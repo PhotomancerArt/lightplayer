@@ -5444,6 +5444,7 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpa-server",
+ "lpa-upgrade",
  "lpc-engine",
  "lpc-hardware",
  "lpc-mapping",
@@ -5824,6 +5825,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-palettes"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
@@ -5862,6 +5873,7 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpa-server",
+ "lpa-upgrade",
  "lpc-engine",
  "lpc-history",
  "lpc-mapping",
@@ -5925,6 +5937,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpa-upgrade"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "lpc-registry",
+ "lpfs",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

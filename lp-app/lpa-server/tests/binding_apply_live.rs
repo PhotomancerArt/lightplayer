@@ -60,9 +60,9 @@ fn authored_binding_survives_commit() {
 
 #[test]
 fn authored_binding_to_the_default_channel_wins_over_the_default() {
-    // Clock `seconds` default-publishes bus:time. Authoring an explicit
-    // seconds → bus:time entry must suppress the default and report the
-    // binding as AUTHORED — otherwise the doc holds a real entry the UI
+    // The clock's `product` output default-publishes bus:time. Authoring an
+    // explicit product → bus:time entry must suppress the default and report
+    // the binding as AUTHORED — otherwise the doc holds a real entry the UI
     // can never see or unbind (2026-07-16 report: popup kept the default
     // presentation and offered no Unbind).
     let (mut server, project_path) = server_with_clock_project("binding-same-channel");
@@ -71,7 +71,7 @@ fn authored_binding_to_the_default_channel_wins_over_the_default() {
 
     let project = project_mut(&mut server, handle);
     project
-        .mutate_overlay(bind_mutation("seconds", "bus:time"))
+        .mutate_overlay(bind_mutation("product", "bus:time"))
         .expect("mutate overlay");
 
     let (engine, registry) = project.runtime_read_parts();
@@ -97,7 +97,7 @@ fn authored_binding_to_the_default_channel_wins_over_the_default() {
     assert_eq!(
         time_writers.len(),
         1,
-        "exactly one seconds → time writer (authored suppresses the default): {time_writers:?}"
+        "exactly one product → time writer (authored suppresses the default): {time_writers:?}"
     );
     assert_eq!(
         time_writers[0].origin,
@@ -218,7 +218,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
     server

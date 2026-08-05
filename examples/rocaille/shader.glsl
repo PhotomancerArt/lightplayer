@@ -2,13 +2,13 @@ const int ITERS = 10;
 const float TAU = 6.28318;
 
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float cycle;
 
 vec4 friendPattern(vec2 uv) {
     vec2 v = vec2(1.0, 1.0);
     vec2 p = (uv + uv - v) / 0.3;
     vec4 color = vec4(0.0);
-    float phase = mod(time * 0.05 * TAU, TAU);
+    float phase = cycle * TAU;
 
     for (int i = 1; i < ITERS; i++) {
         v = p;

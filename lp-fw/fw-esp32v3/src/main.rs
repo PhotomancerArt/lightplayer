@@ -48,13 +48,16 @@
 // failure reaches the RTC ledger as an `Oom` record carrying free/used, rather
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
+// `asm_experimental_arch`: Xtensa inline asm is unstable, and the APP core's
+// idle loop is one `waiti 0` (`output::rmt::shared_driver::app_core_main`) —
+// the same feature xtensa-lx-rt itself builds with.
 #![cfg_attr(
     all(feature = "server", not(feature = "radio_ram_probe")),
-    feature(alloc_error_handler)
+    feature(alloc_error_handler, asm_experimental_arch)
 )]
 #![allow(
     unstable_features,
-    reason = "alloc_error_handler required for custom OOM handler in no_std"
+    reason = "alloc_error_handler + asm_experimental_arch required in no_std; the esp toolchain is nightly-based"
 )]
 
 // The server path is the whole LightPlayer stack. The hello and probe
@@ -150,11 +153,11 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// measured what an on-device compile actually needs of each.
 ///
 /// ⚠️ This is no longer the whole heap. `dram2_seg`'s tail is now a **second**
-/// `esp_alloc` region worth 64 KiB — see [`add_sram1_heap_region`]. This
+/// `esp_alloc` region worth 72 KiB — see [`add_sram1_heap_region`]. This
 /// constant sizes only the `dram_seg` arena, which is the one in zero-sum
 /// competition with `.stack`; the second region costs `.stack` nothing,
 /// which is exactly why it was worth reclaiming. Total heap is
-/// `HEAP_SIZE + 65,536`.
+/// `HEAP_SIZE + 73,728`.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 const HEAP_SIZE: usize = 110 * 1024;
 
@@ -195,6 +198,72 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[alloc_error_handler]
 fn on_alloc_error(layout: core::alloc::Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
+}
+
+/// The global allocator: `esp_alloc::HEAP` behind a bounded immediate retry.
+///
+/// Evidence, not caution: in every dome-scale OOM measured on this board
+/// (2026-08-04, four failures at 1200/1500 LEDs and two at 900 with a heavy
+/// shader), the OOM handler's *first* action — re-issuing the identical
+/// `Layout` before touching anything — **succeeded** (`retry_ok=true`), yet
+/// the null return had already been escalated to a device reset and, two
+/// boots later, a quarantined project. Whatever releases memory between the
+/// null and the handler (see `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`
+/// — the window is real, its occupant still unidentified), the caller's
+/// request was servable and the device died anyway. Retrying at the site
+/// converts those deaths into successful allocations; a genuine exhaustion
+/// still fails after [`OOM_RETRIES`] attempts and reaches
+/// [`on_alloc_error`] exactly as before, where the handler's own retry probe
+/// remains as the diagnostic that says whether this wrapper's budget was too
+/// small.
+///
+/// [`OOM_RETRY_SAVES`] counts conversions and rides the `[MEM]` heartbeat
+/// line — a nonzero value on a healthy board is this wrapper paying rent; a
+/// climbing one says the heap is running at the edge.
+///
+/// Unconditional across this crate's builds: esp-alloc's own
+/// `global-allocator` default is off on every edge that reaches it (this
+/// crate's declaration and esp-rtos's both say `default-features = false`),
+/// so this is the one allocator everywhere, `radio_ram_probe` included.
+struct RetryingHeap;
+
+/// Immediate re-attempts after a null return before the failure is real.
+/// Every observed save needed exactly one; the rest are margin at the cost
+/// of a few loads on a path that otherwise ends in a reset.
+const OOM_RETRIES: u32 = 4;
+
+/// Allocations that failed once and succeeded on an immediate retry — each
+/// of these was a device reset before [`RetryingHeap`] existed.
+static OOM_RETRY_SAVES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+#[global_allocator]
+static GLOBAL_ALLOC: RetryingHeap = RetryingHeap;
+
+unsafe impl core::alloc::GlobalAlloc for RetryingHeap {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        // SAFETY: same contract as the wrapped allocator; this wrapper adds
+        // only repetition, never a different layout or pointer.
+        let p = unsafe { core::alloc::GlobalAlloc::alloc(&esp_alloc::HEAP, layout) };
+        if !p.is_null() {
+            return p;
+        }
+        for _ in 0..OOM_RETRIES {
+            let p = unsafe { core::alloc::GlobalAlloc::alloc(&esp_alloc::HEAP, layout) };
+            if !p.is_null() {
+                OOM_RETRY_SAVES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                return p;
+            }
+        }
+        core::ptr::null_mut()
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        // SAFETY: forwarded verbatim to the allocator that produced `ptr`.
+        unsafe { core::alloc::GlobalAlloc::dealloc(&esp_alloc::HEAP, ptr, layout) }
+    }
+    // `alloc_zeroed`/`realloc` deliberately stay at the trait defaults:
+    // `EspHeap`'s own `GlobalAlloc` impl defines only `alloc`/`dealloc`, so
+    // the defaults compose identically — and route through the retry above.
 }
 
 /// Abort-tier panic handler for the bare-hello and radio-probe images, which
@@ -284,7 +353,10 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
-    esp_println::println!("[MEM] free={free} used={used} largest_free={largest}");
+    let retry_saves = OOM_RETRY_SAVES.load(core::sync::atomic::Ordering::Relaxed);
+    esp_println::println!(
+        "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
+    );
     // The JIT code region is NOT part of the heap above — it is a separate
     // fixed SRAM1 reservation, and its residency is the number that decides
     // how much of it can be handed back. `peak` is the high-water mark of
@@ -320,7 +392,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// (`0x3FFE_7E30`, 98,768 B), which no linker section targets — esp-idf uses
 /// the same span as heap. It could not join the heap here because the JIT
 /// code region sat in the middle of it. Now that the region is measured down
-/// to 32 KiB, 64 KiB of it is free.
+/// to 24 KiB (32 KiB until the 2026-08-04 dome work), 72 KiB of it is free.
 ///
 /// ⚠️ The boundary is **computed from the region**, never restated: the base
 /// and length come from [`CodeRegion::reclaimable_heap_span`], whose
@@ -365,7 +437,7 @@ struct FirmwareApp {
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
-    let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
+    let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
@@ -427,6 +499,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+
+    // Start the APP core with the RMT refill ISR on it, BEFORE the RMT driver
+    // exists: `install_isr` (inside the driver constructor below) decides its
+    // shape from the flag this sets. A dedicated core services refills no
+    // matter how long the render core masks interrupts, which is what lets
+    // transmission overlap the engine instead of hiding under quiet spins —
+    // and a failure here is a downgrade to those single-core (M4) semantics,
+    // never a boot failure.
+    if output::rmt::shared_driver::start_app_core_isr(cpu_ctrl) {
+        esp_println::println!("[INIT] RMT ISR on APP core");
+    } else {
+        esp_println::println!(
+            "[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)"
+        );
+    }
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. The
     // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip

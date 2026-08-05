@@ -22,6 +22,37 @@ pub struct UiPanelTarget {
     pub engaged: bool,
 }
 
+/// How a numeric gesture's `f32` is TYPED on its way out of a control.
+///
+/// Every control until the M2 time break emitted the number itself, so the
+/// dispatching layer could read the family straight off the slot's current
+/// value. A phasor's period cannot: the value it edits is one field of a
+/// whole [`lpc_model::PhasorConfig`] record — the slot's shape when the
+/// knob edits locally, and the config channel's payload when it writes a
+/// panel value — so the number has to be *re-wrapped* before it goes
+/// anywhere, and only the projection knows the shaping to wrap it with.
+///
+/// Deliberately NOT a widget distinction: a period knob is an ordinary
+/// knob, and the two dispatch paths (slot edit / panel write) are the same
+/// two every other control uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum UiPanelEmit {
+    /// The gesture value IS the value written — every scalar control.
+    #[default]
+    Value,
+    /// The gesture value is a phasor **period in seconds**, written wrapped
+    /// in a whole `PhasorConfig` carrying this slot's own shaping.
+    ///
+    /// Waveform and phase offset are never panel-editable (settled D11 v1 —
+    /// a waveform is how ONE consumer reads a shared phase, so a panel that
+    /// set it would be setting it for everybody), but they must survive a
+    /// period edit intact, which is why they ride along here.
+    PhasorPeriod {
+        waveform: lpc_model::Waveform,
+        phase_offset: f32,
+    },
+}
+
 /// A front-panel control projected from a slot that is on a panel —
 /// since Q13 that means a slot bound to a bus channel.
 ///
@@ -42,6 +73,9 @@ pub struct UiPanelControl {
     pub widget: UiPanelWidget,
     /// Current typed value, shared with the slot row's editor.
     pub value: UiSlotValue,
+    /// How a gesture's number is typed on the way out — see [`UiPanelEmit`].
+    /// `Value` for every control but a phasor's period knob.
+    pub emit: UiPanelEmit,
     /// The bound channel's current reading, display-only (P6 item 1): the
     /// widget renders it in the bound-violet family while [`Self::value`]
     /// (the authored default) stays the edit target. Already quantized
@@ -152,6 +186,7 @@ mod tests {
                 step: None,
             },
             value: UiSlotValue::f32(1.6),
+            emit: crate::UiPanelEmit::Value,
             live_value: None,
             panel_target: None,
             unit: None,

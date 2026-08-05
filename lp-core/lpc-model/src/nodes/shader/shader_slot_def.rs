@@ -6,14 +6,23 @@
 //! structure into every shader artifact.
 
 use crate::{
-    BindingRef, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue,
-    SlotValueShape, Slotted, StaticLpType, StaticSlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, ValueSlot,
+    BindingRef, FromLpValue, GradientConfig, LpType, LpValue, OptionSlot, PhasorConfig, SlotMeta,
+    SlotShapeId, SlotValue, SlotValueShape, Slotted, StaticLpType, StaticSlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
 
 use super::ShaderSlotMappingDef;
+
+/// The GLSL type a [`ShaderSlotKind::Palette`] slot declares.
+///
+/// A palette slot's `value` names what GLSL sees, exactly as a
+/// [`ShaderSlotKind::Phasor`] slot's stays `"f32"`: the palette itself is a
+/// [`GradientConfig`] on the def, and the engine bakes it to the height-one
+/// texture this sampler reads (`docs/design/color.md` §5,
+/// `docs/design/lp-shader-texture-access.md`).
+pub const SAMPLER_2D_SHAPE: &str = "sampler2D";
 
 /// Authored definition for one shader consumed or produced slot.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -21,6 +30,17 @@ pub struct ShaderSlotDef {
     pub kind: ValueSlot<ShaderSlotKind>,
     pub value: ValueSlot<ShaderValueShapeRef>,
     pub key: OptionSlot<ValueSlot<ShaderMapKeyDef>>,
+    /// Timebase shaping for a [`ShaderSlotKind::Phasor`] slot: present iff
+    /// the kind is `phasor`, absent for every other kind. The waveform is
+    /// always slot-local; the period may instead be driven by a bound
+    /// config channel, in which case this is the R6 fallback.
+    pub phasor: OptionSlot<ValueSlot<PhasorConfig>>,
+    /// Palette source for a [`ShaderSlotKind::Palette`] slot: present iff the
+    /// kind is `palette`, absent for every other kind. The whole config may
+    /// instead be driven by a bound channel, in which case this is the
+    /// fallback — see the field-split rule on
+    /// `lpc_engine::nodes::shader::resolve_gradient_config`.
+    pub gradient: OptionSlot<ValueSlot<GradientConfig>>,
     /// Declarative default binding endpoint (`bus:<channel>`), materialized
     /// at load when no authored binding names this slot (ADR 2026-07-09).
     /// Consumed slots source from the channel; produced slots publish to it.
@@ -52,6 +72,8 @@ impl ShaderSlotDef {
             kind: ValueSlot::new(ShaderSlotKind::Value),
             value: ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
             key: OptionSlot::none(),
+            phasor: OptionSlot::none(),
+            gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
             default: OptionSlot::some(ValueSlot::new(default)),
             min: min
@@ -64,6 +86,57 @@ impl ShaderSlotDef {
             description: ValueSlot::new(String::from(description)),
             unit: OptionSlot::none(),
         }
+    }
+
+    /// A `phasor` slot: a `float` uniform fed by the scope's timebase as a
+    /// wrapped `[0,1)` cycle position, shaped by `config`.
+    pub fn phasor(label: &str, description: &str, config: PhasorConfig) -> Self {
+        Self {
+            kind: ValueSlot::new(ShaderSlotKind::Phasor),
+            phasor: OptionSlot::some(ValueSlot::new(config)),
+            ..Self::value_f32(label, description, 0.0, None)
+        }
+    }
+
+    /// A `seconds` slot: a `float` uniform fed by the scope's timebase as
+    /// unbounded effective seconds.
+    pub fn seconds(label: &str, description: &str) -> Self {
+        Self {
+            kind: ValueSlot::new(ShaderSlotKind::Seconds),
+            ..Self::value_f32(label, description, 0.0, None)
+        }
+    }
+
+    /// A `palette` slot: a `sampler2D` uniform fed by a height-one texture the
+    /// engine bakes from `config` (`docs/design/color.md` §5).
+    pub fn palette(label: &str, description: &str, config: GradientConfig) -> Self {
+        Self {
+            kind: ValueSlot::new(ShaderSlotKind::Palette),
+            value: ValueSlot::new(ShaderValueShapeRef::builtin(SAMPLER_2D_SHAPE)),
+            gradient: OptionSlot::some(ValueSlot::new(config)),
+            // A sampler has no scalar default to fall back to; the bake's own
+            // fallback is `gradient_config()`.
+            default: OptionSlot::none(),
+            ..Self::value_f32(label, description, 0.0, None)
+        }
+    }
+
+    /// The phasor config this slot evaluates against when nothing drives it
+    /// from a channel — the authored one, or the default shaping.
+    pub fn phasor_config(&self) -> PhasorConfig {
+        self.phasor
+            .data
+            .as_ref()
+            .map_or_else(PhasorConfig::default, |config| config.value().clone())
+    }
+
+    /// The gradient config this slot bakes when nothing drives it from a
+    /// channel — the authored one, or the default palette.
+    pub fn gradient_config(&self) -> GradientConfig {
+        self.gradient
+            .data
+            .as_ref()
+            .map_or_else(GradientConfig::default, |config| config.value().clone())
     }
 
     /// Quantize this slot's panel control to whole multiples of `step`.
@@ -85,6 +158,8 @@ impl ShaderSlotDef {
             kind: ValueSlot::new(ShaderSlotKind::Map),
             value: ValueSlot::new(ShaderValueShapeRef::native(value)),
             key: OptionSlot::some(ValueSlot::new(ShaderMapKeyDef::U32)),
+            phasor: OptionSlot::none(),
+            gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
@@ -116,11 +191,30 @@ impl Default for ShaderSlotDef {
 }
 
 /// Top-level shader slot shape kind.
+///
+/// `Phasor` and `Seconds` are the two **timebase** kinds: both declare a
+/// plain `float` uniform in GLSL (`value` stays `"f32"`), but their value is
+/// evaluated by the host against the scope's time product rather than
+/// materialized from the slot's resolved data. A `Phasor` reads the timebase
+/// as a wrapped `[0,1)` cycle position shaped by [`ShaderSlotDef::phasor`];
+/// a `Seconds` reads it as unbounded effective seconds.
+///
+/// `Palette` is the **texture** kind: it declares a `sampler2D` uniform
+/// (`value` is [`SAMPLER_2D_SHAPE`]) whose contents the engine bakes from a
+/// [`GradientConfig`] — the palette is a value, never a node
+/// (`docs/adr/2026-08-04-palettes-are-values.md`). Like a `Phasor` it reads
+/// the scope's timebase when its config is a cycle, but unlike one it is
+/// never a `float`, so [`ShaderSlotKind::is_timebase`] deliberately stays
+/// false for it: that predicate answers "is this a float uniform the time
+/// product fills", and every caller of it assumes exactly that.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ShaderSlotKind {
     #[default]
     Value,
     Map,
+    Phasor,
+    Seconds,
+    Palette,
 }
 
 impl ShaderSlotKind {
@@ -128,6 +222,9 @@ impl ShaderSlotKind {
         match self {
             Self::Value => "value",
             Self::Map => "map",
+            Self::Phasor => "phasor",
+            Self::Seconds => "seconds",
+            Self::Palette => "palette",
         }
     }
 
@@ -135,8 +232,31 @@ impl ShaderSlotKind {
         match value {
             "value" => Some(Self::Value),
             "map" => Some(Self::Map),
+            "phasor" => Some(Self::Phasor),
+            "seconds" => Some(Self::Seconds),
+            "palette" => Some(Self::Palette),
             _ => None,
         }
+    }
+
+    /// Whether this kind's uniform is evaluated against the scope's time
+    /// product instead of the slot's resolved value.
+    #[must_use]
+    pub fn is_timebase(self) -> bool {
+        matches!(self, Self::Phasor | Self::Seconds)
+    }
+
+    /// Whether this kind's uniform is a texture the engine must supply a
+    /// compile-time `TextureBindingSpec` for
+    /// (`docs/design/lp-shader-texture-access.md`) — today exactly
+    /// [`ShaderSlotKind::Palette`].
+    ///
+    /// Separate from [`Self::is_timebase`] on purpose: a texture uniform is
+    /// not a `float`, does not go through value materialization, and needs a
+    /// compile-time spec that no other kind has.
+    #[must_use]
+    pub fn is_texture(self) -> bool {
+        matches!(self, Self::Palette)
     }
 }
 
@@ -404,6 +524,140 @@ mod tests {
         assert_eq!(slot.value.value().as_str(), "lp::fluid::Emitter");
         assert!(slot.value.value().is_native());
         assert!(slot.mapping.data.is_some());
+    }
+
+    #[test]
+    fn phasor_shader_slot_parses_its_config_and_stays_an_f32_uniform() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "phasor",
+  "value": "f32",
+  "phasor": { "period_seconds": 2.5, "waveform": "sine", "phase_offset": 0.25 },
+  "default_bind": "bus:beat",
+  "label": "Wave",
+  "description": "Cycle position"
+}"#,
+        );
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Phasor);
+        assert!(slot.kind.value().is_timebase());
+        // The GLSL side sees a plain float; the config is def metadata.
+        assert_eq!(slot.value_lp_type(), Some(LpType::F32));
+        assert_eq!(
+            slot.phasor_config(),
+            crate::PhasorConfig {
+                period_seconds: 2.5,
+                waveform: crate::Waveform::Sine,
+                phase_offset: 0.25,
+            }
+        );
+    }
+
+    #[test]
+    fn seconds_shader_slot_parses_without_a_phasor_config() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "seconds",
+  "value": "f32",
+  "label": "Elapsed",
+  "description": "Unbounded project seconds"
+}"#,
+        );
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Seconds);
+        assert!(slot.kind.value().is_timebase());
+        assert_eq!(slot.value_lp_type(), Some(LpType::F32));
+        assert!(slot.phasor.data.is_none());
+        // A slot with no authored config still has one to evaluate against.
+        assert_eq!(slot.phasor_config(), crate::PhasorConfig::default());
+    }
+
+    #[test]
+    fn every_kind_tag_round_trips_and_only_timebase_kinds_say_so() {
+        for kind in [
+            ShaderSlotKind::Value,
+            ShaderSlotKind::Map,
+            ShaderSlotKind::Phasor,
+            ShaderSlotKind::Seconds,
+            ShaderSlotKind::Palette,
+        ] {
+            assert_eq!(ShaderSlotKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(
+            ShaderSlotKind::parse("phasor"),
+            Some(ShaderSlotKind::Phasor)
+        );
+        assert_eq!(
+            ShaderSlotKind::parse("seconds"),
+            Some(ShaderSlotKind::Seconds)
+        );
+        assert_eq!(ShaderSlotKind::parse("lfo"), None);
+        assert!(!ShaderSlotKind::Value.is_timebase());
+        assert!(!ShaderSlotKind::Map.is_timebase());
+        // A palette reads the timebase but is not a float uniform, so it is
+        // the texture kind, never a timebase one.
+        assert!(!ShaderSlotKind::Palette.is_timebase());
+        assert!(ShaderSlotKind::Palette.is_texture());
+        assert!(!ShaderSlotKind::Phasor.is_texture());
+    }
+
+    #[test]
+    fn palette_shader_slot_declares_a_sampler_and_defaults_its_config() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "palette",
+  "value": "sampler2D",
+  "default_bind": "bus:palette",
+  "label": "Palette",
+  "description": "Baked gradient strip"
+}"#,
+        );
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Palette);
+        assert!(slot.kind.value().is_texture());
+        // A sampler is not an `LpType`; the palette rides the `gradient` field.
+        assert_eq!(slot.value.value().as_str(), SAMPLER_2D_SHAPE);
+        assert_eq!(slot.value_lp_type(), None);
+        assert!(!slot.value.value().is_native());
+        // A slot with no authored config still has one to bake.
+        assert!(slot.gradient.data.is_none());
+        assert_eq!(slot.gradient_config(), crate::GradientConfig::default());
+        assert!(slot.gradient_config().is_frozen());
+    }
+
+    #[test]
+    fn the_palette_constructor_declares_the_sampler_and_carries_the_config() {
+        let config = crate::GradientConfig::Cycle {
+            set: alloc::vec![crate::Gradient::default(), crate::Gradient::default()],
+            step_seconds: 8.0,
+            fade_seconds: 2.0,
+        };
+        let slot = ShaderSlotDef::palette("Palette", "Baked strip", config.clone());
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Palette);
+        assert_eq!(slot.value.value().as_str(), SAMPLER_2D_SHAPE);
+        assert_eq!(slot.gradient_config(), config);
+        assert_eq!(slot.gradient_config().full_cycle_seconds(), 16.0);
+        // No scalar default: a sampler has nothing to fall back to.
+        assert!(slot.default.data.is_none());
+    }
+
+    /// The `gradient` field survives the [`crate::LpValue`] round trip the
+    /// project loader reads slot defs through — the fixed-shape recipe
+    /// (`docs/design/color.md` §5), not the authored-JSON serde surface.
+    #[test]
+    fn a_palette_config_round_trips_through_slot_storage() {
+        let config = crate::GradientConfig::Cycle {
+            set: alloc::vec![crate::Gradient::default(), crate::Gradient::default()],
+            step_seconds: 3.0,
+            fade_seconds: 0.5,
+        };
+        let stored = config.to_lp_value();
+
+        assert_eq!(
+            crate::GradientConfig::from_lp_value(&stored).expect("gradient config"),
+            config
+        );
     }
 
     #[test]

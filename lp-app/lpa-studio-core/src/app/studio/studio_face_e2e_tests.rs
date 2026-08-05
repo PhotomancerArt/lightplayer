@@ -56,7 +56,11 @@ fn node_faces_derive_and_edit_end_to_end() {
     let Some(UiNodeFace::Shader(face)) = &shader.face else {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
-    assert_eq!(face.controls.len(), 2, "both bound uniforms");
+    assert_eq!(
+        face.controls.len(),
+        3,
+        "both bound uniforms, plus the phasor's period (P7 item 5)"
+    );
     let knob = control_labeled(face, "Speed");
     assert_eq!(knob.label, "Speed");
     assert_eq!(
@@ -90,6 +94,30 @@ fn node_faces_derive_and_edit_end_to_end() {
         face.code_drawer.is_some(),
         "code drawer reuses the inline GLSL editor"
     );
+    // The phasor slot's ONE control: its period, in seconds, editing the
+    // interior config slot and carrying the slot's own shaping out with
+    // every gesture (P7 item 5).
+    // The def's own "Speed" VALUE uniform holds the plain label, so the
+    // phasor knob disambiguates with its uniform name (G2 vocab feedback).
+    let period = control_labeled(face, "Phase speed");
+    assert_eq!(period.value.kind, UiSlotValueKind::F32(20.0));
+    assert_eq!(
+        period.emit,
+        crate::UiPanelEmit::PhasorPeriod {
+            waveform: lpc_model::Waveform::Triangle,
+            phase_offset: 0.25,
+        },
+        "waveform and offset ride the gesture untouched"
+    );
+    let period_address = period.address.clone().expect("period edits are addressed");
+    assert_eq!(
+        period_address.path.to_string(),
+        "consumed[phase].phasor.some"
+    );
+    assert!(
+        period.panel_target.is_none(),
+        "the phasor slot carries no authored binding, so the knob is card-local"
+    );
 
     // -- fixture face: fader from the brightness slot meta ------------------
     let fixture = node_by_kind(&snapshot, "Fixture");
@@ -120,8 +148,28 @@ fn node_faces_derive_and_edit_end_to_end() {
         .expect("map2d fixture derives the in-face mapping editor");
     assert_eq!(mapping_editor.source, "sign.map2d.json");
 
-    // -- fallback: the clock keeps the generic sections ---------------------
-    assert_eq!(node_by_kind(&snapshot, "Clock").face, None);
+    // -- clock: the time product plus its (unread) phasor listing -----------
+    // P7 item 4. The clock used to fall back to the generic sections; since
+    // `bus:time` carries a product it has a face like everything else, and
+    // that face is where the timebase listing lands.
+    let clock = node_by_kind(&snapshot, "Clock");
+    let Some(UiNodeFace::Clock(face)) = &clock.face else {
+        panic!("clock node derives a clock face, got {:?}", clock.face);
+    };
+    assert_eq!(face.product.kind, crate::UiProductKind::Time);
+    assert_eq!(
+        face.product.detail.as_deref(),
+        Some("node 1 output 0"),
+        "the handle names the clock's own node and output"
+    );
+    assert!(
+        face.seconds.is_some(),
+        "the seconds readout rides the face for the section header"
+    );
+    // No timebase probe has answered in this harness, and "no read yet" is
+    // deliberately NOT the same state as an empty listing.
+    assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
+    assert!(face.phasors.is_empty());
 
     // -- knob drag flood: coalesced SetValues flow back into the face -------
     for value in [1.4_f32, 1.9, 2.5] {
@@ -132,12 +180,30 @@ fn node_faces_derive_and_edit_end_to_end() {
     handle
         .tx
         .send(set_value_action(fader_address.clone(), LpValue::F32(0.12)));
+    // The period knob's gesture: the SAME slot path, carrying the whole
+    // re-wrapped config the emit family builds (the web dispatches exactly
+    // this through `panel_or_slot_action`).
+    handle.tx.send(set_value_action(
+        period_address.clone(),
+        lpc_model::ToLpValue::to_lp_value(&lpc_model::PhasorConfig {
+            period_seconds: 8.0,
+            waveform: lpc_model::Waveform::Triangle,
+            phase_offset: 0.25,
+        }),
+    ));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edits emit a snapshot");
 
     let knob = shader_knob(&snapshot);
     assert_eq!(knob.value.kind, UiSlotValueKind::F32(2.5));
     assert_eq!(knob.state.dirty, UiNodeDirtyState::Dirty);
+    let period = shader_control(&snapshot, "Phase speed");
+    assert_eq!(
+        period.value.kind,
+        UiSlotValueKind::F32(8.0),
+        "the knob reads the period back out of the edited record"
+    );
+    assert_eq!(period.state.dirty, UiNodeDirtyState::Dirty);
     let fader = fixture_fader(&snapshot);
     assert_eq!(fader.value.kind, UiSlotValueKind::F32(0.12));
     assert_eq!(fader.state.dirty, UiNodeDirtyState::Dirty);
@@ -153,6 +219,14 @@ fn node_faces_derive_and_edit_end_to_end() {
     assert!(
         shader_json.contains("\"default\":2.5"),
         "shader.json gained the knob's persisted default edit: {shader_json}"
+    );
+    assert!(
+        shader_json.contains("\"period_seconds\":8"),
+        "shader.json gained the period edit as a whole config: {shader_json}"
+    );
+    assert!(
+        shader_json.contains("\"waveform\":\"triangle\""),
+        "and the shaping the panel may not touch survived it: {shader_json}"
     );
     let fixture_json = read_project_file(&server, "fixture.json");
     assert!(
@@ -1156,7 +1230,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 4\n}\n";
+    let project_json = "{\n  \"format\": 5\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1196,6 +1270,14 @@ fn face_e2e_server() -> LpServer {
       "max": 4,
       "label": "Count",
       "description": "How many bands"
+    },
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": { "period_seconds": 20.0, "waveform": "triangle", "phase_offset": 0.25 },
+      "default": 0,
+      "label": "Phase",
+      "description": "Cycle position (0-1)"
     }
   }
 }"#;
@@ -1269,7 +1351,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 4\n}\n";
+    let project_json = "{\n  \"format\": 5\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -1377,7 +1459,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 4\n}\n";
+    let project_json = "{\n  \"format\": 5\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1489,7 +1571,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 4\n}\n";
+    let project_json = "{\n  \"format\": 5\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1589,7 +1671,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 4\n}\n";
+    let project_json = "{\n  \"format\": 5\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1858,10 +1940,14 @@ fn control_labeled<'a>(face: &'a crate::UiShaderFace, label: &str) -> &'a UiPane
 }
 
 fn shader_knob(view: &UiStudioView) -> UiPanelControl {
+    shader_control(view, "Speed")
+}
+
+fn shader_control(view: &UiStudioView, label: &str) -> UiPanelControl {
     let Some(UiNodeFace::Shader(face)) = node_by_kind(view, "Shader").face else {
         panic!("shader face present");
     };
-    control_labeled(&face, "Speed").clone()
+    control_labeled(&face, label).clone()
 }
 
 fn fixture_fader(view: &UiStudioView) -> UiPanelControl {

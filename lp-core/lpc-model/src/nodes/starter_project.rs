@@ -174,7 +174,7 @@ vec3 hsv_to_rgb(float h, float s, float v) {
 }
 
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec4 render(vec2 pos) {
     // Center of texture
@@ -186,12 +186,12 @@ vec4 render(vec2 pos) {
     // Calculate angle (atan2 gives angle in [-PI, PI])
     float angle = atan(dir.y, dir.x);
 
-    // Rotate angle with time (full rotation every 2 seconds)
-    angle = (angle + time * 3.14159);
+    // Rotate angle with the phasor (one full rotation per phasor period)
+    angle = (angle + phase * 6.28318);
 
     // Normalize angle to [0, 1] for hue
     // atan returns [-PI, PI], map to [0, 1] by: (angle + PI) / (2 * PI)
-    // Wrap hue to [0, 1] using mod to handle large time values
+    // Wrap hue to [0, 1] using mod
     float hue = mod((angle + 3.14159) / (2.0 * 3.14159), 1.0);
 
     // Distance from center (normalized to [0, 1])
@@ -297,7 +297,7 @@ mod tests {
             shader.shader_source().artifact_value().unwrap().to_string(),
             "shader.glsl"
         );
-        assert!(shader.consumed_slots.entries.get("time").is_some());
+        assert!(shader.consumed_slots.entries.get("phase").is_some());
     }
 
     #[test]

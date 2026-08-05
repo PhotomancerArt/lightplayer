@@ -3,6 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiIssue,
     UiPackageCard,
@@ -36,6 +37,7 @@ fn packages() -> Vec<UiPackageCard> {
             connected_device: None,
             running_in_sim: false,
             target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -48,6 +50,7 @@ fn packages() -> Vec<UiPackageCard> {
             connected_device: None,
             running_in_sim: false,
             target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -60,6 +63,7 @@ fn packages() -> Vec<UiPackageCard> {
             connected_device: None,
             running_in_sim: false,
             target: None,
+            health: PackageHealth::Ready,
         },
     ]
 }
@@ -159,6 +163,65 @@ fn gallery_chooser_buttons() -> Element {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Export zip on the card, delete in the menu."
+)]
+fn project_format_states() -> Element {
+    let mut projects = packages();
+    projects[0].health = PackageHealth::UpgradesOnOpen { found: 4 };
+    projects[1].health = PackageHealth::Blocked {
+        headline: "Format 3 — too old for this Studio".to_string(),
+        remedy: "Project format 3, expected 5; formats below 4 are too old to upgrade \
+                 automatically. Open it in a LightPlayer that still reads format 3 and \
+                 re-save it, or rebuild the project."
+            .to_string(),
+    };
+    projects[2].health = PackageHealth::Blocked {
+        headline: "Format 7 — made by a newer LightPlayer".to_string(),
+        remedy: "Project format 7, expected 5; it was written by a newer LightPlayer. \
+                 Update LightPlayer to open it."
+            .to_string(),
+    };
+    projects.push(UiPackageCard {
+        uid: "prj_5tYu7Vw90xZaBc4DeFgHi".to_string(),
+        kind: "Module".to_string(),
+        slug: "2026-06-11-0815-half-written".to_string(),
+        last_saved_at: None,
+        provenance: None,
+        on_device: None,
+        open_elsewhere: false,
+        connected_device: None,
+        running_in_sim: false,
+        target: None,
+        health: PackageHealth::Blocked {
+            headline: "project.json could not be read".to_string(),
+            remedy: "project.json could not be read as a project manifest (expected value at \
+                     line 1 column 1); expected a JSON object stating format 5. Fix or restore \
+                     the file before opening the project."
+                .to_string(),
+        },
+    });
+    let home = UiHomeView {
+        devices: Vec::new(),
+        projects,
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+        backup: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            HomeGallery {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(false),
                 on_action: |_| {},
             }
         }

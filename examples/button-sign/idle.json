@@ -4,13 +4,36 @@
   "render_order": 0,
   "float_mode": "fixed",
   "consumed": {
+    "wavePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 17.9519585,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Wave",
+      "description": "Wave cycle position (0-1)"
+    },
+    "palettePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 25.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Palette",
+      "description": "Palette cycle position (0-1)"
+    },
     "time": {
-      "kind": "value",
+      "kind": "seconds",
       "value": "f32",
       "default": 0,
-      "label": "",
-      "description": "",
-      "default_bind": "bus:time"
+      "label": "Time",
+      "description": "Seconds from the scope's time product (fbm scroll)"
     }
   }
 }

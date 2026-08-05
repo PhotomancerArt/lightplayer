@@ -9,13 +9,53 @@
   },
   "float_mode": "fixed",
   "consumed": {
-    "time": {
-      "kind": "value",
+    "wavePhaseA": {
+      "kind": "phasor",
       "value": "f32",
+      "phasor": {
+        "period_seconds": 2.9919931,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
       "default": 0,
-      "label": "Time",
-      "description": "Project clock time in seconds",
-      "default_bind": "bus:time"
+      "label": "Wave A",
+      "description": "Horizontal wave cycle position (0-1)"
+    },
+    "wavePhaseB": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 3.6959915,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Wave B",
+      "description": "Vertical wave cycle position (0-1)"
+    },
+    "crossPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 4.8332196,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Cross",
+      "description": "Cross-wave cycle position (0-1)"
+    },
+    "huePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 12.5,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Hue",
+      "description": "Palette cycle position (0-1)"
     }
   }
 }

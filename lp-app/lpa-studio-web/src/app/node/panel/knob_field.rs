@@ -61,6 +61,14 @@ pub fn KnobField(
     /// Violet bound treatment on the arc, pointer, and body ring.
     #[props(default = false)]
     bound: bool,
+    /// Phasor speed knob: the stored number is a period (seconds) but the
+    /// felt quantity is SPEED, so up/right DECREASES the stored value along
+    /// a log-period curve (equal drag = equal feel-ratio — clock-face v2,
+    /// judged at its visual gate). The value 0 is the frozen sentinel and
+    /// renders at the far left (no speed), not the far right; no gesture
+    /// produces it.
+    #[props(default = false)]
+    invert: bool,
     /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Deliberately NOT the
     /// violet bound family — bound means "wired", engaged means "captured"
@@ -91,8 +99,17 @@ pub fn KnobField(
     // between 2 and 3, whichever off-grid value (a stale authored default, a
     // continuous bus reading) is behind it. Gestures still start from the raw
     // `value` so repeated arrow presses never stall on a rounding boundary.
-    let shown = knob_snap(base, min, step);
-    let frac = knob_fraction(shown, min, max);
+    // Drag-local echo: while a drag is live the knob renders the value under
+    // the hand, not the last snapshot — display truth catches up through the
+    // panel-write echo, but the geometry must never wait for it (G2: the
+    // knob read "stuck" while its writes landed).
+    let preview = use_signal(|| None::<f32>);
+    let shown = knob_snap(preview().unwrap_or(base), min, step);
+    let frac = if invert {
+        phasor_knob_fraction(shown, min, max)
+    } else {
+        knob_fraction(shown, min, max)
+    };
     let arc_len = frac * 100.0;
     let pointer_deg = knob_pointer_deg(frac);
     let stroke = knob_value_stroke(&state, bound, engaged, editable);
@@ -107,11 +124,15 @@ pub fn KnobField(
 
     let down_wiring = wired.clone();
     let move_wiring = wired.clone();
+    let up_wiring = wired.clone();
     let key_wiring = wired;
     let move_target = panel_target.clone();
+    let up_target = panel_target.clone();
     let key_target = panel_target;
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
+    // Last dispatch timestamp (ms) for the drag throttle.
+    let last_sent = use_signal(|| 0.0_f64);
 
     rsx! {
         span {
@@ -127,8 +148,15 @@ pub fn KnobField(
                     return;
                 };
                 let multiplier = if event.modifiers().shift() { 10.0 } else { 1.0 };
-                let Some(next) = knob_key_value(base, &event.key(), multiplier, min, max, step)
-                else {
+                // Phasor knobs step the felt SPEED axis in p-space along the
+                // log-period curve (up = faster; Home = slowest, End =
+                // fastest); plain knobs step the stored value.
+                let next = if invert {
+                    phasor_knob_key_value(base, &event.key(), multiplier, min, max)
+                } else {
+                    knob_key_value(base, &event.key(), multiplier, min, max, step)
+                };
+                let Some(next) = next else {
                     return;
                 };
                 event.prevent_default();
@@ -142,28 +170,55 @@ pub fn KnobField(
                 drag.set(Some((event.data().client_coordinates().y, base)));
             },
             onpointermove: move |event| {
+                let mut preview = preview;
+                let mut last_sent = last_sent;
                 let Some((anchor_y, anchor_value)) = drag() else {
                     return;
                 };
                 if event.data().held_buttons().is_empty() {
                     // Missed release (no pointer capture): stop the drag.
                     drag.set(None);
+                    preview.set(None);
                     return;
                 }
                 let Some((address, handler)) = move_wiring.clone() else {
                     return;
                 };
-                let next = knob_drag_value(
-                    anchor_value,
-                    anchor_y - event.data().client_coordinates().y,
-                    min,
-                    max,
-                    step,
-                );
+                let rise = anchor_y - event.data().client_coordinates().y;
+                // Phasor knobs drag the felt SPEED axis log-period (equal
+                // drag = equal feel-ratio); plain knobs stay linear.
+                let next = if invert {
+                    phasor_knob_drag_value(anchor_value, rise, min, max)
+                } else {
+                    knob_drag_value(anchor_value, rise, min, max, step)
+                };
+                preview.set(Some(next));
+                // Throttled dispatch (G2: an unthrottled flood kept the app
+                // in a verdict-chase probe loop for the whole drag). The
+                // knob geometry above follows every move; the write stream
+                // is capped, and pointerup flushes the final value.
+                let now = js_sys::Date::now();
+                if now - last_sent() < KNOB_DISPATCH_INTERVAL_MS {
+                    return;
+                }
+                last_sent.set(now);
                 handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
             },
-            onpointerup: move |_| drag.set(None),
-            onpointercancel: move |_| drag.set(None),
+            onpointerup: move |_| {
+                let mut preview = preview;
+                drag.set(None);
+                // Flush the final position: the throttle may have swallowed
+                // the last few moves, and the release must land exactly.
+                if let (Some(next), Some((address, handler))) = (preview(), up_wiring.clone()) {
+                    handler.call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
+                }
+                preview.set(None);
+            },
+            onpointercancel: move |_| {
+                let mut preview = preview;
+                drag.set(None);
+                preview.set(None);
+            },
             svg {
                 class: "tw:block",
                 width: "46",
@@ -272,6 +327,86 @@ pub fn KnobField(
 ///-left start to the +135° bottom-right end. Shared by the track and value
 /// arcs; `pathLength=100` makes the dasharray a percentage.
 const KNOB_ARC_PATH: &str = "M10.56 37.44 A19 19 0 1 1 37.44 37.44";
+
+/// Minimum interval between drag dispatches (ms). The geometry previews
+/// every pointer move; only the write stream is throttled.
+const KNOB_DISPATCH_INTERVAL_MS: f64 = 50.0;
+
+/// The fastest period a phasor knob's gesture can reach, in seconds. The
+/// knob's authored `min` is clamped up to this: an authored min of 0 exists
+/// to admit the frozen sentinel, not to let a drag sweep into thousands of
+/// cycles per second. 0.5 s = 2/s at the top — G3 judged 4/s "way too
+/// fast" for the fast end of the sweep.
+const PHASOR_MIN_PERIOD_SECONDS: f32 = 0.5;
+
+/// The log-period domain `[T_min, T_max]` of a phasor knob, or `None` for a
+/// degenerate authored range (log needs two distinct positive ends).
+fn phasor_knob_bounds(min: f32, max: f32) -> Option<(f32, f32)> {
+    let t_min = min.max(PHASOR_MIN_PERIOD_SECONDS);
+    (max.is_finite() && max > t_min).then_some((t_min, max))
+}
+
+/// Sweep fraction of a phasor knob: the felt quantity is SPEED, mapped
+/// log-period so equal drag is equal feel-ratio (clock-face v2, A3) —
+/// `p ∈ [0,1] ↔ T = T_max·(T_min/T_max)^p`, far left = slowest, far right
+/// = fastest. The stored value 0 is the frozen sentinel — no speed at all —
+/// and pins to the far left rather than mapping through the log.
+pub(crate) fn phasor_knob_fraction(value: f32, min: f32, max: f32) -> f32 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+    let Some((t_min, t_max)) = phasor_knob_bounds(min, max) else {
+        return 0.0;
+    };
+    let clamped = value.clamp(t_min, t_max);
+    ((t_max / clamped).ln() / (t_max / t_min).ln()).clamp(0.0, 1.0)
+}
+
+/// The stored period at sweep fraction `p` of a phasor knob's log-period
+/// curve. Always inside `[T_min, T_max]` — a gesture can never produce the
+/// frozen 0, which stays reachable only as an authored value.
+pub(crate) fn phasor_knob_value(p: f32, min: f32, max: f32) -> f32 {
+    let Some((t_min, t_max)) = phasor_knob_bounds(min, max) else {
+        return max.max(0.0);
+    };
+    t_max * (t_min / t_max).powf(p.clamp(0.0, 1.0))
+}
+
+/// Value for a vertical drag on a phasor knob: the anchor's sweep fraction
+/// plus `rise` (up = faster) over [`KNOB_DRAG_RANGE_PX`], mapped back
+/// through the log-period curve. A frozen anchor starts from the far left.
+pub(crate) fn phasor_knob_drag_value(anchor_value: f32, rise: f64, min: f32, max: f32) -> f32 {
+    let p = phasor_knob_fraction(anchor_value, min, max) + (rise / KNOB_DRAG_RANGE_PX) as f32;
+    phasor_knob_value(p, min, max)
+}
+
+/// Sweep-fraction step for one arrow press on a phasor knob. Stepping in
+/// p-space (not seconds) is what keeps a keyboard nudge the same felt size
+/// at both ends of a log curve.
+const PHASOR_KEY_STEP_P: f32 = 0.01;
+
+/// Value for one keyboard gesture on a phasor knob: arrows step the sweep
+/// fraction by [`PHASOR_KEY_STEP_P`] × `multiplier` (Shift = 10, up =
+/// faster); Home is the slowest end, End the fastest. `None` for non-knob
+/// keys.
+pub(crate) fn phasor_knob_key_value(
+    value: f32,
+    key: &Key,
+    multiplier: f32,
+    min: f32,
+    max: f32,
+) -> Option<f32> {
+    let delta = PHASOR_KEY_STEP_P * multiplier;
+    let p = phasor_knob_fraction(value, min, max);
+    let next = match key {
+        Key::ArrowUp | Key::ArrowRight => p + delta,
+        Key::ArrowDown | Key::ArrowLeft => p - delta,
+        Key::Home => 0.0,
+        Key::End => 1.0,
+        _ => return None,
+    };
+    Some(phasor_knob_value(next, min, max))
+}
 
 /// The value's position in the knob's range, clamped to 0..=1. A degenerate
 /// range (max <= min) pins to 0 so the arc and pointer stay deterministic.
@@ -494,7 +629,8 @@ mod tests {
     use super::{
         TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value, knob_fraction,
         knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x, knob_tick_y,
-        knob_value_stroke,
+        knob_value_stroke, phasor_knob_drag_value, phasor_knob_fraction, phasor_knob_key_value,
+        phasor_knob_value,
     };
 
     #[test]
@@ -733,5 +869,87 @@ mod tests {
         let stroke = knob_value_stroke(&UiSlotFieldState::editable(), true, true, true);
         assert_eq!(stroke, "var(--studio-status-attention-text)");
         assert!(!stroke.contains("bound"));
+    }
+
+    #[test]
+    fn phasor_fraction_reads_speed_log_period_and_pins_frozen_left() {
+        // The felt axis is speed on a log-period curve over [0.25, 120]:
+        // the slow end sits far left, the fast end far right, and the
+        // geometric MIDPOINT of the periods lands at the middle of the
+        // sweep — the whole point of the log mapping.
+        assert_eq!(phasor_knob_fraction(120.0, 0.0, 120.0), 0.0);
+        assert_eq!(phasor_knob_fraction(0.5, 0.0, 120.0), 1.0);
+        let mid = (120.0_f32 * 0.5).sqrt();
+        assert!((phasor_knob_fraction(mid, 0.0, 120.0) - 0.5).abs() < 1e-3);
+        // The frozen sentinel (period 0) is NO speed — far left, never
+        // mapped through the log.
+        assert_eq!(phasor_knob_fraction(0.0, 0.0, 120.0), 0.0);
+    }
+
+    #[test]
+    fn phasor_mapping_round_trips_within_ulp() {
+        for value in [0.5_f32, 1.0, 4.0, 30.0, 120.0] {
+            let p = phasor_knob_fraction(value, 0.0, 120.0);
+            let back = phasor_knob_value(p, 0.0, 120.0);
+            assert!(
+                (back - value).abs() <= value * 1e-5,
+                "{value} -> p {p} -> {back}"
+            );
+        }
+        // The curve's ends are the clamped domain, exactly.
+        assert_eq!(phasor_knob_value(0.0, 0.0, 120.0), 120.0);
+        assert_eq!(phasor_knob_value(1.0, 0.0, 120.0), 0.5);
+    }
+
+    #[test]
+    fn phasor_drag_moves_feel_ratio_and_never_produces_frozen() {
+        // A full-range rise sweeps slowest -> fastest.
+        assert_eq!(phasor_knob_drag_value(120.0, 160.0, 0.0, 120.0), 0.5);
+        // Equal drag = equal feel-RATIO: +40px from 120 s and from 12 s
+        // divide the period by the same factor.
+        let from_slow = phasor_knob_drag_value(120.0, 40.0, 0.0, 120.0);
+        let from_mid = phasor_knob_drag_value(12.0, 40.0, 0.0, 120.0);
+        let ratio_slow = 120.0 / from_slow;
+        let ratio_mid = 12.0 / from_mid;
+        assert!(
+            (ratio_slow - ratio_mid).abs() < 1e-3 * ratio_slow,
+            "{ratio_slow} vs {ratio_mid}"
+        );
+        // Overshoot pins to the fast end — never 0, the frozen sentinel
+        // stays authored-only.
+        assert_eq!(phasor_knob_drag_value(1.0, 4000.0, 0.0, 120.0), 0.5);
+        assert!(phasor_knob_drag_value(0.5, 4000.0, 0.0, 120.0) > 0.0);
+        // A frozen anchor drags in from the far left.
+        assert_eq!(phasor_knob_drag_value(0.0, 0.0, 0.0, 120.0), 120.0);
+    }
+
+    #[test]
+    fn phasor_keys_step_in_p_space_and_land_on_the_felt_extremes() {
+        // One arrow press moves 1% of the sweep — the same felt nudge at
+        // both ends of the curve (a seconds step would be imperceptible at
+        // the slow end and violent at the fast end).
+        let up = phasor_knob_key_value(120.0, &Key::ArrowUp, 1.0, 0.0, 120.0).unwrap();
+        assert!((phasor_knob_fraction(up, 0.0, 120.0) - 0.01).abs() < 1e-4);
+        let down = phasor_knob_key_value(up, &Key::ArrowDown, 1.0, 0.0, 120.0).unwrap();
+        assert!((down - 120.0).abs() < 1e-2);
+        // Home = slowest, End = fastest (the felt extremes; End never 0).
+        assert_eq!(
+            phasor_knob_key_value(4.0, &Key::Home, 1.0, 0.0, 120.0),
+            Some(120.0)
+        );
+        assert_eq!(
+            phasor_knob_key_value(4.0, &Key::End, 1.0, 0.0, 120.0),
+            Some(0.5)
+        );
+        assert_eq!(phasor_knob_key_value(4.0, &Key::Tab, 1.0, 0.0, 120.0), None);
+    }
+
+    /// Plain value knobs are UNTOUCHED by the phasor curve: one pinned case
+    /// proving the linear drag mapping is byte-identical to before.
+    #[test]
+    fn plain_knob_drag_mapping_is_unchanged() {
+        assert_eq!(knob_drag_value(2.0, 40.0, 0.0, 4.0, None), 3.0);
+        assert_eq!(knob_drag_value(0.0, 160.0, 0.0, 4.0, None), 4.0);
+        assert_eq!(knob_fraction(1.0, 0.0, 4.0), 0.25);
     }
 }

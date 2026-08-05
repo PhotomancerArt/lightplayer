@@ -20,8 +20,8 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
-    DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource,
+    DegradedReason, DeviceCardTab, DeviceFormatStanding, RosterCardState, UiDeviceCard,
+    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::{BuildFacts, HardwareFacts};
 
@@ -179,7 +179,29 @@ fn holds_unreadable_data() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name stamps at first post-flash contact."
+    description = "Amber filled edge: the board holds a project at a format this Studio does not use (P5, 2026-08-04). Left: a format the migration chain reaches — the card names what it found and offers ONE verb, Upgrade, which pulls, migrates in the LIBRARY and pushes the result (the device is never rewritten in place, D14); it dispatches without a confirm because the pre-upgrade copy is already banked. Right: below the upgrade floor — no automatic path exists, so there is no button that would only refuse; the note names the remedy and the way out stays the wipe. Both replace what used to be a Running card lying about a board whose firmware had refused to load the project."
+)]
+fn holds_old_format_project() -> Element {
+    sheet(vec![
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::Upgradable { found: 4 },
+                expected: 5,
+            },
+            false,
+        ),
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::TooOld { found: Some(2) },
+                expected: 5,
+            },
+            false,
+        ),
+    ])
+}
+
+#[story(
+    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
 )]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
@@ -243,7 +265,7 @@ fn needs_firmware_update() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: holds a project but no stamped identity; the Name-it row (and the title-bar name) open the D41 name-stamping sheet — card-anchored, never a dialog."
+    description = "Amber filled edge: a live board with no name yet; the Name-it row (and the title-bar name) open the D41 naming sheet — card-anchored, never a dialog."
 )]
 fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
@@ -599,7 +621,7 @@ fn erase_sheet_open() -> Element {
 }
 
 #[story(
-    description = "The name-stamping sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; naming stamps the uid and returns the card to Status. Supersedes the title-bar form for the unstamped board — a stamped device still renames inline in the title bar."
+    description = "The naming sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; the name writes to the registry and returns the card to Status. Supersedes the title-bar form for the unnamed board — a named device still renames inline in the title bar."
 )]
 fn name_sheet_open() -> Element {
     sheet(vec![rsx! {

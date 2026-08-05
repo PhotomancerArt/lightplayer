@@ -164,7 +164,14 @@ pub fn shape_for_shader_slot(
     registry: &SlotShapeRegistry,
 ) -> Result<SlotShape, ComputeStateError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => value_shape_for_slot(slot, registry),
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+            value_shape_for_slot(slot, registry)
+        }
+        // Only produced slots reach here, and a compute shader writes values,
+        // not palettes: a produced sampler has no meaning to give a shape to.
+        ShaderSlotKind::Palette => Err(ComputeStateError::Unsupported(String::from(
+            "a palette slot cannot be produced",
+        ))),
         ShaderSlotKind::Map => {
             let key = slot.key.data.as_ref().ok_or_else(|| {
                 ComputeStateError::Unsupported(String::from("map slot missing key"))
@@ -230,7 +237,14 @@ fn value_shape_for_ref(
 
 fn empty_data_for_slot(slot: &ShaderSlotDef, revision: Revision) -> SlotData {
     match slot.kind.value() {
-        ShaderSlotKind::Value => SlotData::Value(WithRevision::new(
+        // `Palette` rides with the scalar kinds only because this function is
+        // infallible and runs before shaping: a produced palette is refused
+        // with a diagnosable error by `shape_for_shader_slot`, which is the
+        // one place that decision belongs.
+        ShaderSlotKind::Palette
+        | ShaderSlotKind::Value
+        | ShaderSlotKind::Phasor
+        | ShaderSlotKind::Seconds => SlotData::Value(WithRevision::new(
             revision,
             default_lp_value_for_ref(slot.value.value()),
         )),

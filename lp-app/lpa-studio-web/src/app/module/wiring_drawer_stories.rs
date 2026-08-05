@@ -21,7 +21,7 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::node_story_fixtures::visual_preview_bytes;
+use crate::app::node::node_story_fixtures::{control_preview_product, visual_preview_bytes};
 use crate::app::wiring::wiring_drawer::FlowChannelRow;
 
 use super::ModuleFace;
@@ -67,6 +67,17 @@ fn visual_channel_preview() -> UiBusChannelPreview {
             revision: 104,
             bytes: visual_preview_bytes(32, 32).into(),
         },
+        tracking: UiProductTrackingState::Tracking,
+        frame: UiProductPreviewFrame::VISUAL_DEFAULT,
+    }
+}
+
+/// A control channel's value box: the fixture's lamp layout, from the same
+/// preview payload the visual rows carry with the control family on it.
+fn control_channel_preview() -> UiBusChannelPreview {
+    UiBusChannelPreview {
+        kind: UiProductKind::Control,
+        preview: control_preview_product("output").preview,
         tracking: UiProductTrackingState::Tracking,
         frame: UiProductPreviewFrame::VISUAL_DEFAULT,
     }
@@ -166,6 +177,32 @@ fn states_bus_view() -> UiBusView {
     }
 }
 
+/// The output half of a sign's scope: the visual the fixture samples, and
+/// the control product it renders for the hardware output. Both value boxes
+/// show their picture — pixels and lamps — because both are products in the
+/// tracked preview stream.
+fn output_bus_view() -> UiBusView {
+    UiBusView {
+        channels: vec![
+            UiBusChannelView {
+                value: Some("visual product #5:0".to_string()),
+                primary_visual: true,
+                preview: Some(visual_channel_preview()),
+                writers: vec![site("Playlist", Some("output"), UiBusSiteOrigin::Default)],
+                readers: vec![site("Fixture", Some("input"), UiBusSiteOrigin::Authored)],
+                ..channel("visual.out", "Color")
+            },
+            UiBusChannelView {
+                value: Some("control product #7:0".to_string()),
+                preview: Some(control_channel_preview()),
+                writers: vec![site("Fixture", Some("output"), UiBusSiteOrigin::Default)],
+                readers: vec![site("Output", Some("input"), UiBusSiteOrigin::Default)],
+                ..channel("control.out", "Color")
+            },
+        ],
+    }
+}
+
 /// A module face that is nothing but its open wiring drawer: no hero, an
 /// empty panel, so the flow rows carry the story.
 fn drawer_only_face(wiring: UiBusView) -> UiModuleFace {
@@ -205,6 +242,16 @@ pub(crate) fn fyeah_sign() -> Element {
 pub(crate) fn states() -> Element {
     rsx! {
         DrawerCard { face: drawer_only_face(states_bus_view()) }
+    }
+}
+
+#[story(
+    label = "Product Channels",
+    description = "The two product channels of a sign's scope, side by side: `visual.out` shows its pixels, `control.out` shows the fixture's lamp layout. A control channel is a picture too — its value box renders the same lamps the fixture card does, instead of the `control product #7:0` string the flow view used to fall back to."
+)]
+pub(crate) fn product_channels() -> Element {
+    rsx! {
+        DrawerCard { face: drawer_only_face(output_bus_view()) }
     }
 }
 

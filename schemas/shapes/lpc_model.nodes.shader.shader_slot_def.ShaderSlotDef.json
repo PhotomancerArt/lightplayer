@@ -46,6 +46,132 @@
         }
       },
       {
+        "name": "phasor",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 4055979827,
+                  "meta": {},
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "period_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "waveform",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "phase_offset",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "PhasorConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "gradient",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2273791358,
+                  "meta": {},
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "kind",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "set",
+                          "ty": {
+                            "array": [
+                              {
+                                "struct": {
+                                  "fields": [
+                                    {
+                                      "name": "space",
+                                      "ty": "i32"
+                                    },
+                                    {
+                                      "name": "method",
+                                      "ty": "i32"
+                                    },
+                                    {
+                                      "name": "count",
+                                      "ty": "i32"
+                                    },
+                                    {
+                                      "name": "stops",
+                                      "ty": {
+                                        "array": [
+                                          {
+                                            "struct": {
+                                              "fields": [
+                                                {
+                                                  "name": "at",
+                                                  "ty": "f32"
+                                                },
+                                                {
+                                                  "name": "c",
+                                                  "ty": "vec3"
+                                                }
+                                              ],
+                                              "name": "GradientStop"
+                                            }
+                                          },
+                                          24
+                                        ]
+                                      }
+                                    }
+                                  ],
+                                  "name": "Gradient"
+                                }
+                              },
+                              8
+                            ]
+                          }
+                        },
+                        {
+                          "name": "count",
+                          "ty": "i32"
+                        },
+                        {
+                          "name": "step_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "fade_seconds",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "GradientConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "default_bind",
         "shape": {
           "option": {

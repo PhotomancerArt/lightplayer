@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use lpc_model::{
     ControlDisplayLayout, ControlExtent, ControlProduct, ControlSampleLayout, NodeId, ProductRef,
-    VisualProduct,
+    TimeProduct, VisualProduct,
 };
 
 use crate::{
@@ -21,6 +21,16 @@ pub enum UiProductKind {
     Visual,
     /// A control stream, fixture map, or nonvisual device output.
     Control,
+    /// A queryable timebase: the handle a clock publishes on `bus:time`.
+    ///
+    /// A product like the other two, and it wears the same chip — but it has
+    /// no *picture*. Everything behind the handle (effective seconds, this
+    /// tick's delta, the live phasors) lives in the engine's timebase store,
+    /// and the way to look at it is the timebase probe's read-only listing,
+    /// not a preview frame. So this kind renders as
+    /// [`UiProductPreview::MetadataOnly`] by construction: no probe is ever
+    /// requested for it, and no skeleton is ever drawn waiting for one.
+    Time,
     /// A product whose presentation is not known by Studio yet.
     Other,
 }
@@ -80,6 +90,8 @@ pub enum UiProductRef {
         rows: u32,
         samples_per_row: u32,
     },
+    /// Queryable timebase material produced by a node output.
+    Time { node_id: u32, output: u32 },
 }
 
 impl UiProductRef {
@@ -89,6 +101,7 @@ impl UiProductRef {
         match product {
             ProductRef::Visual(product) => Self::from_visual_product(product),
             ProductRef::Control(product) => Self::from_control_product(product),
+            ProductRef::Time(product) => Self::from_time_product(product),
         }
     }
 
@@ -113,6 +126,15 @@ impl UiProductRef {
         }
     }
 
+    /// Convert a time product into a UI identity.
+    #[must_use]
+    pub fn from_time_product(product: TimeProduct) -> Self {
+        Self::Time {
+            node_id: product.node().0,
+            output: product.output(),
+        }
+    }
+
     /// Convert this identity back into a visual product when possible.
     #[must_use]
     pub fn visual_product(self) -> Option<VisualProduct> {
@@ -120,7 +142,16 @@ impl UiProductRef {
             Self::Visual { node_id, output } => {
                 Some(VisualProduct::new(NodeId::new(node_id), output))
             }
-            Self::Control { .. } => None,
+            Self::Control { .. } | Self::Time { .. } => None,
+        }
+    }
+
+    /// Convert this identity back into a time product when possible.
+    #[must_use]
+    pub fn time_product(self) -> Option<TimeProduct> {
+        match self {
+            Self::Time { node_id, output } => Some(TimeProduct::new(NodeId::new(node_id), output)),
+            Self::Visual { .. } | Self::Control { .. } => None,
         }
     }
 
@@ -138,7 +169,7 @@ impl UiProductRef {
                 output,
                 ControlExtent::new(rows, samples_per_row),
             )),
-            Self::Visual { .. } => None,
+            Self::Visual { .. } | Self::Time { .. } => None,
         }
     }
 }
@@ -208,6 +239,9 @@ impl UiProductPreview {
             UiProductKind::Empty => Self::Empty,
             UiProductKind::Visual => Self::Pending,
             UiProductKind::Control => Self::Pending,
+            // Not `Pending`: a time product has no preview to wait for, so
+            // pending would be a spinner that never resolves.
+            UiProductKind::Time => Self::MetadataOnly,
             UiProductKind::Other => Self::MetadataOnly,
         }
     }
@@ -270,6 +304,11 @@ impl UiProducedProduct {
         Self::new(name, UiProductKind::Control)
     }
 
+    /// Create a time product (a clock's published timebase handle).
+    pub fn time(name: impl Into<String>) -> Self {
+        Self::new(name, UiProductKind::Time)
+    }
+
     /// Add size or shape detail.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
@@ -314,12 +353,29 @@ impl UiProducedProduct {
 }
 
 impl UiProductKind {
-    /// Compact label for product detail rows.
+    /// The kind a resolved product value presents as.
+    ///
+    /// The single mapping from "what the engine resolved" to "what chip the
+    /// UI wears", so a product row, a wiring-drawer value box, and a bound
+    /// control's live reading can never disagree about what `bus:time`
+    /// carries.
+    #[must_use]
+    pub fn of_product_ref(product: ProductRef) -> Self {
+        match product {
+            ProductRef::Visual(_) => Self::Visual,
+            ProductRef::Control(_) => Self::Control,
+            ProductRef::Time(_) => Self::Time,
+        }
+    }
+
+    /// Compact label for product detail rows — and the chip text a product
+    /// value wears wherever Studio shows one instead of a number.
     pub fn detail_label(self) -> &'static str {
         match self {
             Self::Empty => "Empty product",
             Self::Visual => "Visual product",
             Self::Control => "Control product",
+            Self::Time => "Time product",
             Self::Other => "Product",
         }
     }

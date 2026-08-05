@@ -57,6 +57,14 @@ can abort `just test` before it is reached
   document carried all four holes as prose in its Conventions section
   because three consecutive Studio phases hit them. Filing the condition
   so the next plan can cite it instead of re-deriving it.
+- 2026-08-04 — a fifth hole of the same shape found and **closed**:
+  firmware manifest drift. The TimeProduct WIRE_PROTO 9→10 bump survived
+  multiple full `just check test` runs and failed on PR #328's first CI
+  run ("Check esp32c6 embedded manifest") — the four
+  `lp-fw/*/manifest-core.expected.json` fixtures had no local check.
+  Closed by wiring `fw-manifest-check-emu` (the one manifest check that
+  needs no chip toolchain) into `just check`; the esp32 variants remain
+  CI-only, so emu-fixture-specific drift is the local-only residue.
 
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching

@@ -21,8 +21,20 @@ pub fn materialize_shader_input(
     registry: &SlotShapeRegistry,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => materialize_value_input(slot_name, slot, data),
+        // Timebase kinds never arrive here from the shader nodes (their
+        // evaluator answers first); the f32 path is the honest fallback for
+        // any other caller.
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+            materialize_value_input(slot_name, slot, data)
+        }
         ShaderSlotKind::Map => materialize_map_input(slot_name, slot, data, registry),
+        // A palette's uniform is a texture handle, not a value: there is no
+        // `LpValue` shape a sampler could be materialized from, and the
+        // shader node's bake path answers before this is reached. Saying so
+        // is better than inventing a black texture nobody asked for.
+        ShaderSlotKind::Palette => Err(ShaderInputMaterializeError::ExpectedTexture(String::from(
+            slot_name,
+        ))),
     }
 }
 
@@ -30,6 +42,9 @@ pub fn materialize_shader_input(
 pub enum ShaderInputMaterializeError {
     ExpectedValue(String),
     ExpectedMap(String),
+    /// A palette slot reached value materialization. Its uniform is a baked
+    /// texture supplied by the shader node, never an `LpValue`.
+    ExpectedTexture(String),
     MissingMapping(String),
     MissingKey(String),
     UnknownNativeShape(String),
@@ -57,6 +72,10 @@ impl core::fmt::Display for ShaderInputMaterializeError {
         match self {
             Self::ExpectedValue(slot) => write!(f, "shader input {slot:?} expected value data"),
             Self::ExpectedMap(slot) => write!(f, "shader input {slot:?} expected map data"),
+            Self::ExpectedTexture(slot) => write!(
+                f,
+                "shader input {slot:?} is a palette: its uniform is a baked texture, not a value"
+            ),
             Self::MissingMapping(slot) => write!(f, "shader map input {slot:?} missing mapping"),
             Self::MissingKey(slot) => write!(f, "shader map input {slot:?} missing key"),
             Self::UnknownNativeShape(name) => write!(f, "unknown native shader shape {name:?}"),

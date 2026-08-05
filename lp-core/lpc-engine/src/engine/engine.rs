@@ -64,6 +64,13 @@ pub struct Engine {
     /// `apply_project_changes` rebuilds bindings from defs and must never
     /// destroy an engaged control.
     panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
+    /// Published timebases and their phasor integrators, keyed by the node
+    /// that produces each (`dataflow::timebase`). A side store for the same
+    /// reason panel writers are one — it is Engine state that must outlive
+    /// `apply_project_changes` — and additionally because servicing a
+    /// per-uniform phasor read through node dispatch would put the
+    /// resolver's heaviest machinery on the hottest new path.
+    timebases: crate::dataflow::timebase::TimebaseStore,
     /// Device-level safe-mode output ceiling, Q16 (`None` = no clamp).
     ///
     /// DEVICE state, not project data: set by the embedder (firmware, from a
@@ -100,6 +107,7 @@ impl Engine {
             demand_roots: Vec::new(),
             graphics: None,
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
+            timebases: crate::dataflow::timebase::TimebaseStore::new(),
             safe_output_clamp_q16: None,
             #[cfg(debug_assertions)]
             last_structural_check: None,
@@ -335,6 +343,23 @@ impl Engine {
         &self.panel_writers
     }
 
+    /// The published timebases and their phasors (probes, tests). Runtime
+    /// state only — never persisted, never authored.
+    pub fn timebases(&self) -> &crate::dataflow::timebase::TimebaseStore {
+        &self.timebases
+    }
+
+    /// Mutable timebase access, so a test can stand in for the consumer that
+    /// P3 will add. Not public: outside the engine, a timebase is read-only
+    /// — only a producing node may publish one, and only a tick may advance
+    /// a phasor. Gated to the clock+shader feature set its only callers
+    /// (`timebase_tests`, `shader_timebase_tests`) compile under, so the
+    /// gate-off builds of `check-lpc-engine-gates` stay warning-free.
+    #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
+    pub(crate) fn timebases_mut(&mut self) -> &mut crate::dataflow::timebase::TimebaseStore {
+        &mut self.timebases
+    }
+
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
         self.graphics = graphics;
     }
@@ -455,7 +480,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -606,6 +631,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -618,14 +644,27 @@ impl Engine {
             frame_revision: self.revision,
         };
 
-        {
+        let walk = (|| {
             for &root in &self.demand_roots {
                 consume_tree_node(&mut session, &mut host, root)?;
             }
-        }
+            Ok(())
+        })();
+
+        // End-of-tick timebase maintenance, deliberately OUTSIDE the `?`
+        // path above: a node erroring mid-walk must not stall the store's
+        // tick, or every phasor in the project would silently freeze until
+        // the offending node was fixed.
+        let tree = &self.tree;
+        self.timebases.sweep(|clock| {
+            matches!(
+                tree.get(clock).map(|entry| entry.state.value()),
+                Some(NodeEntryState::Alive(_))
+            )
+        });
 
         self.resolver = resolver;
-        Ok(())
+        walk
     }
 
     /// Fail loudly when the graph changed shape without anyone calling
@@ -676,6 +715,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -727,6 +767,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -782,6 +823,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -822,6 +864,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -862,6 +905,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -910,6 +954,7 @@ struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     registry: &'a ProjectRegistry,
     panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
+    timebases: &'a mut crate::dataflow::timebase::TimebaseStore,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -978,6 +1023,13 @@ impl EngineResolveHost<'_> {
                     node,
                     slot: slot.clone(),
                 })?;
+        // A shader uniform is not a field of `ShaderDef` — it lives under
+        // `consumed[<name>]` — so the plain def lookup below can never see
+        // it. Project it first, the way the merge-policy read does.
+        if let Ok(Some(product)) = self.read_shader_consumed_slot_default(node, slot) {
+            return Ok(Production::new(product, ProductionSource::Default));
+        }
+
         let product = self.read_authored_def_product(node, slot).map_err(|_| {
             SessionResolveError::UnresolvedConsumedSlot {
                 node,
@@ -1168,6 +1220,39 @@ impl ResolveHost for EngineResolveHost<'_> {
             .collect()
     }
 
+    /// The R5 shadowing walk again, but reporting WHERE it stopped rather
+    /// than what it found there: a phasor's shared identity is the scope the
+    /// winning writer lives in, so two readers in different scopes that both
+    /// resolve outward to the same writer ride the same integrator.
+    ///
+    /// Deliberately not "the winning provider's `node_scope`" — a panel
+    /// writer's synthetic provider is owned by the scope's module node, which
+    /// *inhabits its parent scope*, and that owner-based answer would name
+    /// the wrong scope for exactly the case a shared knob is for.
+    fn consumed_slot_bus_provenance(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
+        let (_, entry) = self.tree.binding_for_consumed_slot(node, slot)?;
+        let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
+            return None;
+        };
+        let channel = channel.clone();
+        let mut scope = self.node_scope(node)?;
+        loop {
+            if self.panel_writers.get(scope, &channel).is_some()
+                || !self
+                    .tree
+                    .providers_for_bus_in_scope(scope, &channel)
+                    .is_empty()
+            {
+                return Some((scope, channel));
+            }
+            scope = self.tree.parent_scope(scope)?;
+        }
+    }
+
     fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
         // Reading scope (R7 export semantics): introducers read inward,
         // everyone else reads the scope they inhabit. Write-side provider
@@ -1252,6 +1337,83 @@ impl ResolveHost for EngineResolveHost<'_> {
             .get_mut_mark_updated(id, frame)
             .map_err(|e| SessionResolveError::other(format!("runtime buffer mut: {e:?}")))
     }
+
+    fn publish_timebase(
+        &mut self,
+        clock: NodeId,
+        effective_seconds: f32,
+        delta_seconds: f32,
+        at: Revision,
+    ) {
+        self.timebases
+            .set_timebase(clock, effective_seconds, delta_seconds, at);
+    }
+
+    fn time_product_seconds(
+        &self,
+        product: lpc_model::TimeProduct,
+    ) -> Result<f32, SessionResolveError> {
+        self.timebases
+            .seconds(product.node())
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+
+    fn time_product_delta(
+        &self,
+        product: lpc_model::TimeProduct,
+    ) -> Result<f32, SessionResolveError> {
+        self.timebases
+            .delta(product.node())
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+
+    fn time_product_phasor(
+        &mut self,
+        product: lpc_model::TimeProduct,
+        key: &crate::dataflow::timebase::PhasorKey,
+        config: &lpc_model::PhasorConfig,
+        reader: (NodeId, &lpc_model::SlotPath),
+    ) -> Result<(f32, u32), SessionResolveError> {
+        self.timebases
+            .phasor_tick(product.node(), key, config, reader)
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+}
+
+/// A handle whose producer has not published a timebase this run.
+///
+/// Loud on purpose: the handle names a node, so a miss means the graph is
+/// wired to something that is not producing time — not that time is zero.
+fn unpublished_timebase(product: lpc_model::TimeProduct) -> SessionResolveError {
+    SessionResolveError::other(format!(
+        "node {:?} has published no timebase for time product output {}",
+        product.node(),
+        product.output()
+    ))
+}
+
+impl crate::node::TimebaseRead for EngineResolveHost<'_> {
+    fn time_product_seconds(&self, product: lpc_model::TimeProduct) -> Result<f32, NodeError> {
+        self.timebases
+            .seconds(product.node())
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
+    }
+
+    fn time_product_delta(&self, product: lpc_model::TimeProduct) -> Result<f32, NodeError> {
+        self.timebases
+            .delta(product.node())
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
+    }
+
+    fn time_product_phasor_read(
+        &self,
+        product: lpc_model::TimeProduct,
+        key: &crate::dataflow::timebase::PhasorKey,
+    ) -> Result<(f32, u32), NodeError> {
+        self.timebases
+            .phasor_read(product.node(), key)
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
+    }
 }
 
 impl EngineResolveHost<'_> {
@@ -1298,6 +1460,81 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Result<Option<SlotMerge>, SessionResolveError> {
+        Ok(self
+            .shader_consumed_slot_def(node, slot)?
+            .map(|slot| match slot.kind.value() {
+                lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
+                // A timebase or palette uniform's binding, when it has one,
+                // names a single config channel — never an aggregate.
+                lpc_model::ShaderSlotKind::Value
+                | lpc_model::ShaderSlotKind::Phasor
+                | lpc_model::ShaderSlotKind::Seconds
+                | lpc_model::ShaderSlotKind::Palette => SlotMerge::Latest,
+            }))
+    }
+
+    /// The authored default an *unbound* shader uniform runs on, as slot
+    /// data — `None` when `slot` does not name a shader consumed slot.
+    ///
+    /// Shader uniforms are not fields of `ShaderDef`/`ComputeShaderDef`;
+    /// they live in the `consumed` map, keyed by uniform name. So a
+    /// `read_authored_def_product` lookup of the *name* has nothing to hit
+    /// and every unbound uniform came back `UnresolvedConsumedSlot` — a
+    /// node behaving exactly as authored reported a permanent `Warn`,
+    /// indistinguishable from a genuinely broken binding
+    /// (`docs/defects/2026-08-04-unbound-shader-uniform-warns.md`).
+    ///
+    /// The data produced is what [`materialize_shader_input`] already
+    /// builds for absent data, so the *value* an unbound uniform runs on is
+    /// unchanged: a value slot's authored `default` (0.0 when unauthored),
+    /// and an empty map for a map slot — which fills every element with the
+    /// mapping's sentinel key.
+    ///
+    /// Only the plain [`QueryKey::ConsumedSlot`] path needs this. An
+    /// accessor is compiled against the def's own shape, so a uniform name
+    /// can never become one in the first place.
+    ///
+    /// [`materialize_shader_input`]: crate::nodes::shader::shader_input_materialize::materialize_shader_input
+    fn read_shader_consumed_slot_default(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<Option<SlotData>, SessionResolveError> {
+        Ok(self
+            .shader_consumed_slot_def(node, slot)?
+            .map(|slot| match slot.kind.value() {
+                // Timebase kinds are scalar f32 on the wire; their real
+                // value comes from the scope's time product at uniform
+                // fill, so the unbound default is only ever a placeholder.
+                lpc_model::ShaderSlotKind::Value
+                | lpc_model::ShaderSlotKind::Phasor
+                | lpc_model::ShaderSlotKind::Seconds => {
+                    SlotData::Value(WithRevision::new(self.frame_revision, slot.default_value()))
+                }
+                // A palette's authored default is its whole `GradientConfig`
+                // — the same value shape a `bus:palette` channel carries, so
+                // the bake path reads one thing whether or not anything
+                // drives it (`docs/design/color.md` §5).
+                lpc_model::ShaderSlotKind::Palette => SlotData::Value(WithRevision::new(
+                    self.frame_revision,
+                    lpc_model::ToLpValue::to_lp_value(&slot.gradient_config()),
+                )),
+                lpc_model::ShaderSlotKind::Map => {
+                    SlotData::Map(lpc_model::SlotMapDyn::with_revision(
+                        self.frame_revision,
+                        lp_collection::VecMap::new(),
+                    ))
+                }
+            }))
+    }
+
+    /// The authored `consumed[<name>]` def `slot` names, when `node` is a
+    /// shader or compute shader and `slot` is a bare uniform name.
+    fn shader_consumed_slot_def(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<Option<&lpc_model::ShaderSlotDef>, SessionResolveError> {
         let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
             return Ok(None);
         };
@@ -1305,15 +1542,11 @@ impl EngineResolveHost<'_> {
             return Ok(None);
         }
         let def = self.loaded_node_def(node)?;
-        let shader_slot = match def {
+        Ok(match def {
             NodeDef::Shader(config) => config.consumed_slots.entries.get(name.as_str()),
             NodeDef::ComputeShader(config) => config.consumed_slots.entries.get(name.as_str()),
             _ => None,
-        };
-        Ok(shader_slot.map(|slot| match slot.kind.value() {
-            lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
-            lpc_model::ShaderSlotKind::Value => SlotMerge::Latest,
-        }))
+        })
     }
 
     fn read_authored_def_slot_semantics(
@@ -2198,6 +2431,7 @@ pub(crate) fn resolve_with_engine_host(
         tree: &mut eng.tree,
         registry,
         panel_writers: &eng.panel_writers,
+        timebases: &mut eng.timebases,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2239,6 +2473,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         tree: &mut eng.tree,
         registry,
         panel_writers: &eng.panel_writers,
+        timebases: &mut eng.timebases,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,

@@ -13,14 +13,17 @@
 
 use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
+mod clock_face;
 mod fixture_face;
 mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;
 mod output_face;
+mod phasor_trace;
 mod playlist_face;
 mod shader_face;
 
+pub use clock_face::ClockFace;
 pub use fixture_face::FixtureFace;
 pub use node_card_drawers::NodeCardDrawers;
 pub use node_card_section::NodeCardSection;

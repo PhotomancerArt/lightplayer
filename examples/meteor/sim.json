@@ -7,9 +7,6 @@
     },
     "speed": {
       "source": "bus:speed"
-    },
-    "time": {
-      "source": "bus:time"
     }
   },
   "float_mode": "fixed",
@@ -34,11 +31,11 @@
       "description": "Travel-speed multiplier for every meteor"
     },
     "time": {
-      "kind": "value",
+      "kind": "seconds",
       "value": "f32",
       "default": 0,
       "label": "Time",
-      "description": "Project clock time in seconds"
+      "description": "Seconds from the scope's time product"
     }
   },
   "produced": {

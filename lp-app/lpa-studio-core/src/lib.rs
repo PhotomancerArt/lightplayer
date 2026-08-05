@@ -13,8 +13,8 @@ pub use lpa_link::{
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
-    ControlSampleSpan, LampType, LpFeature, LpValue, NodeId, NodeKind, Revision, SlotMapKey,
-    SlotPath, SlotPathSegment,
+    ControlSampleSpan, LampType, LpFeature, LpValue, NodeId, NodeKind, PhasorConfig, Revision,
+    SlotMapKey, SlotPath, SlotPathSegment, ToLpValue, Waveform,
 };
 
 pub mod app;
@@ -49,18 +49,19 @@ pub use app::home::{
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeChild,
-    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
-    UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelTarget, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
-    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
-    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
-    UiSlotValue, UiSlotValueKind,
+    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiConfigSlot, UiConfigSlotBody,
+    UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace,
+    UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin,
+    UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
+    UiPanelTarget, UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
+    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiTimebaseState, phasor_rate_display, phasor_speed_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -82,16 +83,17 @@ pub use app::project::{
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
     SlotEditOp, SlotKind, UiAddNodeMenu, UiAddNodeMenuEntry, UiAffordance, UiAssetContent,
     UiAssetContentBody, UiAttachTarget, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProjectManifest, UiShaderError,
+    UiPendingEditPhase, UiProjectManifest, UiShaderError, UiTimebaseRead,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
 pub use app::roster::{
     BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
-    DeviceDetailAffordance, DeviceRichInput, RosterAffordance, RosterCardState, RosterEvidence,
-    RosterStateSpec, RosterTreatment, SimDetailAffordance, SimRichInput, derive_roster_card_state,
-    device_card_tabs, device_rich_object, firmware_update_available, sim_rich_object,
+    DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
+    RosterCardState, RosterEvidence, RosterStateSpec, RosterTreatment, SimDetailAffordance,
+    SimRichInput, derive_roster_card_state, device_card_tabs, device_rich_object,
+    firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
     DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,

@@ -440,7 +440,7 @@ fn manage_fake_device(
     device: &crate::providers::fake_device::FakeEsp32Device,
     request: crate::LinkManagementRequest,
 ) -> Result<crate::LinkManagementResult, LinkError> {
-    use crate::providers::fake_device::FAKE_IMAGE_IDENTITY;
+    use crate::providers::fake_device::{FAKE_IMAGE_IDENTITY, FAKE_PROBED_MAC};
     use crate::{
         LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult,
         LinkFirmwareManifest, LinkFlashRegion, LinkManagementProgress, LinkManagementRequest,
@@ -468,6 +468,11 @@ fn manage_fake_device(
                         manifest_path: None,
                     },
                     chip_name: Some("ESP32-C6 (fake)".to_string()),
+                    // Spelled UPPERCASE deliberately: the browser flasher is
+                    // untestable JS, so this is the only place a test can
+                    // watch a reported MAC travel the real evidence path —
+                    // and the normalization on that path is worth watching.
+                    probed_mac: Some(FAKE_PROBED_MAC.to_string()),
                     logs: vec!["fake flash: scripted transition to LightPlayer".to_string()],
                     progress: vec![
                         LinkManagementProgress::new("Writing firmware").with_percent(50),

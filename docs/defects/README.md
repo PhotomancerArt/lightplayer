@@ -135,6 +135,22 @@ genuinely fits none of these, and define it here in one line.
 - **`retired-surface-still-reachable`** — a surface believed replaced is
   still rendered, because its replacement can be absent and the old
   surface is the fallback branch.
+- **`unenforced-test-precondition`** — a test depends on a condition it never
+  establishes (a scheduling order, a timing window, an invocation count), so
+  the nondeterminism decides both outcomes: sometimes the assertion fails
+  spuriously, sometimes it passes having exercised nothing. The silent half is
+  the expensive one. The fix shape is to hold the nondeterminism rather than
+  hope — throttle the adversary by *quantity of work*, never by elapsed time
+  (a time budget is the same defect wearing a control knob), establish the
+  precondition by construction, then check an invariant that would be false if
+  the intended interleaving never occurred.
+- **`reclaim-ordered-behind-its-own-rebuild`** — a resource is released to
+  make room for a transient, but the releasing component rebuilds it
+  earlier in the same pass than the transient runs, so net reclaim at the
+  moment that matters is zero and the release only adds a second
+  allocation. The design's load-bearing claim is about *ordering*, and the
+  tests around it pin the protocol (it fired, output is unchanged) rather
+  than the ordering, so a mechanism that does nothing passes everything.
 
 ## Index
 
@@ -204,6 +220,8 @@ the combination first being registered as a target.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
+| reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
 | opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
 | config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
@@ -237,6 +255,7 @@ the combination first being registered as a target.
 | ungated-variant | 2026-07-30 | [stacked-prs-get-no-ci](2026-07-30-stacked-prs-get-no-ci.md) | fixed | .github/workflows/pre-merge.yml (trigger) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
+| state-conflation | 2026-08-04 | [unbound-shader-uniform-warns](2026-08-04-unbound-shader-uniform-warns.md) | fixed | lpc-engine engine host + shader nodes |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | state-conflation | 2026-07-26 | [worker-poisoned-instance-reuse](2026-07-26-worker-poisoned-instance-reuse.md) | fixed | fw-browser + lpa-link/browser-worker |

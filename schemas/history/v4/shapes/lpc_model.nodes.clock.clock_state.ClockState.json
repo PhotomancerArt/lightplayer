@@ -1,0 +1,42 @@
+{
+  "record": {
+    "fields": [
+      {
+        "default_bind": "bus:time",
+        "name": "seconds",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "delta_seconds",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

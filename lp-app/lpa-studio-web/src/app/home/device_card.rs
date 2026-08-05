@@ -2095,6 +2095,23 @@ pub(super) fn device_affordance_action(
                      changes stay in your project history.",
         )
         .with_icon("download"),
+        // P5: the format verb dispatches from the face like the drift
+        // verbs, and for the same reason — it is non-destructive by
+        // construction (the pre-upgrade copy stays in project history), so
+        // a confirm gate would be theatre. The summary says where the old
+        // copy went, which is what makes one click feel safe.
+        RosterAffordance::UpgradeProject => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::UpgradeDeviceProject {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary(
+            "Upgrade this board's project to the format Studio uses and put \
+             it back on the board — the copy that's there now is already \
+             saved in your library.",
+        )
+        .with_icon("upload"),
         RosterAffordance::KeepBoth => UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::KeepBothFork {
@@ -2348,6 +2365,11 @@ pub(super) fn flash_device_action_destructive(card_key: &str) -> UiAction {
 /// Erase the device's flash entirely, from the Danger tab. Confirmation
 /// states the honest facts: full wipe; anything Studio could read was
 /// banked at connect (D8) — unreadable content is gone for good.
+///
+/// What it no longer costs is the BOARD (device identity design §6): an
+/// erase takes the projects, not the identity, because the identity is
+/// the chip's own factory MAC. The board comes back as itself, under its
+/// own name, with its history intact.
 pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
@@ -2359,7 +2381,8 @@ pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
         "Erase device",
         format!(
             "Erase everything on \"{name}\"? Its flash is wiped clean; \
-                 anything Studio could read was already saved to your library."
+                 anything Studio could read was already saved to your library. \
+                 The board itself stays remembered — its identity is in its silicon."
         ),
         "Erase",
     ))

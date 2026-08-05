@@ -46,6 +46,8 @@ tests/
   guard.rs           the guard word and the start-of-frame race
   multi_channel.rs   four channels, no cross-talk, coincident interrupts,
                      blocks_per_channel
+  abort_handshake.rs the isr_seq service marker and abort's teardown guarantee
+  cross_core.rs      real-thread teardown races under Miri (`just ws281x-miri`)
   hooks.rs           the test_hooks instrumentation (feature-gated)
   hardware_golden.rs a frame as an ESP32-S3 actually transmitted it, decoded
                      and timing-checked against golden/ (hardware-derived
@@ -120,8 +122,22 @@ column by the output count and the ceiling picks the winner:
   Read `refills` against `refills_wanted`, never `lag_max`, when diagnosing
   this.
 * 2 blocks → 12.5 k/s each → ~4 outputs, and the margin is thin (50 k demand
-  against a ~48 k ceiling). This is what `fw-esp32v3` ships; whether four
-  channels are genuinely clean is a silicon question, not an arithmetic one.
+  against a ~48 k ceiling). This is what `fw-esp32v3` ships. Answered on
+  silicon 2026-08-04 (DOM-Z-102 app path, 4×225 LEDs, concurrent flush):
+  **both two and four concurrent transmitters run trip-free** — provided the
+  CPU quietly spins for the whole transmission. The margins differ sharply
+  (worst entry delay 8 of 64 words at two concurrent, 53 of 64 at four), so
+  `fw-esp32v3` admits two at a time and holds further starts until a slot
+  frees. The proviso is not optional: that firmware's app path masks
+  interrupts in stretches that blow the 80 µs deadline, and a wire left
+  transmitting under engine load truncated ~99 % of its frames. Whoever calls
+  `start_frame` owns keeping the CPU quiet until the frame completes — with
+  one escape: the constraint is a property of the *core that services the
+  ISR*, not of the chip. A handler bound on a core the caller's masking
+  cannot touch (the classic's otherwise-idle APP core) dissolves it, and the
+  frame lifecycle is written for exactly that cross-core deployment — see
+  the teardown handshake on `Ws281xDriver::abort` and the ordering contract
+  in `state.rs`.
 
 Note that only slots `0, 2, 4, 6` exist at two blocks each — a backend must
 skip the absorbed slots when it creates channels, not merely when it
@@ -141,9 +157,13 @@ An all-zero RMT word stops the transmitter. After each refill the driver plants
 one at the **first word of the half the transmitter is currently reading** — a
 slot it has already consumed, and the slot it would next re-read if the
 following refill interrupt never arrived. A lost interrupt therefore truncates
-the frame instead of replaying a stale half over and over: one dim frame instead
-of visible flicker. In healthy operation the next refill overwrites the guard
-before it is ever reached.
+the frame instead of replaying a stale half over and over: one *torn* frame —
+the LEDs past the stop point latch and keep showing the last data they
+received — instead of visible flicker. (A tear is far less noticeable than
+flicker or black, which is also why chronic truncation hides from the eye on
+a bench strip; read `trips` and `refills`-vs-`wanted`, not the LEDs.) In
+healthy operation the next refill overwrites the guard before it is ever
+reached.
 
 Two things differ deliberately from the ancestor:
 
@@ -261,6 +281,26 @@ lp-ws281x = { path = "../lp-ws281x", default-features = false }
 The core uses `core::sync::atomic` directly (including `fetch_add`), which all
 three target chips support natively. A CAS-less target would need
 `portable-atomic`, as `xt-runner-core` does.
+
+### Cross-core deployment
+
+Thread context and the interrupt handler may run on different cores —
+`fw-esp32v3` binds the RMT ISR on the classic ESP32's otherwise-idle APP core so
+refills survive the render core's interrupt masking. Two things such a
+deployment must do:
+
+- **Enable the `isr-in-ram` feature**, which places the whole service path in
+  `.rwtext` (the section esp-hal's `#[ram]` uses). With the path in flash, the
+  ISR core stalls behind the *other* core's cache misses on the shared SPI bus —
+  measured as entry delays blowing the refill deadline the moment transmission
+  overlapped rendering, with per-refill cost unchanged.
+- **Respect the teardown handshake**: `abort` returns only once the handler is
+  provably out of service, and that is the whole reason frame bytes may be freed
+  when it returns. The ordering contract lives in `state.rs`'s module docs; the
+  adversarial proof is `tests/cross_core.rs` under Miri (`just ws281x-miri`),
+  whose oracle was validated against the known-broken shape.
+
+The standing invariant either way: exactly one core services the ISR.
 
 ## Validation
 
