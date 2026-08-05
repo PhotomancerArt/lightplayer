@@ -453,6 +453,25 @@ hours), and neither is an exit path on its own.
   `document.hidden === true`, so rAF and ResizeObserver callbacks never fire
   there until something forces a frame — take a screenshot first, or a
   working fix reads as a dead one.
+  **Verified across two CI captures of the same tree** (runs 31024986361 and
+  31026385720, PR #354) — the comparison nothing in this pipeline does on its
+  own, and the only thing that can falsify an oscillation. Capture 1
+  reproduced main's `clock-face__crowd__lg` byte-for-byte and named exactly
+  two stale files (`crowd__md`, `default__lg`, both max Δ243); capture 2
+  reported the whole clock-face family byte-identical, in neither the drifted
+  set nor the tolerated-with-significant-pixels warning. Two notes that
+  outlive the fix. (a) **main was carrying the degraded render for those two**
+  while holding the correct one for the rest, so an oscillating baseline
+  leaves the set in a MIXED state — a branch that has not touched the files
+  silently takes main's side on merge, and the fix has to pin them back
+  explicitly or it re-lands the bad pair. (b) The comparison only worked
+  because both runs were on one branch close together; on main, a story that
+  flips has nothing to disagree with.
+  Left open by this pass: `exploration__node-ui__status-indicators__sm` was
+  byte-identical in capture 1 and drifted at 304 significant px / max Δ223 in
+  capture 2 — a fresh member of the bistable set, in a story family this
+  branch never touched and (unlike the traces) carrying no canvas, so it is a
+  different mechanism. It is what (5b) asks for: diagnose, do not suppress.
 
 - 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and

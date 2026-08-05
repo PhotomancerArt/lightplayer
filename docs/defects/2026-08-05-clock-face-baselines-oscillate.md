@@ -70,9 +70,17 @@ converges to 253×84 — the box × dpr — as soon as the page produces a frame
 **Verified**: a local capture of the clock-face stories with the fix matches
 CI's *first* variant inside the trace-canvas band to a max channel delta of
 **1** (against 243 for the other), so the run that produced `d7712f79` was the
-one rendering correctly, and main currently holds the degraded bitmap. The
-next CI capture refreshes those baselines once; the acceptance check is that
-the run after it reports no drift.
+one rendering correctly. Then two CI captures of the same tree (runs
+31024986361 and 31026385720): the first reproduced `crowd__lg` byte-for-byte
+and named exactly two stale files, the second reported the whole clock-face
+family byte-identical — in neither the drifted set nor the
+tolerated-with-significant-pixels warning.
+
+Worth keeping from that: main held the degraded render for `crowd__md` and
+`default__lg` and the correct one for every other clock-face story, so an
+oscillating baseline leaves the set **mixed**. A branch that has not touched
+those files takes main's side on merge, which would have re-landed the bad
+pair here; the fix has to pin them back explicitly.
 
 **Fix** — Two changes to the same mechanism, plus a gate.
 
