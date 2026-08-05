@@ -162,16 +162,15 @@ impl ToLpValue for GradientConfig {
             } => (CYCLE_KIND_TAG, set.as_slice(), *step_seconds, *fade_seconds),
         };
 
-        let mut set = Vec::with_capacity(MAX_CYCLE_SET as usize);
-        set.extend(
-            gradients
-                .iter()
-                .take(MAX_CYCLE_SET as usize)
-                .map(ToLpValue::to_lp_value),
-        );
-        // Padding entries are shape-valid default gradients so every array
-        // element decodes; `count` is what bounds the read.
-        set.resize(MAX_CYCLE_SET as usize, Gradient::default().to_lp_value());
+        // Count-bounded, not padded (mirrors `Gradient::to_lp_value`):
+        // `count` bounds the read, so padding entries carry no information
+        // and a fully padded config alone would overflow the 16 KiB
+        // project-read frame budget.
+        let set: Vec<LpValue> = gradients
+            .iter()
+            .take(MAX_CYCLE_SET as usize)
+            .map(ToLpValue::to_lp_value)
+            .collect();
 
         LpValue::Struct {
             name: Some("GradientConfig".to_string()),
@@ -240,7 +239,10 @@ fn set_count(tag: i32, min: usize, max: usize) -> Result<usize, ValueRootError> 
     Ok(count)
 }
 
-/// Read the fixed `set` array and keep only the `count` authored entries.
+/// Read the `set` array and keep only the `count` authored entries.
+///
+/// Accepts any length in `count..=MAX_CYCLE_SET`: the canonical stored form
+/// is count-bounded, and the legacy zero-padded form still decodes.
 fn read_gradient_set(
     fields: &[(String, LpValue)],
     count: usize,
@@ -250,9 +252,9 @@ fn read_gradient_set(
     else {
         return Err(ValueRootError::new("expected GradientConfig.set"));
     };
-    if set.len() != MAX_CYCLE_SET as usize {
+    if set.len() < count || set.len() > MAX_CYCLE_SET as usize {
         return Err(ValueRootError::new(alloc::format!(
-            "GradientConfig.set must hold {MAX_CYCLE_SET} entries, got {}",
+            "GradientConfig.set must hold count..={MAX_CYCLE_SET} entries, got {}",
             set.len()
         )));
     }
@@ -473,8 +475,9 @@ mod tests {
         }
     }
 
-    /// Static writes `count = 1` and zero timings; the padding entries exist
-    /// but are never read back.
+    /// Static writes `count = 1`, zero timings, and a ONE-entry set — the
+    /// stored form is count-bounded (the fixed 8 is the type's maximum, not
+    /// the stored length).
     #[test]
     fn static_storage_is_a_one_entry_flattened_struct() {
         let LpValue::Struct { name, fields } = GradientConfig::default().to_lp_value() else {
@@ -493,7 +496,26 @@ mod tests {
         let LpValue::Array(set) = &fields[1].1 else {
             panic!("set must be an Array");
         };
-        assert_eq!(set.len(), MAX_CYCLE_SET as usize);
+        assert_eq!(set.len(), 1);
+    }
+
+    /// The legacy zero-padded storage form (a full `MAX_CYCLE_SET` array
+    /// with `count` bounding the read) still decodes.
+    #[test]
+    fn storage_accepts_the_legacy_padded_form() {
+        let config = cycle(2, 1.0);
+        let LpValue::Struct { name, mut fields } = config.to_lp_value() else {
+            panic!("GradientConfig storage must be a Struct");
+        };
+        let LpValue::Array(set) = &mut fields[1].1 else {
+            panic!("set must be an Array");
+        };
+        set.resize(MAX_CYCLE_SET as usize, Gradient::default().to_lp_value());
+
+        assert_eq!(
+            GradientConfig::from_lp_value(&LpValue::Struct { name, fields }).unwrap(),
+            config
+        );
     }
 
     #[test]

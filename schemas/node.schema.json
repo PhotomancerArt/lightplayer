@@ -335,7 +335,6 @@
                       "type": "object"
                     },
                     "maxItems": 24,
-                    "minItems": 24,
                     "type": "array"
                   }
                 },
@@ -348,7 +347,6 @@
                 "type": "object"
               },
               "maxItems": 8,
-              "minItems": 8,
               "type": "array"
             },
             "step_seconds": {

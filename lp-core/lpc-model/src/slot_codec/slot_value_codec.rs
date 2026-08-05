@@ -78,7 +78,11 @@ where
         (LpType::Mat2x2, LpValue::Mat2x2(matrix)) => write_matrix(value, matrix),
         (LpType::Mat3x3, LpValue::Mat3x3(matrix)) => write_matrix(value, matrix),
         (LpType::Mat4x4, LpValue::Mat4x4(matrix)) => write_matrix(value, matrix),
-        (LpType::Array(item_ty, len), LpValue::Array(items)) if items.len() == *len => {
+        // A fixed-size array value may carry FEWER elements than the type's
+        // declared length: the declared size is the maximum, and the absent
+        // tail is type-default (color.md §5 — a count-bounded gradient set
+        // must not pad ~17 KiB of dead stops onto disk and wire).
+        (LpType::Array(item_ty, len), LpValue::Array(items)) if items.len() <= *len => {
             write_lp_array(value, item_ty, items)
         }
         (LpType::List(item_ty), LpValue::Array(items)) => write_lp_array(value, item_ty, items),
@@ -386,14 +390,17 @@ where
         items.push(read_lp_value(item_ty, item)?);
     }
 
+    // Fixed-size arrays accept UP TO the declared length: the declared size
+    // is the maximum, and a shorter value's absent tail is type-default
+    // (color.md §5 count-bounded storage).
     if let Some(expected_len) = expected_len
-        && items.len() != expected_len
+        && items.len() > expected_len
     {
         return Err(SyntaxError::new(
             "",
             None,
             alloc::format!(
-                "expected array of {expected_len} values, found {}",
+                "expected array of at most {expected_len} values, found {}",
                 items.len()
             ),
         ));
@@ -858,6 +865,44 @@ mod tests {
         let error = read_lp_value(&endpoint_ty(), reader.value()).unwrap_err();
 
         assert!(error.message().contains("payload"));
+    }
+
+    /// The def-file seam of the count-bounded gradient storage (color.md
+    /// §5): a `GradientConfig` value carries fewer `set`/`stops` entries
+    /// than the type's fixed maximum, and the shape-driven codec must write
+    /// it into authored JSON and read that JSON back unchanged — this is
+    /// exactly the inline `consumed[<name>].gradient.some` slot a palette
+    /// pick edits.
+    #[test]
+    fn slot_value_codec_round_trips_a_count_bounded_gradient_config() {
+        use crate::{Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, ToLpValue};
+
+        let config = GradientConfig::Cycle {
+            set: vec![
+                Gradient {
+                    space: Colorspace::Oklab,
+                    method: InterpMethod::Linear,
+                    stops: vec![
+                        GradientStop {
+                            at: 0.0,
+                            c: [0.0, 0.0, 0.0],
+                        },
+                        GradientStop {
+                            at: 1.0,
+                            c: [0.9, 0.1, 0.1],
+                        },
+                    ],
+                },
+                Gradient::default(),
+            ],
+            step_seconds: 20.0,
+            fade_seconds: 0.5,
+        };
+        let ty = crate::gradient_config_lp_type();
+        let value = config.to_lp_value();
+
+        let json = write_json_value(&ty, &value);
+        assert_eq!(read_json_value(ty, &json), value);
     }
 
     fn read_json_value(ty: LpType, json: &str) -> LpValue {

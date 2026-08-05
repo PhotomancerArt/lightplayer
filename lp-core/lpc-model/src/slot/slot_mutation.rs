@@ -892,8 +892,11 @@ pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
             | (crate::ProductRef::Time(_), ProductKind::Time) => true,
             _ => false,
         },
+        // Fixed-size arrays accept up to the declared length: the declared
+        // size is the maximum, and a shorter value's absent tail is
+        // type-default (color.md §5 count-bounded storage).
         (LpValue::Array(values), LpType::Array(item_ty, len)) => {
-            values.len() == *len
+            values.len() <= *len
                 && values
                     .iter()
                     .all(|value| lp_value_matches_type(value, item_ty))
