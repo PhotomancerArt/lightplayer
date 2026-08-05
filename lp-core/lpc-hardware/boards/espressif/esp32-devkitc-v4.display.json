@@ -24,6 +24,9 @@
       "href": "https://www.aliexpress.com/w/wholesale-esp32-devkitc.html"
     }
   ],
+  "default_led_wires": [
+    "18"
+  ],
   "hw": {
     "width": 116,
     "module": {

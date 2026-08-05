@@ -29,7 +29,9 @@ pub struct UiDeviceCard {
     /// Where the card stands in the honest roster vocabulary.
     pub state: RosterCardState,
     /// The project the device holds (live cards) or last ran (offline
-    /// cards) — identity for the header chip, never health.
+    /// cards) — identity for the card's hero strip (gallery-rework P05,
+    /// vision D12: a thumbnail strip under the title bar with the project's
+    /// name overlaid), never health. `None` renders no strip.
     pub project: Option<UiDeviceProjectChip>,
     /// Running-firmware build facts from the live link's hello (provenance
     /// + the feature set compiled into the image) — Technical evidence for
@@ -139,9 +141,11 @@ impl UiDeviceCard {
     }
 }
 
-/// The header chip naming the device's project: thumbnail seed + display
-/// name. Identity only — the status line and circle carry health. On
-/// offline/error cards the renderer mutes it (last-known, not current).
+/// The device's project, as the card's hero strip names it: thumbnail seed
+/// + display name (gallery-rework P05 — the strip replaced this as the
+/// small in-body chip). Identity only — the status line and edge tint
+/// carry health. On offline/not-responding cards the renderer dims the
+/// strip (last-known, not current).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceProjectChip {
     /// `prj_…` uid — thumbnail seed and the push/review target key.

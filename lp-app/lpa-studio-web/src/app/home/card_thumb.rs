@@ -29,6 +29,12 @@ pub(crate) fn CardThumb(
     seed: String,
     label: String,
     #[props(default = false)] muted: bool,
+    /// The device-card hero strip (gallery-rework P05, vision D12): a
+    /// shorter frame with no centered initial — the name rides a bottom-left
+    /// pill over the art instead. Same live-preview machinery either way;
+    /// only the chrome around it changes.
+    #[props(default = false)]
+    hero: bool,
     /// Live preview content for this thumb. `None` (stories, device-less
     /// contexts) renders the static gradient stack — no host, no canvas.
     #[props(default)]
@@ -39,7 +45,10 @@ pub(crate) fn CardThumb(
     static_badge: Option<ThumbPreviewBadge>,
 ) -> Element {
     let preview = use_thumb_preview(source);
-    let badge = static_badge.or(preview.badge);
+    // The fidelity badge is a project-card affordance (which tier rendered
+    // this preview); the hero strip's 44px is the project's identity, not
+    // a place to explain preview plumbing.
+    let badge = (!hero).then(|| static_badge.or(preview.badge)).flatten();
     let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
@@ -58,12 +67,15 @@ pub(crate) fn CardThumb(
     rsx! {
         div {
             id: "{preview.frame_id}",
-            class: "tw:relative tw:h-24 tw:w-full tw:overflow-hidden tw:rounded-t-md",
-            // base layer: identity gradient + initial
+            class: thumb_frame_class(hero, muted),
+            // base layer: identity gradient (+ initial off the project
+            // card; the hero strip carries its name in the pill instead)
             div {
                 class: "tw:absolute tw:inset-0 tw:flex tw:items-center tw:justify-center",
                 style: "{style}",
-                span { class: initial_class, "{initial}" }
+                if !hero {
+                    span { class: initial_class, "{initial}" }
+                }
             }
             // Snapshot seam (M6 coordination): the save-time capture layer.
             // Structurally present so M6 only has to hand it a source
@@ -92,6 +104,27 @@ pub(crate) fn CardThumb(
                     {thumb_badge_text(&badge)}
                 }
             }
+            if hero {
+                span { class: "tw:absolute tw:bottom-1.5 tw:left-1.5 tw:max-w-[calc(100%-0.75rem)] tw:truncate tw:rounded-sm tw:border tw:bg-background/70 tw:px-1.5 tw:py-0.5 tw:text-[10.5px] tw:font-bold tw:text-strong-foreground",
+                    title: "{label}",
+                    "{label}"
+                }
+            }
+        }
+    }
+}
+
+/// The thumb frame's outer chrome: the project card's h-24 rounded-top
+/// block, or the device card's 44px hero strip (gallery-rework P05) — no
+/// rounding (it sits under the title bar, not at a card corner) and, on an
+/// offline/remembered card, desaturated + dimmed (identity, not health —
+/// the strip still shows what it held, just quietly).
+fn thumb_frame_class(hero: bool, muted: bool) -> &'static str {
+    match (hero, muted) {
+        (false, _) => "tw:relative tw:h-24 tw:w-full tw:overflow-hidden tw:rounded-t-md",
+        (true, false) => "tw:relative tw:h-11 tw:w-full tw:overflow-hidden",
+        (true, true) => {
+            "tw:relative tw:h-11 tw:w-full tw:overflow-hidden tw:saturate-50 tw:brightness-75"
         }
     }
 }

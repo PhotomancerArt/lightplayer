@@ -71,6 +71,12 @@ futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 # Library create → loader round-trip tests drive the real root format gate.
 lpc-registry = { path = "../../lp-core/lpc-registry" }
+# The generated-project gate loads every board's package through the REAL
+# engine loader and validates it against the checked-in JSON Schemas, the
+# same two oracles `lp-cli` holds the checked-in example corpus to.
+lpc-engine = { path = "../../lp-core/lpc-engine" }
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
+jsonschema = { version = "0.46", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 
 [features]
