@@ -42,10 +42,11 @@ pub struct ShaderSlotDef {
     /// `lpc_engine::nodes::shader::resolve_gradient_config`.
     ///
     /// In authored node-def JSON this option carries the FIXED `LpValue`
-    /// recipe (padded set, explicit `count`) — padded-form-only is the
-    /// contract (`docs/design/color.md` §5, M4-P5). The friendly serde form
-    /// is not accepted here; author through Studio's chooser, or omit the
-    /// option and let `gradient_config()` fall back.
+    /// recipe (count-bounded set, explicit `count`; legacy zero-padded
+    /// arrays still decode) — the fixed recipe is the contract
+    /// (`docs/design/color.md` §5, M4-P5, amended 2026-08-05). The friendly
+    /// serde form is not accepted here; author through Studio's chooser, or
+    /// omit the option and let `gradient_config()` fall back.
     pub gradient: OptionSlot<ValueSlot<GradientConfig>>,
     /// Declarative default binding endpoint (`bus:<channel>`), materialized
     /// at load when no authored binding names this slot (ADR 2026-07-09).
