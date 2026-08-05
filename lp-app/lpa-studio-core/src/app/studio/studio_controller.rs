@@ -3291,8 +3291,15 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
+                // The open path's own notices come FIRST — a format upgrade
+                // is the thing the user most needs to read, and it must not
+                // be a console-only line (P3).
+                let mut notices = UiNotices::new();
+                for notice in self.project.take_open_notices() {
+                    notices = notices.with_notice(notice);
+                }
                 let sync = self.sync_project_after_attach(updates).await?;
-                Ok(UiNotices::new().with_notice(project_sync_notice(
+                Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
                     "Project opened; project sync needs attention",
