@@ -36,7 +36,8 @@
 //! a slot the transmitter has already consumed, and the slot it would next
 //! re-read if the following refill interrupt never arrived. The effect is that
 //! a lost interrupt truncates the frame instead of replaying a stale half
-//! forever, which is the difference between one dim frame and visible flicker.
+//! forever, which is the difference between one torn frame (the tail latches
+//! and holds its previous data) and visible flicker.
 //! A refill overwrites the previous guard as part of filling its half, so in
 //! healthy operation the guard is never reached.
 //!

@@ -54,12 +54,53 @@ impl Ws281xConfig {
 /// Implementations receive already-rendered 8-bit protocol bytes. Callers that
 /// start from 16-bit RGB samples should run display-pipeline processing before
 /// writing here.
+///
+/// # Two transmission shapes
+///
+/// [`write`] is the blocking form: one frame in, complete on return. The
+/// [`start`]/[`wait_complete`] pair is the split form that lets a caller run
+/// several outputs **concurrently** — start every wire's frame, and pay the
+/// wire time once instead of once per wire. The defaults make the split form a
+/// synonym for `write`, so an implementation that only ever transmits
+/// synchronously (virtual, emulator) implements nothing extra and a caller
+/// using the split form is always correct against it.
+///
+/// [`write`]: Ws281xOutput::write
+/// [`start`]: Ws281xOutput::start
+/// [`wait_complete`]: Ws281xOutput::wait_complete
 pub trait Ws281xOutput {
-    /// Write one full raw RGB frame.
+    /// Write one full raw RGB frame, blocking until it is on the wire.
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError>;
 
     /// Change the expected frame size for subsequent writes.
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError>;
+
+    /// Begin transmitting one full raw RGB frame without waiting for it.
+    ///
+    /// The default is [`Ws281xOutput::write`] — blocking, complete on return —
+    /// so only genuinely asynchronous implementations override this.
+    ///
+    /// # Safety
+    ///
+    /// An overriding implementation may keep reading `data` (for example from
+    /// an interrupt handler) after this returns. The caller must keep the
+    /// referenced bytes **alive, in place, and unmodified** until the next
+    /// [`Ws281xOutput::wait_complete`] on this output returns, or the output
+    /// is dropped — an implementation's drop must stop the transmission before
+    /// giving up the hardware.
+    unsafe fn start(&mut self, data: &[u8]) -> Result<(), OutputError> {
+        self.write(data)
+    }
+
+    /// Wait for the frame begun by [`Ws281xOutput::start`] to finish.
+    ///
+    /// A no-op when no frame is in flight — including always, for an
+    /// implementation whose `start` is the blocking default. On error the
+    /// output must be left idle (the frame aborted), so the caller may reuse
+    /// or free the frame bytes either way.
+    fn wait_complete(&mut self) -> Result<(), OutputError> {
+        Ok(())
+    }
 }
 
 /// Driver that exposes WS281x-capable hardware endpoints.
