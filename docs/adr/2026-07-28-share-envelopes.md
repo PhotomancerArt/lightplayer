@@ -1,10 +1,28 @@
 # ADR: Share envelopes for projects and nodes
 
-- **Status:** Accepted
+- **Status:** Accepted (annotated 2026-08-04 — see the migration note below)
 - **Date:** 2026-07-28
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+
+> **Migration annotation (2026-08-04,
+> `2026-08-04-project-format-migration-architecture.md`).** "Deliberately
+> not migrated" below is about the **envelope's own** `format` field (the
+> shape of the JSON wrapper, still `1`, still refuse-on-mismatch, unchanged)
+> — not about the **project artifact content** an `lp.package` envelope
+> carries. That content now gates and migrates on import exactly like a
+> zip: `import_json` classifies the embedded project's `PROJECT_FORMAT_
+> VERSION` and runs it through `lpa-upgrade` before install, surfacing
+> "Imported X — upgraded from format 4 to 5" rather than installing a
+> stale artifact that fails later per-node. `lp.node` envelopes gained an
+> `artifact_format: Option<u32>` stamp (new field, additive) naming the
+> project format the node's def/GLSL were authored against; a paste with a
+> missing or mismatched stamp is refused with a classified message, not
+> migrated — bare-node migration needs the stamp to be universal first,
+> which this round cannot guarantee (see the new ADR's decision 8 and
+> follow-ups). The debt entry this ADR pointed at
+> (`../debt/library-format-migration-gap.md`) is rewritten to match.
 
 ## Context
 
@@ -156,4 +174,9 @@ can never correct.
   the local library. Editor-popup export is library-backed only today.
 - A size guard on node envelopes: a large binary asset base64s into
   something no clipboard should carry.
-- Revisit migration when the authored formats settle — see the debt entry.
+- ~~Revisit migration when the authored formats settle~~ — **partly closed
+  2026-08-04**: the project *content* an `lp.package`/pasted-`lp.node`
+  envelope carries now gates and migrates via `lpa-upgrade` (see the
+  migration annotation above). Still open: the envelope's own `format`
+  field (still refuse-only) and bare-node migration (needs the
+  `artifact_format` stamp to be universal first) — see the debt entry.

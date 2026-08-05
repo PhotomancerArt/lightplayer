@@ -19,6 +19,9 @@ pub const PRIMARY_VISUAL_CHANNEL: &str = "visual.out";
 /// symmetry by the same ADR; no preview surface consumes it yet).
 pub const PRIMARY_CONTROL_CHANNEL: &str = "control.out";
 
+/// The scope's palette channel. The one place this name is written.
+pub const PALETTE_CHANNEL: &str = "palette";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +60,12 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: "brightness",
         kind: Kind::Amplitude,
         doc: "Master output brightness (0-1); fixtures consume it by default.",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PALETTE_CHANNEL,
+        kind: Kind::Gradient,
+        doc: "The scope's palette as a GradientConfig — static gradient or cycle; consumers bake it to a height-one texture.",
         carries_product: false,
     },
     WellKnownChannel {

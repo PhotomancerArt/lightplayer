@@ -1,6 +1,14 @@
 # Concurrent WS281x flush: start/wait split, frame barrier, admission cap
 
-- **Status:** accepted (pending G2 sign-off on the shipped channel count)
+- **Status:** accepted (G2 passed, shipped at cap 2); **superseded in part by
+  `2026-08-04-rmt-isr-on-app-core.md`** — the "transmission is only safe under a
+  quiet CPU" constraint below holds only while the refill ISR shares the render
+  core. With the ISR on the dedicated APP core the barrier is conditional
+  (`Ws281xOutput::background_tx_safe`) and wire time overlaps render; the barrier
+  semantics remain the runtime fallback and the S3/C6 default. Note also that ADR's
+  correction to the cap-4 margin story: the "cap 4 clean" row below survived only
+  because the CPU was quiet — under overlap it is ~94 % ISR duty and starves the
+  last-serviced wires.
 - **Date:** 2026-08-04
 - **Plan:** `2026-08-02-1636-multi-channel-output-architecture` M4
 - **Relates to:** `2026-08-03-multi-endpoint-output-node.md` (prepared the

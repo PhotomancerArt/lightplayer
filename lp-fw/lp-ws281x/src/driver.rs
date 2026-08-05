@@ -41,6 +41,21 @@
 //! A refill overwrites the previous guard as part of filling its half, so in
 //! healthy operation the guard is never reached.
 //!
+//! # Cross-core deployment
+//!
+//! The interrupt handler may run on a **different core** from thread context
+//! (fw-esp32v3 binds it on the classic ESP32's APP core so refills survive
+//! the render core's interrupt masking). The driver stays lock-free — the ISR
+//! never waits on the caller — and the one place the caller waits on the ISR
+//! is [`Ws281xDriver::abort`]'s teardown handshake: `on_interrupt` marks
+//! itself in service through the driver-wide `isr_seq` (odd in, even out),
+//! and `abort` returns only once the handler is provably idle, so freed
+//! frame bytes can never be reached by a mid-flight refill. The full
+//! soundness argument lives on `abort`; the ordering contract lives in
+//! [`crate::state`]'s module docs. The standing invariant is that exactly
+//! **one core services the ISR** — the handler never runs concurrently with
+//! itself.
+//!
 //! Two behaviours here differ deliberately from lp2025:
 //!
 //! * **No guard at start.** lp2025 planted one at word 0 immediately after
@@ -61,7 +76,8 @@
 
 #[cfg(feature = "test_hooks")]
 use core::sync::atomic::AtomicU32;
-use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 
 use crate::hw::RmtHw;
 use crate::pulse::STOP_WORD;
@@ -143,6 +159,16 @@ pub enum StartError {
 pub struct Ws281xDriver<H, const N: usize> {
     hw: H,
     channels: [ChannelState; N],
+    /// The ISR-service seqlock: **odd while the interrupt handler is
+    /// servicing channels, even otherwise.** [`Self::on_interrupt`]
+    /// increments it entering and leaving the service loop;
+    /// [`Self::abort`] spins until it reads even before returning, which is
+    /// what lets a caller free or reuse frame bytes the instant `abort`
+    /// returns even when the handler runs on another core. Driver-wide, not
+    /// per-channel, because exactly one ISR instance services every channel
+    /// in one pass — a per-channel flag would add handler work for no
+    /// soundness gain.
+    isr_seq: AtomicUsize,
     /// Test hook (feature `test_hooks`), per channel: threshold interrupts to
     /// service normally before the drop counter starts consuming them.
     #[cfg(feature = "test_hooks")]
@@ -167,6 +193,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         Self {
             hw,
             channels: [const { ChannelState::new() }; N],
+            isr_seq: AtomicUsize::new(0),
             #[cfg(feature = "test_hooks")]
             hook_threshold_skip: [const { AtomicU32::new(0) }; N],
             #[cfg(feature = "test_hooks")]
@@ -280,7 +307,10 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
 
         let half = state.half_words.load(Relaxed);
         self.hw.set_tx_threshold(ch, half as u16);
-        state.threshold_boundary.store(half, Relaxed);
+        // Release: this store lands *after* `arm`'s publish, so a cross-core
+        // ISR would otherwise be free to read it stale (see the field's doc).
+        // It must be visible before `start_tx` can raise the first event.
+        state.threshold_boundary.store(half, Release);
         self.hw.start_tx(ch);
         Ok(())
     }
@@ -371,15 +401,80 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         Ok(())
     }
 
-    /// Stop `ch` at once and mark its frame complete.
+    /// Stop `ch`, mark its frame complete, and wait until the interrupt
+    /// handler is provably out of service.
     ///
-    /// Safe to call at any time; a no-op if no frame is in flight.
-    pub fn abort(&self, ch: u8) {
+    /// Safe to call at any time; a no-op if no frame is in flight. **When
+    /// this returns, the frame bytes may be freed or reused immediately**,
+    /// even when the handler runs on another core — that guarantee is the
+    /// whole point of the handshake below, and it is what every safety
+    /// argument that keeps a frame alive "until abort has been called" leans
+    /// on.
+    ///
+    /// # Soundness (the cross-core teardown handshake)
+    ///
+    /// After `disarm` publishes `frame_complete = true` with `SeqCst`, this
+    /// spins until [`Self::on_interrupt`]'s service marker `isr_seq` reads
+    /// even (`SeqCst`). Why that suffices:
+    ///
+    /// * The ISR marks itself in service (odd) **before** its `SeqCst` check
+    ///   of `frame_complete`; abort stores `frame_complete` **before** its
+    ///   `SeqCst` load of the marker. In the `SeqCst` total order one of the
+    ///   two must come first, so either the ISR pass sees the disarm and
+    ///   never touches the frame, or abort sees the pass in service (odd)
+    ///   and keeps waiting. Both missing each other — the store-buffer
+    ///   litmus outcome that would free bytes under a live refill — is
+    ///   excluded. Release/Acquire alone would not exclude it.
+    /// * A pass observed odd keeps the old descriptor's bytes valid simply
+    ///   because this function has not returned yet; when the pass exits
+    ///   (even, `SeqCst`), abort's load of that value orders every read the
+    ///   pass made before this function returns.
+    /// * Any pass that starts after abort's even observation had its
+    ///   `frame_complete` check placed after the disarm in the total order,
+    ///   so it sees the channel idle and never touches the frame.
+    ///
+    /// On single-core deployments the handler cannot be mid-service while
+    /// thread code runs, so the marker always reads even and the spin never
+    /// iterates — this is not a behavioural change for the S3/C6 firmwares.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the handshake confirmed the handler idle; `false` when the
+    /// bounded spin expired, which is reachable only if the ISR core wedged
+    /// **mid-service** (a reportable defect — the same paranoia stance as the
+    /// admission spin in `fw-esp32v3`). On `false` the frame bytes may still
+    /// be referenced by the wedged pass; callers with a logger should shout.
+    /// The bound is an iteration count because this crate has no clock: at
+    /// hundreds of millions of spin iterations per second it is tens of
+    /// milliseconds — orders of magnitude past the tens-of-microseconds a
+    /// real service pass takes.
+    pub fn abort(&self, ch: u8) -> bool {
         let Some(state) = self.channels.get(ch as usize) else {
-            return;
+            return true;
         };
         self.hw.stop_tx(ch);
         state.disarm();
+
+        const SPIN_BOUND: usize = 10_000_000;
+        let mut spins = 0usize;
+        while self.isr_seq.load(SeqCst) % 2 != 0 {
+            core::hint::spin_loop();
+            spins += 1;
+            if spins >= SPIN_BOUND {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Is the interrupt handler currently inside its service loop?
+    ///
+    /// A point-in-time sample of the `isr_seq` marker [`Self::abort`] waits
+    /// on — useful to tests and to firmware diagnostics, never as a substitute
+    /// for the abort handshake (the answer can be stale by the time the
+    /// caller acts on it).
+    pub fn isr_in_service(&self) -> bool {
+        self.isr_seq.load(SeqCst) % 2 != 0
     }
 
     /// Has `ch` finished (or never started) a frame?
@@ -417,6 +512,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// top of its own service and therefore includes every earlier channel's
     /// refill — and it is the reason the deadline budget in the crate README is
     /// stated per *group* rather than per channel.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub fn on_interrupt(&self) {
         let flags = self.hw.take_interrupts();
         #[cfg(feature = "test_hooks")]
@@ -424,6 +520,15 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         if flags.is_empty() {
             return;
         }
+
+        // In-service marker, `SeqCst` on both edges: odd while the loop below
+        // may touch a frame descriptor, even otherwise. `abort` pairs with it
+        // — see the soundness argument there and at
+        // `ChannelState::is_complete_sync`. Two `memw`-fenced RMWs per
+        // interrupt entry, against a delivered-rate ceiling of ~48 k/s, is
+        // noise next to a half-buffer refill; taking the marker after the
+        // early return keeps a cause-less entry free of even that.
+        self.isr_seq.fetch_add(1, SeqCst);
 
         for (idx, state) in self.channels.iter().enumerate() {
             let ch = idx as u8;
@@ -436,6 +541,8 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 self.refill(ch, state);
             }
         }
+
+        self.isr_seq.fetch_add(1, SeqCst);
     }
 
     /// Test hook — deliberately lose `ch`'s threshold interrupts.
@@ -495,8 +602,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     }
 
     /// Handle `tx_end`: classify the frame and publish completion.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn finish(&self, state: &ChannelState) {
-        if state.is_complete() {
+        // `SeqCst`, not `Acquire`: the ISR's entry check is half of the
+        // abort handshake — see `ChannelState::is_complete_sync`.
+        if state.is_complete_sync() {
             // Spurious or duplicated end event.
             return;
         }
@@ -528,8 +638,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// Which of the two dominates is the whole question when a chip starts
     /// truncating frames: entry delay says the handler could not get in, refill
     /// lag says it could not get out.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn refill(&self, ch: u8, state: &ChannelState) {
-        if state.is_complete() {
+        // `SeqCst`, not `Acquire`: the ISR's entry check is half of the
+        // abort handshake — see `ChannelState::is_complete_sync`.
+        if state.is_complete_sync() {
             return;
         }
         let half = state.half_words.load(Relaxed);
@@ -551,7 +664,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // modulus is the one that carries weight: a service late enough for the
         // pointer to have wrapped past the boundary reads a `read_pos`
         // numerically *below* it, for a delay that is positive.
-        let boundary = state.threshold_boundary.load(Relaxed) % ram;
+        let boundary = state.threshold_boundary.load(Acquire) % ram;
         state.record_entry_delay((pos_before + ram - boundary) % ram, half);
 
         let in_second_half = pos_before >= half;
@@ -588,6 +701,28 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// Walks bits — not LEDs — so any half size works. When the pixel data runs
     /// out the latch is emitted exactly once and the remainder of the half is
     /// STOP-filled, which is what actually ends the transmission.
+    ///
+    /// # The hoists (why this loop is shaped the way it is)
+    ///
+    /// This is the hot core of the refill deadline: at four concurrent
+    /// transmitters the last-serviced channel eats every earlier channel's
+    /// fill before its own, so per-word cycles here multiply by the number of
+    /// coincident refills. A boot-time probe on the classic ESP32
+    /// (`fw-esp32v3`'s `refill_floor_probe`, 2026-08-05) put the raw APB
+    /// floor for a 64-word half at ~3.2 µs while this loop's previous shape
+    /// cost ~11.2 µs — the gap was per-word `/`/`%` addressing math, two
+    /// atomic loads per frame byte, and the backend's per-word block-plan
+    /// lookup. Hence, hoisted once per fill:
+    ///
+    /// * the frame descriptor ([`ChannelState::frame_slice`] — sound for
+    ///   exactly one service pass, see its docs; this function never outlives
+    ///   one),
+    /// * the byte address, tracked incrementally (`pixel_base`/`slot`/`mask`)
+    ///   instead of divided out of the cursor per word,
+    /// * the RAM window base and bound ([`RmtHw::ram_window`]), when the
+    ///   backend offers one — the fallback stays the per-word
+    ///   [`RmtHw::write_ram`] path bit-for-bit.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn fill_half(&self, ch: u8, state: &ChannelState, half: Half) -> FillResult {
         let half_words = state.half_words.load(Relaxed);
         let start = match half {
@@ -599,24 +734,70 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         let codes = state.codes();
         let order = state.color_order();
         let total = state.total_bits.load(Relaxed);
+        let (frame_ptr, frame_len) = state.frame_slice();
+        let window = self.hw.ram_window(ch);
         let mut cursor = state.bit_cursor.load(Acquire);
         let mut word = start;
 
-        let mut byte = 0u8;
-        let mut byte_loaded = false;
-        while word < end && cursor < total {
-            let bit_in_byte = cursor % 8;
-            if !byte_loaded || bit_in_byte == 0 {
-                let pixel = cursor / BITS_PER_PIXEL;
-                let slot = (cursor % BITS_PER_PIXEL) / 8;
-                byte = state.frame_byte(pixel * BYTES_PER_PIXEL + order.source_index(slot));
-                byte_loaded = true;
+        // One store, either shape. The raw path keeps a bounds check — one
+        // register compare, not the per-word plan lookup — so a bug here
+        // still cannot scribble outside the window `ram_window` promised.
+        let put = |word: usize, value: u32| match window {
+            Some(w) => {
+                if word < w.words {
+                    // SAFETY: `RamWindow`'s contract — `base` addresses
+                    // `w.words` writable MMIO words for the driver's
+                    // lifetime, and `word` was just bounds-checked. Volatile:
+                    // the transmitter reads this memory behind the compiler's
+                    // back.
+                    unsafe { w.base.add(word).write_volatile(value) };
+                }
             }
-            // WS281x is MSB-first within each byte.
-            let one = byte & (0x80 >> bit_in_byte) != 0;
-            self.hw.write_ram(ch, word, codes.bit(one));
-            word += 1;
-            cursor += 1;
+            None => self.hw.write_ram(ch, word, value),
+        };
+
+        // Byte address of the cursor position, then tracked incrementally:
+        // `pixel_base + source[slot]` replaces the per-word divisions of the
+        // previous shape.
+        let source = [
+            order.source_index(0),
+            order.source_index(1),
+            order.source_index(2),
+        ];
+        let mut pixel_base = (cursor / BITS_PER_PIXEL) * BYTES_PER_PIXEL;
+        let mut slot = (cursor % BITS_PER_PIXEL) / 8;
+        // WS281x is MSB-first within each byte; a resume mid-byte starts at
+        // the cursor's bit.
+        let mut mask = 0x80u8 >> (cursor % 8);
+
+        while word < end && cursor < total {
+            let index = pixel_base + source[slot];
+            let byte = if index < frame_len {
+                // SAFETY: `frame_slice` promises `frame_ptr` addresses
+                // `frame_len` readable bytes for the duration of this service
+                // pass, and `index < frame_len` was just checked. The frame
+                // is `u8`, so no alignment concern, and `frame_len` came from
+                // a slice so the offset fits an `isize`.
+                unsafe { *frame_ptr.add(index) }
+            } else {
+                // Out-of-range reads as zero — sound even if a caller
+                // violated the `arm` length contract.
+                0
+            };
+            while mask != 0 && word < end && cursor < total {
+                put(word, codes.bit(byte & mask != 0));
+                word += 1;
+                cursor += 1;
+                mask >>= 1;
+            }
+            if mask == 0 {
+                mask = 0x80;
+                slot += 1;
+                if slot == BYTES_PER_PIXEL {
+                    slot = 0;
+                    pixel_base += BYTES_PER_PIXEL;
+                }
+            }
         }
         state.bit_cursor.store(cursor, Release);
 
@@ -632,14 +813,14 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 // first word of the next half.
                 return FillResult::More;
             }
-            self.hw.write_ram(ch, word, codes.latch);
+            put(word, codes.latch);
             word += 1;
             state.latch_written.store(true, Relaxed);
             result = FillResult::Tail;
         }
 
         while word < end {
-            self.hw.write_ram(ch, word, STOP_WORD);
+            put(word, STOP_WORD);
             word += 1;
         }
         result

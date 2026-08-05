@@ -14,7 +14,7 @@ use lp_gfx::{
 use lp_shader::{
     CompilePxDesc, LpsEngine, LpsSamplePointBuf, LpsSampleRgba16Buf, LpsTextureBuf, TextureBuffer,
 };
-use lps_shared::TextureStorageFormat;
+use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm::{FloatMode, LpvmEngine};
 
 use crate::lpvm_compute_shader::LpvmComputeShader;
@@ -187,6 +187,15 @@ where
     fn clear_texture(&self, texture: &mut TextureHandle) -> Result<(), GfxError> {
         texture_buf_mut(texture)?.data_mut().fill(0);
         Ok(())
+    }
+
+    /// The CPU tier's `ptr` lane is a real guest pointer into the LPVM
+    /// buffer, so the guest can address the texels directly — the GPU tier's
+    /// counterpart puts a registry id there instead.
+    fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
+        Ok(LpsValueF32::Texture2D(
+            texture_buf(texture)?.to_texture2d_value(),
+        ))
     }
 
     /// CPU blend over the backing byte buffers (byte-identical to the

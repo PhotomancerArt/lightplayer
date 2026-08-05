@@ -1,0 +1,35 @@
+{
+  "kind": "ComputeShader",
+  "source": "compute.glsl",
+  "bindings": {
+    "emitters": {
+      "target": "bus:fluid.emitters"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    }
+  },
+  "produced": {
+    "emitters": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

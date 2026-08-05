@@ -112,6 +112,16 @@ pub enum CatalogOp {
         observed: lpc_history::ContentHash,
         device_name: String,
     },
+    /// Migrate a package's own bytes to the current project format and
+    /// save the result (P5's Upgrade verb; the same body P3 runs on open).
+    ///
+    /// The migrated bytes are born HERE, in the library — never on the
+    /// device (D14 / ADR 2026-07-05 decision 5). Idempotent: a package
+    /// already at the current format is a no-op, and the outcome's
+    /// `upgraded_from` is `None`.
+    UpgradePackageFormat {
+        project_uid: String,
+    },
     /// Record a completed push: history `Pushed` event + device
     /// association.
     RecordPush {
@@ -122,11 +132,16 @@ pub enum CatalogOp {
 }
 
 /// What a catalog transaction produced.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CatalogOutcome {
     /// The touched/created package, where the op has one (everything but
     /// `Delete` and the registry ops).
     pub summary: Option<PackageSummary>,
+    /// For the import ops: the older format the incoming files were
+    /// migrated from before they were installed. `None` when they arrived
+    /// current — the ordinary case — so the import notice can say "imported
+    /// and upgraded from format 4" only when that is what happened.
+    pub upgraded_from: Option<u32>,
 }
 
 /// A project opened for writing: per-project fs handles whose backing
@@ -156,6 +171,10 @@ pub enum LibraryHostError {
     NotFound(String),
     /// Catalog lock retry exhausted.
     Busy(String),
+    /// The library declined the request, and the message is the whole
+    /// answer — an import whose project format is below the floor or ahead
+    /// of this build. Surfaces verbatim, without a "library:" prefix.
+    Refused(String),
     /// Everything else, message for the log.
     Host(String),
 }
@@ -171,6 +190,7 @@ impl core::fmt::Display for LibraryHostError {
             }
             LibraryHostError::NotFound(key) => write!(f, "not found: {key}"),
             LibraryHostError::Busy(m) => write!(f, "library busy: {m}"),
+            LibraryHostError::Refused(m) => write!(f, "{m}"),
             LibraryHostError::Host(m) => write!(f, "library host: {m}"),
         }
     }
@@ -199,6 +219,7 @@ impl From<LibraryHostError> for crate::UiError {
             LibraryHostError::Busy(_) => crate::UiError::UnsupportedAction(
                 "The library is busy in another tab — try again in a moment".to_string(),
             ),
+            LibraryHostError::Refused(message) => crate::UiError::UnsupportedAction(message),
             LibraryHostError::NotFound(key) => {
                 crate::UiError::MissingSession(format!("library: not found: {key}"))
             }
@@ -253,6 +274,9 @@ pub fn apply_catalog_op(
     op: CatalogOp,
     now: f64,
 ) -> Result<CatalogOutcome, LibraryHostError> {
+    // Set by the import ops when the incoming files had to be migrated
+    // forward before they could be installed.
+    let mut upgraded_from = None;
     let summary = match op {
         CatalogOp::Create { name } => Some(store.create(&name, now)?),
         CatalogOp::Rename { uid, new_slug } => {
@@ -265,16 +289,19 @@ pub fn apply_catalog_op(
             store.delete(parse_uid(&uid)?)?;
             None
         }
-        CatalogOp::ImportZip { file_name, bytes } => Some(
-            super::package_zip::import_zip(store, &bytes, now).map_err(|error| {
-                LibraryHostError::Host(format!("could not import {file_name}: {error}"))
-            })?,
-        ),
-        CatalogOp::ImportJson { text } => Some(
-            super::package_zip::import_json(store, &text, now).map_err(|error| {
-                LibraryHostError::Host(format!("could not paste this project: {error}"))
-            })?,
-        ),
+        CatalogOp::ImportZip { file_name, bytes } => {
+            let outcome = super::package_zip::import_zip(store, &bytes, now)
+                .map_err(|error| import_refusal(&error, format!("could not import {file_name}")))?;
+            upgraded_from = outcome.upgraded_from;
+            Some(outcome.summary)
+        }
+        CatalogOp::ImportJson { text } => {
+            let outcome = super::package_zip::import_json(store, &text, now).map_err(|error| {
+                import_refusal(&error, String::from("could not paste this project"))
+            })?;
+            upgraded_from = outcome.upgraded_from;
+            Some(outcome.summary)
+        }
         CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),
         CatalogOp::UpsertRegisteredDevice(device) => {
             // merge semantics: sight-only upserts (association None) must
@@ -337,6 +364,21 @@ pub fn apply_catalog_op(
             &device_name,
             now,
         )?),
+        CatalogOp::UpgradePackageFormat { project_uid } => {
+            let uid = parse_uid(&project_uid)?;
+            let mut handle = store.open(uid)?;
+            // A format refusal is already a full user-facing sentence
+            // (what was found, what was expected, the remedy), so it
+            // travels as `Refused` and reaches the card verbatim.
+            match super::package_upgrade::migrate_handle_to_current(&mut handle, now) {
+                Ok(report) => upgraded_from = report.map(|report| report.from),
+                Err(LibraryError::Format(message)) => {
+                    return Err(LibraryHostError::Refused(message));
+                }
+                Err(other) => return Err(other.into()),
+            }
+            Some(summary_for(store, uid)?)
+        }
         CatalogOp::RecordPush {
             project_uid,
             device,
@@ -352,7 +394,24 @@ pub fn apply_catalog_op(
             Some(summary_for(store, parse_uid(&project_uid)?)?)
         }
     };
-    Ok(CatalogOutcome { summary })
+    Ok(CatalogOutcome {
+        summary,
+        upgraded_from,
+    })
+}
+
+/// Wrap an import failure for the UI.
+///
+/// A format refusal is already a full user-facing sentence naming what was
+/// found, what was expected and a remedy ([`LibraryError::Format`]), so it
+/// travels as its own [`LibraryHostError::Refused`] and reaches the user as
+/// an actionable message rather than as library plumbing. Everything else
+/// keeps the generic "could not import X: …" shape.
+fn import_refusal(error: &LibraryError, context: String) -> LibraryHostError {
+    match error {
+        LibraryError::Format(message) => LibraryHostError::Refused(format!("{context}: {message}")),
+        other => LibraryHostError::Host(format!("{context}: {other}")),
+    }
 }
 
 /// The seed-once transaction body: the package seeded from example `id`,
@@ -478,6 +537,7 @@ impl LibraryHost for MemoryLibraryHost {
             | CatalogOp::ForkObservedVersion {
                 project_uid: uid, ..
             }
+            | CatalogOp::UpgradePackageFormat { project_uid: uid }
             | CatalogOp::RecordPush {
                 project_uid: uid, ..
             } => self.refuses(uid).then(|| uid.clone()),
