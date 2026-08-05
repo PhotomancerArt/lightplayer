@@ -75,13 +75,13 @@ pub fn ClockFace(
     rsx! {
         NodeCardSection { label: "output", first: true,
             div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
-                // The hero is the SECONDS COUNTER — the number a scrub or
-                // speed change visibly moves ("Time product" as a caption
-                // did nothing; PR review). The Delta row stays dead.
+                // Interim: the product row alone (caption band). The tape
+                // transport instrument replaces the seconds-counter hero in
+                // P3 of plan 2026-08-04-2355-clock-tape-hero; the counter's
+                // string plumbing died with the DTO's transport block (P2).
                 ProducedProductView {
                     product: face.product.clone(),
                     on_action,
-                    time_seconds: face.seconds.clone(),
                 }
             }
         }

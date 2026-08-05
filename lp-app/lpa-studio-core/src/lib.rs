@@ -48,7 +48,7 @@ pub use app::home::{
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiConfigSlot, UiConfigSlotBody,
+    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot, UiConfigSlotBody,
     UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace,
     UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab,
     UiNodeTabBody, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin,
