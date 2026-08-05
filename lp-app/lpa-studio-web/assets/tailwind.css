@@ -1875,6 +1875,10 @@
     --tw-tracking: 0.1em;
     letter-spacing: 0.1em;
   }
+  .tw\:tracking-\[0\.06em\] {
+    --tw-tracking: 0.06em;
+    letter-spacing: 0.06em;
+  }
   .tw\:tracking-\[0\.08em\] {
     --tw-tracking: 0.08em;
     letter-spacing: 0.08em;
