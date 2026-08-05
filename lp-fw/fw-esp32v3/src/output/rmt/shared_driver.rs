@@ -321,6 +321,35 @@ pub mod telemetry {
             return;
         }
 
+        // Per-wire attribution first: the `[WS281X]` per-slot lines aggregate
+        // every wire that shared the slot (slot 0 sums wires 0 and 4 at five
+        // wires), and an 8-wire run is unreadable without the per-wire view.
+        // A NEW line kind, not new fields — the per-slot prefix is
+        // position-greppable by the capacity-matrix scripts and must not
+        // shift. Emitted only for wires that have posted, so the four-wire
+        // steady state prints exactly four.
+        for wire in 0..TX_CHANNELS {
+            let stats = crate::output::rmt::wire_pusher::MAILBOXES[wire].wire_stats();
+            if stats.posted == 0 {
+                continue;
+            }
+            esp_println::println!(
+                "[WS281X-WIRE] t_ms={} wire={} posted={} sent={} torn={} waved={} mux={} \
+                 aborted={} cancelled={} failed={} queue_wait_max_us={}",
+                now_ms,
+                wire,
+                stats.posted,
+                stats.transmitted,
+                stats.torn,
+                stats.waved,
+                stats.takeovers,
+                stats.aborted,
+                stats.cancelled,
+                stats.start_failed,
+                stats.queue_wait_max_us,
+            );
+        }
+
         for ch in 0..TX_CHANNELS as u8 {
             let Some(state) = DRIVER.channel(ch) else {
                 continue;

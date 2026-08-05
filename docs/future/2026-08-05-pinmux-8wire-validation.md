@@ -25,7 +25,10 @@ matrix. **The design target is eight wires; validation is tiered:**
   product family question, not just a test fixture.
 - **Wave-schedule telemetry at 8**: two full waves of four; the per-slot
   `[WS281X]` counters aggregate across wires that share a slot, so an 8-wire
-  run also wants the per-wire attribution layer (P7 planning scope).
+  run also wants the per-wire attribution layer. **Landed 2026-08-05** (the
+  overlap plan's P4): `[WS281X-WIRE]` lines carry per-wire posted / sent /
+  torn (slot-delta attribution) / waved (the second-wave signature) /
+  aborted / cancelled / failed / worst post→completion latency.
 - **Mux-correctness proof beyond visual**: an RMT-RX loopback harness (route
   a muxed pad's signal back into a receiver via the matrix) proving the right
   bytes leave the right pad through takeovers. Optional for 5 (visual + trip
