@@ -399,14 +399,20 @@ impl<'r> TickContext<'r> {
     ///
     /// The result is the RAW ramp: [`PhasorConfig::waveform`] and
     /// `phase_offset` are the caller's to apply.
+    ///
+    /// `reader` names who is asking — this node and the consumed slot the
+    /// config was resolved for. The store records it (with the config's
+    /// shaping) as witness data for the timebase probe; it never affects
+    /// the answer.
     pub fn time_product_phasor(
         &mut self,
         product: TimeProduct,
         key: &PhasorKey,
         config: &PhasorConfig,
+        reader: (NodeId, &SlotPath),
     ) -> Result<(f32, u32), NodeError> {
         self.resolver
-            .time_product_phasor(product, key, config)
+            .time_product_phasor(product, key, config, reader)
             .map_err(|e| NodeError::msg(alloc::format!("time product phasor: {}", e.message)))
     }
 

@@ -18,5 +18,5 @@ pub use project_read::{
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
     WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin,
-    WirePhasorRow, WireScopeRef,
+    WirePhasorReading, WirePhasorRow, WireScopeRef,
 };
