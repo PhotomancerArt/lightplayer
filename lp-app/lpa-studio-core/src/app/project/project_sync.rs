@@ -513,7 +513,7 @@ impl ProjectSync {
     pub(in crate::app::project) fn set_control_display_layout(
         &mut self,
         product: &UiProductRef,
-        layout: ControlDisplayLayout,
+        layout: Rc<ControlDisplayLayout>,
     ) {
         if let Some(UiProductPreview::ControlNative(preview)) =
             self.product_previews.get_mut(product)
@@ -545,7 +545,7 @@ impl ProjectSync {
             .product_previews
             .get(&product)
             .and_then(control_preview_display_layout)
-            .map(ControlDisplayLayout::revision)
+            .map(|layout| layout.revision())
         {
             Some(revision) => ControlDisplayLayoutRead::IfChanged {
                 known_revision: Some(revision),
@@ -570,8 +570,7 @@ impl ProjectSync {
             }) => {
                 let product_ref = UiProductRef::from_control_product(*product);
                 let cached = self.product_previews.get(&product_ref);
-                let display_layout =
-                    display_layout_from_probe_result(display_layout, cached).cloned();
+                let display_layout = display_layout_from_probe_result(display_layout, cached);
                 Some((
                     product_ref,
                     UiProductPreview::ControlNative(UiControlProductPreview {
@@ -847,23 +846,30 @@ fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTi
     }
 }
 
-fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&ControlDisplayLayout> {
+fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&Rc<ControlDisplayLayout>> {
     match preview {
         UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
         _ => None,
     }
 }
 
-fn display_layout_from_probe_result<'a>(
-    result: &'a ControlDisplayLayoutProbeResult,
-    cached: Option<&'a UiProductPreview>,
-) -> Option<&'a ControlDisplayLayout> {
+/// The layout the fresh preview should carry. Reuses the cached `Rc` on the
+/// per-tick `Unchanged`/`Omitted` paths — a dome-scale layout is 1500 lamps,
+/// and deep-copying it every tick was a measurable slice of the 2026-08-05
+/// editor-perf trace. Only a genuinely new engine-sent layout allocates.
+fn display_layout_from_probe_result(
+    result: &ControlDisplayLayoutProbeResult,
+    cached: Option<&UiProductPreview>,
+) -> Option<Rc<ControlDisplayLayout>> {
     match result {
-        ControlDisplayLayoutProbeResult::Layout(layout) => Some(layout),
+        ControlDisplayLayoutProbeResult::Layout(layout) => Some(Rc::new(layout.clone())),
         ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
             .and_then(control_preview_display_layout)
-            .filter(|layout| layout.revision() == *revision),
-        ControlDisplayLayoutProbeResult::Omitted => cached.and_then(control_preview_display_layout),
+            .filter(|layout| layout.revision() == *revision)
+            .cloned(),
+        ControlDisplayLayoutProbeResult::Omitted => {
+            cached.and_then(control_preview_display_layout).cloned()
+        }
         ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
     }
 }
@@ -1393,7 +1399,7 @@ mod tests {
                 extent: product.preferred_extent(),
                 sample_format: UiControlSampleFormat::U16,
                 sample_layout,
-                display_layout: Some(display_layout),
+                display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
