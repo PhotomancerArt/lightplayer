@@ -5051,13 +5051,13 @@ mod tests {
     }
 
     /// The defect doc's clock example: a nested declared value slot
-    /// (`controls.rate`) takes an authored source binding.
+    /// (`transport.rate`) takes an authored source binding.
     #[test]
     fn authored_clock_rate_binding_registers() {
         let fs = char_project(&[(
             "clock",
             r#"{ "kind": "Clock",
-                 "bindings": { "controls.rate": { "source": "bus:rate" } } }"#,
+                 "bindings": { "transport.rate": { "source": "bus:rate" } } }"#,
         )]);
         let rt = load_project(&fs);
         let clock = sibling(&rt, "clock");
@@ -5066,7 +5066,7 @@ mod tests {
             (BindingSource::BusChannel(channel), BindingTarget::ConsumedSlot { node, slot })
                 if channel.0 == "rate"
                     && *node == clock
-                    && slot == &SlotPath::parse("controls.rate").expect("path")
+                    && slot == &SlotPath::parse("transport.rate").expect("path")
         )));
     }
 
