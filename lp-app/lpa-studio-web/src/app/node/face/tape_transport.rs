@@ -25,8 +25,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiClockTransport, UiSlotFieldState};
 
 use crate::app::node::panel::HFaderField;
-use crate::app::node::slot_edit_actions::panel_or_slot_action;
+use crate::app::node::slot_edit_actions::{panel_or_slot_action, slot_clear_action};
 use crate::app::node::slot_fields::capture_field_pointer;
+use crate::base::{StudioIcon, StudioIconName};
 
 use super::tape_driver::TapeTransportDriver;
 
@@ -176,6 +177,35 @@ pub(crate) fn adjacent_detent(rate: f32, up: bool) -> f32 {
 /// where the finger goes.
 pub(crate) fn scrub_drag_value(anchor_scrub: f32, dx_px: f64) -> f32 {
     anchor_scrub - (dx_px / tape_px_per_sec()) as f32
+}
+
+/// The panel's per-control clear, transplanted (G1: "we don't show the
+/// per-control revert icons like we do on the panel, and that feels
+/// odd"): the same tiny ↺ glyph, attention-toned for a debug override,
+/// inside an ALWAYS-reserved `w-3` slot beside its control — appearing
+/// never reflows the row (the panel hangs its copy absolutely for the
+/// same reason).
+fn override_clear_slot(
+    target: Option<ProjectSlotAddress>,
+    title: &'static str,
+    on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    rsx! {
+        span { class: "tw:inline-flex tw:w-3 tw:flex-none tw:items-center tw:justify-start",
+            if let (Some(address), Some(handler)) = (target, on_action) {
+                button {
+                    class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
+                    r#type: "button",
+                    title,
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        handler.call(slot_clear_action(address.clone()));
+                    },
+                    StudioIcon { name: StudioIconName::Revert, size: 10 }
+                }
+            }
+        }
+    }
 }
 
 /// The `(address, handler)` pair a transport gesture needs to dispatch,
@@ -386,6 +416,11 @@ pub fn TapeTransport(
                         if running { "\u{275a}\u{275a}" } else { "\u{25b6}" }
                     }
                 }
+                {override_clear_slot(
+                    transport.running_override.clone(),
+                    "Clear the run/pause debug override \u{2014} session only",
+                    on_action,
+                )}
                 // The time cluster: driver-written digits with the amber
                 // off-live readout on its own reserved line underneath —
                 // "the +7.1s live thing jumps around… it should be
@@ -422,6 +457,11 @@ pub fn TapeTransport(
                         "{initial_offlive}"
                     }
                 }
+                {override_clear_slot(
+                    transport.scrub_override.clone(),
+                    "Clear the scrub debug override \u{2014} session only",
+                    on_action,
+                )}
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-2",
                     span { class: "tw:text-[9px] tw:uppercase tw:tracking-[0.1em] tw:text-dim-foreground",
                         "speed"
@@ -448,6 +488,11 @@ pub fn TapeTransport(
                         "\u{00d7}"
                         span { class: readout_value_class, {format_rate(shown_rate)} }
                     }
+                    {override_clear_slot(
+                        transport.rate_override.clone(),
+                        "Clear the speed debug override \u{2014} session only",
+                        on_action,
+                    )}
                 }
             }
         }

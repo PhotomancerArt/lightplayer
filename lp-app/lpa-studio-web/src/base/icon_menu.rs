@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
+use crate::base::{IconPopoverButton, PopoverPlacement, StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -41,6 +41,39 @@ pub fn IconMenuButton(
             anchor_id,
             anchor_visual,
             {children}
+        }
+    }
+}
+
+/// An icon-menu-boxed ACTION button: the exact 32px toned square the
+/// detail/menu triggers wear, but a plain press instead of a popover — so
+/// an action sitting beside a [`crate::base::DetailPopover`] trigger reads
+/// as the same family instead of a one-off (G1 feedback: the tape's
+/// header `clear` was "shorter, icon's a different size" next to the
+/// detail button).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn IconActionButton(
+    icon: StudioIconName,
+    label: String,
+    #[props(default = label.clone())] title: String,
+    #[props(default = 16)] icon_size: u32,
+    #[props(default = IconMenuTone::Neutral)] tone: IconMenuTone,
+    #[props(default = false)] active: bool,
+    on_press: EventHandler<()>,
+) -> Element {
+    let class = icon_menu_class(tone, active);
+    rsx! {
+        button {
+            class,
+            r#type: "button",
+            aria_label: "{label}",
+            title: "{title}",
+            onclick: move |event| {
+                event.stop_propagation();
+                on_press.call(());
+            },
+            StudioIcon { name: icon, size: icon_size }
         }
     }
 }
