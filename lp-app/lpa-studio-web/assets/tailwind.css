@@ -131,9 +131,6 @@
   .tw\:inset-y-0 {
     inset-block: calc(var(--tw-spacing) * 0);
   }
-  .tw\:inset-y-0\.5 {
-    inset-block: calc(var(--tw-spacing) * 0.5);
-  }
   .tw\:top-0 {
     top: calc(var(--tw-spacing) * 0);
   }
@@ -146,12 +143,6 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
-  .tw\:top-\[12px\] {
-    top: 12px;
-  }
-  .tw\:top-\[15px\] {
-    top: 15px;
-  }
   .tw\:right-1 {
     right: calc(var(--tw-spacing) * 1);
   }
@@ -160,9 +151,6 @@
   }
   .tw\:bottom-0 {
     bottom: calc(var(--tw-spacing) * 0);
-  }
-  .tw\:bottom-0\.5 {
-    bottom: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:left-0 {
     left: calc(var(--tw-spacing) * 0);
@@ -611,9 +599,6 @@
   .tw\:w-\[184px\] {
     width: 184px;
   }
-  .tw\:w-\[190px\] {
-    width: 190px;
-  }
   .tw\:w-\[200px\] {
     width: 200px;
   }
@@ -804,9 +789,6 @@
   }
   .tw\:cursor-default {
     cursor: default;
-  }
-  .tw\:cursor-ew-resize {
-    cursor: ew-resize;
   }
   .tw\:cursor-grab {
     cursor: grab;
@@ -1362,9 +1344,6 @@
   }
   .tw\:bg-border-muted {
     background-color: var(--tw-color-border-muted);
-  }
-  .tw\:bg-border-strong {
-    background-color: var(--tw-color-border-strong);
   }
   .tw\:bg-card {
     background-color: var(--tw-color-card);
@@ -2266,34 +2245,16 @@
       inset-inline: calc(var(--tw-spacing) * 2.5);
     }
   }
-  .tw\:after\:inset-y-\[3px\] {
-    &::after {
-      content: var(--tw-content);
-      inset-block: 3px;
-    }
-  }
   .tw\:after\:-bottom-\[11px\] {
     &::after {
       content: var(--tw-content);
       bottom: calc(11px * -1);
     }
   }
-  .tw\:after\:left-1\/2 {
-    &::after {
-      content: var(--tw-content);
-      left: calc(1/2 * 100%);
-    }
-  }
   .tw\:after\:h-0\.5 {
     &::after {
       content: var(--tw-content);
       height: calc(var(--tw-spacing) * 0.5);
-    }
-  }
-  .tw\:after\:w-px {
-    &::after {
-      content: var(--tw-content);
-      width: 1px;
     }
   }
   .tw\:after\:rounded-full {
@@ -2306,12 +2267,6 @@
     &::after {
       content: var(--tw-content);
       background-color: var(--tw-color-accent);
-    }
-  }
-  .tw\:after\:bg-status-attention-foreground {
-    &::after {
-      content: var(--tw-content);
-      background-color: var(--tw-color-status-attention-foreground);
     }
   }
   .tw\:after\:content-\[\'\'\] {
