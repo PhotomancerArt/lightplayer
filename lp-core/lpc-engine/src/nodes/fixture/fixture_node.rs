@@ -3084,6 +3084,155 @@ mod tests {
         assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
     }
 
+    /// A dome-scale fixture's display layout cannot ride one project-read
+    /// frame (1500 lamps serialize far past the 16 KiB budget), and the
+    /// transport's over-budget rejection is terminal for the whole read
+    /// stream. The engine must refuse the layout as `Unsupported` — a
+    /// graceful per-probe fallback — instead of handing the transport an
+    /// event that wedges the entire project view.
+    #[test]
+    #[cfg(feature = "node-shader")]
+    fn fixture_project_read_refuses_over_budget_display_layout() {
+        let ticks = Arc::new(AtomicU32::new(0));
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                frame,
+            )
+            .unwrap();
+
+        let out_path = shader_output_path();
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::clone(&ticks),
+                    color: [u16::MAX, 0, 0, u16::MAX],
+                }),
+                frame,
+            )
+            .unwrap();
+
+        // Dome scale: 1500 lamps on one path, the Zook dome regime.
+        let points: Vec<[f32; 2]> = (0..1500)
+            .map(|i| [(i % 100) as f32 / 100.0, (i / 100) as f32 / 15.0])
+            .collect();
+        let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, points)], 2.0);
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path,
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+
+        let extent = ControlExtent::new(1, 4500);
+        let product = ControlProduct::new(fix_id, 0, extent);
+        let results = read_probe_results(
+            &mut engine,
+            &registry,
+            ProjectReadRequest {
+                since: None,
+                queries: vec![],
+                probes: vec![ProjectProbeRequest::ControlProduct(
+                    ControlProductProbeRequest {
+                        product,
+                        sample_format: WireChannelSampleFormat::U16,
+                        display_layout: ControlDisplayLayoutRead::Always,
+                    },
+                )],
+            },
+        );
+
+        // The preview itself still flows — samples, layout metadata — only
+        // the display layout degrades, with a reason a human can act on.
+        let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+            display_layout: ControlDisplayLayoutProbeResult::Unsupported { reason },
+            ..
+        }) = &results[0]
+        else {
+            panic!("expected preview with refused display layout, got {results:?}");
+        };
+        assert!(
+            reason.contains("wire budget"),
+            "reason names the wire budget: {reason}"
+        );
+    }
+
     /// Read the fixture's current display-layout revision. That revision is
     /// keyed on `mapping_version`, so it is the observable face of the
     /// fixture's mapping-derived caches.
