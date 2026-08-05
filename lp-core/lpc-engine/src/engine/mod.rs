@@ -26,6 +26,9 @@ mod resolution_persistence_tests;
 // Compute-shader nodes reading a clock's timebase through `bus:time`.
 #[cfg(test)]
 mod scoped_resolution_tests;
+// Visual shader nodes baking palette strips off a clock's timebase.
+#[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
+mod shader_palette_tests;
 #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
 mod shader_timebase_tests;
 mod srgb8_lut;

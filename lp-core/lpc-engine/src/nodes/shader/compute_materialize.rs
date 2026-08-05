@@ -31,6 +31,11 @@ pub fn materialize_produced_slot(
             Ok(SlotData::Value(WithRevision::new(revision, value)))
         }
         ShaderSlotKind::Map => materialize_map_slot(slot_name, slot, value, revision),
+        // A compute shader writes values, not palettes; a produced sampler is
+        // refused rather than converted to something it is not.
+        ShaderSlotKind::Palette => Err(ComputeMaterializeError::Unsupported(format!(
+            "produced slot {slot_name:?} is a palette, which cannot be produced"
+        ))),
     }
 }
 
