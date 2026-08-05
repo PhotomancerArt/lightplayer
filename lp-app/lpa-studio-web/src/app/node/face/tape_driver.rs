@@ -52,9 +52,14 @@ struct DriverInner {
     tick: RefCell<Option<web_sys::js_sys::Function>>,
     /// Lazily-resolved story-page flag — see `phasor_trace::DriverInner`.
     frozen: Cell<Option<bool>>,
-    /// Mid-drag flag (P4 wires it): digits grow a tenths place while the
-    /// tape is under the finger.
+    /// Mid-drag flag: digits grow a tenths place while the tape is under
+    /// the finger.
     dragging: Cell<bool>,
+    /// The scrub value under the finger, overriding the DTO's staged one
+    /// (drag-local echo, the KnobField preview pattern): the paint shows
+    /// `t + (preview − staged)` so the strip follows the pointer exactly
+    /// while the throttled write stream catches up through the DTO.
+    scrub_preview: Cell<Option<f32>>,
     /// Last digits string written, so the `textContent` write only happens
     /// when the display actually changes (once a second at rest).
     last_digits: RefCell<String>,
@@ -97,6 +102,7 @@ impl TapeTransportDriver {
             tick: RefCell::new(None),
             frozen: Cell::new(None),
             dragging: Cell::new(false),
+            scrub_preview: Cell::new(None),
             last_digits: RefCell::new(String::new()),
         });
         let for_frames = inner.clone();
@@ -163,6 +169,23 @@ impl TapeTransportDriver {
         if let Some(inner) = &self.inner {
             inner.paint(inner.performance.now());
         }
+    }
+
+    /// A scrub drag is live (or just ended): tenths on the digits, and the
+    /// strip renders the preview value rather than waiting for the write
+    /// stream's echo. Repaints immediately so the strip is under the
+    /// finger this frame, not the next one.
+    pub(crate) fn set_scrub_drag(&self, preview: Option<f32>) {
+        if let Some(inner) = &self.inner {
+            inner.dragging.set(preview.is_some());
+            inner.scrub_preview.set(preview);
+            inner.paint(inner.performance.now());
+        }
+    }
+
+    /// The scrub value under the finger, when a drag is live.
+    pub(crate) fn scrub_preview(&self) -> Option<f32> {
+        self.inner.as_ref().and_then(|inner| inner.scrub_preview.get())
     }
 }
 
@@ -267,7 +290,16 @@ impl DriverInner {
         };
         let transport = &anchor.transport;
         let elapsed = ((now_ms - anchor.anchored_at_ms) / 1000.0).max(0.0);
+        // Drag-local echo: the preview's DELTA against the anchored staged
+        // value rides on top of the extrapolation, so the strip follows
+        // the pointer exactly and converges to zero correction as the
+        // throttled writes echo back through the DTO.
+        let preview_delta = self
+            .scrub_preview
+            .get()
+            .map_or(0.0, |preview| f64::from(preview - transport.scrub_offset_seconds));
         let t = f64::from(transport.seconds)
+            + preview_delta
             + if transport.running {
                 elapsed * f64::from(transport.rate)
             } else {

@@ -84,7 +84,7 @@ pub fn ClockFace(
                     on_action,
                 }
                 if let Some(transport) = face.transport.clone() {
-                    TapeTransport { transport }
+                    TapeTransport { transport, on_action }
                 }
             }
         }
