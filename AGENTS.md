@@ -439,7 +439,7 @@ fact, so a spike disagreeing with shipped Studio means the design moved on.
 Never edit a spike to "fix" it.
 
 `spikes/index.html` is the browsable contact sheet, **generated** from each
-spike's own `<title>` and opening paragraph:
+spike's own `<title>` and opening paragraph, newest first:
 
 ```bash
 just spikes-index          # rewrite it after adding a spike
@@ -447,6 +447,13 @@ just spikes-index          # rewrite it after adding a spike
 
 `just lint-spikes-index` (in `check-lint`) fails when the checked-in copy has
 drifted, so a new spike cannot go missing from the index quietly.
+
+Dates live in `spikes/dates.json`, one line per spike. The generator asks git
+for a date **once**, when a spike first appears, and treats the recorded value
+as fact from then on — CI checks out shallow, so `git log -- <path>` there
+answers for the tip commit alone and would disagree with every full clone.
+Edit that file by hand when a spike gets a later round and the index should
+say so.
 
 Reading them: `just studio-dev` copies the pages into the served directory each
 second, and Studio's Tools ("…") menu links to `/spikes/index.html` — **in

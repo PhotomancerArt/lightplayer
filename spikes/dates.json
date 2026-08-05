@@ -1,0 +1,16 @@
+{
+  "board-selector": "2026-08-02",
+  "classic-oom-allocator": "2026-08-02",
+  "clock-phasor-face": "2026-08-04",
+  "contiguous-popup": "2026-07-15",
+  "device-card-panel": "2026-07-24",
+  "device-stateflow": "2026-07-26",
+  "glsl-compile-working-set": "2026-08-02",
+  "hardware-boards": "2026-07-31",
+  "lightplayer-logo": "2026-08-03",
+  "mapping-editor": "2026-07-27",
+  "naga-wasm-poc": "2026-03-21",
+  "palettes": "2026-08-04",
+  "top-bar": "2026-08-01",
+  "wiring-ui": "2026-08-03"
+}
