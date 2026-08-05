@@ -54,6 +54,12 @@ Emulator A/B on this project (archived in `profiles/`): load retained
 load transient 140,545 → 73,986 B, per-frame churn −73% (the 36 KB/frame
 mapping clone is gone).
 
+**Combined stack (M6 + M4 concurrent flush, main merged, 2026-08-04
+late):** 1500 lamps = **18 fps, tick 53 ms**, used=139,368 B,
+retry_saves=0 — the sequential 45 ms wire spin collapsed to ~22 ms at
+the shipped concurrency cap (2). The Yona-gated cap-4 flip
+(`MAX_CONCURRENT_TX` in esp32v3_rmt_ws281x_driver.rs) projects ~23 fps.
+
 ## Same-day follow-up (earlier): retrying allocator + 24 KiB JIT region
 
 Two levers landed on this branch and were re-probed (total heap
