@@ -83,4 +83,23 @@ pub trait LinkProvider {
 
     /// Close provider-owned resources for a live session.
     async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError>;
+
+    /// Revoke whatever PERSISTENT access this provider holds over an
+    /// endpoint, so nothing can reach it again without the user granting
+    /// access afresh, and drop the provider's endpoint state.
+    ///
+    /// Only the browser serial provider has such a grant today
+    /// (`SerialPort.forget()` over a Web Serial permission that outlives
+    /// the page): every other provider rediscovers its endpoints from the
+    /// host on demand, with nothing to revoke. `Ok(false)` is the honest
+    /// answer for those, and for a browser too old for `forget()` — the
+    /// caller learns the grant SURVIVES rather than being told a
+    /// revocation happened.
+    ///
+    /// Closing a live session first is the caller's job: this severs
+    /// access, it does not tidy up sessions built on it.
+    async fn forget_endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<bool, LinkError> {
+        let _ = endpoint_id;
+        Ok(false)
+    }
 }
