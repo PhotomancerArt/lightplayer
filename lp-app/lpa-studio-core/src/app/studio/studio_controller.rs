@@ -1120,13 +1120,10 @@ impl StudioController {
             pending_uid: None,
             console_tail: session.console_tail().iter().cloned().collect(),
             recovery: session.recovery_status().cloned(),
-            // TODO(identity resolution — P2, hardware-anchored-device-identity
-            // plan): the same snapshot now carries `probed_mac`, the base MAC
-            // a flash preflight read out of efuse (rule A2). It is the board's
-            // durable identity — unique, erase-proof — and belongs to the
-            // resolver that keys the registry, NOT to this card evidence. Read
-            // it here (or wherever P2 lands the resolver) rather than adding
-            // another acquisition path.
+            // `DeviceSnapshot` also carries `probed_mac` (the flash
+            // preflight's efuse read, acquisition rule A2) — consumed by
+            // the identity resolver (`places/identity_resolution.rs`),
+            // not surfaced on the card yet.
             detected_chip: session
                 .hardware_session()
                 .and_then(|hardware| hardware.snapshot().detected_chip),
