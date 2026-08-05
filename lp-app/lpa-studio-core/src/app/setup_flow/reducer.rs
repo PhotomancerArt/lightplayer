@@ -229,13 +229,20 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
         }
 
         // ---- ALREADY_LP ----------------------------------------------------
-        (SetupState::AlreadyLp { probe }, SetupEvent::AdoptDone) => {
-            // Adopt writes nothing but the sighting: the board keeps its
-            // name, its project, and its history.
-            let mut commands = Vec::new();
-            if let Some(hardware_uid) = probe.hardware_uid.clone() {
-                commands.push(SetupCommand::RecordSighting { hardware_uid });
-            }
+        // Adopt writes nothing but the sighting: the board keeps its name,
+        // its project, and its history. The two adopt edges differ ONLY in
+        // where the user is left (G2 follow-up, 2026-08-05 — adopt does
+        // not navigate, setup does): "Done" ends the flow where the user
+        // already is, on the gallery, with the board on its own card;
+        // "Open in the editor" is the old landing, kept as the secondary.
+        (SetupState::AlreadyLp { probe }, SetupEvent::AdoptDone) => SetupStep::with(
+            // NO ReleasePort: adopting means the board joins the roster as
+            // it is, and it cannot do that with its session dropped.
+            closed(CloseReason::Adopted),
+            record_sighting_for(&probe),
+        ),
+        (SetupState::AlreadyLp { probe }, SetupEvent::AdoptAndOpen) => {
+            let mut commands = record_sighting_for(&probe);
             commands.push(SetupCommand::OpenDeviceHome);
             SetupStep::with(
                 SetupState::DeviceHome {
@@ -514,6 +521,15 @@ fn closed(reason: CloseReason) -> SetupState {
     SetupState::Closed { reason }
 }
 
+/// The adopt write: the sighting, and only when the probe anchored an
+/// identity. An anonymous board is remembered by nothing.
+fn record_sighting_for(probe: &BoardProbe) -> Vec<SetupCommand> {
+    match probe.hardware_uid.clone() {
+        Some(hardware_uid) => vec![SetupCommand::RecordSighting { hardware_uid }],
+        None => Vec::new(),
+    }
+}
+
 fn release_port_if(release: bool) -> Vec<SetupCommand> {
     if release {
         vec![SetupCommand::ReleasePort]
@@ -720,6 +736,7 @@ mod tests {
             SetupEventKind::PortLost => SetupEvent::PortLost,
             SetupEventKind::WipeAndSetUp => SetupEvent::WipeAndSetUp,
             SetupEventKind::AdoptDone => SetupEvent::AdoptDone,
+            SetupEventKind::AdoptAndOpen => SetupEvent::AdoptAndOpen,
             SetupEventKind::SetUpFresh => SetupEvent::SetUpFresh,
             SetupEventKind::Retry => SetupEvent::Retry,
             SetupEventKind::FlashSucceeded => SetupEvent::FlashSucceeded,
@@ -786,8 +803,12 @@ mod tests {
                 (E::CloseRequested, S::Closed, &["release-port"]),
             ],
             S::AlreadyLp => &[
+                // Adopt ends the flow where the user is: no lens attach,
+                // and no port release either (the board stays on the
+                // roster with its session).
+                (E::AdoptDone, S::Closed, &["record-sighting"]),
                 (
-                    E::AdoptDone,
+                    E::AdoptAndOpen,
                     S::DeviceHome,
                     &["record-sighting", "open-device-home"],
                 ),
@@ -1346,6 +1367,10 @@ mod tests {
 
     #[test]
     fn golden_adopt_path_writes_nothing_but_the_sighting() {
+        // G2 follow-up 2026-08-05: "Done" adopts and ENDS — no lens
+        // attach, and no port release either. The user stays where they
+        // are, and the board is on the roster with its session, which is
+        // the whole content of "it joins your roster as it is".
         let (flow, commands) = trace(
             hardware(),
             vec![
@@ -1357,6 +1382,35 @@ mod tests {
                     }),
                 },
                 SetupEvent::AdoptDone,
+            ],
+        );
+        assert_eq!(
+            commands,
+            vec!["request-port", "probe-board", "record-sighting"]
+        );
+        assert_eq!(
+            flow.state(),
+            &SetupState::Closed {
+                reason: CloseReason::Adopted
+            }
+        );
+    }
+
+    #[test]
+    fn adopt_and_open_is_the_only_adopt_edge_that_navigates() {
+        // The secondary CTA does what "Done" used to: the same sighting,
+        // then the editor lensed to the board.
+        let (flow, commands) = trace(
+            hardware(),
+            vec![
+                SetupEvent::ItsConnected,
+                SetupEvent::PortGranted,
+                SetupEvent::ProbeCompleted {
+                    probe: probe(BoardVerdict::LightPlayer {
+                        known: Some(remembered("Porch sign")),
+                    }),
+                },
+                SetupEvent::AdoptAndOpen,
             ],
         );
         assert_eq!(
@@ -1373,6 +1427,35 @@ mod tests {
             &SetupState::DeviceHome {
                 project_uid: None,
                 adopted: true,
+            }
+        );
+    }
+
+    #[test]
+    fn an_anonymous_board_is_adopted_without_a_registry_write() {
+        // No hardware uid, no row: a board remembered by nothing is still
+        // adoptable, it is just not remembered.
+        let (flow, commands) = trace(
+            hardware(),
+            vec![
+                SetupEvent::ItsConnected,
+                SetupEvent::PortGranted,
+                SetupEvent::ProbeCompleted {
+                    probe: BoardProbe {
+                        verdict: BoardVerdict::LightPlayer { known: None },
+                        detected_chip: Some("esp32c6".to_string()),
+                        hardware_uid: None,
+                        hardware_origin: None,
+                    },
+                },
+                SetupEvent::AdoptDone,
+            ],
+        );
+        assert_eq!(commands, vec!["request-port", "probe-board"]);
+        assert_eq!(
+            flow.state(),
+            &SetupState::Closed {
+                reason: CloseReason::Adopted
             }
         );
     }

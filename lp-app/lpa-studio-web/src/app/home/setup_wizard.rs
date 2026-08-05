@@ -458,6 +458,12 @@ fn wled_found(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Elem
 }
 
 /// ALREADY_LP: adopt is one click and writes nothing but the sighting.
+///
+/// **Done does not navigate** (G2 follow-up, 2026-08-05). Adopting a board
+/// that was already glowing is not a setup; being thrown into the editor
+/// for it read as one. Done ends the flow where the user already is, the
+/// card goes back to its own body on the roster, and the editor is the
+/// SECONDARY verb for whoever actually wanted it.
 fn already_lp(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Element {
     let name = wizard.recognised_name().unwrap_or("This board").to_string();
     let chip = wizard.detected_chip().unwrap_or("").to_string();
@@ -472,14 +478,20 @@ fn already_lp(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Elem
             }
         }
         p { class: "tw:m-0 tw:text-[0.7rem] tw:text-dim-foreground",
-            "Done = it joins your roster as it is, and nothing is written. Re-flash, wipe, and \
-             rename live on its card afterwards."
+            "Done = it joins your roster as it is, and nothing is written — you stay right here, \
+             and it keeps glowing. Re-flash, wipe, and rename live on its card afterwards."
         }
         button {
             class: primary_cta_class(),
             r#type: "button",
             onclick: move |_| on_action.call(gesture(SetupGesture::AdoptDone)),
-            "Done →"
+            "Done"
+        }
+        button {
+            class: secondary_cta_class(),
+            r#type: "button",
+            onclick: move |_| on_action.call(gesture(SetupGesture::AdoptAndOpen)),
+            "Open in the editor →"
         }
         button {
             class: secondary_cta_class(),

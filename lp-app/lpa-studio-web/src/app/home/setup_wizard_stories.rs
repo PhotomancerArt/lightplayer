@@ -234,19 +234,16 @@ fn port_picking() -> Element {
 }
 
 #[story(
-    description = "PROBING, the first frame of the TAKEOVER: the port grant produced a session, so the board now has its own roster card — and the wizard is that card's body from here on. One physical board, one card. The header is already honest (transport known, chip-named, anonymous until identity lands); the body is the flow. One spinner for one probe pass — chip identity and what is already on the board, decided together (design §4)."
+    description = "PROBING, the last STANDALONE frame: the port is granted but no verdict has landed, so the connection has no identity yet — and a board the registry already remembers would show its remembered card next to an un-mergeable anonymous one. So the pre-verdict window keeps the wizard standalone and stands the bound session's row down; the card the flow will ride is the one the verdict names. One spinner for one probe pass — chip identity and what is already on the board, decided together (design §4)."
 )]
 fn probing() -> Element {
-    takeover(
-        bound_card(),
-        hardware(SetupState::Probing {
-            preseeded_board: None,
-        }),
-    )
+    frame(hardware(SetupState::Probing {
+        preseeded_board: None,
+    }))
 }
 
 #[story(
-    description = "BOARD_PICK on a blank board: the SHIPPED setup-form picker, filtered to the detected chip plus Generic. The forward verb is not armed until something is picked — the machine records selection and confirmation separately (design §7.2)."
+    description = "BOARD_PICK on a blank board — and the first frame of the TAKEOVER: the verdict has landed, so the board is recognised (or honestly anonymous, as here) and the wizard becomes the body of that board's own roster card. One physical board, one card, from here to the end. The header is the device's; the body is the flow. Inside it: the SHIPPED setup-form picker, filtered to the detected chip plus Generic. The forward verb is not armed until something is picked — the machine records selection and confirmation separately (design §7.2)."
 )]
 fn board_pick_blank() -> Element {
     takeover(
@@ -301,7 +298,7 @@ fn wled_found() -> Element {
 }
 
 #[story(
-    description = "ALREADY_LP: adopt is one click and writes nothing but a sighting — the board keeps its name, its project, and its history. The registry name leads, because recognition is the whole point of this state."
+    description = "ALREADY_LP: adopt is one click and writes nothing but a sighting — the board keeps its name, its project, and its history. The registry name leads, because recognition is the whole point of this state. Done does NOT navigate (G2 follow-up, 2026-08-05): adopting a board that was already glowing is not a setup, and being thrown into the editor read as one — the flow just ends, this card goes back to its own body, and the user stays on the gallery. \"Open in the editor →\" is the secondary for whoever wanted that, and it is exactly what Done used to do."
 )]
 fn already_lightplayer() -> Element {
     takeover(
@@ -479,7 +476,7 @@ fn device_home() -> Element {
 }
 
 #[story(
-    description = "DEVICE_HOME reached by adopting an already-LightPlayer board: it never stopped glowing, and nothing was written. Drawn for completeness like the frame above — an adopt ends with the board's own card standing exactly where it already was."
+    description = "DEVICE_HOME reached by an adopt that asked for the editor (\"Open in the editor →\" — the only adopt edge that navigates since the G2 follow-up): it never stopped glowing, and nothing was written. Drawn for completeness like the frame above; plain Done ends at CLOSED(Adopted) instead, with the board's own card standing exactly where it already was."
 )]
 fn device_home_adopted() -> Element {
     frame(hardware(SetupState::DeviceHome {
@@ -499,7 +496,7 @@ fn device_home_simulator() -> Element {
 }
 
 #[story(
-    description = "CLOSED: the terminal state, drawn for completeness. In the live gallery the card is off the grid by the time this could paint."
+    description = "CLOSED: the terminal state, drawn for completeness. In the live gallery the card is off the grid by the time this could paint. Three reasons reach it — Cancelled (✕, nothing written), IncompleteFlash (shown here: the board's card is left saying it needs re-flashing), and Adopted (the G2 follow-up's Done: the sighting is recorded, the port is kept, and the board's own card simply carries on)."
 )]
 fn closed() -> Element {
     frame(hardware(SetupState::Closed {

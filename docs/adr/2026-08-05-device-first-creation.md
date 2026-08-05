@@ -158,6 +158,26 @@ machine's own command rather than through the open-anything lane.
   through `SetupDispatch`.
 - WLED migration is out: the only WLED path is wipe-and-flash, and the copy
   says so.
+- **Adopt does not navigate; setup does** (G2 re-walk, 2026-08-05).
+  ALREADY_LP's "Done" ends at `CLOSED(Adopted)` — the sighting is recorded,
+  the port is deliberately kept, and the user stays on the gallery with the
+  board on its own card. Landing in the editor is what a *created* project
+  earns; a board that was already glowing had nothing created for it, and
+  the automatic jump read as a setup that had happened to the user rather
+  than for them. The old behaviour survives as the state's secondary verb
+  (`AdoptAndOpen`, "Open in the editor →"), so nobody loses the shortcut.
+  The full flash+provision path is untouched: PROVISION → DEVICE_HOME with
+  the project running is still the north star.
+- **The wizard is a state of the device card, not a card of its own** (G2,
+  same day). One physical board renders as exactly one card at every moment
+  of the flow: standalone in the entry slot while nothing is attached and
+  no verdict has landed, then as the BODY of the bound board's own roster
+  card from the verdict on, then — at DEVICE_HOME/CLOSED — simply that
+  card's own body again. The verdict is the seam because it is the
+  recognition moment: before it the live session is anonymous and cannot be
+  merged with the remembered card a known board already has, so the
+  pre-verdict window (and only it) stands the bound session's row down.
+  `docs/design/device-setup-flow.md` §9 carries the frame table.
 - **Still not decided, after P06**: what a failed generate or push leaves
   behind on a board that is already flashed and registered. The machine
   still has no PROVISION failure edge. P06 deliberately did not close it —

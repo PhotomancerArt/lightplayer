@@ -1068,17 +1068,29 @@ impl StudioController {
     /// — `Some` exactly while the flow should be rendering as a device
     /// card's body.
     ///
-    /// `None` covers the three cases where it must not: no flow at all;
-    /// the pre-device states (nothing granted yet, so there is no card to
-    /// be the body of); and DEVICE_HOME/CLOSED, where the handoff is done
-    /// and the card's own body returns. The hardware binding is the bound
-    /// `RuntimeId` rather than the session's stored card key, so a port
-    /// release un-binds the takeover the moment the session goes.
+    /// `None` covers the cases where it must not: no flow at all; the
+    /// pre-device states (nothing granted yet, so there is no card to be
+    /// the body of); the PRE-VERDICT states (see below); and
+    /// DEVICE_HOME/CLOSED, where the handoff is done and the card's own
+    /// body returns. The hardware binding is the bound `RuntimeId` rather
+    /// than the session's stored card key, so a port release un-binds the
+    /// takeover the moment the session goes.
+    ///
+    /// **The takeover binds at the VERDICT** (G2 follow-up, 2026-08-05).
+    /// Between the port grant and the probe's answer the live card is
+    /// anonymous, so a board the registry already knows would render
+    /// twice — the remembered row plus an un-mergeable anonymous card.
+    /// The verdict is the recognition moment: from there the live card
+    /// carries the probed uid ([`Self::setup_recognised_uid`]) and merges
+    /// with its registry row, and there is exactly one card to ride.
     fn setup_binding(&self) -> Option<String> {
         if !self.setup_flow_running() {
             return None;
         }
         let session = self.setup.as_ref()?;
+        if !session.state().kind().has_verdict() {
+            return None;
+        }
         if session.sim {
             // The sim's key is known from the start, but no sim card
             // exists until the session does — so this resolves to nothing
@@ -1102,6 +1114,43 @@ impl StudioController {
         })
     }
 
+    /// The bound session whose roster row STANDS DOWN — the pre-verdict
+    /// window only (port granted, probe not yet answered).
+    ///
+    /// This is the one scoped suppression the model keeps, and it exists
+    /// because of the KNOWN board: its registry row is already on the
+    /// grid, the just-granted session has no identity to merge with it
+    /// yet, and two rows for one board is exactly what this model is for.
+    /// No evidence is lost — the wizard's own PORT_PICKING/PROBING body
+    /// is the narration for precisely this window, and the row returns
+    /// (as the takeover's card) the instant the verdict lands.
+    fn setup_pre_verdict_session(&self) -> Option<crate::RuntimeId> {
+        if !self.setup_flow_running() {
+            return None;
+        }
+        if self.setup.as_ref()?.state().kind().has_verdict() {
+            return None;
+        }
+        self.setup_device
+    }
+
+    /// The uid the PROBE anchored, once a verdict carries one — the
+    /// recognition the live card wears until its own identity read lands.
+    ///
+    /// Fed to the bound row as `pending_uid`, which is the roster's
+    /// existing "this live evidence belongs to THAT remembered card"
+    /// channel (built for the reconnect-transient-twin defect, and this
+    /// is the same problem arriving from the probe instead of a click).
+    /// It is what makes the live card and the registry row ONE card from
+    /// the verdict on.
+    fn setup_recognised_uid(&self) -> Option<String> {
+        let session = self.setup.as_ref()?;
+        if !self.setup_flow_running() {
+            return None;
+        }
+        session.state().probe()?.hardware_uid.clone()
+    }
+
     /// The runtime pool's roster evidence (P4 → multi-device M3): one
     /// evidence bundle per DEVICE session — reconcile state reads each
     /// device session, never the lens, which may be on the sim (P2
@@ -1116,12 +1165,18 @@ impl StudioController {
     /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
         // Every session gets its evidence — INCLUDING the one an open setup
-        // flow drives. That card is not a rival to the wizard; it IS the
-        // wizard's card (G2 ruling, 2026-08-05), and standing it down was
-        // what made one board wear two representations.
+        // flow drives, from the verdict on. That card is not a rival to the
+        // wizard; it IS the wizard's card (G2 ruling, 2026-08-05), and
+        // standing it down wholesale was what made one board wear two
+        // representations. The ONE window that still stands down is
+        // pre-verdict, where the row cannot yet be merged with the
+        // remembered card of a board we already know
+        // ([`Self::setup_pre_verdict_session`]).
+        let pre_verdict = self.setup_pre_verdict_session();
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
             .device_sessions()
+            .filter(|session| Some(session.id()) != pre_verdict)
             .map(|session| self.device_evidence(session))
             .collect();
         // The connect NARRATION does still stand down while a flow is
@@ -1154,6 +1209,20 @@ impl StudioController {
                     pending_uid,
                     ..Default::default()
                 });
+            }
+        }
+        // The probe's recognition, on the bound row: it makes the live
+        // card adopt the remembered board's uid and name, which is what
+        // lets the roster's twin filter drop the registry row. Applied
+        // after the connect-flow overlay above so the more specific
+        // attribution wins on that row.
+        if let (Some(device_id), Some(uid)) = (self.setup_device, self.setup_recognised_uid()) {
+            let key = device_id.to_string();
+            if let Some(bound) = devices
+                .iter_mut()
+                .find(|entry| entry.session_key.as_deref() == Some(key.as_str()))
+            {
+                bound.pending_uid = Some(uid);
             }
         }
         let sim = self
@@ -8504,35 +8573,56 @@ mod tests {
         );
     }
 
-    /// Install a stub device session and bind the open flow to it — the
-    /// port-grant moment, without a wire.
-    fn grant_a_port(studio: &mut StudioController) -> crate::RuntimeId {
-        let device_id = studio
+    const KNOWN_UID: &str = "dev_000000029EVDlKLX";
+
+    /// Install a stub device session — a board on the wire, no flow.
+    fn install_stub_device(studio: &mut StudioController) -> crate::RuntimeId {
+        studio
             .pool
             .install(
                 crate::app::runtime_pool::RuntimePayload::stub_device_for_test(
                     crate::app::runtime_pool::runtime_session::ready_state_for_test(),
                 ),
             )
-            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message));
-        studio.bind_setup_device(device_id);
-        device_id
+            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message))
     }
 
-    /// Walk the pure machine from a granted port to DEVICE_HOME. The
-    /// machine does not care where the events came from (R1).
-    fn walk_the_flow_to_device_home(studio: &mut StudioController) {
+    /// The port-grant moment without a wire: a stub session, bound to the
+    /// flow, with the machine walked to PROBING (where a real grant lands).
+    fn grant_a_port(studio: &mut StudioController) -> crate::RuntimeId {
+        let device_id = install_stub_device(studio);
+        studio.bind_setup_device(device_id);
         let flow = &mut studio.setup.as_mut().expect("wizard").flow;
         flow.handle(crate::SetupEvent::ItsConnected);
         flow.handle(crate::SetupEvent::PortGranted);
-        flow.handle(crate::SetupEvent::ProbeCompleted {
-            probe: crate::BoardProbe {
-                verdict: crate::BoardVerdict::Blank { known: None },
-                detected_chip: Some("esp32c6".to_string()),
-                hardware_uid: None,
-                hardware_origin: None,
-            },
-        });
+        device_id
+    }
+
+    /// A probe verdict, as the executor would report it.
+    fn blank_probe(hardware_uid: Option<&str>) -> crate::BoardProbe {
+        crate::BoardProbe {
+            verdict: crate::BoardVerdict::Blank { known: None },
+            detected_chip: Some("esp32c6".to_string()),
+            hardware_uid: hardware_uid.map(str::to_string),
+            hardware_origin: hardware_uid.map(|_| "efuse:aa:bb:cc:dd:ee:ff".to_string()),
+        }
+    }
+
+    /// Land a verdict on the open flow — the recognition moment the
+    /// takeover binds at.
+    fn land_a_verdict(studio: &mut StudioController, probe: crate::BoardProbe) {
+        studio
+            .setup
+            .as_mut()
+            .expect("wizard")
+            .flow
+            .handle(crate::SetupEvent::ProbeCompleted { probe });
+    }
+
+    /// Walk the pure machine from a landed BLANK verdict to DEVICE_HOME.
+    /// The machine does not care where the events came from (R1).
+    fn walk_the_flow_to_device_home(studio: &mut StudioController) {
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
         flow.handle(crate::SetupEvent::BoardChosen {
             board_id: "espressif/esp32-c6-devkitc-1".to_string(),
         });
@@ -8546,12 +8636,12 @@ mod tests {
     }
 
     #[test]
-    fn a_bound_flow_rides_the_devices_own_card_as_a_body_takeover() {
-        // G2 ruling 2026-08-05: one physical board, ONE card. From the
-        // port grant the wizard is the BODY of that board's roster card
-        // (the same card the live evidence produces), not a sibling of it
-        // — the P06 shape rendered two cards for one device, and standing
-        // the live card down only traded that for a card that appears.
+    fn a_bound_flow_rides_the_devices_own_card_from_the_verdict_on() {
+        // G2 ruling 2026-08-05 + its follow-up: one physical board, ONE
+        // card, at every moment. Pre-device and PRE-VERDICT the wizard is
+        // standalone and the bound session's row stands down (an anonymous
+        // row cannot merge with a remembered card); from the verdict on the
+        // wizard is the BODY of that board's own roster card.
         let mut studio = StudioController::new(|| 1_800_000_000.0);
         block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
 
@@ -8570,6 +8660,29 @@ mod tests {
         );
 
         let device_id = grant_a_port(&mut studio);
+
+        // Pre-verdict: still standalone, and the bound row stands down —
+        // the wizard's PROBING body is the whole of the narration.
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::Probing,
+        );
+        assert_eq!(
+            home.setup.expect("the wizard renders").takeover_card,
+            None,
+            "no verdict, no card to ride"
+        );
+        assert!(
+            home.devices.is_empty(),
+            "the pre-verdict row stands down; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        land_a_verdict(&mut studio, blank_probe(None));
 
         let home = studio.view().home.expect("home view");
         assert_eq!(
@@ -8596,6 +8709,81 @@ mod tests {
     }
 
     #[test]
+    fn a_recognised_board_never_renders_twice() {
+        // The G2 re-walk finding: a board the registry already knows was
+        // showing its remembered card AND the connection's anonymous card.
+        // The verdict is what fixes it — the probe's uid rides the live row
+        // as `pending_uid`, the live card adopts the remembered identity,
+        // and the roster's twin filter drops the registry row.
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::app::places::{DeviceRegistry, RegisteredDevice};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| "2026-08-05-0900".to_string()),
+        );
+        DeviceRegistry::new(store.fs_handle())
+            .upsert(RegisteredDevice {
+                uid: KNOWN_UID.to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1_799_000_000.0,
+                association: None,
+                board_id: Some("espressif/esp32-c6-devkitc-1".to_string()),
+                hardware_id: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
+                previous_uids: Vec::new(),
+            })
+            .expect("the registry remembers this board");
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 1.0))));
+        block_on_ready(studio.settle_library());
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "the remembered board's card is on the grid to begin with"
+        );
+
+        grant_a_port(&mut studio);
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "pre-verdict the connection adds NO second card; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        land_a_verdict(&mut studio, blank_probe(Some(KNOWN_UID)));
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "and from the verdict on there is still exactly one; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        let card = &home.devices[0];
+        assert_eq!(card.uid.as_deref(), Some(KNOWN_UID), "it is THE board");
+        assert_eq!(card.name, "Porch sign", "wearing the name we remember");
+        assert!(card.session_key.is_some(), "and it is the LIVE card");
+        assert_eq!(
+            home.setup.expect("wizard").takeover_card.as_deref(),
+            Some(card.identity_key()),
+            "the wizard rides the merged card"
+        );
+    }
+
+    #[test]
     fn the_takeover_ends_at_device_home_without_the_card_changing() {
         // "Becomes the device card" is a BODY SWAP: at DEVICE_HOME the
         // same card is still there, in the same place, wearing its own
@@ -8603,6 +8791,7 @@ mod tests {
         let mut studio = StudioController::new(|| 1_800_000_000.0);
         block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
         grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
         let before = studio.view().home.expect("home view");
         let key = before.devices[0].identity_key().to_string();
 
@@ -8635,15 +8824,16 @@ mod tests {
         // hop columns as other cards land.
         let mut studio = StudioController::new(|| 1_800_000_000.0);
         block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
-        let first = grant_a_port(&mut studio);
-        let second = grant_a_port(&mut studio);
-        assert_ne!(first, second, "two boards attached");
+        let idle = install_stub_device(&mut studio);
+        let bound = grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        assert_ne!(idle, bound, "two boards attached");
 
         let home = studio.view().home.expect("home view");
         assert_eq!(home.devices.len(), 2, "both boards keep their cards");
         assert_eq!(
             home.devices[0].session_key.as_deref(),
-            Some(second.to_string().as_str()),
+            Some(bound.to_string().as_str()),
             "the board the flow is on leads"
         );
         assert_eq!(
