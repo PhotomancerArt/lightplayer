@@ -41,6 +41,12 @@ const checks = {
       ...servedFirmwareBuilds.map((id) => `firmware/${id}/manifest.json`),
       "lpa-link/browser_esp32_device_controller.js",
     ],
+    // The design spikes are internal records — several state gate verdicts
+    // as settled fact — and are copied into the served directory by
+    // `just studio-dev` alone. Nothing in the deploy path copies them today;
+    // this says so out loud, so a future "just add it to the asset dir"
+    // fails here rather than on the public site.
+    forbidden: ["spikes"],
   },
   "web-demo": {
     indexNeedle: "pkg/web_demo.js",
@@ -101,6 +107,11 @@ function checkLocalFiles() {
     }
     if (statSync(assetPath).size === 0) {
       throw new Error(`required asset is empty: ${formatRequiredAsset(asset)}`);
+    }
+  }
+  for (const entry of check.forbidden ?? []) {
+    if (existsSync(path.join(siteDir, entry))) {
+      throw new Error(`asset must not be deployed: ${entry}`);
     }
   }
 }
