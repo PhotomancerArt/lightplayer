@@ -102,7 +102,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "the Debug section replaces the old `controls` record row, never duplicates it: {settings_labels:?}"
     );
 
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert!(rate.state.debug, "clock rate is a Debug control");
     let rate_address = rate.address.clone().expect("rate slot carries an address");
@@ -135,7 +135,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         2,
         "three queued rate SetValues coalesce with the color-order edit into two mutations"
     );
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
     assert!(rate.state.debug);
     assert_eq!(slot_value_display(rate), "2");
@@ -168,7 +168,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         !clock_json.contains("\"rate\":2"),
         "clock.json must not gain the debug rate override: {clock_json}"
     );
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(
         rate.state.dirty,
         UiNodeDirtyState::Dirty,
@@ -199,7 +199,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert emits a snapshot");
 
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(rate),
@@ -240,7 +240,7 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let rate_address = find_slot(&snapshot, "controls.rate")
+    let rate_address = find_slot(&snapshot, "transport.rate")
         .address
         .clone()
         .expect("rate slot carries an address");
@@ -281,7 +281,7 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
     .expect("re-attach connects");
     let rebuilt = actor.controller_mut_for_test().view();
     assert_eq!(
-        slot_value_display(find_slot(&rebuilt, "controls.rate")),
+        slot_value_display(find_slot(&rebuilt, "transport.rate")),
         "2",
         "the acked edit is visible after detach → re-attach"
     );
@@ -1085,7 +1085,7 @@ fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(slot_value_display(rate), "1");
     let rate_address = rate.address.clone().expect("rate slot carries an address");
 
@@ -1098,7 +1098,7 @@ fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(slot_value_display(rate), "2");
 
@@ -1111,7 +1111,7 @@ fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("clear + refresh emit a snapshot");
 
-    let rate = find_slot(&snapshot, "controls.rate");
+    let rate = find_slot(&snapshot, "transport.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(rate),
@@ -2403,7 +2403,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "running": true,
     "rate": 1.0
   }
@@ -2485,7 +2485,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
             "clock.json",
             r#"{
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "running": true,
     "rate": 1.0
   }

@@ -1242,7 +1242,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1371,7 +1371,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1471,7 +1471,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let playlist_json = r#"{
   "kind": "Playlist",
@@ -1583,7 +1583,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let playlist_json = format!(
         r#"{{
@@ -1683,7 +1683,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",

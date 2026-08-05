@@ -10044,7 +10044,7 @@ mod tests {
     }
 
     fn overlay_slot_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn overlay_with_rate_edit() -> ProjectOverlay {

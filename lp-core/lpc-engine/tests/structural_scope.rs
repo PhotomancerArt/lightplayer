@@ -189,7 +189,7 @@ fn load_and_trivial_apply_produce_identical_scope_tables() {
     // Trivial content change: touch the clock def body.
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();
@@ -249,7 +249,7 @@ fn load_and_apply_produce_identical_bus_wiring() {
     let (mut engine, mut registry) = rt.into_parts();
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();
@@ -539,7 +539,7 @@ fn panel_writer_survives_apply_project_changes() {
 
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();

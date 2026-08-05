@@ -14,7 +14,7 @@ pub mod starter_project;
 pub mod texture;
 
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
-pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
+pub use clock::{CLOCK_TRANSPORT_SHAPE_NAME, ClockDef, ClockDefView, ClockState, ClockTransport};
 pub use fixture::{
     Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixturePower,
     FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig, PathSpec,
