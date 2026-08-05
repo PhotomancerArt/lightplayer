@@ -47,9 +47,9 @@ evidence the five sectors are exact 72° rotations of one another.
 
 `examples/zook-dome/output.json` authors the true physical split: five
 wires of 300 (IO18/IO16/IO14/IO2 + IO13 as the count-less remainder).
-The classic drives four concurrent RMT channels today, so the fifth wire
-parks (per-wire; the siblings stay live) until pin-mux channel pooling
-lands. The Studio preview renders all 1500 lamps regardless.
+Since the pooled-slot RMT work (PR #350), the classic drives all five
+wires over its four RMT slots by re-binding pins per transmission — the
+whole dome is live on one board.
 
 ```bash
 lp-cli upload examples/zook-dome serial:auto
