@@ -76,6 +76,10 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The board the sim claims to be (vision D4), inherited from the
+    /// project it runs — `vendor/product`, the registry's vocabulary.
+    /// `None` = no board known, the ordinary default.
+    pub board_id: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
 }
@@ -383,6 +387,8 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         hardware: None,
         detected_chip: None,
+        // D4: the sim's inherited board — the one card that carries this
+        board_id: sim.board_id.clone(),
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -487,6 +493,8 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        // a device's board is a REGISTRY fact, read there (see the field doc)
+        board_id: None,
         port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
@@ -666,6 +674,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
+        board_id: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -897,6 +906,7 @@ mod tests {
             devices: Vec::new(),
             sim: Some(HomeSimEvidence {
                 project,
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         }
@@ -1081,6 +1091,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
             UiDeviceCard {
                 port_label: None,
@@ -1097,6 +1108,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -1501,6 +1513,7 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         };

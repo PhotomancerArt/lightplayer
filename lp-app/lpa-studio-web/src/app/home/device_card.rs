@@ -630,6 +630,8 @@ pub(crate) fn DeviceCard(
         sim_rich_object(&SimRichInput {
             state: &card.state,
             project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
+            // D4: "as ESP32-S3 DevKitC-1" under the status line
+            board_id: card.board_id.as_deref(),
             now_secs: now,
         })
         .sections

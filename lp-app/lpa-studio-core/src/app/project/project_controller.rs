@@ -3530,6 +3530,21 @@ impl ProjectController {
         })
     }
 
+    /// The open library package's advisory board `target` (vision D3/P02),
+    /// read straight from its container manifest. `None` when no library
+    /// package backs the running project, when the manifest fails to parse,
+    /// or — the common case — when the project names no board.
+    ///
+    /// The SIM's board identity is inherited from this (vision D4): the
+    /// manifest is where that fact persists, so a reload re-derives it.
+    pub fn active_target(&self) -> Option<String> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        crate::app::library::package_manifest::read_manifest(&*view)
+            .ok()?
+            .target
+    }
+
     /// The `prj_…` uid of the open library package, when the running
     /// project is backed by one.
     pub fn active_library_uid(&self) -> Option<String> {

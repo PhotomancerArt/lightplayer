@@ -274,6 +274,7 @@ mod tests {
             console_tail: Vec::new(),
             ui: CardUiState::default(),
             detected_chip: None,
+            board_id: None,
         }
     }
 

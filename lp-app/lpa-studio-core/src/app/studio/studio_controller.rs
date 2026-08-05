@@ -848,18 +848,21 @@ impl StudioController {
             .with_dirty(dirty)
     }
 
-    /// The board the LENS device is known to be — `RegisteredDevice.board_id`,
-    /// stamped at provisioning (board-selection M5) and cached with the
-    /// gallery's registry rows.
+    /// The board the LENS runtime is known to be — for a device,
+    /// `RegisteredDevice.board_id`, stamped at provisioning (board-selection
+    /// M5) and cached with the gallery's registry rows; for the SIM, the
+    /// board it inherited from the project it runs (vision D4).
     ///
-    /// `None` is ORDINARY, not exceptional: no lens, a sim lens (the sim is
-    /// not a device — D22), an unidentified board, or a device provisioned
-    /// outside Studio. The wire's `HardwareFacts.board_id` is not a fallback
-    /// — it is always `None` today, so the registry is the only source.
+    /// `None` is ORDINARY, not exceptional: no lens, an unidentified board,
+    /// a device provisioned outside Studio, or a sim running an untargeted
+    /// project. The wire's `HardwareFacts.board_id` is not a fallback — it
+    /// is always `None` today, so the registry is the device's only source.
     fn lens_board_id(&self) -> Option<&str> {
         let session = self.pool.lens_session()?;
         if session.is_sim() {
-            return None;
+            // the sim is still not a device (D22): it has no registry row,
+            // and its board is the session's own advisory identity
+            return session.sim_board_id();
         }
         let uid = session.device_uid().or_else(|| {
             session
@@ -1076,6 +1079,7 @@ impl StudioController {
                         uid: project.uid.clone(),
                         name: project.name.clone(),
                     }),
+                board_id: session.sim_board_id().map(str::to_string),
                 console_tail: session.console_tail().iter().cloned().collect(),
             });
         crate::app::home::HomePoolEvidence { devices, sim }
@@ -4673,16 +4677,25 @@ impl StudioController {
     /// not on a sim or the open carried no library identity (the storeless
     /// demo path); the record outlives the lens (detach keeps the sim
     /// running) and dies with the session.
+    ///
+    /// The sim's BOARD identity rides along (vision D4: the sim inherits
+    /// its board from the project it runs) — the project's advisory
+    /// manifest `target`, which is where that fact persists. It follows the
+    /// project exactly: an untargeted project leaves the sim with no board,
+    /// which is today's behavior everywhere until the wizard generates
+    /// targeted projects.
     fn note_sim_loaded_project(&mut self) {
         let project = self
             .project
             .active_library_uid()
             .zip(self.project.active_library_slug());
+        let target = self.project.active_target();
         if let Some((uid, name)) = project
             && let Ok(session) = self.pool.lens_session_mut()
             && session.is_sim()
         {
             session.set_sim_loaded_project(Some(crate::SimLoadedProject { uid, name }));
+            session.set_sim_board_id(target);
         }
     }
 
@@ -6747,6 +6760,60 @@ mod tests {
         assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
         studio.run_due_heartbeats();
         assert_eq!(studio.next_refresh_interval(), DEVICE_HEARTBEAT_INTERVAL);
+    }
+
+    #[test]
+    fn a_sim_lens_with_a_board_feeds_lens_board_id_and_its_card() {
+        // Gallery-rework P04 / vision D4. The sim is still not a device
+        // (D22) — no registry row backs it — but a board identity makes
+        // the output face's pin diagram light up for it exactly as it does
+        // for hardware, and the card says what it is pretending to be.
+        let mut studio = StudioController::new(|| 100.0);
+        studio.set_stub_sim_for_test();
+
+        assert_eq!(
+            studio.lens_board_id(),
+            None,
+            "default: no board, today's behavior"
+        );
+        assert_eq!(
+            studio
+                .lens_device_card()
+                .expect("a lens card for the sim session")
+                .board_id,
+            None
+        );
+
+        studio
+            .pool
+            .lens_session_mut()
+            .expect("the sim holds the lens")
+            .set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
+
+        assert_eq!(studio.lens_board_id(), Some("seeed/xiao-esp32-c6"));
+        assert_eq!(
+            studio
+                .lens_device_card()
+                .expect("a lens card for the sim session")
+                .board_id
+                .as_deref(),
+            Some("seeed/xiao-esp32-c6"),
+            "the card carries it too — that is the \"as <board>\" line"
+        );
+    }
+
+    #[test]
+    fn a_device_session_never_takes_the_sims_board_field() {
+        // The two sources stay separate: a device's board is its registry
+        // row, and `set_sim_board_id` is a no-op on a device session.
+        let mut studio = StudioController::new(|| 100.0);
+        studio.set_stub_device_for_test(lpa_link::DeviceState::Booting);
+        let session = studio
+            .pool
+            .lens_session_mut()
+            .expect("the device holds the lens");
+        session.set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
+        assert_eq!(session.sim_board_id(), None);
     }
 
     #[test]
