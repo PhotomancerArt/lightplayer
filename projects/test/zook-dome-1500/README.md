@@ -33,7 +33,28 @@ load-churned heap. Marginal steady cost measured 600→900 is ~100 B/LED
 all-in — the parked M6 "compact resolved carrier" (−24 B/LED) is what
 makes 1500 fit outright.
 
-## Same-day follow-up: retrying allocator + 24 KiB JIT region
+## 2026-08-04 (late): M6 compact mappings — 1500 RUNS
+
+On branch `claude/m6-compact-mappings-f98a49` (clone kill + streaming
+visitor + compact resolved carrier + drop recast), same probe cadence:
+
+| LEDs | result | fps | tick | steady used | largest_free |
+|---|---|---|---|---|---|
+| 1200 | ✅ compile 64 ms, renders | 14 | 66 ms | 119,596 B | 56,045 |
+| 1500 | ✅ **compile 69 ms, renders** | **12** | **76-77 ms** | **137,332 B** | 38,883 |
+
+`retry_saves=0` on both — nothing needed rescuing. The frame model
+(24 ms fixed + 5 µs/LED render + 30 µs/LED sequential flush) predicted
+66 / 76.5 ms; measured 66 / 76-77. Post-M6 marginal ≈ 59 B/LED
+(1200→1500). fps at 1500 is flush-bound: M4 concurrent flush is the
+next lever (~23 fps projected).
+
+Emulator A/B on this project (archived in `profiles/`): load retained
+89,875 → 37,231 B (the 61,440 B slot-modelled mapping → ~9 KB compact),
+load transient 140,545 → 73,986 B, per-frame churn −73% (the 36 KB/frame
+mapping clone is gone).
+
+## Same-day follow-up (earlier): retrying allocator + 24 KiB JIT region
 
 Two levers landed on this branch and were re-probed (total heap
 178,176 → 186,368 B; `[MEM]` now carries `retry_saves=`):
