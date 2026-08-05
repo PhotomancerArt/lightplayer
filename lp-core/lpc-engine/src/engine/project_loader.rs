@@ -2757,13 +2757,28 @@ mod tests {
         );
     }
 
-    /// M4 differential: after a `High` pressure broadcast at a safe point, the
-    /// next frame's published output bytes are bit-identical to an engine that
-    /// never dropped anything. Core path only — display-pipeline temporal
-    /// state (dither, interpolation) is firmware-side and exempt anyway; see
+    /// After a `High` pressure broadcast at a safe point, the next frame's
+    /// published output bytes are bit-identical to an engine that never got
+    /// the broadcast. Core path only — display-pipeline temporal state
+    /// (dither, interpolation) is firmware-side and exempt anyway; see
     /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md.
+    ///
+    /// This started life (#303) as the drop→rebuild differential: the fixture
+    /// and output nodes dropped their per-LED buffers at `High`, and this
+    /// pinned that the lazy `ensure_*` seams rebuilt them to identical bytes.
+    /// M6 P4 removed those drops — they freed nothing at the compile instant,
+    /// because the compile runs at RENDER time and every dropped buffer was
+    /// rebuilt earlier in the same tick
+    /// (`docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`).
+    /// The assertion is unchanged and now pins the stronger, simpler property:
+    /// a pressure broadcast is **inert** on the core path. Per-node no-drop
+    /// coverage lives next to each handler
+    /// (`memory_pressure_does_not_drop_the_fixtures_derived_caches`,
+    /// `memory_pressure_does_not_drop_the_control_samples`); if a future
+    /// droppable is added back at `High`, this test is the identity guard it
+    /// must satisfy.
     #[test]
-    fn memory_pressure_drop_and_rebuild_is_bit_identical_on_the_core_path() {
+    fn memory_pressure_broadcast_leaves_the_core_path_bit_identical() {
         let warm = || {
             let mut rt = loaded_basic_runtime();
             // Frame 1 defers the shader compile (window request); frame 2
@@ -2791,7 +2806,7 @@ mod tests {
         );
         assert_eq!(
             expected, actual,
-            "state dropped under pressure must lazily rebuild to bit-identical output"
+            "a memory-pressure broadcast must not change core-path output bytes"
         );
     }
 
