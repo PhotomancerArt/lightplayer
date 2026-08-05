@@ -366,6 +366,18 @@ Exit when both hold across a few captures. If a new over-tolerance
 churner appears and resists diagnosis, that is the architecture signal —
 escalate rather than widening the threshold.
 
+**Added 2026-08-05 — criterion (6), the HANG (distinct from the drift
+criteria above).** The CI job wedged twice in one day for hours with zero
+output; the unbounded wait that let it is fixed, but the reason the discovery
+Chrome hangs is not known. See the 2026-08-05 incident. Exit (6) when either:
+the discovery hang is reproduced and root-caused (the way the 2026-07-26
+python-server wedge was), **or** several weeks of CI pass with no run hitting
+`STUDIO_STORY_DISCOVERY_ATTEMPTS` exhaustion, the run watchdog (exit 3), or a
+job `timeout-minutes` — i.e. the retry absorbs it and the class is empirically
+gone. Bounding a hang is containment, not diagnosis: `timeout-minutes` and the
+watchdog address the **carrying cost** (a burned runner and a PR pending for
+hours), and neither is an exit path on its own.
+
 - 2026-07-28 — **the `overview` composites are out of the pipeline, and
   the churn they caused was never a settling race.** Both PR #163
   flip-floppers were generated composites, which is what made "composites
@@ -424,3 +436,63 @@ escalate rather than widening the threshold.
   compile error is at the top of the step, thousands of lines above the
   failure line. Local prophylactic for studio-touching changes:
   `cargo check -p lpa-studio-web --target wasm32-unknown-unknown`.
+
+- 2026-08-05 — **CI WEDGE ROOT-CAUSED (the hang, not the drift): story
+  DISCOVERY Chrome never exits, and nothing was waiting on it with a bound.**
+  Two wedges the same day, both cancelled by hand: run 30993890003 job
+  92266222518 (PR #349) burned **5h08m**, and run 30986724958 job 92243105380
+  burned **3h35m** — out of ~25 story-job starts that day. Both logs have the
+  **identical** signature, and it is not subtle:
+  - Last line of output: `Artifacts: target/dx/lpa-studio-web/release/web/public/
+    (story build)` — i.e. `dx build` **succeeded**. Then *nothing at all* until
+    `##[error]The operation was canceled` hours later. Not one capture line.
+  - Orphan processes reaped at cleanup, identical in both: `just`, `tee`,
+    `bash`, `node`, **exactly one `chrome` and two `chrome_crashpad_handler`**.
+    That is the shape of a single `--dump-dom` browser, not a capture pass
+    (which runs 4 pages and would have printed `Capturing N/M …` and `wrote …`).
+  Between the build and the first capture line the script does exactly four
+  things, and only one of them could hang: `computeBuildFingerprint` (file
+  reads), `waitForServer` (bounded, 10s, throws), the static server's `listen`,
+  and **`discoverStoryIds()` → `runChrome(--dump-dom)` → `runProcess` → a bare
+  `await once(child, "exit")` with no timeout**. Every timeout this pipeline
+  has accumulated — `STUDIO_STORY_CAPTURE_TIMEOUT_MS`,
+  `STUDIO_STORY_CDP_TIMEOUT_MS`, page recycling,
+  `STUDIO_STORY_BROWSER_RESTART_EVERY` — guards the **CDP capture path**, which
+  a wedged discovery never reaches. So the run went silent and stayed silent
+  until GitHub's 6-hour default would have reaped it.
+  **What is fixed** (all verified against a fake Chrome that never exits, and
+  against a real Chrome for the success path):
+  - `runProcess` is now bounded (`STUDIO_STORY_SUBPROCESS_TIMEOUT_MS`, 180s
+    default; also covers the previously-unbounded `oxipng` call). It races the
+    exit against a timer and SIGKILLs, so it **always settles** even if the kill
+    does not take. Verified: the 5-hour hang becomes a 9-second failure, with no
+    leaked processes.
+  - Discovery gets its own bound + retries (`STUDIO_STORY_DISCOVERY_TIMEOUT_MS`
+    120s, `STUDIO_STORY_DISCOVERY_ATTEMPTS` 3), so a *transient* hang costs a
+    minute instead of the job. 120s is sized off a **measured** happy path
+    (~21s for a cold Chrome locally), not off `--virtual-time-budget=5000`.
+  - A **global watchdog** (`STUDIO_STORY_RUN_DEADLINE_MS`, 40 min) that exits
+    **3** — distinct from drift (1) and usage (2) — printing the phase it died
+    in. It is a watchdog timer rather than a race on individual awaits
+    deliberately: that is the only shape that covers phases nobody has thought
+    to bound yet, which is exactly the class this incident belonged to.
+  - **Periodic progress output** (`STUDIO_STORY_PROGRESS_INTERVAL_MS`, 30s):
+    `[+MM:SS] <phase> — N/M captured`. The capture phase was never the silent
+    one; the point is that discovery, oxipng, and comparison now announce
+    themselves, so a future wedge says *where* it stopped.
+  **What is NOT fixed, and why this entry stays open:** *why* the discovery
+  Chrome hangs is **unidentified and was not reproduced**. Per this entry's own
+  standing warning — this pipeline has produced several "obviously a settling
+  race" diagnoses the pixels later overturned — no theory about Chrome's
+  internals is recorded here, because none was tested. What is proven is the
+  *location* (the unbounded wait) and that bounding it converts the wedge into
+  a fast, labelled red. If it recurs, the new log will name the phase and the
+  killed-process message will carry Chrome's stderr — start there.
+  **Carrying-cost fix, filed alongside and explicitly NOT a root-cause fix:**
+  no workflow in this repo set `timeout-minutes` at all, so any wedge anywhere
+  ran to the 6-hour default. Every job in `.github/workflows/pre-merge.yml` now
+  has one, sized from the p95/max of the last ~60 runs' successful jobs at
+  roughly 2-3x the observed max (story job: p95 23.7 min, max 24.4 → 45).
+  Generous on purpose: the goal is to convert a wedge into a fast red, not to
+  make a slow-but-healthy run flaky. **This bounds the damage; it does not
+  explain the hang.** The entry stays open on the root cause.

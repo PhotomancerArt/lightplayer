@@ -82,7 +82,7 @@ hex — which every chip must agree on.
   registry still keys on `dev_…` — but the fact is now on the wire, which
   is the prerequisite. Reconciling a re-provisioned board back to its
   registry entry by MAC is deliberate follow-up work, not a side effect of
-  this change.
+  this change. (Done: see 2026-08-04-device-identity-anchored-in-silicon.md.)
 - It does **not** help a board that cannot boot. Everything here is behind
   the hello, so a board stuck rebooting reaches no layer where identity
   exists. That is why the boot-loop defect

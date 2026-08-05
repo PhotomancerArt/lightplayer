@@ -135,6 +135,15 @@ genuinely fits none of these, and define it here in one line.
 - **`retired-surface-still-reachable`** — a surface believed replaced is
   still rendered, because its replacement can be absent and the old
   surface is the fallback branch.
+- **`unenforced-test-precondition`** — a test depends on a condition it never
+  establishes (a scheduling order, a timing window, an invocation count), so
+  the nondeterminism decides both outcomes: sometimes the assertion fails
+  spuriously, sometimes it passes having exercised nothing. The silent half is
+  the expensive one. The fix shape is to hold the nondeterminism rather than
+  hope — throttle the adversary by *quantity of work*, never by elapsed time
+  (a time budget is the same defect wearing a control knob), establish the
+  precondition by construction, then check an invariant that would be false if
+  the intended interleaving never occurred.
 - **`reclaim-ordered-behind-its-own-rebuild`** — a resource is released to
   make room for a transient, but the releasing component rebuilds it
   earlier in the same pass than the transient runs, so net reclaim at the
@@ -211,6 +220,7 @@ the combination first being registered as a target.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
 | opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |

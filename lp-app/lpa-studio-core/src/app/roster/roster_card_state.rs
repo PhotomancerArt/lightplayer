@@ -131,8 +131,8 @@ pub enum RosterCardState {
     /// Speaks the wire framing but not this build's protocol: reflash is
     /// the only remedy. Amber solid.
     NeedsFirmwareUpdate,
-    /// Holds a project but no stamped identity: naming (stamping) adopts
-    /// it. Amber solid.
+    /// Live, but the board has no NAME yet: naming it (a registry write
+    /// under its own derived uid) is the way on. Amber solid.
     NeedsAName,
     /// The readiness deadline passed with no classification, or the retry
     /// ladder gave up. Red solid; troubleshooting popup.
