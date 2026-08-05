@@ -42,7 +42,7 @@
 //! slot is cancelled by the abort request rather than refused at start).
 
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use core::sync::atomic::{AtomicPtr, AtomicU8, AtomicU32, AtomicUsize};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, AtomicUsize};
 
 use crate::driver::Ws281xDriver;
 use crate::hw::RmtHw;
@@ -353,7 +353,6 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
         // not pin `self` across the `&mut self` calls below.
         let mailboxes = self.mailboxes;
         for (wire, mailbox) in mailboxes.iter().enumerate() {
-
             let close_req = mailbox.close_req_seq.load(Acquire);
             if seq_after(close_req, mailbox.close_ack_seq.load(Relaxed)) {
                 self.dispose_through(wire, close_req, WireOutcome::Cancelled);
@@ -416,8 +415,7 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
                 continue;
             }
             let mailbox = &mailboxes[wire];
-            let Some((seq, ptr, len, gpio)) = mailbox.pending_for_pusher(self.started[wire])
-            else {
+            let Some((seq, ptr, len, gpio)) = mailbox.pending_for_pusher(self.started[wire]) else {
                 continue;
             };
             // Covered by a pending close/abort: dispose, never start.
@@ -467,9 +465,7 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
     /// busy slot is never taken.
     fn acquire_slot(&mut self, wire: u8, gpio: u8) -> Option<usize> {
         let usable = &self.slots[..self.slot_count];
-        let mine = usable
-            .iter()
-            .position(|s| s.owner_wire == wire && !s.busy);
+        let mine = usable.iter().position(|s| s.owner_wire == wire && !s.busy);
         let pick = mine
             .or_else(|| usable.iter().position(|s| s.owner_wire == NONE && !s.busy))
             .or_else(|| usable.iter().position(|s| !s.busy))?;
@@ -502,7 +498,9 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
         }
         self.wire_channel[wire] = NO_CHANNEL;
         self.transmitting -= 1;
-        self.mailboxes[wire].active_channel.store(NO_CHANNEL, Relaxed);
+        self.mailboxes[wire]
+            .active_channel
+            .store(NO_CHANNEL, Relaxed);
     }
 
     /// Drop every slot binding to `wire`'s pad (close-time teardown). The

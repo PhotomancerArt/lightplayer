@@ -701,7 +701,11 @@ impl Esp32V3RmtWs281xOutput {
                     self.index,
                     self.gpio,
                     FRAME_TIMEOUT.as_millis(),
-                    if timed_out { "" } else { " (disposed by a concurrent close)" },
+                    if timed_out {
+                        ""
+                    } else {
+                        " (disposed by a concurrent close)"
+                    },
                 ),
             }),
             WireOutcome::StartFailed => Err(OutputError::Other {
