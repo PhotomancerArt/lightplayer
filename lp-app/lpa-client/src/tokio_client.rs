@@ -549,6 +549,7 @@ impl TokioLpClient {
                     uptime_ms,
                     memory,
                     recovery,
+                    ..
                 } if self.display_heartbeats => {
                     display_heartbeat(
                         fps,
