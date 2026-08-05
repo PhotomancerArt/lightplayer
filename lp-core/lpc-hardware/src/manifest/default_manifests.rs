@@ -214,14 +214,20 @@ mod tests {
             manifest.resource(&HwAddress::gpio(12)).is_none(),
             "gpio12 is not exposed by this board and must stay absent"
         );
-        // And no fifth /rmt/ws281xK rides along: plan_for_declared(5) gives
-        // every channel 1 block — a 40 µs refill deadline against a start-path
-        // masking cost measured at up to 69 µs on this board
-        // (docs/adr/2026-08-02-classic-hli-refill.md). Declaring a fifth
-        // channel would not add one; it would break the working four.
+        // The fifth wire rides the slot POOL, not a fifth transmitter: since
+        // the wire/slot decoupling (fw-esp32v3's `plan_for_declared` caps
+        // silicon slots at four two-block transmitters and extra wires
+        // time-share them by pin muxing), declaring `/rmt/ws281x4` no longer
+        // shrinks anyone's window to the undeliverable 40 µs geometry — the
+        // objection the earlier version of this test encoded. IO13 is that
+        // fifth wire's pad on this board (the Zook dome's 5th strand).
         assert!(
-            manifest.resource(&HwAddress::rmt_ws281x(4)).is_none(),
-            "a 5th RMT channel cannot be deadline-funded on the classic"
+            manifest.resource(&HwAddress::rmt_ws281x(4)).is_some(),
+            "the 5th wire resource must be declared for the 5-strand dome"
+        );
+        assert!(
+            manifest.resource(&HwAddress::rmt_ws281x(5)).is_none(),
+            "wires beyond the validated five are not declared on this board"
         );
     }
 
