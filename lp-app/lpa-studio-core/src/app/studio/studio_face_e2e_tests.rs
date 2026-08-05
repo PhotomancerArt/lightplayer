@@ -1278,8 +1278,12 @@ fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
     );
     assert_eq!(
         layout.paths.len(),
-        10,
-        "one span per document object (five channels, two runs each)"
+        5,
+        "one span per repeat instance (the dome ships as 1 gapped sector x repeat 5)"
+    );
+    assert!(
+        layout.paths.iter().all(|span| span.lamp_count == 300),
+        "every instance is one physical 300-lamp strand"
     );
     assert_eq!(
         layout.paths.iter().map(|span| span.lamp_count).sum::<u32>(),
