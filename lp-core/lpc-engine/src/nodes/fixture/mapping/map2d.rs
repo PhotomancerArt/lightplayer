@@ -7,7 +7,7 @@
 //! imports — funnel through here.
 //!
 //! This used to expand the resolver's already-compact output (positions +
-//! one span per object) into `MappingConfig::PathPoints` slots: 24 B of slot
+//! one span per physical strand) into `MappingConfig::PathPoints` slots: 24 B of slot
 //! tuple per lamp, 41 B/LED live once `VecMap`'s power-of-two capacity
 //! overshoot is counted, to carry 8 B of coordinate. Nothing downstream
 //! needed the slot addressing — every consumer goes through the mapping
@@ -51,11 +51,16 @@ pub fn mapping_from_map2d_doc(
     )?;
     drop(positions);
 
+    // One carrier span per resolver span, and the resolver's spans are
+    // *strands*, not objects: a `repeat` object emits one per instance, all
+    // carrying its object index. Copying the list straight through is what
+    // keeps N rotated instances N separate runs downstream — the fixture's
+    // honest spans and the output face's strip boundaries both read this.
     let mut compact_spans = Vec::with_capacity(spans.len());
     for span in &spans {
         compact_spans.push(ResolvedSpan {
             object: span.object,
-            // Wiring order is the channel order: an object's first lamp
+            // Wiring order is the channel order: a strand's first lamp
             // index IS its first channel (what the slot form stored as the
             // point list's `first_channel`).
             first_channel: span.start,
@@ -96,6 +101,33 @@ mod tests {
         assert_eq!(mapping.spans[1].count, 2);
         assert_eq!(mapping.points.len(), 5);
         assert_eq!(mapping.sample_diameter, 2.0);
+    }
+
+    /// A repeated document must bridge as N runs, not one: the carrier keeps
+    /// one span per instance, each starting where the last ended, and every
+    /// one still naming the single document object it came from.
+    #[test]
+    fn a_repeated_document_bridges_one_span_per_instance() {
+        let doc = lpc_mapping::corpus::repeated_sector();
+        let mapping = mapping_from_map2d_doc(&doc, 64, 64).expect("resolve");
+        assert_eq!(doc.objects.len(), 1);
+        assert_eq!(mapping.spans.len(), 5, "five instances, five strands");
+        for (instance, span) in mapping.spans.iter().enumerate() {
+            assert_eq!(span.object, 0);
+            assert_eq!(span.count, 12);
+            assert_eq!(span.first_channel, instance as u32 * 12);
+        }
+        assert_eq!(mapping.points.len(), 60);
+        assert_eq!(mapping.lamp_count(), 60);
+        // The carrier's invariant holds with repeated spans too.
+        assert_eq!(
+            mapping
+                .spans
+                .iter()
+                .map(|s| s.count as usize)
+                .sum::<usize>(),
+            mapping.points.len()
+        );
     }
 
     #[test]

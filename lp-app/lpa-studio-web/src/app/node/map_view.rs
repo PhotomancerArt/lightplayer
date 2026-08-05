@@ -66,6 +66,7 @@ impl MapViewOptions {
             universes: self.universes,
             live: self.live,
             fit_preview: false,
+            reference: true,
         }
     }
 
