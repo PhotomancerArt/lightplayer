@@ -16,8 +16,8 @@ matrix. **The design target is eight wires; validation is tiered:**
 | tier | state |
 |---|---|
 | 4 wires | **Fully validated**: telemetry (zero trips/skips/errors, 170 s runs, cap 4 overlapped) + visual on the DOM-Z-102's four fused/level-shifted DATA terminals |
-| 5 wires | Telemetry-validated on the dome rig; visual = the Zook demo (IO13 spare terminal, raw 3.3 V pad — no level shifter, adequate on the bench) |
-| 6–8 wires | **Designed, untested.** No hardware: the DOM-Z-102 exposes five data-capable terminals; an 8-strip rig is a *different* esp32v3 board with more ports |
+| 5 wires | **Fully validated 2026-08-05** (overlap plan G1): 29.99 fps engine-bound under the wire pusher (ADR `2026-08-05-ws281x-transmission-on-app-core.md`), zero trips over 240 s, visual + scope check incl. the unshifted IO13 pad; upload-under-render degrades to exactly one torn frame |
+| 6–8 wires | **Designed, host-proven, silicon-untested.** The two-waves-of-four schedule is proven against MockRmt (`lp-ws281x/tests/pusher.rs`); no hardware — the DOM-Z-102 exposes five data-capable terminals. **Rig deferred** (Yona, 2026-08-05): past Zook-dome time, to the S3/C6/GA era |
 
 ## What "fully testing 8" needs
 
@@ -25,14 +25,20 @@ matrix. **The design target is eight wires; validation is tiered:**
   product family question, not just a test fixture.
 - **Wave-schedule telemetry at 8**: two full waves of four; the per-slot
   `[WS281X]` counters aggregate across wires that share a slot, so an 8-wire
-  run also wants the per-wire attribution layer (P7 planning scope).
+  run also wants the per-wire attribution layer. **Landed 2026-08-05** (the
+  overlap plan's P4): `[WS281X-WIRE]` lines carry per-wire posted / sent /
+  torn (slot-delta attribution) / waved (the second-wave signature) /
+  aborted / cancelled / failed / worst post→start (queue-wait) latency.
 - **Mux-correctness proof beyond visual**: an RMT-RX loopback harness (route
   a muxed pad's signal back into a receiver via the matrix) proving the right
   bytes leave the right pad through takeovers. Optional for 5 (visual + trip
   counters carry it); worth building for 8.
 - **The total-LED budget shipped as manifest soft limits** — heap binds
   (~1500–2000 LEDs today) before frame time does; "8 channels" must never be
-  read as 8× dome strips.
+  read as 8× dome strips. **Landed 2026-08-05** (ADR
+  `2026-08-05-manifest-soft-limits-are-measured-records.md`): DOM-Z-102
+  carries a provenanced totalLeds=1500 record, surfaced in the hello and on
+  the Studio output face.
 
 ## The Fadecandy scenario (why 8×64 is the realer target than 8×300)
 

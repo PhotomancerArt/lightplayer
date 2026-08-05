@@ -7,7 +7,7 @@
 //! picking a pin is the one gesture a still capture otherwise cannot show.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiOutputChannelRow, UiOutputFace};
+use lpa_studio_core::{UiLedBudget, UiOutputChannelRow, UiOutputFace, UiWireStatus};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{output_channel, output_face, output_node_view};
@@ -50,6 +50,28 @@ fn dome_channels(counts: [Option<u32>; 5]) -> Vec<UiOutputChannelRow> {
 
 const DOME_SPANS: [u32; 5] = [0, 280, 610, 900, 1210];
 
+/// The dome face with the device live: per-wire heartbeat status (the
+/// fifth wire waves — it time-shares a transmitter slot) and the board's
+/// measured LED envelope. `torn_on_io13` puts tears on the unshifted
+/// spare-terminal wire, the one pad with no level shifter.
+fn live_dome_face(used: u32, budget: u32, torn_on_io13: u32) -> UiOutputFace {
+    let mut face = dome_face(
+        [Some(280), Some(330), Some(290), Some(310), None],
+        Some(DESK_BOARD),
+    );
+    for (index, row) in face.channels.iter_mut().enumerate() {
+        let waves = index == 4;
+        row.wire_status = Some(UiWireStatus {
+            sent: 14_380 - (index as u32 * 7),
+            torn: if index == 4 { torn_on_io13 } else { 0 },
+            waves,
+            queue_wait_ms: if waves { 10 } else { 1 },
+        });
+    }
+    face.led_budget = Some(UiLedBudget { used, budget });
+    face
+}
+
 fn dome_face(counts: [Option<u32>; 5], board: Option<&str>) -> UiOutputFace {
     output_face(
         board,
@@ -84,6 +106,34 @@ fn dome_five_channels() -> Element {
                     dome_face([Some(280), Some(330), Some(290), Some(310), None], Some(DESK_BOARD)),
                     "5 wires · 1500 lamps",
                 ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The dome LIVE at the measured envelope: a connected device's heartbeat fills each wire's health — steady sent counters on the four fused terminals, and the fifth wire (IO13) carrying the 'wave 2' block: it time-shares a pooled transmitter and waits its turn each frame, a designed state rendered as a quiet squared block, never a warning. The budget line reads 1500/1500 in the dim tone: AT the measured envelope is exactly where the proven configuration sits."
+)]
+fn dome_live_at_envelope() -> Element {
+    rsx! {
+        OutputCardCanvas {
+            NodePane {
+                view: output_node_view(live_dome_face(1500, 1500, 0), "5 wires · 1500 lamps"),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The dome in DISTRESS, both attention states at once: the project grew past the board's measured envelope (1800/1500 — the budget line flips to the attention tone; advice, not an error, since the device proceeds and warns about heap pressure) and the unshifted IO13 wire is tearing frames ('torn 41' in attention where its quiet sent-counter would be — the missing level shifter is the first suspect on exactly that pad). What must read at a glance: which wire hurts, and that its 'wave 2' block is NOT part of the problem."
+)]
+fn dome_over_budget_and_torn() -> Element {
+    rsx! {
+        OutputCardCanvas {
+            NodePane {
+                view: output_node_view(live_dome_face(1800, 1500, 41), "5 wires · 1800 lamps"),
                 on_action: move |_| {},
             }
         }

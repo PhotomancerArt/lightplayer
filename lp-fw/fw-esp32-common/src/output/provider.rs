@@ -143,6 +143,35 @@ impl OutputProvider for Esp32OutputProvider {
             },
         );
 
+        // The board's measured total-LED envelope, if it carries one. A SOFT
+        // limit: exceeding it warns and proceeds — the record is evidence of
+        // what has run clean (heap binds before frame time on the classic),
+        // never a refusal. Checked at open, not per frame: opens are rare and
+        // the sum only changes here.
+        if let Some(budget) = self
+            .hardware_system
+            .registry()
+            .manifest()
+            .soft_limits()
+            .and_then(|limits| limits.total_leds.as_ref())
+        {
+            let total_leds: u32 = self
+                .channels
+                .borrow()
+                .iter()
+                .map(|(_, channel)| channel.byte_count / 3)
+                .sum();
+            if total_leds > budget.value {
+                log::warn!(
+                    "Esp32OutputProvider::open: total LEDs across outputs ({total_leds}) \
+                     exceed the board's measured envelope of {} — proceeding; expect heap \
+                     pressure. Envelope provenance: {}",
+                    budget.value,
+                    budget.measured,
+                );
+            }
+        }
+
         Ok(handle)
     }
 
@@ -357,6 +386,35 @@ mod tests {
         provider
             .write(handle, &exact)
             .expect("a write of exactly the capped size succeeds");
+    }
+
+    /// The total-LED soft limit is SOFT: an open that pushes the board past
+    /// its measured envelope warns (log-only) and must still succeed — a
+    /// refusal would invert the measured-records convention.
+    #[test]
+    fn opening_past_the_soft_led_envelope_still_succeeds() {
+        use lpc_hardware::{HwMeasuredLimit, HwSoftLimits};
+        let manifest = HwManifest::virtual_single_rmt_gpio_board().with_soft_limits(HwSoftLimits {
+            total_leds: Some(HwMeasuredLimit {
+                value: 10,
+                measured: "test envelope".into(),
+            }),
+        });
+        let registry = Rc::new(HwRegistry::new(manifest));
+        let provider =
+            Esp32OutputProvider::new(Rc::new(HardwareSystem::with_virtual_drivers(registry)));
+
+        // 100 lamps against an envelope of 10: warns, proceeds.
+        let handle = provider
+            .open(
+                &lpc_hardware::HwEndpointSpec::from_static("ws281x:local:D10"),
+                100 * 3,
+                OutputFormat::Ws2811,
+                None,
+            )
+            .expect("a soft limit must never refuse an open");
+        let frame = vec![0u16; 100 * 3];
+        provider.write(handle, &frame).expect("and writes proceed");
     }
 
     /// 375 and 1024 lamps both sit at or under the cap: `open` must grant
