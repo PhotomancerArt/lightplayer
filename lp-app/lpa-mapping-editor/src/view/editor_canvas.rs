@@ -13,10 +13,10 @@
 //! every committed change so the host can persist.
 
 use dioxus::prelude::*;
-use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, bounds_of_points, resolve};
+use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, Rotation2d, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
-use crate::editor_core::editor_session::MapEditorSession;
+use crate::editor_core::editor_session::{MapEditorSession, editable_path};
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::{ArrowInput, universe_rgb, wiring_arrows};
 use crate::view::map_editor::EditorViewOptions;
@@ -174,26 +174,27 @@ pub fn EditorCanvas(
     let tool_is_select = matches!(session_read.tool, MapTool::Select);
     let tool = session_read.tool.clone();
     let selection = session_read.selection.clone();
+    // Authored polylines, repeats included: a repeated path's editable
+    // geometry is instance 0 — the unrotated inner path — so that is what
+    // takes clicks and shows handles.
     let path_objects: Vec<(usize, Vec<[f32; 2]>)> = doc
         .objects
         .iter()
         .enumerate()
-        .filter_map(|(index, object)| match &object.shape {
-            Map2dShape::Path(path) => Some((index, path.points.clone())),
-            _ => None,
+        .filter_map(|(index, object)| {
+            editable_path(&object.shape).map(|path| (index, path.points.clone()))
         })
         .collect();
     // Inert (jumper) segments carry no lamps, so nothing else on the canvas
     // shows them: draw the wire itself, dashed and dimmed. Gap indices always
     // name authored segments — `reversed` mirrors them in the resolver so the
     // same physical run stays inert — so no direction handling is needed here.
+    // Under a repeat this draws instance 0's jumpers; the other instances are
+    // the same wire turned, and their lamps already show the shape.
     let gap_segments: Vec<[[f32; 2]; 2]> = doc
         .objects
         .iter()
-        .filter_map(|object| match &object.shape {
-            Map2dShape::Path(path) => Some(path),
-            _ => None,
-        })
+        .filter_map(|object| editable_path(&object.shape))
         .flat_map(|path| {
             path.gaps.iter().filter_map(|gap| {
                 let start = path.points.get(*gap as usize)?;
@@ -202,6 +203,37 @@ pub fn EditorCanvas(
             })
         })
         .collect();
+    // Repeat affordances for the selected object: the point it turns about,
+    // and — for a repeated polyline — where the other instances of that
+    // polyline run, which lamps alone leave to inference.
+    let repeat_center: Option<[f32; 2]> = selection
+        .single()
+        .and_then(|index| doc.objects.get(index))
+        .and_then(|object| match &object.shape {
+            Map2dShape::Repeat(repeat) => Some(repeat.center),
+            _ => None,
+        });
+    let ghost_outlines: Vec<Vec<[f32; 2]>> = selection
+        .single()
+        .and_then(|index| doc.objects.get(index))
+        .and_then(|object| match &object.shape {
+            Map2dShape::Repeat(repeat) => {
+                let path = editable_path(&repeat.shape)?;
+                Some(
+                    (1..repeat.count)
+                        .map(|instance| {
+                            let rotation = Rotation2d::about(
+                                repeat.center,
+                                repeat.instance_degrees(instance),
+                            );
+                            path.points.iter().map(|p| rotation.apply(*p)).collect()
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        })
+        .unwrap_or_default();
     let resolved = resolve(doc).unwrap_or(ResolvedMap2d {
         lamps: Vec::new(),
         spans: Vec::new(),
@@ -264,14 +296,14 @@ pub fn EditorCanvas(
     let handle_half = 5.0 / cam.scale;
     let selection_margin = radius + 8.0 / cam.scale;
 
-    // Vertex handles for a single selected path.
+    // Vertex handles for a single selected path — the inner path through a
+    // repeat, whose other instances follow the drag on the next resolve.
     let vertex_points: Vec<[f32; 2]> = selection
         .single()
         .and_then(|index| doc.objects.get(index))
-        .and_then(|object| match &object.shape {
-            Map2dShape::Path(path) if tool_is_select => Some(path.points.clone()),
-            _ => None,
-        })
+        .filter(|_| tool_is_select)
+        .and_then(|object| editable_path(&object.shape))
+        .map(|path| path.points.clone())
         .unwrap_or_default();
     let selected_vertex = selection.vertex;
 
@@ -605,6 +637,15 @@ pub fn EditorCanvas(
                         }
                     }
                 }
+                // Where the other instances of a selected repeated path run.
+                for (instance, outline) in ghost_outlines.iter().enumerate() {
+                    polyline {
+                        key: "ghost{instance}",
+                        class: "lpme-ghost",
+                        points: outline.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
+                        stroke_width: "{1.2 / cam.scale}",
+                    }
+                }
                 // Jumper wire: the segments an author marked inert.
                 for (index, segment) in gap_segments.iter().enumerate() {
                     line {
@@ -800,6 +841,41 @@ pub fn EditorCanvas(
                                     moved: false,
                                 }));
                             },
+                        }
+                    }
+                }
+                // The point a selected repeat turns about: a crosshair, not a
+                // handle — it moves with the object (drag) and by its own
+                // number fields, and a draggable dot here would collide with
+                // the marquee.
+                if let Some(center) = repeat_center {
+                    {
+                        let arm = 9.0 / cam.scale;
+                        let stroke = 1.4 / cam.scale;
+                        rsx! {
+                            circle {
+                                class: "lpme-repeat-center",
+                                cx: "{center[0]}",
+                                cy: "{center[1]}",
+                                r: "{arm * 0.55}",
+                                stroke_width: "{stroke}",
+                            }
+                            line {
+                                class: "lpme-repeat-center",
+                                x1: "{center[0] - arm}",
+                                y1: "{center[1]}",
+                                x2: "{center[0] + arm}",
+                                y2: "{center[1]}",
+                                stroke_width: "{stroke}",
+                            }
+                            line {
+                                class: "lpme-repeat-center",
+                                x1: "{center[0]}",
+                                y1: "{center[1] - arm}",
+                                x2: "{center[0]}",
+                                y2: "{center[1] + arm}",
+                                stroke_width: "{stroke}",
+                            }
                         }
                     }
                 }

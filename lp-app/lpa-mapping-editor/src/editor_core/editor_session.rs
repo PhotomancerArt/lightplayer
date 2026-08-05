@@ -11,7 +11,8 @@ use std::collections::BTreeSet;
 
 use lpc_mapping::{
     Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape,
-    ResolvedMap2d, RingDir, RingOrder, RingShape, bounds_of_points, resolve,
+    RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d, bounds_of_points,
+    resolve,
 };
 
 use crate::editor_core::map_selection::MapSelection;
@@ -22,6 +23,10 @@ const UNDO_CAP: usize = 100;
 /// Default lamp pitch used by creation defaults and path-count derivation
 /// (doc-space units; the spike's value).
 pub const DEFAULT_PITCH: f32 = 26.0;
+
+/// Instances a freshly authored repeat starts with — enough to read as a
+/// wheel at a glance, and the dome's own sector count.
+pub const DEFAULT_REPEAT_COUNT: u32 = 5;
 
 pub struct MapEditorSession {
     doc: Map2dDoc,
@@ -239,6 +244,10 @@ impl MapEditorSession {
     }
 
     /// Move one vertex of the single selected path (gesture-driven).
+    ///
+    /// Through a repeat this edits the **inner** path — the handles sit on
+    /// instance 0, and every other instance is that same path turned, so they
+    /// follow live.
     pub fn move_vertex_from_gesture(&mut self, vertex: usize, position: [f32; 2]) {
         let Some(base) = self.gesture_doc() else {
             return;
@@ -247,7 +256,11 @@ impl MapEditorSession {
             return;
         };
         self.doc = base;
-        if let Some(Map2dShape::Path(path)) = self.doc.objects.get_mut(index).map(|o| &mut o.shape)
+        if let Some(path) = self
+            .doc
+            .objects
+            .get_mut(index)
+            .and_then(|object| editable_path_mut(&mut object.shape))
             && let Some(point) = path.points.get_mut(vertex)
         {
             *point = position;
@@ -263,7 +276,10 @@ impl MapEditorSession {
     /// point shift up with their segments.
     pub fn insert_path_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) {
         self.edit(|doc| {
-            if let Some(Map2dShape::Path(path)) = doc.objects.get_mut(index).map(|o| &mut o.shape)
+            if let Some(path) = doc
+                .objects
+                .get_mut(index)
+                .and_then(|object| editable_path_mut(&mut object.shape))
                 && at <= path.points.len()
             {
                 path.gaps = gaps_after_vertex_insert(&path.gaps, at);
@@ -278,8 +294,10 @@ impl MapEditorSession {
         if let (Some(index), Some(vertex)) = (self.selection.single(), self.selection.vertex) {
             let mut deleted = false;
             self.edit(|doc| {
-                if let Some(Map2dShape::Path(path)) =
-                    doc.objects.get_mut(index).map(|o| &mut o.shape)
+                if let Some(path) = doc
+                    .objects
+                    .get_mut(index)
+                    .and_then(|object| editable_path_mut(&mut object.shape))
                     && path.points.len() > 2
                     && vertex < path.points.len()
                 {
@@ -353,7 +371,18 @@ impl MapEditorSession {
     /// Illustrator-style expand: replace a parametric object with a plain
     /// path through its own resolved lamps, ready for hand-tweaking. The
     /// lamp layout is identical before and after.
+    ///
+    /// A [`RepeatShape`] expands differently — into one independent object per
+    /// instance, see [`Self::expand_repeat`] — because baking its whole wheel
+    /// into a single path would fuse N physical strands into one run.
     pub fn expand_object(&mut self, index: usize) {
+        if matches!(
+            self.doc.objects.get(index).map(|object| &object.shape),
+            Some(Map2dShape::Repeat(_))
+        ) {
+            self.expand_repeat(index);
+            return;
+        }
         let positions: Vec<[f32; 2]> = {
             let resolved = self.resolved();
             // The object's WHOLE lamp range, strands merged: `spans[index]` is
@@ -380,6 +409,111 @@ impl MapEditorSession {
                 });
             }
         });
+    }
+
+    /// Expand a repeat into one independent object per instance
+    /// (`{name}-1`…`{name}-N`), in wiring order, selecting the new objects.
+    ///
+    /// This is the on-playa move: the wheel stops being parametric so a single
+    /// strand can be nudged where the physical dome disagrees with the model,
+    /// and *nothing else changes* — the lamps, their order, and their strand
+    /// boundaries are the same before and after. Instances therefore stay
+    /// parametric wherever the turn is representable (a path's points rotate,
+    /// a ring's center rotates and its start angle shifts, a nested repeat's
+    /// inner shape and center both rotate); only a grid, which has no rotation
+    /// of its own, bakes down to a path through its resolved lamps.
+    pub fn expand_repeat(&mut self, index: usize) {
+        let Some(Map2dShape::Repeat(repeat)) =
+            self.doc.objects.get(index).map(|object| object.shape.clone())
+        else {
+            return;
+        };
+        let name = self.doc.objects[index].name.clone();
+        let count = repeat.count.max(1);
+        // Instance lamps come from the live resolution, so a shape that cannot
+        // rotate itself bakes to exactly the lamps the repeat produced.
+        let instance_positions: Vec<Vec<[f32; 2]>> = {
+            let resolved = self.resolved();
+            let Some(span) = resolved.object_span(index as u32) else {
+                return;
+            };
+            let per_instance = span.count / count;
+            (0..count)
+                .map(|instance| {
+                    let start = (span.start + instance * per_instance) as usize;
+                    resolved.lamps[start..start + per_instance as usize]
+                        .iter()
+                        .map(|lamp| lamp.pos)
+                        .collect()
+                })
+                .collect()
+        };
+        let objects: Vec<Map2dObject> = (0..count)
+            .map(|instance| {
+                let rotation =
+                    Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
+                let degrees = repeat.instance_degrees(instance);
+                let shape = rotate_shape(&repeat.shape, rotation, degrees)
+                    .unwrap_or_else(|| bake_path(&instance_positions[instance as usize]));
+                Map2dObject {
+                    name: format!("{name}-{}", instance + 1),
+                    shape,
+                }
+            })
+            .collect();
+        self.edit(move |doc| {
+            doc.objects.splice(index..=index, objects);
+        });
+        self.selection.objects = (index..index + count as usize).collect();
+        self.selection.vertex = None;
+    }
+
+    /// Wrap one object's shape in a rotational repeat about the canvas center
+    /// (falling back to the document's lamp bounds), `count` instances.
+    ///
+    /// The object keeps its slot in the wiring order and its selection: what
+    /// was one strand is now `count` strands of the same shape, and the rail
+    /// row still names one object.
+    pub fn repeat_object(&mut self, index: usize, count: u32) {
+        let Some(center) = self.default_repeat_center() else {
+            return;
+        };
+        self.edit(move |doc| {
+            if let Some(object) = doc.objects.get_mut(index) {
+                let inner = object.shape.clone();
+                object.shape = Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(inner),
+                    center,
+                    count,
+                });
+            }
+        });
+    }
+
+    /// Unwrap one level of repeat: the object keeps instance 0's shape and
+    /// loses the other instances. The inverse of [`Self::repeat_object`].
+    pub fn unwrap_repeat(&mut self, index: usize) {
+        self.edit(|doc| {
+            if let Some(object) = doc.objects.get_mut(index)
+                && let Map2dShape::Repeat(repeat) = &object.shape
+            {
+                object.shape = (*repeat.shape).clone();
+            }
+        });
+    }
+
+    /// Where a new repeat turns about: the authored canvas rect's center when
+    /// the document has one (the frame the author composed in), else the
+    /// center of everything resolved.
+    fn default_repeat_center(&mut self) -> Option<[f32; 2]> {
+        let bounds = self
+            .doc
+            .canvas_bounds()
+            .or_else(|| bounds_of_points(&self.resolved().positions()))?;
+        Some([
+            bounds.min_x + bounds.width / 2.0,
+            bounds.min_y + bounds.height / 2.0,
+        ])
     }
 
     // ---- creation (parent decision D6: click drops defaults) -------------
@@ -528,6 +662,76 @@ impl MapEditorSession {
     fn invalidate(&mut self) {
         self.resolved = None;
     }
+}
+
+/// The path a shape offers for vertex editing: its own, or — through any
+/// number of repeats — the inner path every instance is a turned copy of.
+///
+/// Editing instance 0 *is* editing the repeat: handles sit on the authored
+/// geometry and the other instances follow on the next resolve.
+fn editable_path_mut(shape: &mut Map2dShape) -> Option<&mut PathShape> {
+    match shape {
+        Map2dShape::Path(path) => Some(path),
+        Map2dShape::Repeat(repeat) => editable_path_mut(&mut repeat.shape),
+        _ => None,
+    }
+}
+
+/// The same path, read-only — what the canvas draws handles and jumper lines
+/// on.
+#[must_use]
+pub fn editable_path(shape: &Map2dShape) -> Option<&PathShape> {
+    match shape {
+        Map2dShape::Path(path) => Some(path),
+        Map2dShape::Repeat(repeat) => editable_path(&repeat.shape),
+        _ => None,
+    }
+}
+
+/// One instance of a shape under a repeat's turn, still parametric.
+///
+/// `None` for a grid: it has no rotation of its own, so a turned grid is only
+/// representable as baked geometry. Everything else carries the turn in its
+/// own parameters — which is what keeps an expanded instance resolving to the
+/// lamps the repeat produced instead of a re-sampled approximation of them.
+fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Option<Map2dShape> {
+    Some(match shape {
+        Map2dShape::Path(path) => Map2dShape::Path(PathShape {
+            points: path.points.iter().map(|p| rotation.apply(*p)).collect(),
+            count: path.count,
+            reversed: path.reversed,
+            gaps: path.gaps.clone(),
+        }),
+        Map2dShape::Ring(ring) => Map2dShape::Ring(RingShape {
+            center: rotation.apply(ring.center),
+            radius: ring.radius,
+            outer_count: ring.outer_count,
+            rings: ring.rings,
+            counts: ring.counts.clone(),
+            order: ring.order,
+            start_angle_deg: ring.start_angle_deg + degrees,
+            dir: ring.dir,
+        }),
+        // Turning a wheel of wheels turns the hub and the spoke together: a
+        // rotation conjugated by another rotation is the same rotation about
+        // the moved center, so the inner instances land where they did.
+        Map2dShape::Repeat(repeat) => Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(rotate_shape(&repeat.shape, rotation, degrees)?),
+            center: rotation.apply(repeat.center),
+            count: repeat.count,
+        }),
+        Map2dShape::Grid(_) => return None,
+    })
+}
+
+/// A plain path through already-resolved lamp positions (the bake fallback).
+fn bake_path(positions: &[[f32; 2]]) -> Map2dShape {
+    Map2dShape::Path(PathShape {
+        points: positions.to_vec(),
+        count: (positions.len() as u32).max(1),
+        reversed: false,
+        gaps: Vec::new(),
+    })
 }
 
 fn translate_shape(shape: &mut Map2dShape, dx: f32, dy: f32) {
@@ -1065,20 +1269,300 @@ mod tests {
         assert_eq!(session.lamp_count(), 16);
     }
 
-    /// Expand bakes a repeat through its **whole** resolved range, not just
-    /// its first instance — `spans[index]` is one strand now.
+    /// Wrapping a shape in a repeat is one undo step, turns about the canvas
+    /// center, and multiplies the strands without touching the wiring order.
     #[test]
-    fn expanding_a_repeat_bakes_every_instance() {
-        let mut session = session_with_repeat(4);
-        assert_eq!(session.lamp_count(), 16);
-        session.expand_object(0);
-        let Map2dShape::Path(path) = &session.doc().objects[0].shape else {
-            panic!("expected a path after expand");
-        };
-        assert_eq!(path.points.len(), 16);
-        assert_eq!(session.lamp_count(), 16);
-        // Baked geometry needs nothing newer than the base format.
+    fn repeat_around_a_point_wraps_one_object_in_one_step() {
+        let mut session = session_with_gapped_path();
+        session.edit(|doc| doc.canvas = Some([0.0, 0.0, 40.0, 40.0]));
+        let before = session.lamp_count();
+        session.selection.select_only(0);
+        session.repeat_object(0, DEFAULT_REPEAT_COUNT);
+
+        let repeat = repeat_of(&session);
+        assert_eq!(repeat.count, DEFAULT_REPEAT_COUNT);
+        assert_eq!(repeat.center, [20.0, 20.0], "the authored canvas center");
+        assert!(matches!(repeat.shape.as_ref(), Map2dShape::Path(_)));
+        assert_eq!(session.lamp_count(), before * DEFAULT_REPEAT_COUNT);
+        assert_eq!(session.resolved().spans.len(), 5);
+        assert_eq!(session.doc().objects.len(), 1, "still one object");
+        assert_eq!(session.doc().format, 2);
+
+        // One step out, and the document is byte-for-byte what it was.
+        session.undo();
+        assert!(matches!(
+            session.doc().objects[0].shape,
+            Map2dShape::Path(_)
+        ));
+        assert_eq!(session.lamp_count(), before);
+    }
+
+    /// Without an authored canvas the turn centers on what the document
+    /// actually resolves to, so a freshly drawn path repeats about itself
+    /// rather than about the origin.
+    #[test]
+    fn a_repeat_without_a_canvas_turns_about_the_content_center() {
+        let mut session = session_with_gapped_path();
+        session.repeat_object(0, 4);
+        // The gapped-path fixture spans [0,0]..[20,10].
+        assert_eq!(repeat_of(&session).center, [10.0, 5.0]);
+    }
+
+    /// Unwrap is the inverse of wrap: instance 0's shape survives, the other
+    /// instances go, and the document drops back to format 1.
+    #[test]
+    fn unwrap_keeps_instance_zero_and_releases_the_format() {
+        let mut session = session_with_repeat(5);
+        let instance_zero: Vec<[f32; 2]> = session.resolved().lamps[..4]
+            .iter()
+            .map(|lamp| lamp.pos)
+            .collect();
+        session.unwrap_repeat(0);
+        assert!(matches!(
+            session.doc().objects[0].shape,
+            Map2dShape::Path(_)
+        ));
         assert_eq!(session.doc().format, 1);
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(after, instance_zero);
+        session.undo();
+        assert_eq!(repeat_of(&session).count, 5);
+    }
+
+    /// **The on-playa contract.** Expanding a repeat replaces it with one
+    /// object per instance, and the device output is untouched: same lamps, in
+    /// the same order, in the same strands. Only then is nudging one strand a
+    /// safe field repair.
+    #[test]
+    fn expanding_a_repeat_moves_no_lamp() {
+        // The mini-dome: one gapped sector strand, five instances.
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        let spans_before: Vec<(u32, u32)> = session
+            .resolved()
+            .spans
+            .iter()
+            .map(|span| (span.start, span.count))
+            .collect();
+
+        session.expand_object(0);
+
+        assert_eq!(session.doc().objects.len(), 5);
+        let names: Vec<&str> = session
+            .doc()
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["sector-1", "sector-2", "sector-3", "sector-4", "sector-5"]
+        );
+        // Selection lands on the new objects, one undo step behind.
+        assert_eq!(session.selection.objects, (0..5).collect::<BTreeSet<_>>());
+        assert!(session.can_undo());
+
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(after.len(), before.len());
+        // Rotation is the resolver's own (`Rotation2d` + `instance_degrees`),
+        // so the only difference is which side of the center subtraction each
+        // arithmetic happens on: an expanded path's points are absolute, while
+        // the repeat's instance 0 still went through `center + (p - center)`.
+        // That is a last-bit difference — the printed worst case below is a
+        // couple of ulps at doc-space magnitudes in the hundreds, ~1e-5 of a
+        // lamp pitch — not a re-sampling of the geometry.
+        let worst = after
+            .iter()
+            .zip(&before)
+            .map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()))
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-3, "lamps moved by up to {worst} doc units");
+        let spans_after: Vec<(u32, u32)> = session
+            .resolved()
+            .spans
+            .iter()
+            .map(|span| (span.start, span.count))
+            .collect();
+        assert_eq!(spans_after, spans_before, "strand boundaries moved");
+        // Each instance kept the jumper the author marked, and the expanded
+        // geometry no longer needs the repeat construct — but gaps still do.
+        assert_eq!(session.doc().format, 2);
+
+        session.undo();
+        assert_eq!(session.doc().objects.len(), 1);
+        assert_eq!(repeat_of(&session).count, 5);
+    }
+
+    /// Expand stays parametric wherever the turn is representable: a repeated
+    /// ring expands to rings (turned center + shifted start angle), not to
+    /// baked polylines — so the objects stay editable as what they are.
+    #[test]
+    fn expanding_a_repeat_of_rings_keeps_them_rings() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "pod".to_string(),
+            shape: Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(Map2dShape::Ring(RingShape {
+                    center: [100.0, 40.0],
+                    radius: 20.0,
+                    outer_count: 8,
+                    rings: 1,
+                    counts: Vec::new(),
+                    order: RingOrder::OuterFirst,
+                    start_angle_deg: -90.0,
+                    dir: RingDir::Cw,
+                })),
+                center: [100.0, 100.0],
+                count: 6,
+            }),
+        });
+        let mut session = MapEditorSession::new(doc);
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        session.expand_object(0);
+        assert_eq!(session.doc().objects.len(), 6);
+        for object in &session.doc().objects {
+            assert!(matches!(object.shape, Map2dShape::Ring(_)), "still a ring");
+        }
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(after.len(), before.len());
+        for (index, (a, b)) in after.iter().zip(&before).enumerate() {
+            assert!(
+                (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3,
+                "lamp {index} moved: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    /// A grid has no rotation of its own, so a turned instance is only
+    /// representable as baked geometry — the one case expand falls back to a
+    /// path through the instance's own resolved lamps.
+    #[test]
+    fn expanding_a_repeat_of_grids_bakes_the_turned_instances() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "tile".to_string(),
+            shape: Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(Map2dShape::Grid(GridShape {
+                    origin: [100.0, 20.0],
+                    cols: 4,
+                    rows: 2,
+                    pitch: 10.0,
+                    routing: GridRouting::Snake,
+                    start_corner: GridCorner::Tl,
+                })),
+                center: [100.0, 100.0],
+                count: 4,
+            }),
+        });
+        let mut session = MapEditorSession::new(doc);
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        session.expand_object(0);
+        assert_eq!(session.doc().objects.len(), 4);
+        for object in &session.doc().objects {
+            assert!(matches!(object.shape, Map2dShape::Path(_)), "baked");
+        }
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(after.len(), before.len());
+        for (index, (a, b)) in after.iter().zip(&before).enumerate() {
+            assert!(
+                (a[0] - b[0]).abs() < 1e-2 && (a[1] - b[1]).abs() < 1e-2,
+                "lamp {index} moved: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    /// A wheel of wheels expands into wheels: the inner repeat's own center
+    /// turns with it, so the strand structure survives instead of collapsing
+    /// into one long baked run.
+    #[test]
+    fn expanding_a_nested_repeat_keeps_the_inner_strands() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "wheel".to_string(),
+            shape: Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Path(PathShape {
+                        points: vec![[100.0, 40.0], [100.0, 20.0]],
+                        count: 3,
+                        reversed: false,
+                        gaps: Vec::new(),
+                    })),
+                    center: [100.0, 60.0],
+                    count: 3,
+                })),
+                center: [100.0, 100.0],
+                count: 2,
+            }),
+        });
+        let mut session = MapEditorSession::new(doc);
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        let spans_before: Vec<(u32, u32)> = session
+            .resolved()
+            .spans
+            .iter()
+            .map(|span| (span.start, span.count))
+            .collect();
+        session.expand_object(0);
+        assert_eq!(session.doc().objects.len(), 2);
+        for object in &session.doc().objects {
+            assert!(matches!(object.shape, Map2dShape::Repeat(_)));
+        }
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        for (index, (a, b)) in after.iter().zip(&before).enumerate() {
+            assert!(
+                (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3,
+                "lamp {index} moved: {a:?} vs {b:?}"
+            );
+        }
+        let spans_after: Vec<(u32, u32)> = session
+            .resolved()
+            .spans
+            .iter()
+            .map(|span| (span.start, span.count))
+            .collect();
+        assert_eq!(spans_after, spans_before, "6 strands before and after");
+    }
+
+    /// Vertex handles on a repeat edit instance 0's path; every other instance
+    /// is that path turned, so they all follow the one drag.
+    #[test]
+    fn dragging_a_vertex_through_a_repeat_moves_every_instance() {
+        let mut session = session_with_repeat(4);
+        session.selection.select_only(0);
+        session.begin_gesture();
+        session.move_vertex_from_gesture(0, [110.0, 30.0]);
+        session.commit_gesture();
+
+        let Map2dShape::Path(path) = repeat_of(&session).shape.as_ref() else {
+            panic!("expected an inner path");
+        };
+        assert_eq!(path.points[0], [110.0, 30.0]);
+        // Instance 0's first lamp sits on the moved vertex, and instance 2 —
+        // half a turn away — is its mirror about the center.
+        assert_eq!(session.resolved().lamps[0].pos, [110.0, 30.0]);
+        let opposite = session.resolved().lamps[8].pos;
+        assert!(
+            (opposite[0] - 90.0).abs() < 1e-3 && (opposite[1] - 170.0).abs() < 1e-3,
+            "instance 2 lamp at {opposite:?}"
+        );
+        session.undo();
+        assert_eq!(session.resolved().lamps[0].pos, [100.0, 40.0]);
+    }
+
+    /// Instance count is a field like any other: typing one commits one step
+    /// and the strands follow.
+    #[test]
+    fn editing_the_instance_count_restrands_the_object() {
+        let mut session = session_with_repeat(4);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Repeat(repeat) = shape {
+                repeat.count = 7;
+            }
+        });
+        assert_eq!(session.resolved().spans.len(), 7);
+        assert_eq!(session.lamp_count(), 28);
+        session.undo();
+        assert_eq!(session.resolved().spans.len(), 4);
     }
 
     #[test]

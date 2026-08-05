@@ -7,13 +7,13 @@
 //! `edit`s. Hidden while a canvas drag is live.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{ChevronDown, ChevronUp, Trash2, Ungroup};
+use dioxus_icons::lucide::{ChevronDown, ChevronUp, Minimize2, RotateCw, Trash2, Ungroup};
 use lpc_mapping::{
     GridCorner, GridRouting, Map2dShape, RingDir, RingOrder, bounds_of_points, resolve,
 };
 
 use crate::editor_core::camera::Camera;
-use crate::editor_core::editor_session::MapEditorSession;
+use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
 use crate::view::editor_canvas::CanvasDrag;
 
 const POPOVER_WIDTH: f32 = 236.0;
@@ -110,7 +110,7 @@ pub fn PropertiesPopover(
                     }
                     span { class: "lpme-pop-kind", {shape_kind_label(&object.shape)} }
                 }
-                {shape_fields(session, on_committed, index, object.shape.clone())}
+                {shape_fields(session, on_committed, index, object.shape.clone(), 0)}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
                         "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
@@ -129,13 +129,47 @@ pub fn PropertiesPopover(
                 {
                     button {
                         class: "lpme-btn",
-                        title: "expand to a plain path (hand-tweakable, same lamps)",
+                        title: if matches!(object.shape, Map2dShape::Repeat(_)) {
+                            "expand to independent objects, one per instance (same lamps, hand-tweakable)"
+                        } else {
+                            "expand to a plain path (hand-tweakable, same lamps)"
+                        },
                         onclick: move |_| {
                             session.write().expand_object(index);
                             on_committed.call(());
                         },
                         Ungroup { size: 13 }
                         "expand"
+                    }
+                }
+                // Wrap ⇄ unwrap sit beside expand because all three answer the
+                // same question — how parametric should this object be. The
+                // pair is exclusive: nesting a repeat inside a repeat resolves
+                // and edits fine, but reaching it by a stray click on an
+                // already-repeated object would multiply strands by surprise.
+                if let (Some(index), Some(object)) = (single, single.and_then(|i| session.read().doc().objects.get(i).cloned())) {
+                    if matches!(object.shape, Map2dShape::Repeat(_)) {
+                        button {
+                            class: "lpme-btn",
+                            title: "unwrap the repeat: keep this shape, drop the other instances",
+                            onclick: move |_| {
+                                session.write().unwrap_repeat(index);
+                                on_committed.call(());
+                            },
+                            Minimize2 { size: 13 }
+                            "unwrap"
+                        }
+                    } else {
+                        button {
+                            class: "lpme-btn",
+                            title: "repeat around a point: {DEFAULT_REPEAT_COUNT} turned instances about the canvas center",
+                            onclick: move |_| {
+                                session.write().repeat_object(index, DEFAULT_REPEAT_COUNT);
+                                on_committed.call(());
+                            },
+                            RotateCw { size: 13 }
+                            "repeat"
+                        }
                     }
                 }
                 if let Some(index) = single {
@@ -185,11 +219,19 @@ fn shape_kind_label(shape: &Map2dShape) -> &'static str {
     }
 }
 
+/// The fields for one shape.
+///
+/// `depth` is how many repeat wrappers stand between `doc.objects[index]` and
+/// the shape being edited: a repeat renders its own fields and then recurses
+/// with `depth + 1` for the inner shape, and every field applies through
+/// [`shape_at_depth`] so an inner edit lands on the boxed shape rather than
+/// the wrapper.
 fn shape_fields(
     session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
     shape: Map2dShape,
+    depth: usize,
 ) -> Element {
     match shape {
         Map2dShape::Grid(grid) => {
@@ -205,20 +247,20 @@ fn shape_fields(
                 GridCorner::Br => "br",
             };
             rsx! {
-                NumberField { session, on_committed, index, label: "cols", value: grid.cols as f32, min: 1.0, is_int: true,
+                NumberField { session, on_committed, index, depth, label: "cols", value: grid.cols as f32, min: 1.0, is_int: true,
                     apply: FieldApply::GridCols }
-                NumberField { session, on_committed, index, label: "rows", value: grid.rows as f32, min: 1.0, is_int: true,
+                NumberField { session, on_committed, index, depth, label: "rows", value: grid.rows as f32, min: 1.0, is_int: true,
                     apply: FieldApply::GridRows }
-                NumberField { session, on_committed, index, label: "pitch", value: grid.pitch, min: 0.5, is_int: false,
+                NumberField { session, on_committed, index, depth, label: "pitch", value: grid.pitch, min: 0.5, is_int: false,
                     apply: FieldApply::GridPitch }
                 SegField {
-                    session, on_committed, index, label: "routing",
+                    session, on_committed, index, depth, label: "routing",
                     options: vec![("snake", "snake"), ("raster", "raster")],
                     current: routing_current,
                     apply: FieldApply::GridRouting,
                 }
                 SegField {
-                    session, on_committed, index, label: "start corner",
+                    session, on_committed, index, depth, label: "start corner",
                     options: vec![("tl", "↖"), ("tr", "↗"), ("bl", "↙"), ("br", "↘")],
                     current: corner_current,
                     apply: FieldApply::GridCorner,
@@ -237,25 +279,25 @@ fn shape_fields(
                 "ccw"
             };
             rsx! {
-                NumberField { session, on_committed, index, label: "outer count", value: ring.outer_count as f32, min: 1.0, is_int: true,
+                NumberField { session, on_committed, index, depth, label: "outer count", value: ring.outer_count as f32, min: 1.0, is_int: true,
                     apply: FieldApply::RingCount }
-                NumberField { session, on_committed, index, label: "radius", value: ring.radius, min: 1.0, is_int: false,
+                NumberField { session, on_committed, index, depth, label: "radius", value: ring.radius, min: 1.0, is_int: false,
                     apply: FieldApply::RingRadius }
-                NumberField { session, on_committed, index, label: "rings", value: ring.rings as f32, min: 1.0, is_int: true,
+                NumberField { session, on_committed, index, depth, label: "rings", value: ring.rings as f32, min: 1.0, is_int: true,
                     apply: FieldApply::RingRings }
                 if ring.rings > 1 {
-                    RingCountsField { session, on_committed, index, counts: ring.counts.clone() }
+                    RingCountsField { session, on_committed, index, depth, counts: ring.counts.clone() }
                     SegField {
-                        session, on_committed, index, label: "ring order",
+                        session, on_committed, index, depth, label: "ring order",
                         options: vec![("outer", "out→in"), ("inner", "in→out")],
                         current: order_current,
                         apply: FieldApply::RingOrder,
                     }
                 }
-                NumberField { session, on_committed, index, label: "start angle", value: ring.start_angle_deg, min: -360.0, is_int: false,
+                NumberField { session, on_committed, index, depth, label: "start angle", value: ring.start_angle_deg, min: -360.0, is_int: false,
                     apply: FieldApply::RingAngle }
                 SegField {
-                    session, on_committed, index, label: "direction",
+                    session, on_committed, index, depth, label: "direction",
                     options: vec![("cw", "cw ↻"), ("ccw", "ccw ↺")],
                     current: dir_current,
                     apply: FieldApply::RingDir,
@@ -265,34 +307,55 @@ fn shape_fields(
         Map2dShape::Path(path) => {
             let dir_current = if path.reversed { "rev" } else { "fwd" };
             rsx! {
-                NumberField { session, on_committed, index, label: "count", value: path.count as f32, min: 1.0, is_int: true,
+                NumberField { session, on_committed, index, depth, label: "count", value: path.count as f32, min: 1.0, is_int: true,
                     apply: FieldApply::PathCount }
                 SegField {
-                    session, on_committed, index, label: "direction",
+                    session, on_committed, index, depth, label: "direction",
                     options: vec![("fwd", "forward"), ("rev", "reversed")],
                     current: dir_current,
                     apply: FieldApply::PathReversed,
                 }
-                PathGapsField { session, on_committed, index, gaps: path.gaps.clone() }
+                PathGapsField { session, on_committed, index, depth, gaps: path.gaps.clone() }
             }
         }
-        // Read-only for now: the repeat's own editing grammar (count field,
-        // center handle, expand-to-instances) is P5's. Showing the parameters
-        // beats showing an empty panel and pretending the object has none.
+        // A repeat's own parameters, then the shape it turns — one panel, read
+        // top to bottom as "N copies of this, about here". The inner fields
+        // recurse, so a nested repeat simply shows another instances row.
         Map2dShape::Repeat(repeat) => {
-            let center = format!(
-                "{}, {}",
-                (repeat.center[0] * 10.0).round() / 10.0,
-                (repeat.center[1] * 10.0).round() / 10.0
-            );
+            let inner = (*repeat.shape).clone();
+            let inner_kind = shape_kind_label(&inner);
             rsx! {
+                NumberField { session, on_committed, index, depth, label: "instances", value: repeat.count as f32, min: 1.0, is_int: true,
+                    apply: FieldApply::RepeatCount }
+                NumberField { session, on_committed, index, depth, label: "center x", value: repeat.center[0], min: -100000.0, is_int: false,
+                    apply: FieldApply::RepeatCenterX }
+                NumberField { session, on_committed, index, depth, label: "center y", value: repeat.center[1], min: -100000.0, is_int: false,
+                    apply: FieldApply::RepeatCenterY }
                 div { class: "lpme-field",
-                    label { "instances" }
-                    span { class: "lpme-field-static", "×{repeat.count} about {center}" }
+                    label { "repeats" }
+                    span { class: "lpme-field-static", "{inner_kind}" }
                 }
+                {shape_fields(session, on_committed, index, inner, depth + 1)}
             }
         }
     }
+}
+
+/// The shape a field at `depth` edits: `depth` steps down through repeat
+/// wrappers from the object's own shape.
+///
+/// Returns `None` when the document changed shape under the popover (an undo
+/// landing mid-edit, say) — the edit is then simply dropped rather than
+/// written to whatever now sits at that slot.
+fn shape_at_depth(shape: &mut Map2dShape, depth: usize) -> Option<&mut Map2dShape> {
+    let mut current = shape;
+    for _ in 0..depth {
+        match current {
+            Map2dShape::Repeat(repeat) => current = &mut repeat.shape,
+            _ => return None,
+        }
+    }
+    Some(current)
 }
 
 /// Which shape field a numeric/segmented input drives.
@@ -311,6 +374,9 @@ pub enum FieldApply {
     RingDir,
     PathCount,
     PathReversed,
+    RepeatCount,
+    RepeatCenterX,
+    RepeatCenterY,
 }
 
 fn apply_number(shape: &mut Map2dShape, apply: FieldApply, value: f32) {
@@ -323,6 +389,13 @@ fn apply_number(shape: &mut Map2dShape, apply: FieldApply, value: f32) {
         (FieldApply::RingRings, Map2dShape::Ring(ring)) => ring.rings = value.max(1.0) as u32,
         (FieldApply::RingAngle, Map2dShape::Ring(ring)) => ring.start_angle_deg = value,
         (FieldApply::PathCount, Map2dShape::Path(path)) => path.count = value.max(1.0) as u32,
+        // Sanitize owns the upper bound (`MAX_REPEAT_COUNT`) so a typed digit
+        // that overshoots is clamped on commit rather than refused mid-typing.
+        (FieldApply::RepeatCount, Map2dShape::Repeat(repeat)) => {
+            repeat.count = value.max(1.0) as u32;
+        }
+        (FieldApply::RepeatCenterX, Map2dShape::Repeat(repeat)) => repeat.center[0] = value,
+        (FieldApply::RepeatCenterY, Map2dShape::Repeat(repeat)) => repeat.center[1] = value,
         _ => {}
     }
 }
@@ -371,6 +444,7 @@ fn NumberField(
     session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
+    depth: usize,
     label: &'static str,
     value: f32,
     min: f32,
@@ -394,8 +468,10 @@ fn NumberField(
                         && parsed.is_finite()
                     {
                         session.write().edit_uncommitted(move |doc| {
-                            if let Some(object) = doc.objects.get_mut(index) {
-                                apply_number(&mut object.shape, apply, parsed);
+                            if let Some(object) = doc.objects.get_mut(index)
+                                && let Some(shape) = shape_at_depth(&mut object.shape, depth)
+                            {
+                                apply_number(shape, apply, parsed);
                             }
                         });
                     }
@@ -415,6 +491,7 @@ fn SegField(
     session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
+    depth: usize,
     label: &'static str,
     options: Vec<(&'static str, &'static str)>,
     current: &'static str,
@@ -430,8 +507,10 @@ fn SegField(
                         class: if value == current { "lpme-seg-on" } else { "" },
                         onclick: move |_| {
                             session.write().edit(move |doc| {
-                                if let Some(object) = doc.objects.get_mut(index) {
-                                    apply_choice(&mut object.shape, apply, value);
+                                if let Some(object) = doc.objects.get_mut(index)
+                                    && let Some(shape) = shape_at_depth(&mut object.shape, depth)
+                                {
+                                    apply_choice(shape, apply, value);
                                 }
                             });
                             on_committed.call(());
@@ -454,6 +533,7 @@ fn PathGapsField(
     session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
+    depth: usize,
     gaps: Vec<u32>,
 ) -> Element {
     let shown = gaps
@@ -476,7 +556,7 @@ fn PathGapsField(
                         .collect();
                     session.write().edit_uncommitted(move |doc| {
                         if let Some(object) = doc.objects.get_mut(index)
-                            && let Map2dShape::Path(path) = &mut object.shape
+                            && let Some(Map2dShape::Path(path)) = shape_at_depth(&mut object.shape, depth)
                         {
                             path.gaps = parsed;
                         }
@@ -499,6 +579,7 @@ fn RingCountsField(
     session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
+    depth: usize,
     counts: Vec<u32>,
 ) -> Element {
     let shown = counts
@@ -521,11 +602,7 @@ fn RingCountsField(
                         .collect();
                     session.write().edit_uncommitted(move |doc| {
                         if let Some(object) = doc.objects.get_mut(index)
-                            && let Map2dShape::Path(_) = &object.shape
-                        {
-                            // not a ring; ignore
-                        } else if let Some(object) = doc.objects.get_mut(index)
-                            && let Map2dShape::Ring(ring) = &mut object.shape
+                            && let Some(Map2dShape::Ring(ring)) = shape_at_depth(&mut object.shape, depth)
                         {
                             ring.counts = parsed;
                         }
