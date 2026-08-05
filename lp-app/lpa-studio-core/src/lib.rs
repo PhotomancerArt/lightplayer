@@ -111,6 +111,13 @@ pub use app::settings::{
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
     UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
+pub use app::setup_flow::{
+    BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
+    ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities, SetupCommand, SetupContext,
+    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupState,
+    SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
+    derive_device_name, dispatch_for, known_device_for, month_day_label, unique_device_name,
+};
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
     ShareFile, ShareHeader, peek_header,
