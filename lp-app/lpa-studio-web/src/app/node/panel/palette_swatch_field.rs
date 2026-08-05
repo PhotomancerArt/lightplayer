@@ -46,7 +46,7 @@ use crate::base::{
     PopoverButton, PopoverPlacement, StudioIcon, StudioIconName, detail_popover_card_class,
 };
 
-use super::palette_chooser::{PaletteChooser, PaletteChooserTab};
+use super::palette_chooser::{PaletteChooser, PaletteChooserTab, PaletteEditTarget};
 
 static NEXT_SWATCH_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -83,6 +83,9 @@ pub fn PaletteSwatchField(
     /// whichever kind the config already is.
     #[props(default = None)]
     chooser_initial_tab: Option<PaletteChooserTab>,
+    /// Open the chooser straight into the editor takeover (stories).
+    #[props(default = None)]
+    chooser_initial_edit: Option<PaletteEditTarget>,
 ) -> Element {
     let invalid_title = state.invalid.clone().unwrap_or_default();
     // The anchored-outline id: the swatch FRAME is the anchor, so the
@@ -134,6 +137,7 @@ pub fn PaletteSwatchField(
                     panel_target,
                     on_action,
                     initial_tab: chooser_initial_tab,
+                    initial_edit: chooser_initial_edit,
                 }
             }
         }

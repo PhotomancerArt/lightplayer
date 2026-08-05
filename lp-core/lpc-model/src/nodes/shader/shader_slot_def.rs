@@ -45,6 +45,15 @@ pub struct ShaderSlotDef {
     /// at load when no authored binding names this slot (ADR 2026-07-09).
     /// Consumed slots source from the channel; produced slots publish to it.
     pub default_bind: OptionSlot<ValueSlot<BindingRef>>,
+    /// Panel-visibility hint for the binding this slot's `default_bind`
+    /// materializes (`panel: "show"`), the additive override on the derived
+    /// membership rule (ADR 2026-08-03-panel-visibility-is-derived, amended).
+    ///
+    /// A native def spells the same hint as a `#[slot(panel = "show")]`
+    /// attribute — shape metadata — but a shader slot is authored data, so
+    /// here it is a field. Without it, a `default_bind` alone materializes a
+    /// Default-origin binding, which the panel deliberately does not present.
+    pub panel: OptionSlot<ValueSlot<crate::PanelHint>>,
     pub default: OptionSlot<ValueSlot<f32>>,
     pub min: OptionSlot<ValueSlot<f32>>,
     pub max: OptionSlot<ValueSlot<f32>>,
@@ -67,6 +76,17 @@ impl ShaderSlotDef {
         self
     }
 
+    /// Promote this slot's default-bound channel to a panel control.
+    pub fn with_panel_show(mut self) -> Self {
+        self.panel = OptionSlot::some(ValueSlot::new(crate::PanelHint::Show));
+        self
+    }
+
+    /// The declared panel hint, if any.
+    pub fn panel_hint(&self) -> Option<crate::PanelHint> {
+        self.panel.data.as_ref().map(|hint| *hint.value())
+    }
+
     pub fn value_f32(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Value),
@@ -75,6 +95,7 @@ impl ShaderSlotDef {
             phasor: OptionSlot::none(),
             gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
+            panel: OptionSlot::none(),
             default: OptionSlot::some(ValueSlot::new(default)),
             min: min
                 .map(ValueSlot::new)
@@ -161,6 +182,7 @@ impl ShaderSlotDef {
             phasor: OptionSlot::none(),
             gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
+            panel: OptionSlot::none(),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
             max: OptionSlot::none(),

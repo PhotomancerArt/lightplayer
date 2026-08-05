@@ -24,7 +24,10 @@ use lpc_model::{Gradient, GradientConfig, MAX_CYCLE_SET};
 
 use crate::base::{GradientStripCanvas, PopoverCloseHandle, StudioIcon, StudioIconName};
 
-use super::palette_catalog::{PaletteChoice, filter_choices, group_choices, use_palette_catalog};
+use super::palette_catalog::{
+    PaletteChoice, PaletteGroup, filter_choices, group_choices, use_palette_catalog,
+};
+use super::palette_editor::{PaletteEditor, PaletteOrigin};
 use super::palette_swatch_field::palette_write_action;
 
 /// Step and fade a static palette is promoted with when the first extra
@@ -47,6 +50,16 @@ const FADE_PRESETS: [(&str, f32); 3] = [("cut", 0.0), ("0.3 s", 0.3), ("0.9 s", 
 pub enum PaletteChooserTab {
     Palette,
     Cycle,
+}
+
+/// Where an edited palette LANDS when the editor says done — always the
+/// place the ✎ was pressed, never a new one (P5 scope 2).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PaletteEditTarget {
+    /// The control's single held palette: done writes `Static`.
+    Static,
+    /// One member of the cycle set: done replaces it in place.
+    Member(usize),
 }
 
 impl PaletteChooserTab {
@@ -83,6 +96,10 @@ pub fn PaletteChooser(
     /// Open on a specific tab regardless of the config's kind (stories).
     #[props(default = None)]
     initial_tab: Option<PaletteChooserTab>,
+    /// Open straight into the editor on this target (stories) — the state
+    /// a ✎ press produces.
+    #[props(default = None)]
+    initial_edit: Option<PaletteEditTarget>,
 ) -> Element {
     let mut tab =
         use_signal(|| initial_tab.unwrap_or_else(|| PaletteChooserTab::for_config(&config)));
@@ -90,6 +107,14 @@ pub fn PaletteChooser(
     let catalog = use_palette_catalog();
     let choices = catalog.choices();
     let close = try_consume_context::<PopoverCloseHandle>();
+
+    // The takeover: `Some(session)` means the popover shows the editor
+    // INSTEAD of the lists, never beside them.
+    let mut editing = use_signal(|| {
+        initial_edit.and_then(|target| {
+            edit_source(&config, target).map(|gradient| PaletteEditSession { target, gradient })
+        })
+    });
 
     let emit = {
         let address = address.clone();
@@ -101,6 +126,27 @@ pub fn PaletteChooser(
             handler.call(palette_write_action(&panel_target, address, &next));
         }
     };
+
+    // The editor takes the WHOLE popover — spike §9's `ddview-edit`. It
+    // writes nothing until done, and done writes exactly once.
+    if let Some(session) = editing() {
+        let (name, origin) = palette_identity(&session.gradient, &choices);
+        let edited_config = config.clone();
+        let target = session.target;
+        let mut emit_done = emit;
+        return rsx! {
+            PaletteEditor {
+                gradient: session.gradient,
+                name,
+                origin,
+                on_done: move |gradient: Gradient| {
+                    emit_done(with_palette_edited(&edited_config, target, &gradient));
+                    editing.set(None);
+                },
+                on_cancel: move |_| editing.set(None),
+            }
+        };
+    }
 
     let current = tab();
     let visible = filter_choices(&choices, &query());
@@ -146,6 +192,19 @@ pub fn PaletteChooser(
                             close.close();
                         }
                     },
+                    // A project row's ✎ edits THAT row's palette, and the
+                    // result lands as the held value — the Palette tab's
+                    // click already means "this is the palette", and the
+                    // editor does not change what a tab means.
+                    on_edit: move |gradient: Gradient| {
+                        editing
+                            .set(
+                                Some(PaletteEditSession {
+                                    target: PaletteEditTarget::Static,
+                                    gradient,
+                                }),
+                            );
+                    },
                 }
             } else {
                 CycleTabBody {
@@ -153,6 +212,15 @@ pub fn PaletteChooser(
                     choices: visible,
                     named: choices.clone(),
                     on_change: emit,
+                    on_edit: move |(index, gradient): (usize, Gradient)| {
+                        editing
+                            .set(
+                                Some(PaletteEditSession {
+                                    target: PaletteEditTarget::Member(index),
+                                    gradient,
+                                }),
+                            );
+                    },
                 }
             }
         }
@@ -162,7 +230,11 @@ pub fn PaletteChooser(
 /// The Palette tab: the whole catalog, grouped, where a click SELECTS.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PaletteTabBody(choices: Vec<PaletteChoice>, on_pick: EventHandler<Gradient>) -> Element {
+fn PaletteTabBody(
+    choices: Vec<PaletteChoice>,
+    on_pick: EventHandler<Gradient>,
+    on_edit: EventHandler<Gradient>,
+) -> Element {
     let groups = group_choices(&choices);
     rsx! {
         div { class: PALETTE_LIST_CLASS,
@@ -178,7 +250,19 @@ fn PaletteTabBody(choices: Vec<PaletteChoice>, on_pick: EventHandler<Gradient>) 
                         PaletteRow {
                             key: "{choice.id}",
                             choice: choice.clone(),
-                            on_press: move |_| on_pick.call(choice.gradient.clone()),
+                            // Only a palette this project already owns is
+                            // edited from a ROW; a built-in is forked from
+                            // wherever it is in use (the ✎ on its chip), so
+                            // the catalog list stays a catalog.
+                            editable: choice.group == PaletteGroup::ThisProject,
+                            on_press: {
+                                let gradient = choice.gradient.clone();
+                                move |_| on_pick.call(gradient.clone())
+                            },
+                            on_edit: {
+                                let gradient = choice.gradient.clone();
+                                move |_| on_edit.call(gradient.clone())
+                            },
                         }
                     }
                 }
@@ -198,6 +282,8 @@ fn CycleTabBody(
     /// The UNFILTERED catalog, used to name the members.
     named: Vec<PaletteChoice>,
     on_change: EventHandler<GradientConfig>,
+    /// A member's ✎: the set position and the palette sitting in it.
+    on_edit: EventHandler<(usize, Gradient)>,
 ) -> Element {
     let members: Vec<Gradient> = config.gradients().to_vec();
     let full = members.len() >= MAX_CYCLE_SET as usize;
@@ -221,6 +307,10 @@ fn CycleTabBody(
                     on_remove: {
                         let config = config.clone();
                         move |_| on_change.call(with_member_removed(&config, index))
+                    },
+                    on_edit: {
+                        let gradient = gradient.clone();
+                        move |_| on_edit.call((index, gradient.clone()))
                     },
                 }
             }
@@ -257,7 +347,7 @@ fn CycleTabBody(
                     for (label , seconds) in FADE_PRESETS {
                         button {
                             key: "{label}",
-                            class: fade_preset_class(approx_eq(fade_seconds, seconds)),
+                            class: seg_button_class(approx_eq(fade_seconds, seconds)),
                             r#type: "button",
                             title: "Cross-fade at each hand-off",
                             onclick: {
@@ -290,6 +380,10 @@ fn CycleTabBody(
                                 choice: choice.clone(),
                                 adding: true,
                                 disabled: full,
+                                // No ✎ in the add-list: here a row means
+                                // "put this in the set", and the chip it
+                                // becomes is where it is edited.
+                                on_edit: move |_| {},
                                 on_press: {
                                     let config = config.clone();
                                     let gradient = choice.gradient.clone();
@@ -318,35 +412,79 @@ fn PaletteRow(
     #[props(default = false)]
     adding: bool,
     #[props(default = false)] disabled: bool,
+    /// Whether the row carries a ✎ — true only where editing means editing
+    /// THIS palette (a project one), never a catalog entry.
+    #[props(default = false)]
+    editable: bool,
     on_press: EventHandler<()>,
+    on_edit: EventHandler<()>,
 ) -> Element {
     let spdx = choice.license.as_ref().map(|license| license.spdx.clone());
+    let name = choice.name.clone();
+    rsx! {
+        // A row with a ✎ is two gestures, so the affordance is a sibling of
+        // the row button rather than a button inside one (nested buttons are
+        // not a thing the DOM has).
+        div { class: "tw:flex tw:min-w-0 tw:items-center",
+            button {
+                class: palette_row_class(disabled),
+                r#type: "button",
+                disabled,
+                title: choice.title(),
+                onclick: move |event| {
+                    event.stop_propagation();
+                    if !disabled {
+                        on_press.call(());
+                    }
+                },
+                span { class: "tw:w-14 tw:flex-none",
+                    GradientStripCanvas { gradient: choice.gradient.clone() }
+                }
+                span { class: "tw:min-w-0 tw:truncate tw:text-left", "{choice.name}" }
+                if let Some(spdx) = spdx {
+                    span { class: "tw:ml-auto tw:flex-none tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
+                        "{spdx}"
+                    }
+                }
+                if adding {
+                    span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
+                        StudioIcon { name: StudioIconName::Add, size: 12 }
+                    }
+                }
+            }
+            if editable {
+                EditPaletteButton {
+                    name: name.clone(),
+                    disabled,
+                    on_edit: move |_| on_edit.call(()),
+                }
+            }
+        }
+    }
+}
+
+/// The ✎ that swaps the popover for the editor. One component, because the
+/// gesture means the same thing from a chip and from a row: take THIS
+/// palette into the editor, and land the result where it came from.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn EditPaletteButton(
+    name: String,
+    #[props(default = false)] disabled: bool,
+    on_edit: EventHandler<()>,
+) -> Element {
     rsx! {
         button {
-            class: palette_row_class(disabled),
+            class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-1 tw:text-subtle-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-50",
             r#type: "button",
             disabled,
-            title: choice.title(),
-            onclick: move |event| {
+            title: "Edit this palette",
+            aria_label: "Edit {name}",
+            onclick: move |event: MouseEvent| {
                 event.stop_propagation();
-                if !disabled {
-                    on_press.call(());
-                }
+                on_edit.call(());
             },
-            span { class: "tw:w-14 tw:flex-none",
-                GradientStripCanvas { gradient: choice.gradient.clone() }
-            }
-            span { class: "tw:min-w-0 tw:truncate tw:text-left", "{choice.name}" }
-            if let Some(spdx) = spdx {
-                span { class: "tw:ml-auto tw:flex-none tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                    "{spdx}"
-                }
-            }
-            if adding {
-                span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
-                    StudioIcon { name: StudioIconName::Add, size: 12 }
-                }
-            }
+            StudioIcon { name: StudioIconName::Edited, size: 12 }
         }
     }
 }
@@ -360,6 +498,7 @@ fn CycleMemberChip(
     gradient: Gradient,
     removable: bool,
     on_remove: EventHandler<()>,
+    on_edit: EventHandler<()>,
 ) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-xs tw:border tw:border-border-subtle tw:px-1.5 tw:py-1",
@@ -367,6 +506,7 @@ fn CycleMemberChip(
                 GradientStripCanvas { gradient }
             }
             span { class: "tw:min-w-0 tw:grow tw:truncate tw:text-xs", "{name}" }
+            EditPaletteButton { name: name.clone(), on_edit: move |_| on_edit.call(()) }
             if removable {
                 button {
                     class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:text-status-error-foreground",
@@ -413,7 +553,9 @@ fn palette_row_class(disabled: bool) -> String {
     }
 }
 
-fn fade_preset_class(active: bool) -> String {
+/// One button of a segmented row (the fade presets, and the editor's space
+/// and method segments): active reads as pressed, the rest as quiet text.
+pub(crate) fn seg_button_class(active: bool) -> String {
     let base = "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2 tw:py-0.5 tw:text-[11px]";
     if active {
         format!("{base} tw:bg-card-muted tw:font-bold tw:text-strong-foreground")
@@ -530,6 +672,90 @@ pub fn with_member_removed(config: &GradientConfig, index: usize) -> GradientCon
             step_seconds: *step_seconds,
             fade_seconds: *fade_seconds,
         },
+    }
+}
+
+/// One open editor takeover: which palette is on the bar, and where its
+/// result lands. Held as a whole so nothing has to re-derive the source from
+/// a config that the edit is about to replace.
+#[derive(Clone, Debug, PartialEq)]
+struct PaletteEditSession {
+    target: PaletteEditTarget,
+    gradient: Gradient,
+}
+
+/// The palette a target currently holds — the editor's starting value when
+/// the edit came from the CONFIG (a cycle chip, or the story-opened static
+/// value) rather than from a catalog row.
+#[must_use]
+pub fn edit_source(config: &GradientConfig, target: PaletteEditTarget) -> Option<Gradient> {
+    let gradients = config.gradients();
+    match target {
+        PaletteEditTarget::Static => gradients.first().cloned(),
+        PaletteEditTarget::Member(index) => gradients.get(index).cloned(),
+    }
+}
+
+/// Land an edited palette back where the ✎ was pressed.
+///
+/// The set's SHAPE never changes here: replacing a member leaves a cycle a
+/// cycle with the same timings, and a static edit stays static. Copy-on-use
+/// forking needs no branch of its own — the copy simply becomes the authored
+/// value at that position, and the catalog is not something this function can
+/// reach.
+#[must_use]
+pub fn with_palette_edited(
+    config: &GradientConfig,
+    target: PaletteEditTarget,
+    gradient: &Gradient,
+) -> GradientConfig {
+    match (config, target) {
+        (_, PaletteEditTarget::Static) | (GradientConfig::Static(_), _) => {
+            GradientConfig::Static(gradient.clone())
+        }
+        (
+            GradientConfig::Cycle {
+                set,
+                step_seconds,
+                fade_seconds,
+            },
+            PaletteEditTarget::Member(index),
+        ) => {
+            let mut set = set.clone();
+            if index >= set.len() {
+                // A stale ✎ (the set shrank underneath it) changes nothing
+                // rather than appending a member nobody asked for.
+                return config.clone();
+            }
+            set[index] = gradient.clone();
+            GradientConfig::Cycle {
+                set,
+                step_seconds: *step_seconds,
+                fade_seconds: *fade_seconds,
+            }
+        }
+    }
+}
+
+/// What the editor's title row says about a palette: its name, and whether
+/// done will FORK it.
+///
+/// Provenance is decided by VALUE, not by which list the ✎ was pressed in: a
+/// cycle chip holding the shipped `Ocean` is a built-in wherever it sits, and
+/// the moment a stop moves it stops being one. Anything the catalog has never
+/// heard of — an edited ramp, an import — is already this project's.
+#[must_use]
+pub fn palette_identity(gradient: &Gradient, choices: &[PaletteChoice]) -> (String, PaletteOrigin) {
+    let matched = choices.iter().find(|choice| &choice.gradient == gradient);
+    match matched {
+        Some(choice) if choice.group == PaletteGroup::ThisProject => {
+            (choice.name.clone(), PaletteOrigin::ProjectCustom)
+        }
+        Some(choice) => (
+            choice.name.clone(),
+            PaletteOrigin::BuiltinCopy(choice.name.clone()),
+        ),
+        None => ("Custom palette".to_string(), PaletteOrigin::ProjectCustom),
     }
 }
 
