@@ -229,8 +229,7 @@ fn takeover_parks_the_displaced_pad_before_routing() {
     let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
     let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
 
-    let mut pusher_ref = &mut pusher;
-    pusher_ref.service();
+    pusher.service();
     // Fresh slot: route only, no park (nothing was displaced).
     assert_eq!(log.borrow().as_slice(), &[PadEvent::Route { slot: 0, gpio: 10 }]);
 
@@ -238,7 +237,7 @@ fn takeover_parks_the_displaced_pad_before_routing() {
         if mailboxes[1].completed_outcome(seq_b).is_some() {
             break;
         }
-        tick(&driver, &mut pusher_ref);
+        tick(&driver, &mut pusher);
     }
     assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Transmitted));
     assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Transmitted));
@@ -262,7 +261,7 @@ fn takeover_parks_the_displaced_pad_before_routing() {
         if mailboxes[1].completed_outcome(seq_c).is_some() {
             break;
         }
-        tick(&driver, &mut pusher_ref);
+        tick(&driver, &mut pusher);
     }
     assert_eq!(mailboxes[1].completed_outcome(seq_c), Some(WireOutcome::Transmitted));
     assert_eq!(
