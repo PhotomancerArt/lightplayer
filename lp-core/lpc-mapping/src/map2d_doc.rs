@@ -8,10 +8,13 @@
 //!    `points_packed` beside [`PathShape::points`]) is deliberately left room
 //!    for and would arrive as an additive field — do not encode bulk data in
 //!    ways that would make that transition breaking.
-//! 2. **New variants bump the format, and old parsers refuse loudly.** An
-//!    unknown [`Map2dShape`] variant cannot be ignored — the document would
-//!    silently lose lamps — so a document using one declares a higher
-//!    `format` and older builds reject the whole document. [`Map2dDoc::from_json`]
+//! 2. **Constructs an old parser would misread bump the format, and old
+//!    parsers refuse loudly.** An unknown [`Map2dShape`] variant cannot be
+//!    ignored — the document would silently lose lamps — and neither can an
+//!    additive field that changes what existing fields *mean*
+//!    ([`PathShape::gaps`] re-parameterizes the whole path), so a document
+//!    using one declares a higher `format` and older builds reject the whole
+//!    document. [`Map2dDoc::from_json`]
 //!    *peeks* the `format` field before running the full parse, so such a
 //!    document fails as [`Map2dError::UnsupportedFormat`] with an honest
 //!    "this build reads up to N" message instead of an opaque parse error.
@@ -30,11 +33,17 @@ use crate::map2d_error::Map2dError;
 use crate::map2d_fit::Bounds2d;
 
 /// Newest document format this crate can read.
-pub const MAP2D_FORMAT: u32 = 1;
+pub const MAP2D_FORMAT: u32 = 2;
 
 /// The format every document using only the original constructs declares.
 /// [`Map2dDoc::required_format`] returns this unless the content needs more.
 const MAP2D_FORMAT_BASE: u32 = 1;
+
+/// The format a document needs once any path carries inert [`PathShape::gaps`].
+/// A format-1 build parses the field away silently — it would light the jumper
+/// wire and shift every downstream wiring index — so gapped documents declare
+/// this and old builds refuse them whole.
+const MAP2D_FORMAT_PATH_GAPS: u32 = 2;
 
 /// Default lamp sample diameter (texture-space units, matches the legacy
 /// per-fixture default).
@@ -161,12 +170,28 @@ pub enum RingDir {
 
 /// `count` lamps sampled evenly by arc length along a polyline; the first and
 /// last lamps sit exactly on the endpoints.
+///
+/// With [`gaps`](Self::gaps), "arc length" means *active* arc length: the
+/// polyline may include jumper-wire segments that carry no lamps, so one
+/// physical channel can stay one object.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PathShape {
     pub points: Vec<[f32; 2]>,
     pub count: u32,
     #[serde(default)]
     pub reversed: bool,
+    /// Indices of inert segments (segment `i` runs `points[i] → points[i+1]`):
+    /// physical jumper wire that carries no lamps. Lamps distribute evenly
+    /// over the remaining (active) length only — fixed-pitch strip cut at hubs
+    /// and jumpered keeps its pitch across the whole channel — and an inert
+    /// segment emits no lamp entries at all, so wiring indices downstream are
+    /// unshifted.
+    ///
+    /// `skip_serializing_if` keeps gap-free documents byte-identical: the
+    /// field only ever appears on a document that actually uses it — which is
+    /// also the document that stamps format 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<u32>,
 }
 
 impl Map2dDoc {
@@ -206,13 +231,23 @@ impl Map2dDoc {
     /// The lowest `format` that can represent this document's content.
     ///
     /// Minimal stamping: a document declares the oldest format able to read
-    /// it, never simply "the newest format the writer knows". Everything in
-    /// today's schema is format 1; as newer constructs land, this predicate
-    /// grows a case per construct, so removing the last newer construct from
-    /// a document drops it back to 1 and makes it readable by old builds
+    /// it, never simply "the newest format the writer knows". This predicate
+    /// grows a case per newer construct, so removing the last newer construct
+    /// from a document drops it back to 1 and makes it readable by old builds
     /// again.
     pub fn required_format(&self) -> u32 {
-        MAP2D_FORMAT_BASE
+        let mut required = MAP2D_FORMAT_BASE;
+        for object in &self.objects {
+            match &object.shape {
+                // Inert path segments (format 2): an old build would parse
+                // `gaps` away and light the jumper wire.
+                Map2dShape::Path(path) if !path.gaps.is_empty() => {
+                    required = required.max(MAP2D_FORMAT_PATH_GAPS);
+                }
+                _ => {}
+            }
+        }
+        required
     }
 
     /// Stamp [`Self::required_format`] onto the document. Every writer runs
@@ -272,6 +307,7 @@ mod tests {
     use super::*;
     use crate::corpus;
     use alloc::string::ToString;
+    use alloc::vec;
 
     #[test]
     fn round_trips_a_document_through_json() {
@@ -313,9 +349,9 @@ mod tests {
     #[test]
     fn rejects_newer_and_zero_formats() {
         assert!(matches!(
-            Map2dDoc::from_json(r#"{"format":2}"#),
+            Map2dDoc::from_json(r#"{"format":3}"#),
             Err(Map2dError::UnsupportedFormat {
-                found: 2,
+                found: 3,
                 supported: MAP2D_FORMAT
             })
         ));
@@ -340,7 +376,7 @@ mod tests {
             Map2dDoc::from_json(newer),
             Err(Map2dError::UnsupportedFormat {
                 found: 99,
-                supported: 1
+                supported: 2
             })
         );
     }
@@ -374,6 +410,45 @@ mod tests {
         assert_eq!(doc.format, 1);
         // And a normalized doc parses on this build.
         assert!(Map2dDoc::from_json(&doc.to_json()).is_ok());
+    }
+
+    /// Inert path segments are the first format-2 construct: a document that
+    /// uses them stamps 2, and dropping the last gap puts it back to 1 so old
+    /// builds can read it again.
+    #[test]
+    fn inert_path_gaps_require_format_two_and_release_it() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "sector".to_string(),
+            shape: Map2dShape::Path(PathShape {
+                points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                count: 4,
+                reversed: false,
+                gaps: vec![1],
+            }),
+        });
+        assert_eq!(doc.required_format(), 2);
+        doc.normalize_format();
+        assert_eq!(doc.format, 2);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+
+        let Map2dShape::Path(path) = &mut doc.objects[0].shape else {
+            panic!("expected path");
+        };
+        path.gaps.clear();
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+    }
+
+    /// Byte-stability: `gaps` is skipped when empty, so every document written
+    /// before this field existed round-trips through the current writer
+    /// unchanged.
+    #[test]
+    fn a_gap_free_path_serializes_without_the_gaps_field() {
+        let doc = corpus::cat_ears();
+        let json = doc.to_json();
+        assert!(!json.contains("gaps"), "{json}");
+        assert!(json.contains("\"format\":1"));
     }
 
     #[test]

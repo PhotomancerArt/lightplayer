@@ -214,37 +214,84 @@ fn resolve_path(
         return Err(invalid("path needs at least 2 points"));
     }
     let mut points = path.points.clone();
+    let inert = inert_segments(path);
     if path.reversed {
         points.reverse();
     }
 
-    let total = polyline_length(&points);
-    if total <= f32::EPSILON {
-        return Err(invalid("path has zero length"));
+    // Lamps are distributed over the ACTIVE length only: a jumper wire between
+    // two lit runs carries no lamps, and the strip's pitch stays uniform
+    // across the whole channel (fixed-pitch strip cut at a hub and jumpered).
+    let total_active = active_length(&points, &inert);
+    if total_active <= f32::EPSILON {
+        return Err(invalid(if path.gaps.is_empty() {
+            "path has zero length"
+        } else {
+            "path has no active length (every segment is a gap)"
+        }));
     }
 
     let mut positions = Vec::with_capacity(path.count as usize);
     if path.count == 1 {
-        positions.push(points[0]);
+        positions.push(point_at_active_distance(&points, &inert, 0.0));
         return Ok(positions);
     }
     for lamp in 0..path.count {
-        let distance = total * (lamp as f32 / (path.count - 1) as f32);
-        positions.push(point_at_distance(&points, distance));
+        let distance = total_active * (lamp as f32 / (path.count - 1) as f32);
+        positions.push(point_at_active_distance(&points, &inert, distance));
     }
     Ok(positions)
 }
 
-fn polyline_length(points: &[[f32; 2]]) -> f32 {
+/// Per-segment inert flags, already mapped into walk order.
+///
+/// `reversed` mirrors the segment order along with the points
+/// (`n_segments - 1 - i`), so the same *physical* segments stay inert whichever
+/// end of the strip the data enters from. Out-of-range indices name no segment
+/// and are ignored — the editor sanitizes them out, and a hand-authored
+/// document should not fail to resolve over one.
+fn inert_segments(path: &PathShape) -> Vec<bool> {
+    let segments = path.points.len().saturating_sub(1);
+    let mut inert = Vec::new();
+    inert.resize(segments, false);
+    for gap in &path.gaps {
+        let index = *gap as usize;
+        if index < segments {
+            let index = if path.reversed {
+                segments - 1 - index
+            } else {
+                index
+            };
+            inert[index] = true;
+        }
+    }
+    inert
+}
+
+/// Summed length of the segments that carry lamps.
+fn active_length(points: &[[f32; 2]], inert: &[bool]) -> f32 {
     points
         .windows(2)
-        .map(|pair| distance(pair[0], pair[1]))
+        .enumerate()
+        .filter(|(index, _)| !is_inert(inert, *index))
+        .map(|(_, pair)| distance(pair[0], pair[1]))
         .sum()
 }
 
-fn point_at_distance(points: &[[f32; 2]], target_distance: f32) -> [f32; 2] {
+/// The point `target_distance` along the polyline's **active** length.
+///
+/// Inert segments move the walk's position without consuming distance, so a
+/// lamp can never land on one. The fallback (float slop pushing the last lamp
+/// a hair past the total) is the far end of the last *active* segment, which
+/// is not `points.last()` when the path ends in a gap. Degenerate zero-length
+/// segments keep their long-standing skip behavior.
+fn point_at_active_distance(points: &[[f32; 2]], inert: &[bool], target_distance: f32) -> [f32; 2] {
     let mut remaining = target_distance;
-    for pair in points.windows(2) {
+    let mut last_active_end = None;
+    for (index, pair) in points.windows(2).enumerate() {
+        if is_inert(inert, index) {
+            continue;
+        }
         let start = pair[0];
         let end = pair[1];
         let segment = distance(start, end);
@@ -259,8 +306,13 @@ fn point_at_distance(points: &[[f32; 2]], target_distance: f32) -> [f32; 2] {
             ];
         }
         remaining -= segment;
+        last_active_end = Some(end);
     }
-    *points.last().expect("non-empty points")
+    last_active_end.unwrap_or_else(|| *points.first().expect("non-empty points"))
+}
+
+fn is_inert(inert: &[bool], index: usize) -> bool {
+    inert.get(index).copied().unwrap_or(false)
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -375,6 +427,7 @@ mod tests {
             points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
             count: 5,
             reversed: false,
+            gaps: Vec::new(),
         }));
         let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
         assert_eq!(positions[0], [0.0, 0.0]);
@@ -388,9 +441,100 @@ mod tests {
             points: vec![[0.0, 0.0], [10.0, 0.0]],
             count: 2,
             reversed: true,
+            gaps: Vec::new(),
         }));
         assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
         assert_eq!(resolved.lamps[1].pos, [0.0, 0.0]);
+    }
+
+    /// The heart of inert segments: `count` lamps spread over the ACTIVE
+    /// length only, at one uniform pitch, and never onto the jumper. The
+    /// lamp landing exactly on the seam sits at the *end* of the active run
+    /// before the gap (the walk's `remaining <= segment` convention).
+    #[test]
+    fn a_mid_path_gap_carries_no_lamps_and_keeps_the_pitch_uniform() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![1], 5, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        // 20 active units (segments 0 and 2), 5 lamps → 5 units apart.
+        assert_eq!(
+            positions,
+            vec![
+                [0.0, 0.0],
+                [5.0, 0.0],
+                [10.0, 0.0],  // end of the run into the jumper
+                [15.0, 10.0], // resumes on the far side, pitch unbroken
+                [20.0, 10.0],
+            ]
+        );
+        // Inert segments emit NO entries: the object's span is exactly `count`,
+        // so every downstream wiring index is unshifted.
+        assert_eq!(resolved.spans[0].count, 5);
+    }
+
+    #[test]
+    fn a_leading_gap_starts_the_lamps_at_the_first_active_segment() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[10.0, 0.0], [10.0, 10.0], [20.0, 10.0]]);
+    }
+
+    #[test]
+    fn a_trailing_gap_ends_the_lamps_at_the_last_active_segment() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![2], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]);
+    }
+
+    #[test]
+    fn gaps_either_side_leave_one_active_segment_carrying_every_lamp() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0, 2], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[10.0, 0.0], [10.0, 5.0], [10.0, 10.0]]);
+    }
+
+    /// `reversed` mirrors the gap indices along with the points, so the same
+    /// *physical* segment stays inert whichever end the data enters from — the
+    /// reversed lamp list is exactly the forward one, backwards.
+    #[test]
+    fn reversed_remaps_gap_indices_to_the_same_physical_segments() {
+        let forward = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, false)));
+        let reversed = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, true)));
+        let mut expected: Vec<_> = forward.lamps.iter().map(|l| l.pos).collect();
+        expected.reverse();
+        let actual: Vec<_> = reversed.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual[0], [20.0, 10.0]);
+    }
+
+    #[test]
+    fn a_single_lamp_on_a_gapped_path_sits_at_the_first_active_point() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 1, false)));
+        assert_eq!(resolved.lamps.len(), 1);
+        assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
+    }
+
+    /// Every segment inert is the analogue of a zero-length path: an object
+    /// that cannot place a lamp is a load-time error, not silence.
+    #[test]
+    fn a_path_whose_every_segment_is_a_gap_is_invalid() {
+        let doc = Map2dDoc {
+            objects: vec![object(Map2dShape::Path(gapped_l(vec![0, 1, 2], 4, false)))],
+            ..Map2dDoc::new()
+        };
+        let error = resolve(&doc).unwrap_err();
+        assert!(matches!(
+            &error,
+            Map2dError::InvalidObject { reason, .. } if reason.contains("no active length")
+        ));
+    }
+
+    /// Out-of-range gap indices name no segment; the document still resolves
+    /// (the editor sanitizes them away, a hand-edit should not brick a load).
+    #[test]
+    fn out_of_range_gap_indices_are_ignored() {
+        let with_junk = resolve_shape(Map2dShape::Path(gapped_l(vec![1, 9, 42], 5, false)));
+        let clean = resolve_shape(Map2dShape::Path(gapped_l(vec![1], 5, false)));
+        assert_eq!(with_junk.positions(), clean.positions());
     }
 
     #[test]
@@ -429,6 +573,7 @@ mod tests {
                     points: vec![[0.0, 0.0], [1.0, 0.0]],
                     count: 3,
                     reversed: false,
+                    gaps: Vec::new(),
                 })),
                 object(Map2dShape::Ring(button_rings())),
             ],
@@ -452,6 +597,7 @@ mod tests {
                     points: vec![[0.0, 0.0]],
                     count: 2,
                     reversed: false,
+                    gaps: Vec::new(),
                 }),
             }],
             ..Map2dDoc::new()
@@ -481,6 +627,17 @@ mod tests {
         Map2dObject {
             name: String::new(),
             shape,
+        }
+    }
+
+    /// Three 10-unit segments in an L-and-back: `[0,0] → [10,0] → [10,10] →
+    /// [20,10]`. Every gap test reads off the same geometry.
+    fn gapped_l(gaps: Vec<u32>, count: u32, reversed: bool) -> PathShape {
+        PathShape {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]],
+            count,
+            reversed,
+            gaps,
         }
     }
 

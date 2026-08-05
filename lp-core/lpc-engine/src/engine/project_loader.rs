@@ -2359,7 +2359,7 @@ mod tests {
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
         assert_fixture_node_error(
             &rt,
-            "unsupported map2d format 99 (this build reads up to 1)",
+            "unsupported map2d format 99 (this build reads up to 2)",
         );
     }
 

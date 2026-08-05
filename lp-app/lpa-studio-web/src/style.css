@@ -1367,6 +1367,16 @@ label:has(> input:not(:disabled)) {
     cursor: move;
 }
 
+/* Inert path segments: jumper wire that carries no lamps. Dashed and dimmed,
+   and never a pointer target — the path's own hit line owns the clicks. */
+.lpme-gapline {
+    fill: none;
+    stroke: rgba(198, 203, 212, 0.32);
+    stroke-dasharray: 3 4;
+    stroke-linecap: round;
+    pointer-events: none;
+}
+
 /* Invisible enlarged pointer target over sparse (small-radius) lamps. */
 .lpme-lamp-hit {
     fill: transparent;

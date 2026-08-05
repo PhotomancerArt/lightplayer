@@ -24,6 +24,23 @@ wiring order:
 }
 ```
 
+A path may mark some of its segments **inert** — jumper wire that carries no
+lamps — so one physical channel stays one object:
+
+```json
+{ "name": "channel 1", "shape": { "path": { "count": 24,
+  "points": [[100, 300], [100, 100], [160, 100], [160, 300]],
+  "gaps": [1] } } }
+```
+
+Segment `i` runs `points[i] → points[i+1]`. Lamps distribute evenly over the
+**active** arc length only, so pitch stays uniform across the whole channel
+(fixed-pitch strip cut at a hub and jumpered), and an inert segment emits no
+lamp entries at all — placeholder lamps would shift every downstream wiring
+index. `reversed` mirrors the gap indices with the points, so the same physical
+segments stay inert whichever end the data enters from. Gaps are a format-2
+construct: an older build would parse the field away and light the jumper.
+
 Shapes are externally tagged (`"shape": {"grid": {...}}`) rather than using a
 `kind` field: the repo bans serde `tag`/`untagged`/`flatten` in the firmware
 dependency graph (Content-machinery flash cost — `scripts/check-serde-content.sh`).
@@ -58,12 +75,15 @@ arrays today; a packed base64 alternative (e.g. `points_packed` beside
 mapping documents ride Studio's whole-body asset pipeline with a 10 KiB body
 budget, and the corpus enforces headroom in tests.
 
-**New variants bump `format`, and old parsers hard-fail — by design.** An
-unknown shape variant cannot be ignored the way an unknown field can: doing so
-would silently drop lamps from someone's fixture. So a document using a newer
-construct declares a higher `format`, and a build that reads up to a lower one
-refuses the whole document. Loud refusal is the chosen posture: a build meeting
-data it does not understand should stop, not guess.
+**Constructs an old parser would misread bump `format`, and old parsers
+hard-fail — by design.** An unknown shape variant cannot be ignored the way an
+unknown field can: doing so would silently drop lamps from someone's fixture.
+Neither can a field that changes what the *existing* fields mean — `gaps`
+re-parameterizes the whole path, so a format-1 build that dropped it would
+light the jumper wire and shift every downstream index. So a document using a
+newer construct declares a higher `format`, and a build that reads up to a
+lower one refuses the whole document. Loud refusal is the chosen posture: a
+build meeting data it does not understand should stop, not guess.
 
 **`format` is peeked before the document is parsed.** `Map2dDoc::from_json`
 deserializes the `format` field alone first, so a newer document fails as
@@ -85,7 +105,8 @@ is overwritten, and the stored document survives open → close byte-identical.
 
 ## Corpus
 
-`corpus::{basic_button, cat_ears, panel_16x16, fyeah}` are the shared test
-scenes (the fourth is the real fyeah sign, derived from its mapping SVG via
-the importer: 219 lamps, 2 universes). Studio stories and editor fixtures
-should reuse these rather than inventing new geometry.
+`corpus::{basic_button, cat_ears, panel_16x16, gapped_path, fyeah}` are the
+shared test scenes (`gapped_path` is the format-2 archetype: one channel that
+jumpers across an inert segment; the last is the real fyeah sign, derived from
+its mapping SVG via the importer: 219 lamps, 2 universes). Studio stories and
+editor fixtures should reuse these rather than inventing new geometry.

@@ -1,0 +1,16 @@
+{
+  "format": 2,
+  "sample_diameter": 2.0,
+  "objects": [
+    {
+      "name": "channel 1",
+      "shape": {
+        "path": {
+          "points": [[100.0, 300.0], [100.0, 100.0], [160.0, 100.0], [160.0, 300.0]],
+          "count": 24,
+          "gaps": [1]
+        }
+      }
+    }
+  ]
+}

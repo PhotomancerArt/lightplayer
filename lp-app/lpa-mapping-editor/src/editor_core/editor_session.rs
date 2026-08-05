@@ -257,6 +257,21 @@ impl MapEditorSession {
 
     // ---- structural edits ------------------------------------------------
 
+    /// Insert a vertex into the selected path so it becomes `points[at]`,
+    /// splitting the segment it lands in. Inert segments survive the split:
+    /// both halves of a split jumper stay inert, and gaps after the insertion
+    /// point shift up with their segments.
+    pub fn insert_path_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) {
+        self.edit(|doc| {
+            if let Some(Map2dShape::Path(path)) = doc.objects.get_mut(index).map(|o| &mut o.shape)
+                && at <= path.points.len()
+            {
+                path.gaps = gaps_after_vertex_insert(&path.gaps, at);
+                path.points.insert(at, position);
+            }
+        });
+    }
+
     /// Delete the selected vertex (path keeps ≥ 2 points) or, without a
     /// vertex selection, all selected objects.
     pub fn delete_selection(&mut self) {
@@ -268,6 +283,7 @@ impl MapEditorSession {
                     && path.points.len() > 2
                     && vertex < path.points.len()
                 {
+                    path.gaps = gaps_after_vertex_delete(&path.gaps, vertex, path.points.len() - 1);
                     path.points.remove(vertex);
                     path.count = path.count.saturating_sub(1).max(2);
                     deleted = true;
@@ -358,6 +374,7 @@ impl MapEditorSession {
                     points: positions,
                     count,
                     reversed: false,
+                    gaps: Vec::new(),
                 });
             }
         });
@@ -453,6 +470,7 @@ impl MapEditorSession {
                 points,
                 count,
                 reversed: false,
+                gaps: Vec::new(),
             }),
         }))
     }
@@ -577,9 +595,79 @@ fn sanitize_doc(doc: &mut Map2dDoc) {
             }
             Map2dShape::Path(path) => {
                 path.count = path.count.max(1);
+                sanitize_path_gaps(path);
             }
         }
     }
+}
+
+/// Sort, dedupe and clamp inert segment indices.
+///
+/// Sanitize's contract is "every emitted document resolves", so a gap set that
+/// would leave the path with nothing to light is trimmed rather than rejected:
+/// indices naming no segment are dropped, and if every segment is marked
+/// inert the last one gives way. Editing the field is thus never a dead end.
+fn sanitize_path_gaps(path: &mut PathShape) {
+    let segments = path.points.len().saturating_sub(1);
+    path.gaps.retain(|gap| (*gap as usize) < segments);
+    path.gaps.sort_unstable();
+    path.gaps.dedup();
+    if path.gaps.len() >= segments {
+        path.gaps.pop();
+    }
+}
+
+/// Inert indices after a vertex is inserted so it becomes `points[at]`.
+///
+/// The insertion splits segment `at - 1` in two (`at - 1` and `at`); a split
+/// jumper is still a jumper, so both halves stay inert. Segments after the
+/// split shift up by one.
+fn gaps_after_vertex_insert(gaps: &[u32], at: usize) -> Vec<u32> {
+    let split = at.checked_sub(1).map(|split| split as u32);
+    let mut next = Vec::with_capacity(gaps.len() + 1);
+    for gap in gaps {
+        match split {
+            Some(split) if *gap == split => {
+                next.push(split);
+                next.push(split + 1);
+            }
+            Some(split) if *gap < split => next.push(*gap),
+            _ => next.push(gap + 1),
+        }
+    }
+    next
+}
+
+/// Inert indices after `vertex` is removed from a path with `segments`
+/// segments.
+///
+/// Deleting an interior vertex merges segments `vertex - 1` and `vertex` into
+/// one; the merged segment stays inert if *either* half was, because the
+/// alternative is silently lighting wire the author marked as jumper. Deleting
+/// an endpoint drops its segment outright.
+fn gaps_after_vertex_delete(gaps: &[u32], vertex: usize, segments: usize) -> Vec<u32> {
+    let last_vertex = segments; // points.len() - 1
+    let mut next = Vec::with_capacity(gaps.len());
+    for gap in gaps {
+        let gap = *gap as usize;
+        let mapped = if vertex == 0 {
+            (gap > 0).then(|| gap - 1)
+        } else if vertex >= last_vertex {
+            (gap + 1 < segments).then_some(gap)
+        } else if gap + 1 < vertex {
+            Some(gap)
+        } else if gap == vertex - 1 || gap == vertex {
+            Some(vertex - 1)
+        } else {
+            Some(gap - 1)
+        };
+        if let Some(mapped) = mapped {
+            next.push(mapped as u32);
+        }
+    }
+    next.sort_unstable();
+    next.dedup();
+    next
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -765,6 +853,97 @@ mod tests {
         assert!(Map2dDoc::from_json(&session.doc().to_json()).is_ok());
     }
 
+    /// Sanitize's contract on gaps: sorted, deduped, no index naming a
+    /// segment that does not exist, and never every segment at once.
+    #[test]
+    fn sanitize_orders_and_clamps_gap_indices() {
+        let mut session = session_with_gapped_path();
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps = vec![2, 0, 2, 9];
+            }
+        });
+        assert_eq!(gaps_of(&session), vec![0, 2]);
+        assert!(session.resolve_error.is_none());
+
+        // Every segment inert would leave nothing to light: the last gap gives
+        // way rather than the edit failing.
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps = vec![0, 1, 2];
+            }
+        });
+        assert_eq!(gaps_of(&session), vec![0, 1]);
+        assert!(session.resolve_error.is_none());
+        assert_eq!(session.lamp_count(), 4);
+    }
+
+    /// A gapped document stamps format 2 on commit, and drops back to 1 the
+    /// moment the last gap goes.
+    #[test]
+    fn gaps_stamp_format_two_and_release_it() {
+        let mut session = session_with_gapped_path();
+        assert_eq!(session.doc().format, 1);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps = vec![1];
+            }
+        });
+        assert_eq!(session.doc().format, 2);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps.clear();
+            }
+        });
+        assert_eq!(session.doc().format, 1);
+    }
+
+    /// Inserting a vertex inside a jumper leaves both halves inert; segments
+    /// after the insertion point shift up with their geometry.
+    #[test]
+    fn inserting_a_vertex_remaps_gaps_around_the_split() {
+        let mut session = session_with_gapped_path();
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps = vec![1];
+            }
+        });
+        // Split segment 1 (the jumper) at its midpoint: it becomes 1 and 2.
+        session.insert_path_vertex(0, 2, [10.0, 5.0]);
+        assert_eq!(gaps_of(&session), vec![1, 2]);
+        assert_eq!(points_of(&session).len(), 5);
+
+        // A vertex inserted before every gap pushes them all up one.
+        session.insert_path_vertex(0, 0, [-10.0, 0.0]);
+        assert_eq!(gaps_of(&session), vec![2, 3]);
+    }
+
+    /// Deleting a vertex merges the two segments it joined; a merged segment
+    /// stays inert if either half was, so wire never silently lights up.
+    #[test]
+    fn deleting_a_vertex_remaps_gaps_and_keeps_wire_inert() {
+        let mut session = session_with_gapped_path();
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.gaps = vec![1];
+            }
+        });
+        // Vertex 2 joins segment 1 (the jumper) and segment 2; the merged
+        // segment 1 is still a jumper.
+        session.selection.select_only(0);
+        session.selection.vertex = Some(2);
+        session.delete_selection();
+        assert_eq!(points_of(&session).len(), 3);
+        assert_eq!(gaps_of(&session), vec![1]);
+
+        // Deleting the first vertex drops segment 0 and shifts the rest down.
+        session.selection.select_only(0);
+        session.selection.vertex = Some(0);
+        session.delete_selection();
+        assert_eq!(points_of(&session).len(), 2);
+        assert_eq!(gaps_of(&session), Vec::<u32>::new()); // clamped: 1 segment left, and it must light
+    }
+
     #[test]
     fn dirty_tracks_saved_snapshot() {
         let mut session = session_with_ring();
@@ -777,6 +956,37 @@ mod tests {
 
     fn session_with_ring() -> MapEditorSession {
         MapEditorSession::new(corpus::basic_button())
+    }
+
+    /// One path, four points, three 10-unit segments — the gap tests all read
+    /// off this geometry.
+    fn session_with_gapped_path() -> MapEditorSession {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "channel".to_string(),
+            shape: Map2dShape::Path(PathShape {
+                points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]],
+                count: 4,
+                reversed: false,
+                gaps: Vec::new(),
+            }),
+        });
+        MapEditorSession::new(doc)
+    }
+
+    fn path_of(session: &MapEditorSession) -> &PathShape {
+        let Map2dShape::Path(path) = &session.doc().objects[0].shape else {
+            panic!("expected path");
+        };
+        path
+    }
+
+    fn gaps_of(session: &MapEditorSession) -> Vec<u32> {
+        path_of(session).gaps.clone()
+    }
+
+    fn points_of(session: &MapEditorSession) -> Vec<[f32; 2]> {
+        path_of(session).points.clone()
     }
 
     fn ring_center(session: &mut MapEditorSession) -> [f32; 2] {

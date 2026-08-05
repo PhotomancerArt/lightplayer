@@ -270,6 +270,7 @@ fn shape_fields(
                     current: dir_current,
                     apply: FieldApply::PathReversed,
                 }
+                PathGapsField { session, on_committed, index, gaps: path.gaps.clone() }
             }
         }
     }
@@ -419,6 +420,53 @@ fn SegField(
                         "{text}"
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Comma-separated inert segment indices; empty = every segment lit. Segment
+/// `i` runs from vertex `i` to vertex `i + 1`, so `0` is the first leg of the
+/// polyline — the numbering the document itself uses. Sanitize sorts, dedupes
+/// and clamps whatever is typed, so a half-typed list is never a dead end.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PathGapsField(
+    session: Signal<MapEditorSession>,
+    on_committed: EventHandler<()>,
+    index: usize,
+    gaps: Vec<u32>,
+) -> Element {
+    let shown = gaps
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    rsx! {
+        div { class: "lpme-field",
+            label { title: "segment i runs vertex i → vertex i+1; listed segments are jumper wire and carry no lamps", "gaps" }
+            input {
+                r#type: "text",
+                placeholder: "none",
+                value: "{shown}",
+                oninput: move |evt| {
+                    let parsed: Vec<u32> = evt
+                        .value()
+                        .split(',')
+                        .filter_map(|token| token.trim().parse::<u32>().ok())
+                        .collect();
+                    session.write().edit_uncommitted(move |doc| {
+                        if let Some(object) = doc.objects.get_mut(index)
+                            && let Map2dShape::Path(path) = &mut object.shape
+                        {
+                            path.gaps = parsed;
+                        }
+                    });
+                },
+                onchange: move |_| {
+                    session.write().commit_gesture();
+                    on_committed.call(());
+                },
             }
         }
     }
