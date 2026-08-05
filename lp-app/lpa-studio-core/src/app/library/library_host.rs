@@ -112,6 +112,16 @@ pub enum CatalogOp {
         observed: lpc_history::ContentHash,
         device_name: String,
     },
+    /// Migrate a package's own bytes to the current project format and
+    /// save the result (P5's Upgrade verb; the same body P3 runs on open).
+    ///
+    /// The migrated bytes are born HERE, in the library — never on the
+    /// device (D14 / ADR 2026-07-05 decision 5). Idempotent: a package
+    /// already at the current format is a no-op, and the outcome's
+    /// `upgraded_from` is `None`.
+    UpgradePackageFormat {
+        project_uid: String,
+    },
     /// Record a completed push: history `Pushed` event + device
     /// association.
     RecordPush {
@@ -354,6 +364,21 @@ pub fn apply_catalog_op(
             &device_name,
             now,
         )?),
+        CatalogOp::UpgradePackageFormat { project_uid } => {
+            let uid = parse_uid(&project_uid)?;
+            let mut handle = store.open(uid)?;
+            // A format refusal is already a full user-facing sentence
+            // (what was found, what was expected, the remedy), so it
+            // travels as `Refused` and reaches the card verbatim.
+            match super::package_upgrade::migrate_handle_to_current(&mut handle, now) {
+                Ok(report) => upgraded_from = report.map(|report| report.from),
+                Err(LibraryError::Format(message)) => {
+                    return Err(LibraryHostError::Refused(message));
+                }
+                Err(other) => return Err(other.into()),
+            }
+            Some(summary_for(store, uid)?)
+        }
         CatalogOp::RecordPush {
             project_uid,
             device,
@@ -512,6 +537,7 @@ impl LibraryHost for MemoryLibraryHost {
             | CatalogOp::ForkObservedVersion {
                 project_uid: uid, ..
             }
+            | CatalogOp::UpgradePackageFormat { project_uid: uid }
             | CatalogOp::RecordPush {
                 project_uid: uid, ..
             } => self.refuses(uid).then(|| uid.clone()),

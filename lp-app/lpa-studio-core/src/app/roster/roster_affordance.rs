@@ -25,6 +25,17 @@ pub enum RosterAffordance {
     Troubleshoot,
     /// Connected, empty: project picker popup.
     ChooseProject,
+    /// Holds an OLD-format project this build can migrate: pull → migrate
+    /// in the library → push (the device never upgrades in place, D14 /
+    /// ADR 2026-07-05 decision 5). Non-destructive by construction — the
+    /// pre-migration copy stays in project history — so, like
+    /// [`Self::UseBoardCopy`], it dispatches without a gate.
+    ///
+    /// Offered ONLY for a format this build can actually migrate. A
+    /// project below the upgrade floor, or one from a newer LightPlayer,
+    /// keeps [`Self::WipeProject`] and an honest note: a button that
+    /// cannot work is worse than no button.
+    UpgradeProject,
     /// Holds-unreadable-data: wipe the device's project storage back to
     /// blank (model rev 2026-07-26 — the way out is BLANK, never
     /// push-over). Destructive: the web gates it with the confirm sheet.
@@ -52,6 +63,7 @@ impl RosterAffordance {
             Self::KeepBoth => "Keep both".to_string(),
             Self::Troubleshoot => "Troubleshoot".to_string(),
             Self::ChooseProject => "Choose a project".to_string(),
+            Self::UpgradeProject => "Upgrade project".to_string(),
             Self::WipeProject => "Wipe project…".to_string(),
             Self::SetUp => "Set up".to_string(),
             Self::UpdateFirmware => "Update".to_string(),

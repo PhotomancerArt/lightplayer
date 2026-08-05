@@ -37,7 +37,7 @@ pub use card_tabs::{CardTabView, DeviceCardTab, device_card_tabs};
 pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_rich_object};
 pub use firmware_update::{BundledFirmware, firmware_update_available};
 pub use roster_affordance::RosterAffordance;
-pub use roster_card_state::{ConnectPhase, DegradedReason, RosterCardState};
+pub use roster_card_state::{ConnectPhase, DegradedReason, DeviceFormatStanding, RosterCardState};
 pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
 pub use roster_state_spec::{RosterStateSpec, RosterTreatment};
 pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};

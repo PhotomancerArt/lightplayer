@@ -2304,6 +2304,295 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
     );
 }
 
+/// P5 (project-format upgrades): a board holding an OLD-FORMAT project
+/// must say so, and the one verb on its card must fix it end to end.
+///
+/// Before this, the connect-time pull read the manifest's `uid` and never
+/// its `format`, so a format-4 board classified as Known/at-head and the
+/// card claimed it was running a project the firmware had refused to load.
+/// The upgrade runs pull → migrate IN THE LIBRARY → push (the device is
+/// never rewritten in place, D14), so the board comes back at head with
+/// current-format bytes.
+#[test]
+fn an_old_format_board_classifies_honestly_and_upgrades_in_one_verb() {
+    use crate::app::roster::{DeviceFormatStanding, RosterCardState};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files_at_format(4, "v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let stale_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(stale_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    // (a) classification: the format, not the hash relation, owns the card
+    let sync = studio.device_sync_for_test().expect("the pull landed");
+    let DeviceContent::OldFormat {
+        project_uid, class, ..
+    } = &sync.content
+    else {
+        panic!(
+            "a format-4 board is not Known/Running, got {:?}",
+            sync.content
+        );
+    };
+    assert_eq!(*class, lpa_upgrade::FormatClass::Upgradable { found: 4 });
+    assert_eq!(
+        project_uid.as_deref(),
+        Some(summary.uid.to_string().as_str()),
+        "the card knows which library project this board's copy belongs to"
+    );
+    let home = studio.view().home.expect("gallery view");
+    assert!(
+        home.devices.iter().any(|card| card.state
+            == RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::Upgradable { found: 4 },
+                expected: lpc_model::PROJECT_FORMAT_VERSION,
+            }),
+        "the card names the format it found: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // (b) the verb: one dispatch, no confirm sheet
+    let outcome = drive(
+        studio.dispatch(deploy_action(DeployOp::UpgradeDeviceProject {
+            target: studio.device_target_for_test(),
+        })),
+    )
+    .expect("the upgrade succeeds");
+    assert!(
+        outcome.notices.iter().any(
+            |notice| notice.message.contains("Upgraded") && notice.message.contains("format 4")
+        ),
+        "the upgrade says what it did: {:?}",
+        outcome.notices
+    );
+
+    // The migrated bytes were born in the LIBRARY…
+    let handle = store.open(summary.uid).unwrap();
+    let manifest = handle
+        .read_all_files()
+        .unwrap()
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| String::from_utf8_lossy(&bytes).to_string())
+        .expect("a manifest");
+    assert!(
+        manifest.contains(&format!(
+            "\"format\": {}",
+            lpc_model::PROJECT_FORMAT_VERSION
+        )),
+        "the library copy is current now: {manifest}"
+    );
+    // …and the pre-upgrade version is still there. That is what makes the
+    // verb safe to dispatch without a confirm gate.
+    assert!(
+        handle.history.events().len() > 1,
+        "the upgrade left history to fall back on"
+    );
+
+    // …and travelled back over the ordinary hash-checked push: the board
+    // now holds exactly the library head.
+    assert!(
+        matches!(
+            studio.device_sync_for_test().map(|sync| &sync.content),
+            Some(DeviceContent::Known {
+                relation: lpc_history::SyncRelation::AtHead,
+                ..
+            })
+        ),
+        "the board settles at head, got {:?}",
+        studio.device_sync_for_test().map(|sync| &sync.content)
+    );
+    let home = studio.view().home.expect("gallery view");
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| matches!(card.state, RosterCardState::RunningUpToDate)),
+        "the card settled to Running-up-to-date: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The board is stale but the LIBRARY is not — the user already opened
+/// the project in the editor, which migrated it (P3). There is nothing to
+/// migrate, so the verb is just the push, and it says so rather than
+/// claiming an upgrade it did not perform.
+///
+/// Also the guard on a real trap: sending the migrate transaction anyway
+/// would take the project lock and refuse for a project open in this very
+/// tab — an upgrade failing because the project is open is exactly the
+/// kind of nonsense the format work exists to end.
+#[test]
+fn a_stale_board_whose_library_copy_is_current_is_simply_pushed() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let head_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+    // the board still holds what it was pushed BEFORE the format bump:
+    // same project uid, older manifest
+    let stale_files: Vec<(String, Vec<u8>)> = head_files
+        .iter()
+        .map(|(path, bytes)| {
+            if path != "project.json" {
+                return (path.clone(), bytes.clone());
+            }
+            let mut manifest: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            manifest["format"] = serde_json::json!(4);
+            (path.clone(), serde_json::to_vec_pretty(&manifest).unwrap())
+        })
+        .collect();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(stale_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    assert!(
+        matches!(
+            studio.device_sync_for_test().map(|sync| &sync.content),
+            Some(DeviceContent::OldFormat { .. })
+        ),
+        "the board's format owns its card, got {:?}",
+        studio.device_sync_for_test().map(|sync| &sync.content)
+    );
+
+    let head_before = store.open(summary.uid).unwrap().history.head();
+    let outcome = drive(
+        studio.dispatch(deploy_action(DeployOp::UpgradeDeviceProject {
+            target: studio.device_target_for_test(),
+        })),
+    )
+    .expect("the verb succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("already upgraded")),
+        "no upgrade was needed — say what actually happened: {:?}",
+        outcome.notices
+    );
+    assert_eq!(
+        store.open(summary.uid).unwrap().history.head(),
+        head_before,
+        "the library's line did not move: the board's old copy must never \
+         become the head behind the user's back"
+    );
+    assert!(
+        matches!(
+            studio.device_sync_for_test().map(|sync| &sync.content),
+            Some(DeviceContent::Known {
+                relation: lpc_history::SyncRelation::AtHead,
+                ..
+            })
+        ),
+        "the board runs the library head now, got {:?}",
+        studio.device_sync_for_test().map(|sync| &sync.content)
+    );
+}
+
+/// The other half of P5's honesty: a board below the upgrade floor gets
+/// the same clear card and NO upgrade button — the migration chain does
+/// not reach it, and a verb that refuses the moment it is pressed is worse
+/// than the honest way out. A stray dispatch says why.
+#[test]
+fn a_board_below_the_upgrade_floor_is_named_but_not_offered_an_upgrade() {
+    use crate::app::roster::{DeviceFormatStanding, RosterAffordance, RosterCardState};
+
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(project_files_at_format(2, "ancient"))
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("the pull landed");
+    assert!(
+        matches!(
+            &sync.content,
+            DeviceContent::OldFormat {
+                class: lpa_upgrade::FormatClass::BelowFloor { found: Some(2) },
+                ..
+            }
+        ),
+        "got {:?}",
+        sync.content
+    );
+    let home = studio.view().home.expect("gallery view");
+    let card = home
+        .devices
+        .iter()
+        .find(|card| {
+            matches!(
+                card.state,
+                RosterCardState::HoldsOldFormatProject {
+                    standing: DeviceFormatStanding::TooOld { found: Some(2) },
+                    ..
+                }
+            )
+        })
+        .expect("the below-floor card");
+    assert_eq!(
+        card.state.affordance(),
+        Some(RosterAffordance::WipeProject),
+        "no upgrade path — the way out is the offer"
+    );
+
+    let error = drive(
+        studio.dispatch(deploy_action(DeployOp::UpgradeDeviceProject {
+            target: studio.device_target_for_test(),
+        })),
+    )
+    .expect_err("a stray dispatch refuses");
+    let message = error.to_string();
+    assert!(
+        message.contains('2') && message.contains("too old"),
+        "the refusal names what was found: {message}"
+    );
+}
+
 /// Regression (2026-07-26 hardware walk): a push to the LIVE device
 /// smeared its "Pushing…" overlay onto a REMEMBERED (unplugged) device's
 /// card too — the overlay's session-op fallback matched any card with a
@@ -3059,10 +3348,16 @@ fn library() -> (LibraryStore, Rc<MemoryLibraryHost>) {
 }
 
 fn project_files(marker: &str) -> Vec<(String, Vec<u8>)> {
+    project_files_at_format(lpc_model::PROJECT_FORMAT_VERSION, marker)
+}
+
+/// The same minimal project, authored at an arbitrary format — the
+/// fixture the format-upgrade rows (P5) are built on.
+fn project_files_at_format(format: u32, marker: &str) -> Vec<(String, Vec<u8>)> {
     vec![
         (
             "project.json".to_string(),
-            format!(r#"{{"format":5,"name":"Porch {marker}"}}"#).into_bytes(),
+            format!(r#"{{"format":{format},"name":"Porch {marker}"}}"#).into_bytes(),
         ),
         (
             "module.json".to_string(),

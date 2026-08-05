@@ -445,6 +445,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
             uid: project_uid.clone(),
             name: slug.clone(),
         }),
+        // No chip for the rest — including an OLD-FORMAT copy (P5), whose
+        // library package is known but is NOT what the board is running:
+        // the firmware refused to load it. The card's Health section says
+        // what is there instead.
         _ => None,
     });
     // hello build + hardware facts: Technical evidence for the card's
