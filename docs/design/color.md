@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for color representation,
 precision, and conversion in LightPlayer. All implementations
-(lp-domain, lp-engine, lpfx, fixture/output drivers, debug viewers,
+(lpc-model, lpc-engine, lpfx, fixture/output drivers, debug viewers,
 shader codegen) must conform.
 
 ## TL;DR
@@ -127,39 +127,43 @@ Notes:
 
 ## 5. Color-family kinds
 
-Three Kinds in the color family. Each is a struct shape with the
+Two Kinds in the color family. Each is a struct shape with the
 colorspace and color data inside the value. These structs are the
 authoring/storage model, not necessarily the shader ABI for every
 runtime path.
 
-| Kind           | Storage (`LpsType::Struct`)                                                           |
-| -------------- | ------------------------------------------------------------------------------------- |
-| `Color`        | `{ space: I32, coords: Vec3 }`                                                        |
-| `ColorPalette` | `{ space: I32, count: I32, entries: Array(Vec3, 16) }`                                |
-| `Gradient`     | `{ space: I32, method: I32, count: I32, stops: Array(Struct{at: F32, c: Vec3}, 16) }` |
+| Kind       | Storage (`LpsType::Struct`)                                                           |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `Color`    | `{ space: I32, coords: Vec3 }`                                                        |
+| `Gradient` | `{ space: I32, method: I32, count: I32, stops: Array(Struct{at: F32, c: Vec3}, 24) }` |
+
+There is **no separate `ColorPalette` Kind**: a discrete swatch list
+is a `Gradient` with `method: Step` (D2 of the palette spike,
+`2026-08-03-1803-palette-exploration-spike`). One collection type, one
+bake path, one editor.
 
 Conventions:
 
 - `space` is `Colorspace as i32` (per the table above). Stable repr.
 - `method` is `InterpMethod as i32` (see §6).
 - Both encoded as integers in storage so `LpsValue` stays purely
-  structural; the loader maps TOML strings (`"oklch"`, `"linear_srgb"`,
-  `"srgb"`, ...) to the integer encoding.
-- **`coords` and `entries.c` and `stops.c` are F32** per the
-  precision contract.
-- **Color collections share one space at the collection level.**
-  `ColorPalette` and `Gradient` carry a single `space` for all
-  entries — never per-element. Same for `method` on `Gradient`.
+  structural; the loader maps authored strings (`"oklch"`,
+  `"linear_srgb"`, `"srgb"`, ...) to the integer encoding.
+- **`coords` and `stops.c` are F32** per the precision contract.
+- **A gradient shares one space at the collection level.** A
+  `Gradient` carries a single `space` for all stops — never
+  per-element. Same for `method`.
 
 ### Fixed-size arrays + explicit count
 
-`ColorPalette` and `Gradient` use **fixed-size arrays** sized by
-constants:
+`Gradient` uses a **fixed-size array** sized by a constant:
 
 ```rust
-pub const MAX_PALETTE_LEN:    u32 = 16;
-pub const MAX_GRADIENT_STOPS: u32 = 16;
+pub const MAX_GRADIENT_STOPS: u32 = 24;
 ```
+
+24 rather than the original 16: WLED gradients carry up to 18 stops
+and importing one must not truncate (D2 of the palette spike).
 
 Storage is always the maximum size. The loader populates an explicit
 `count: i32` field with the number of authored entries; remaining
@@ -170,12 +174,18 @@ Authored values _exceeding_ the maximum are a load error, not
 silently truncated. Larger collections are a one-constant bump in
 v1+, not a model change.
 
-For lpfx rendering, `ColorPalette` and `Gradient` values materialize
-to width-by-one texture resources before shader binding. Shaders
-sample those resources as `sampler2D` uniforms using the lp-shader
+The authored JSON surface is **not** this fixed shape: it carries
+snake-case enum strings and exactly the stops that were authored.
+`lpc-model`'s `color` module owns both encodings and the conversion
+between them; the fixed shape is what `LpValue` / `LpType` and the
+GPU layout logic see.
+
+For lpfx rendering, `Gradient` values materialize to width-by-one
+texture resources before shader binding. Shaders sample those
+resources as `sampler2D` uniforms using the lp-shader
 `TextureShapeHint::HeightOne` contract. This keeps color authoring
-textual and structured while avoiding fixed-size palette/gradient
-uniform structs as the shader-facing ABI.
+textual and structured while avoiding fixed-size gradient uniform
+structs as the shader-facing ABI.
 
 ## 6. Gradient interpolation
 
@@ -261,7 +271,7 @@ canonical, it isn't a buffer the engine produced.
 The hard rules. Implementations that violate these are wrong.
 
 1. **`Unorm8` is display-encoded sRGB or device output. Never linear.**
-   If you see a `u8` color channel in lp-domain or lp-engine
+   If you see a `u8` color channel in `lpc-model` or `lpc-engine`
    internals, it's a bug or it's at the output stage.
 2. **Canonical color is `LinearSrgb`, F32, 3 channels.** Shaders,
    uniforms, and engine math operate here. No exceptions.
@@ -295,9 +305,9 @@ The contract is designed to grow without breaking these:
 - **CIE Lab / LCH.** Older perceptual spaces. Mostly superseded by
   Oklab/Oklch but useful for compatibility with existing color
   data. Additive.
-- **Larger color collections.** Bump `MAX_PALETTE_LEN` /
-  `MAX_GRADIENT_STOPS`. One constant change; per-collection-instance
-  storage size scales linearly.
+- **Larger color collections.** Bump `MAX_GRADIENT_STOPS`. One
+  constant change; per-collection-instance storage size scales
+  linearly.
 - **Native multi-primary authoring (RGBW etc.).** Currently a
   fixture-stage concern. If a use case needs to author white
   separately at the canonical layer, that's a new Kind and a
@@ -305,15 +315,18 @@ The contract is designed to grow without breaking these:
 
 ## 12. Reference implementations
 
-When written, these crates / files implement this contract:
+These crates / files implement this contract:
 
-- `lp-domain/lp-domain/src/color.rs` — the `Colorspace`,
-  `InterpMethod`, `MAX_*` constants, conversion functions.
-- `lp-domain/lp-domain/src/kinds/color.rs` — `Color`, `ColorPalette`,
-  `Gradient` Kind storage recipes.
+- `lp-core/lpc-model/src/color/gradient.rs` — the `Colorspace`,
+  `InterpMethod`, `MAX_GRADIENT_STOPS`, and the `Gradient` storage
+  recipe (§5) plus its authored serde surface.
+- `lp-core/lpc-model/src/color/gradient_config.rs` — `GradientConfig`,
+  the static-or-cycle read of a palette.
+- `lp-core/lpc-model/src/value/legacy_kind.rs` — the legacy `Kind`
+  storage recipes; `Kind::Gradient` delegates to the module above.
 - `lp-shader/lpvm/src/runtime/color.rs` — colorspace conversion at
-  uniform-binding time.
-- Per-fixture drivers under `lp-engine/fixtures/` — fixture-stage
+  uniform-binding time (not yet written).
+- Per-fixture drivers under `lp-core/lpc-engine/` — fixture-stage
   gamma, white balance, channel synthesis.
 
 ## See also
@@ -323,6 +336,6 @@ When written, these crates / files implement this contract:
 - [`glsl-layout.md`](./glsl-layout.md) — std430 packing rules for
   uniform / storage buffer layout (relevant for color-family struct
   storage on the GPU).
-- `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` — broader
+- `docs-archive/roadmaps/2026-04-22-lp-domain/notes-quantity.md` — broader
   Quantity model that color sits inside (Slot, Shape, Kind,
   Constraint, etc.).
