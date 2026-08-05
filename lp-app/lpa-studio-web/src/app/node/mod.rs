@@ -38,6 +38,8 @@ pub(crate) mod node_story_fixtures;
 #[cfg(feature = "stories")]
 pub(crate) mod output_face_stories;
 #[cfg(feature = "stories")]
+pub(crate) mod palette_chooser_stories;
+#[cfg(feature = "stories")]
 pub(crate) mod palette_swatch_stories;
 mod panel;
 #[cfg(feature = "stories")]
@@ -100,7 +102,11 @@ pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
 pub(crate) use panel::phasor_speed_display;
-pub use panel::{HFaderField, KnobField, PaletteSwatchField, PanelControl, PanelEmit, ToggleField};
+pub use panel::{
+    HFaderField, KnobField, PaletteCatalog, PaletteChoice, PaletteChooser, PaletteChooserTab,
+    PaletteGroup, PaletteSwatchField, PanelControl, PanelEmit, ToggleField,
+    project_palette_choices,
+};
 pub use produced_product_view::ProducedProductView;
 pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};
 pub use produced_products::ProducedProducts;

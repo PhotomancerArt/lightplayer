@@ -143,9 +143,6 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
-  .tw\:right-0\.5 {
-    right: calc(var(--tw-spacing) * 0.5);
-  }
   .tw\:right-1 {
     right: calc(var(--tw-spacing) * 1);
   }
@@ -418,6 +415,12 @@
   }
   .tw\:max-h-80 {
     max-height: calc(var(--tw-spacing) * 80);
+  }
+  .tw\:max-h-\[168px\] {
+    max-height: 168px;
+  }
+  .tw\:max-h-\[210px\] {
+    max-height: 210px;
   }
   .tw\:min-h-0 {
     min-height: calc(var(--tw-spacing) * 0);
@@ -1141,6 +1144,10 @@
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 1px;
   }
+  .tw\:border-b-2 {
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 2px;
+  }
   .tw\:border-b-4 {
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 4px;
@@ -1653,9 +1660,6 @@
   }
   .tw\:pr-1\.5 {
     padding-right: calc(var(--tw-spacing) * 1.5);
-  }
-  .tw\:pr-5 {
-    padding-right: calc(var(--tw-spacing) * 5);
   }
   .tw\:pr-8 {
     padding-right: calc(var(--tw-spacing) * 8);
@@ -2503,6 +2507,13 @@
       }
     }
   }
+  .tw\:hover\:bg-transparent {
+    &:hover {
+      @media (hover: hover) {
+        background-color: transparent;
+      }
+    }
+  }
   .tw\:hover\:bg-white\/5 {
     &:hover {
       @media (hover: hover) {
@@ -2538,6 +2549,13 @@
     &:hover {
       @media (hover: hover) {
         color: var(--tw-color-soft-foreground);
+      }
+    }
+  }
+  .tw\:hover\:text-status-error-foreground {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--tw-color-status-error-foreground);
       }
     }
   }

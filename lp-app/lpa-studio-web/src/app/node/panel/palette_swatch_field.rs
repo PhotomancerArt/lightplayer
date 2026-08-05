@@ -11,10 +11,12 @@
 //!   control's readout chip (`↻ 4 · 3/min`, auto-denominated like every
 //!   other periodic reading in Studio), not the band.
 //!
-//! The band carries the chevron that says a chooser lives behind it. In
-//! this phase the chooser does not exist yet, so the band is deliberately
-//! **not interactive**: a cursor that promises a click and does nothing is
-//! worse than a picture. P4 turns the band into the popover trigger.
+//! The band carries the chevron that says a chooser lives behind it, and
+//! since P4 the band IS that chooser's trigger: the popover opens in
+//! **anchored mode** (`base/popover.rs` `:86-98`) with the swatch FRAME as
+//! the anchor, so the merged outline welds control and panel into one shape
+//! — "diving into the control", the same join the label's detail popover
+//! makes one level up.
 //!
 //! The live member ring — highlighting which member of a running cycle is
 //! showing right now — is NOT here, and it is not a styling omission: a
@@ -30,6 +32,8 @@
 //! (`docs/design/panel.md` P6 — the engaged family is decided at the P6
 //! gate, and this phase mints nothing new).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use dioxus::prelude::*;
 use lpa_studio_core::{
     LpValue, ProjectSlotAddress, ToLpValue, UiAction, UiPanelTarget, UiSlotFieldState,
@@ -38,7 +42,17 @@ use lpc_model::GradientConfig;
 
 use crate::app::node::GradientStripBand;
 use crate::app::node::slot_edit_actions::panel_or_slot_action;
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{
+    PopoverButton, PopoverPlacement, StudioIcon, StudioIconName, detail_popover_card_class,
+};
+
+use super::palette_chooser::{PaletteChooser, PaletteChooserTab};
+
+static NEXT_SWATCH_ID: AtomicUsize = AtomicUsize::new(1);
+
+/// The band's trigger button: no chrome of its own — the FRAME around it is
+/// the visual, and the frame is also the popover's outline anchor.
+const BAND_TRIGGER_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -55,21 +69,102 @@ pub fn PaletteSwatchField(
     /// Outranks the violet bound family, same rule as every other field.
     #[props(default = false)]
     engaged: bool,
+    /// Backing slot a pick edits when the control is not public.
+    #[props(default = None)]
+    address: Option<ProjectSlotAddress>,
+    /// Panel channel a pick writes when the control IS public.
+    #[props(default = None)]
+    panel_target: Option<UiPanelTarget>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Open the chooser on first render (stories).
+    #[props(default = false)]
+    chooser_initially_open: bool,
+    /// Force the chooser's opening tab (stories); by default it opens on
+    /// whichever kind the config already is.
+    #[props(default = None)]
+    chooser_initial_tab: Option<PaletteChooserTab>,
 ) -> Element {
     let invalid_title = state.invalid.clone().unwrap_or_default();
+    // The anchored-outline id: the swatch FRAME is the anchor, so the
+    // merged outline grows out of the whole control, not the band's button.
+    let anchor_id = use_hook(|| {
+        let id = NEXT_SWATCH_ID.fetch_add(1, Ordering::Relaxed);
+        format!("ux-palette-swatch-{id}")
+    });
+
+    // A swatch that cannot write is a PICTURE: no caret, no cursor, no
+    // popover. P3's reason for keeping the band inert still holds wherever
+    // the gesture would go nowhere — a read-only slot, or a surface with no
+    // dispatch conduit (the wiring drawer's preview copies).
+    if !chooser_is_reachable(&state, address.as_ref(), on_action.is_some()) {
+        return rsx! {
+            div {
+                class: "tw:grid tw:min-w-0 tw:rounded-sm tw:border tw:p-0.5 {swatch_frame_class(&state, bound, engaged)}",
+                title: "{invalid_title}",
+                GradientStripBand { config }
+            }
+        };
+    }
+
     rsx! {
         div {
-            class: "tw:relative tw:flex tw:min-w-0 tw:items-stretch tw:rounded-sm tw:border tw:p-0.5 tw:pr-5 {swatch_frame_class(&state, bound, engaged)}",
+            id: "{anchor_id}",
+            class: "tw:grid tw:min-w-0 tw:rounded-sm tw:border tw:p-0.5 {swatch_frame_class(&state, bound, engaged)}",
             title: "{invalid_title}",
-            div { class: "tw:min-w-0 tw:grow", GradientStripBand { config } }
-            // The "a chooser lives here" caret. Non-interactive in P3 —
-            // P4 makes the whole frame the popover trigger.
-            span {
-                class: "tw:pointer-events-none tw:absolute tw:right-0.5 tw:top-1/2 tw:inline-flex tw:-translate-y-1/2 tw:text-subtle-foreground",
-                StudioIcon { name: StudioIconName::Expanded, size: 12 }
+            PopoverButton {
+                class: BAND_TRIGGER_CLASS.to_string(),
+                open_class: BAND_TRIGGER_CLASS.to_string(),
+                trigger: swatch_band_visual(&config),
+                label: "Choose a palette".to_string(),
+                title: "Choose a palette".to_string(),
+                popup_class: detail_popover_card_class().to_string(),
+                placement: PopoverPlacement::BottomMiddle,
+                initially_open: chooser_initially_open,
+                anchor_id: Some(anchor_id.clone()),
+                // The top-layer copy of the control while open: the same
+                // band inside the frame's own padding, so nothing shifts.
+                anchor_visual: rsx! {
+                    div { class: "tw:grid tw:h-full tw:w-full tw:min-w-0 tw:content-center tw:p-0.5",
+                        {swatch_band_visual(&config)}
+                    }
+                },
+                PaletteChooser {
+                    config,
+                    address,
+                    panel_target,
+                    on_action,
+                    initial_tab: chooser_initial_tab,
+                }
             }
         }
     }
+}
+
+/// The control's face: the strip band plus the caret that says a chooser
+/// lives behind it. Rendered twice while the popover is open (in-flow
+/// placeholder + top-layer copy), so it stays a plain function of the
+/// config.
+fn swatch_band_visual(config: &GradientConfig) -> Element {
+    rsx! {
+        span { class: "tw:min-w-0 tw:grow",
+            GradientStripBand { config: config.clone() }
+        }
+        span { class: "tw:inline-flex tw:flex-none tw:text-subtle-foreground", aria_hidden: "true",
+            StudioIcon { name: StudioIconName::Expanded, size: 12 }
+        }
+    }
+}
+
+/// Whether opening the chooser could actually change anything: the slot has
+/// to be editable AND there has to be somewhere to send the write. A caret
+/// over a dead gesture is worse than no caret (P3's rule for the inert
+/// band, kept).
+fn chooser_is_reachable(
+    state: &UiSlotFieldState,
+    address: Option<&ProjectSlotAddress>,
+    has_conduit: bool,
+) -> bool {
+    state.editable && address.is_some() && has_conduit
 }
 
 /// The frame's border family: amber when a panel writer holds the channel,
@@ -99,13 +194,6 @@ pub(crate) fn swatch_frame_class(
 ///
 /// No partial-field carry, unlike a phasor's period: a pick REPLACES the
 /// palette, so there is nothing of the old config to preserve.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4's chooser is the only caller; the tests below pin both dispatch branches"
-    )
-)]
 pub(crate) fn palette_write_action(
     panel_target: &Option<UiPanelTarget>,
     address: ProjectSlotAddress,
@@ -116,14 +204,7 @@ pub(crate) fn palette_write_action(
 
 /// The `LpValue` a palette gesture carries — the model's own storage, never
 /// a shape rebuilt in the UI layer.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "reached through palette_write_action, which P4 calls"
-    )
-)]
-pub(crate) fn palette_lp_value(config: &GradientConfig) -> LpValue {
+fn palette_lp_value(config: &GradientConfig) -> LpValue {
     config.to_lp_value()
 }
 
@@ -169,6 +250,24 @@ mod tests {
             channel: "palette".to_string(),
             engaged: false,
         })
+    }
+
+    /// The caret only appears where a pick can land: a read-only slot, or
+    /// one with no address, keeps P3's inert picture.
+    #[test]
+    fn the_chooser_is_only_promised_where_a_pick_can_land() {
+        let editable = UiSlotFieldState::editable();
+        assert!(chooser_is_reachable(&editable, Some(&address()), true));
+        // Nowhere to write: a preview copy with no address, or a surface
+        // with no dispatch conduit.
+        assert!(!chooser_is_reachable(&editable, None, true));
+        assert!(!chooser_is_reachable(&editable, Some(&address()), false));
+        // Projected/derived values stay pictures.
+        assert!(!chooser_is_reachable(
+            &UiSlotFieldState::readonly(),
+            Some(&address()),
+            true
+        ));
     }
 
     /// A public palette writes the WHOLE config onto its channel — the
