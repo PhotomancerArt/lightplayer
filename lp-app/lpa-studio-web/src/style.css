@@ -1235,22 +1235,16 @@ label:has(> input:not(:disabled)) {
     background: #000;
 }
 
-.ux-produced-product-control-lamp {
+/* The whole lamp field, however many lamps: one canvas, no per-lamp DOM.
+   Sized by its host box (the 5.5% inset) — the renderer reads that box and
+   paints a device-pixel backing store into it. */
+.ux-produced-product-lamp-canvas {
     position: absolute;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
     pointer-events: none;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    background: radial-gradient(
-        circle closest-side,
-        rgb(var(--lamp-r) var(--lamp-g) var(--lamp-b) / 1) 0%,
-        rgb(var(--lamp-r) var(--lamp-g) var(--lamp-b) / 1) 75%,
-        rgb(var(--lamp-r) var(--lamp-g) var(--lamp-b) / 0) 100%
-    );
-    filter: saturate(1.08);
-    mix-blend-mode: screen;
 }
 
 /* ---- the standalone mapping editor (#/mapping, lpa-mapping-editor) ----- */
@@ -1942,56 +1936,12 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
 }
 
-/* ---- mapping view layers (wiring numbers / arrows / toggles) ---------- */
+/* ---- mapping view layers (lamp field inset / toggles) ----------------- */
 
 /* Pulls the lamp field off the frame edges so edge-mapped lamps stay whole. */
 .ux-map-inset {
     position: absolute;
     inset: 5.5%;
-}
-
-.ux-map-lamp-num {
-    position: absolute;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    font-family: var(--studio-font-mono, ui-monospace, monospace);
-    font-size: 8px;
-    font-weight: 600;
-    line-height: 1;
-    /* White fill + 8-direction black outline: readable over any lamp color,
-       lit or unlit (the lp2014 outline treatment). */
-    color: #fff;
-    text-shadow:
-        1px 0 0 #000,
-        -1px 0 0 #000,
-        0 1px 0 #000,
-        0 -1px 0 #000,
-        1px 1px 0 #000,
-        -1px 1px 0 #000,
-        1px -1px 0 #000,
-        -1px -1px 0 #000;
-}
-
-.ux-map-arrows {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
-}
-
-.ux-map-arrow-wire {
-    stroke: rgba(198, 203, 212, 0.65);
-    stroke-width: 2.5;
-    color: rgba(198, 203, 212, 0.65);
-}
-
-.ux-map-arrow-chain {
-    stroke: rgba(228, 192, 101, 0.9);
-    stroke-width: 3;
-    stroke-dasharray: 10 8;
-    color: rgba(228, 192, 101, 0.9);
 }
 
 /* Pinned above the lamp display inside the output section (not floating). */
