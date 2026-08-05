@@ -271,37 +271,11 @@ fn PanelControlBody(
     }
 }
 
-/// A period reading presented as an auto-denominated rate: `"0.5"` → `2/s`,
-/// `"20"` → `3/min`, `"240"` → `15/hr` (G2 convergence — pick the smallest
-/// time unit that keeps the number ≥ 1, so the reading is always a natural
-/// count; the unit is part of the string, so these controls carry no
-/// separate unit suffix). A frozen phasor (period 0) never cycles: `0/s`.
-/// A reading that does not parse passes through untouched.
-pub(crate) fn phasor_speed_display(shown: &str) -> String {
-    let Ok(period) = shown.trim().parse::<f32>() else {
-        return shown.to_string();
-    };
-    if period <= 0.0 {
-        return "0/s".to_string();
-    }
-    // Smallest unit whose count reaches 1; /hr is the floor either way.
-    let (count, unit) = [(1.0, "s"), (60.0, "min"), (3600.0, "hr")]
-        .into_iter()
-        .map(|(seconds, unit)| (seconds / period, unit))
-        .find(|(count, unit)| *count >= 1.0 || *unit == "hr")
-        .expect("the ladder always yields");
-    let number = if count >= 9.95 {
-        format!("{}", count.round() as i64)
-    } else {
-        let rounded = (count * 10.0).round() / 10.0;
-        if rounded.fract() == 0.0 {
-            format!("{}", rounded as i64)
-        } else {
-            format!("{rounded:.1}")
-        }
-    };
-    format!("{number}/{unit}")
-}
+/// A period reading presented as an auto-denominated rate — the G2
+/// convergence, now shared with the clock face's trace cards, so the pure
+/// function lives in `lpa-studio-core` ([`phasor_speed_display`]) and this
+/// module only re-exports it for its readout path.
+pub(crate) use lpa_studio_core::phasor_speed_display;
 
 /// The label visual shared by the trigger button and its top-layer copy:
 /// the control name in the panel's label typography plus a small info glyph

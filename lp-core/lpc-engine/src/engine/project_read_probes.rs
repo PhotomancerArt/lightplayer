@@ -377,6 +377,16 @@ impl Engine {
                 phase: state.phase,
                 cycle: state.cycle,
                 period_seconds: state.period_seconds,
+                readings: state
+                    .readings()
+                    .iter()
+                    .map(|reading| lpc_wire::WirePhasorReading {
+                        node: reading.node.0,
+                        slot: alloc::string::ToString::to_string(&reading.slot),
+                        waveform: reading.waveform,
+                        phase_offset: reading.phase_offset,
+                    })
+                    .collect(),
             })
             .collect();
         TimebaseProbeResult::Timebase {

@@ -1372,9 +1372,10 @@ impl ResolveHost for EngineResolveHost<'_> {
         product: lpc_model::TimeProduct,
         key: &crate::dataflow::timebase::PhasorKey,
         config: &lpc_model::PhasorConfig,
+        reader: (NodeId, &lpc_model::SlotPath),
     ) -> Result<(f32, u32), SessionResolveError> {
         self.timebases
-            .phasor_tick(product.node(), key, config)
+            .phasor_tick(product.node(), key, config, reader)
             .ok_or_else(|| unpublished_timebase(product))
     }
 }
