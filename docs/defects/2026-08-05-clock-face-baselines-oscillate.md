@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-08-05      # how: ci
-fixed: this change
+fixed: 2e3a1a20e  # + cb6b4993e (the capture-side gate)
 area: lpa-studio-web story capture (clock-face stories)
 class: stale-measurement
 related:
