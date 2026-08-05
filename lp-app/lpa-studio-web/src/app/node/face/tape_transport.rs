@@ -430,7 +430,7 @@ pub fn TapeTransport(
                     // faders") in its rate mode: log ׼–×8 domain, magnetic
                     // octave detents, detent tick row, double-click = ×1.
                     // Its ENGAGED amber doubles as the debug-changed tint.
-                    span { class: "tw:w-[190px] tw:flex-none",
+                    span { class: "tw:w-[170px] tw:flex-none",
                         HFaderField {
                             value: shown_rate,
                             min: 0.25,
