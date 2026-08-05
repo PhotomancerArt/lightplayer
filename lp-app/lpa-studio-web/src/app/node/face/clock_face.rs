@@ -40,7 +40,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorReading, UiTimebaseState};
 
-use crate::app::node::{NodeCardSection, ProducedProductView};
+use crate::app::node::{
+    BindingChip, BindingChipDirection, NodeCardSection, ProducedProductView, SlotDetailButton,
+};
 
 use super::phasor_trace::PhasorTraceDriver;
 use super::tape_transport::TapeTransport;
@@ -76,15 +78,42 @@ pub fn ClockFace(
     rsx! {
         NodeCardSection { label: "output", first: true,
             div { class: "tw:grid tw:min-w-0 tw:justify-items-stretch tw:gap-2 tw:p-2",
-                // The product row keeps the bus:time handle + binding chip;
-                // the tape transport instrument below it is the hero (plan
-                // 2026-08-04-2355-clock-tape-hero, P3).
-                ProducedProductView {
-                    product: face.product.clone(),
-                    on_action,
-                }
                 if let Some(transport) = face.transport.clone() {
+                    // The tape IS the time product's face, so it carries the
+                    // product chrome itself — name, publish chip, and the
+                    // same detail affordance every slot surface has — in a
+                    // slim header instead of a boxed pane ("a big Time
+                    // product box that does nothing" — G1-adjacent gate
+                    // feedback, 2026-08-05).
+                    div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                        strong {
+                            class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                            title: face.product.detail.clone().unwrap_or_default(),
+                            "{face.product.name}"
+                        }
+                        if let Some(endpoint) = face.product.binding.bindings.bus_target.clone() {
+                            BindingChip {
+                                endpoint,
+                                direction: BindingChipDirection::Publishes,
+                            }
+                        }
+                        span { class: "tw:ml-auto tw:flex-none",
+                            SlotDetailButton {
+                                label: face.product.name.clone(),
+                                aspects: face.product.visible_aspects(),
+                                on_action,
+                                authoring: face.product.authoring.clone(),
+                            }
+                        }
+                    }
                     TapeTransport { transport, on_action }
+                } else {
+                    // No transport rows yet (unread project): the compact
+                    // product pane stands in until the first read lands.
+                    ProducedProductView {
+                        product: face.product.clone(),
+                        on_action,
+                    }
                 }
             }
         }
