@@ -85,6 +85,10 @@ pub fn MapEditor(
     #[props(default)]
     initial_camera: Option<[f32; 3]>,
     #[props(default)] initial_selection: Vec<usize>,
+    /// Stories: descend into the (single) initial selection after seeding,
+    /// so scoped-state captures are deterministic.
+    #[props(default = false)]
+    initial_descend: bool,
     #[props(default)] initial_draft: Vec<[f32; 2]>,
     #[props(default)] initial_view: Option<EditorViewOptions>,
     /// Host-owned view options (the fixture face's toggle bar drives the
@@ -114,6 +118,9 @@ pub fn MapEditor(
         let mut session = MapEditorSession::new(doc.clone());
         for index in &initial_selection {
             session.selection.insert_path(ShapePath::root(*index));
+        }
+        if initial_descend {
+            session.descend();
         }
         if !initial_draft.is_empty() {
             session.tool = MapTool::Path {
@@ -377,7 +384,8 @@ fn HelpFloat() -> Element {
                     ("⌘A", "select all"),
                     ("⌫", "delete selection"),
                     ("⏎", "finish path"),
-                    ("esc", "back out · clear · select tool"),
+                    ("dbl-click", "enter a group (edit its sub-object)"),
+                    ("esc", "back out · leave group · clear · select tool"),
                 ] {
                     div { class: "lpme-help-row",
                         span { class: "lpme-help-keys", "{keys}" }
@@ -498,12 +506,20 @@ fn handle_key(
         }
         Key::Escape => {
             let mut s = session.write();
-            // D6: never discard work wholesale — back out one path vertex,
-            // then clear selection, then fall back to the select tool.
+            // The ladder (D6 + the selection/tree ADR): back out one path
+            // vertex, then drop a vertex sub-selection, then ASCEND out of
+            // a descended group, then clear selection, then select tool.
             if s.path_backout() {
                 return;
             }
-            if !s.selection.is_empty() || s.selection.vertex.is_some() {
+            if s.selection.vertex.is_some() {
+                s.selection.vertex = None;
+                return;
+            }
+            if s.ascend() {
+                return;
+            }
+            if !s.selection.is_empty() {
                 s.selection.clear();
             } else {
                 s.tool = MapTool::Select;

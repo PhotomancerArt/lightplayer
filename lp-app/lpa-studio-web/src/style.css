@@ -1343,6 +1343,65 @@ label:has(> input:not(:disabled)) {
     accent-color: var(--studio-color-text-muted);
 }
 
+/* Tree rail: the ×N instance badge on group rows. */
+.lpme-rail-badge {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 4px;
+    padding: 0 4px;
+}
+
+/* Popover breadcrumb (descended selection): ancestors click to ascend. */
+.lpme-pop-crumbs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+
+.lpme-pop-crumb {
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-pop-crumb:hover {
+    color: var(--studio-color-text-strong);
+    text-decoration: underline;
+}
+
+.lpme-pop-crumb-here {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--studio-color-text-strong);
+}
+
+.lpme-pop-crumb-sep {
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+}
+
+/* The "enter the group" affordance on a repeat's fields. */
+.lpme-pop-descend {
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--studio-color-text);
+}
+
+.lpme-pop-descend:hover {
+    color: var(--studio-color-text-strong);
+    text-decoration: underline;
+}
+
 .lpme-canvas-wrap {
     position: relative;
     flex: 1;

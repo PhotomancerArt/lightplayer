@@ -252,6 +252,44 @@ pub fn EditorCanvas(
         lamps: Vec::new(),
         spans: Vec::new(),
     });
+    // Tessellation context (selection/tree ADR): a selected or scoped
+    // repeat renders instance-by-instance — a distinct hue per span so the
+    // tessellation reads at a glance — and while DESCENDED, non-primary
+    // instances are inert live previews (the primary is the only handle).
+    let tessellating: std::collections::BTreeSet<usize> = selection
+        .paths()
+        .map(|path| path.object)
+        .filter(|object| {
+            matches!(
+                doc.objects.get(*object).map(|o| &o.shape),
+                Some(Map2dShape::Repeat(_))
+            )
+        })
+        .collect();
+    let scoped_object: Option<usize> = selection.scope().map(|scope| scope.object);
+    // Per-span instance ordinals for the tessellating objects (spans are in
+    // wiring order, so the ordinal among an object's spans IS the instance).
+    let span_instances: Vec<(u32, u32, usize)> = {
+        let mut ordinals = std::collections::BTreeMap::<u32, usize>::new();
+        resolved
+            .spans
+            .iter()
+            .filter(|span| tessellating.contains(&(span.object as usize)))
+            .map(|span| {
+                let ordinal = ordinals.entry(span.object).or_insert(0);
+                let instance = *ordinal;
+                *ordinal += 1;
+                (span.start, span.count, instance)
+            })
+            .collect()
+    };
+    let instance_of = |lamp_index: u32| -> Option<usize> {
+        let slot = span_instances.partition_point(|(start, count, _)| start + count <= lamp_index);
+        span_instances
+            .get(slot)
+            .filter(|(start, _, _)| *start <= lamp_index)
+            .map(|(_, _, instance)| *instance)
+    };
     // Lamp screen size is CAPPED: proportional at fit zoom, but circles stop
     // growing past ~11px screen radius as you zoom in — near-coincident
     // lamps (out-and-back wiring runs) separate visually instead of staying
@@ -727,11 +765,25 @@ pub fn EditorCanvas(
                     {
                         let object_index = lamp.object as usize;
                         let selected = selection.object_selected(object_index);
-                        // The ATTRIBUTE fill is the non-live look (universe
-                        // color > object palette); live output rides an
-                        // inline-style override written by the live-color
-                        // effect, so color frames never re-render this tree.
-                        let fill = if opts.universes {
+                        // Instance-by-instance rendering for a selected /
+                        // scoped repeat; while scoped, instance 0 (the
+                        // authored primary) is the only interactive geometry
+                        // — the rest are inert live previews.
+                        let instance = tessellating
+                            .contains(&object_index)
+                            .then(|| instance_of(lamp.index))
+                            .flatten();
+                        let inert =
+                            scoped_object == Some(object_index) && instance.is_some_and(|i| i > 0);
+                        // The ATTRIBUTE fill is the non-live look (instance
+                        // hue > universe color > object palette); live output
+                        // rides an inline-style override written by the
+                        // live-color effect, so color frames never re-render
+                        // this tree.
+                        let fill = if let Some(instance) = instance {
+                            OBJECT_COLORS[(object_index + instance) % OBJECT_COLORS.len()]
+                                .to_string()
+                        } else if opts.universes {
                             let [r, g, b] = universe_rgb(lamp.index);
                             format!("rgb({r} {g} {b})")
                         } else {
@@ -745,13 +797,15 @@ pub fn EditorCanvas(
                                 cy: "{lamp.pos[1]}",
                                 r: "{radius}",
                                 fill,
-                                stroke: if selected { SELECTION_COLOR } else { "#000" },
-                                stroke_width: if selected {
+                                opacity: if inert { "0.6" } else { "1" },
+                                pointer_events: if inert { "none" } else { "auto" },
+                                stroke: if selected && !inert { SELECTION_COLOR } else { "#000" },
+                                stroke_width: if selected && !inert {
                                     "{(radius * 0.28).clamp(0.6, 2.4)}"
                                 } else {
                                     "{(radius * 0.12).clamp(0.2, 1.5)}"
                                 },
-                                cursor: if tool_is_select { "move" } else { "crosshair" },
+                                cursor: if inert { "default" } else if tool_is_select { "move" } else { "crosshair" },
                                 onpointerdown: move |evt| {
                                     if secondary_button(&evt) {
                                         return;
@@ -761,8 +815,19 @@ pub fn EditorCanvas(
                                         select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     }
                                 },
+                                ondoubleclick: move |evt| {
+                                    // Double-click descends into the group
+                                    // under the cursor (selection/tree ADR);
+                                    // a leaf object no-ops.
+                                    evt.stop_propagation();
+                                    let mut s = session.write();
+                                    if !s.selection.object_selected(object_index) {
+                                        s.selection.select_only(object_index);
+                                    }
+                                    s.descend();
+                                },
                             }
-                            if hit_radius > radius * 1.15 {
+                            if hit_radius > radius * 1.15 && !inert {
                                 circle {
                                     key: "lh{lamp.index}",
                                     class: "lpme-lamp-hit",
@@ -778,6 +843,14 @@ pub fn EditorCanvas(
                                             evt.stop_propagation();
                                             select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                         }
+                                    },
+                                    ondoubleclick: move |evt| {
+                                        evt.stop_propagation();
+                                        let mut s = session.write();
+                                        if !s.selection.object_selected(object_index) {
+                                            s.selection.select_only(object_index);
+                                        }
+                                        s.descend();
                                     },
                                 }
                             }
@@ -1014,11 +1087,21 @@ fn select_and_start_move(
         s.selection.toggle(object_index);
         return;
     }
+    // Scoped editing: while descended inside this object's group, a click
+    // on the primary geometry keeps the descended selection (grabbing the
+    // sub-object must not pop the scope) and just arms the write-through
+    // move.
+    let scoped_here = s
+        .selection
+        .single()
+        .is_some_and(|path| !path.is_root() && path.object == object_index);
     let mut collapse = None;
-    if !s.selection.object_selected(object_index) {
-        s.selection.select_only(object_index);
-    } else if s.selection.len() > 1 {
-        collapse = Some(object_index);
+    if !scoped_here {
+        if !s.selection.object_selected(object_index) {
+            s.selection.select_only(object_index);
+        } else if s.selection.len() > 1 {
+            collapse = Some(object_index);
+        }
     }
     s.selection.vertex = None;
     s.begin_gesture();
