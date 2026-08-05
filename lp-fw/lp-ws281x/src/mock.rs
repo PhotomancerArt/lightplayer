@@ -340,7 +340,8 @@ impl RmtHw for MockRmt {
     }
 
     fn take_interrupts(&self) -> InterruptFlags {
-        self.pending.with(|f| core::mem::replace(f, InterruptFlags::NONE))
+        self.pending
+            .with(|f| core::mem::replace(f, InterruptFlags::NONE))
     }
 }
 

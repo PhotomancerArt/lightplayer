@@ -675,11 +675,10 @@ mod concurrent_flush_tests {
         // must drain the in-flight frame before staging over its bytes.
         provider.write(first, &frame).expect("next frame");
         assert!(
-            log.borrow()
-                .events
-                .iter()
-                .rev()
-                .any(|e| *e == ProbeEvent::Wait { had_in_flight: true }),
+            log.borrow().events.iter().rev().any(|e| *e
+                == ProbeEvent::Wait {
+                    had_in_flight: true
+                }),
             "wait-before-stage must find the overlapped frame in flight"
         );
     }
