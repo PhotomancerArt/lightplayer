@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{HardwareTarget, HwAddress, HwCapability, HwResource};
+use crate::{HardwareTarget, HwAddress, HwCapability, HwResource, HwSoftLimits};
 
 /// In-memory hardware profile for one board or virtual target.
 ///
@@ -17,6 +17,7 @@ pub struct HwManifest {
     product: Option<String>,
     description: Option<String>,
     url: Option<String>,
+    soft_limits: Option<HwSoftLimits>,
     resources: Vec<HwResource>,
 }
 
@@ -34,6 +35,7 @@ impl HwManifest {
             product: None,
             description: None,
             url: None,
+            soft_limits: None,
             resources: resources.into(),
         }
     }
@@ -147,6 +149,12 @@ impl HwManifest {
         self.url.as_deref()
     }
 
+    /// Measured soft-limit records, if this board carries any. Evidence,
+    /// not policy: exceeding one warns and proceeds — see [`HwSoftLimits`].
+    pub fn soft_limits(&self) -> Option<&HwSoftLimits> {
+        self.soft_limits.as_ref()
+    }
+
     pub fn resources(&self) -> &[HwResource] {
         &self.resources
     }
@@ -173,6 +181,11 @@ impl HwManifest {
 
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
+        self
+    }
+
+    pub fn with_soft_limits(mut self, soft_limits: HwSoftLimits) -> Self {
+        self.soft_limits = Some(soft_limits);
         self
     }
 

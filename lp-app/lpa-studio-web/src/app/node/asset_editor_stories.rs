@@ -117,7 +117,7 @@ fn applying() -> Element {
 )]
 fn apply_failed() -> Element {
     let mut editor = editor_fixture(resolved(true));
-    editor.failure = Some("shader too large to send (limit 10 KB)".to_string());
+    editor.failure = Some("asset too large to send (limit 10 KB)".to_string());
     rsx! {
         EditorStoryCard { editor }
     }

@@ -9,6 +9,9 @@
   direction for fixture mapping authoring. The legacy `MappingConfig`
   variants remain functional during migration.
 - **Superseded by:** None
+- **Related:** `2026-08-05-map2d-format-2-repeat-and-gaps.md` (first format
+  bump: rotational repeat, inert path gaps, minimal-format stamping, and
+  the loud-refusal posture in practice)
 
 ## Context
 
