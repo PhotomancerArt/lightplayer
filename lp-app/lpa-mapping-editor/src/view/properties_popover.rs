@@ -14,6 +14,7 @@ use lpc_mapping::{
 
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
+use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::CanvasDrag;
 
 const POPOVER_WIDTH: f32 = 236.0;
@@ -62,10 +63,50 @@ pub fn PropertiesPopover(
     let y = right[1].clamp(10.0, (viewport_height - 120.0).max(10.0));
 
     let lamp_total = selected_positions.len();
-    // P4 gives descended selections their own breadcrumbed popover; until
-    // then the popover presents the selected path's OBJECT (root behavior).
-    let single = selection.single().map(|path| path.object);
+    // The popover presents the SELECTED NODE: its fields at the selection's
+    // depth, with a breadcrumb standing in for the name row when descended
+    // (the breadcrumb replaces inline recursion — selection/tree ADR).
+    let single_path = selection.single().cloned();
+    let single = single_path.as_ref().map(|path| path.object);
+    let base_depth = single_path
+        .as_ref()
+        .map(|path| path.descent.len())
+        .unwrap_or(0);
     let object = single.and_then(|index| doc.objects.get(index).cloned());
+    let selected_shape = single_path
+        .as_ref()
+        .and_then(|path| path.resolve(doc))
+        .cloned();
+    // Breadcrumb labels root→selected: (label, path to select when clicked;
+    // None = the current node, not clickable).
+    let crumbs: Vec<(String, Option<ShapePath>)> = single_path
+        .as_ref()
+        .filter(|path| !path.is_root())
+        .map(|path| {
+            let mut crumbs = Vec::new();
+            for level in 0..=path.descent.len() {
+                let ancestor = ShapePath {
+                    object: path.object,
+                    descent: path.descent[..level].to_vec(),
+                };
+                let label = if level == 0 {
+                    object
+                        .as_ref()
+                        .map(|object| object.name.clone())
+                        .unwrap_or_default()
+                } else {
+                    ancestor
+                        .resolve(doc)
+                        .map(shape_kind_label)
+                        .unwrap_or("?")
+                        .to_string()
+                };
+                let target = (level < path.descent.len()).then_some(ancestor);
+                crumbs.push((label, target));
+            }
+            crumbs
+        })
+        .unwrap_or_default();
     // The object's whole lamp range, strands merged: a repeat resolves to one
     // span per instance, so `spans[index]` would report only its first strand.
     let span = single.and_then(|index| {
@@ -94,25 +135,51 @@ pub fn PropertiesPopover(
             style: "left: {x}px; top: {y}px; width: {POPOVER_WIDTH}px;",
             // Keep canvas shortcuts out of field typing.
             onkeydown: move |evt| evt.stop_propagation(),
-            if let (Some(index), Some(object)) = (single, object) {
+            if let (Some(index), Some(object), Some(selected_shape)) =
+                (single, object, selected_shape)
+            {
                 div { class: "lpme-pop-head",
-                    input {
-                        class: "lpme-pop-name",
-                        r#type: "text",
-                        value: "{object.name}",
-                        oninput: move |evt| {
-                            let value = evt.value();
-                            session.write().edit_uncommitted(move |doc| {
-                                if let Some(object) = doc.objects.get_mut(index) {
-                                    object.name = value;
+                    if crumbs.is_empty() {
+                        input {
+                            class: "lpme-pop-name",
+                            r#type: "text",
+                            value: "{object.name}",
+                            oninput: move |evt| {
+                                let value = evt.value();
+                                session.write().edit_uncommitted(move |doc| {
+                                    if let Some(object) = doc.objects.get_mut(index) {
+                                        object.name = value;
+                                    }
+                                });
+                            },
+                            onchange: move |_| commit(),
+                        }
+                        span { class: "lpme-pop-kind", {shape_kind_label(&object.shape)} }
+                    } else {
+                        // Descended: the crumb trail names the scope chain;
+                        // clicking an ancestor ascends to it (rename lives
+                        // on the root selection).
+                        span { class: "lpme-pop-crumbs",
+                            for (slot, (label, target)) in crumbs.into_iter().enumerate() {
+                                if slot > 0 {
+                                    span { class: "lpme-pop-crumb-sep", "▸" }
                                 }
-                            });
-                        },
-                        onchange: move |_| commit(),
+                                if let Some(target) = target {
+                                    button {
+                                        class: "lpme-pop-crumb",
+                                        onclick: move |_| {
+                                            session.write().selection.select_only_path(target.clone());
+                                        },
+                                        "{label}"
+                                    }
+                                } else {
+                                    span { class: "lpme-pop-crumb-here", "{label}" }
+                                }
+                            }
+                        }
                     }
-                    span { class: "lpme-pop-kind", {shape_kind_label(&object.shape)} }
                 }
-                {shape_fields(session, on_committed, index, object.shape.clone(), 0)}
+                {shape_fields(session, on_committed, index, selected_shape, base_depth)}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
                         "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
@@ -212,7 +279,7 @@ pub fn PropertiesPopover(
     }
 }
 
-fn shape_kind_label(shape: &Map2dShape) -> &'static str {
+pub(crate) fn shape_kind_label(shape: &Map2dShape) -> &'static str {
     match shape {
         Map2dShape::Grid(_) => "grid",
         Map2dShape::Ring(_) => "ring",
@@ -229,7 +296,7 @@ fn shape_kind_label(shape: &Map2dShape) -> &'static str {
 /// [`shape_at_depth`] so an inner edit lands on the boxed shape rather than
 /// the wrapper.
 fn shape_fields(
-    session: Signal<MapEditorSession>,
+    mut session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
     shape: Map2dShape,
@@ -333,11 +400,24 @@ fn shape_fields(
                     apply: FieldApply::RepeatCenterX }
                 NumberField { session, on_committed, index, depth, label: "center y", value: repeat.center[1], min: -100000.0, is_int: false,
                     apply: FieldApply::RepeatCenterY }
+                // The inner shape's fields live one descent down — the
+                // breadcrumb replaces inline recursion (selection/tree ADR):
+                // entering the group selects the sub-object and this popover
+                // re-renders showing its fields.
                 div { class: "lpme-field",
                     label { "repeats" }
-                    span { class: "lpme-field-static", "{inner_kind}" }
+                    button {
+                        class: "lpme-pop-descend",
+                        title: "edit the repeated sub-object (double-click on canvas does the same)",
+                        onclick: move |_| {
+                            session.write().selection.select_only_path(ShapePath {
+                                object: index,
+                                descent: vec![0; depth + 1],
+                            });
+                        },
+                        "{inner_kind} ▸"
+                    }
                 }
-                {shape_fields(session, on_committed, index, inner, depth + 1)}
             }
         }
     }

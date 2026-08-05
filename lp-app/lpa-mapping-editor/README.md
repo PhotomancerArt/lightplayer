@@ -66,7 +66,11 @@ to the authored shape (every repeat instance follows). Rationale and
 invariants: `docs/adr/2026-08-05-map2d-editor-selection-tree-model.md`.
 Click, shift-click, marquee, ⌘A select; corner handles resize uniformly;
 single-path vertices drag; Delete removes (at depth it removes the whole
-object — unwrap is the keep-the-inner op). Views N/A/U/F: wiring numbers, direction
+object — unwrap is the keep-the-inner op). The wiring rail is the object
+TREE (group rows disclose their sub-object, ×N badged); a selected or
+scoped repeat renders instance-by-instance in distinct hues, and while
+descended only the authored primary is interactive — the other instances
+are inert, live-updating previews (the tessellation authoring loop). Views N/A/U/F: wiring numbers, direction
 arrows (gold dashed chain hops between objects), universe colors
 (auto-flow, 170 RGB lamps/universe; ranges annotate as `u:lo-hi`),
 texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.
