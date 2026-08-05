@@ -554,7 +554,9 @@ mod concurrent_flush_tests {
                     had_in_flight: false
                 },
                 ProbeEvent::Start,
-                ProbeEvent::Wait { had_in_flight: true },
+                ProbeEvent::Wait {
+                    had_in_flight: true
+                },
                 ProbeEvent::Start,
             ],
         );

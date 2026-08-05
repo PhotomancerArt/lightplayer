@@ -1048,7 +1048,11 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint("ws281x:local:D10")));
+        services.register_output_sink(
+            buffer_id,
+            node(1),
+            &OutputDef::new(endpoint("ws281x:local:D10")),
+        );
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
