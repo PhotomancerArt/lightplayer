@@ -122,7 +122,9 @@ impl PhasorTraceDriver {
         let closure = Closure::wrap(Box::new(move |now: f64| {
             for_frames.raf_id.set(None);
             for card in for_frames.cards.borrow().iter() {
-                paint_card(card, now);
+                if let Some(frozen) = paint_card(card, now) {
+                    for_frames.frozen.set(Some(frozen));
+                }
             }
             for_frames.schedule();
         }) as Box<dyn FnMut(f64)>);
@@ -181,19 +183,17 @@ impl PhasorTraceDriver {
 
     /// A card's canvas just mounted: paint its first frame (the sync-time
     /// paint may have run before the element existed). On a frozen page the
-    /// paint is pinned to the anchor (elapsed exactly zero) so a capture of
-    /// the mounted state is byte-stable run to run.
+    /// paint pins itself to the anchor (elapsed exactly zero) so a capture
+    /// of the mounted state is byte-stable run to run.
     pub(crate) fn canvas_mounted(&self, index: usize) {
         let Some(inner) = &self.inner else {
             return;
         };
-        let now = if inner.is_frozen() {
-            None
-        } else {
-            Some(inner.performance.now())
-        };
-        if let Some(card) = inner.cards.borrow().get(index) {
-            paint_card(card, now.unwrap_or(card.anchored_at_ms));
+        let now = inner.performance.now();
+        if let Some(card) = inner.cards.borrow().get(index)
+            && let Some(frozen) = paint_card(card, now)
+        {
+            inner.frozen.set(Some(frozen));
         }
     }
 }
@@ -209,32 +209,18 @@ impl Drop for PhasorTraceDriver {
 }
 
 impl DriverInner {
-    /// Whether this page freezes trace animation (the story page — its
-    /// capture box marks the document). Resolved once: the marker exists
-    /// from the story shell's first render, and a real app never has it.
-    fn is_frozen(&self) -> bool {
-        if let Some(frozen) = self.frozen.get() {
-            return frozen;
-        }
-        let frozen = self
-            .window
-            .document()
-            .and_then(|document| {
-                document
-                    .query_selector("[data-story-capture=\"1\"]")
-                    .ok()
-                    .flatten()
-            })
-            .is_some();
-        self.frozen.set(Some(frozen));
-        frozen
-    }
-
     /// Schedule the next frame while any card is live; quietly stops the
-    /// loop when the card list empties. Never runs on a frozen page — the
-    /// cards stay on their deterministic elapsed-zero frame.
+    /// loop when the card list empties or a paint has discovered it lives
+    /// inside the story page's capture box — the cards then hold their
+    /// deterministic elapsed-zero frame. The flag comes from the paints
+    /// themselves (`closest()` from the mounted canvas): a document-level
+    /// query at driver creation ran before the story shell was in the DOM
+    /// and cached the wrong answer.
     fn schedule(&self) {
-        if self.raf_id.get().is_some() || self.cards.borrow().is_empty() || self.is_frozen() {
+        if self.raf_id.get().is_some()
+            || self.cards.borrow().is_empty()
+            || self.frozen.get() == Some(true)
+        {
             return;
         }
         let scheduled = self.tick.borrow().as_ref().and_then(|tick| {
@@ -246,23 +232,29 @@ impl DriverInner {
     }
 }
 
-/// Draw one card's trailing window as of `now_ms`.
+/// Draw one card's trailing window as of `now_ms`, and report whether the
+/// canvas lives inside the story page's capture box (`Some(frozen)`), where
+/// every paint pins to the anchor — elapsed exactly zero — so captures are
+/// byte-stable run to run.
 ///
-/// Quietly does nothing when the canvas is not in the DOM yet — the mount
-/// hook and the next frame both retry.
-fn paint_card(card: &TraceCard, now_ms: f64) {
-    let Some(canvas) = web_sys::window()
+/// Quietly does nothing (`None`) when the canvas is not in the DOM yet —
+/// the mount hook and the next frame both retry.
+fn paint_card(card: &TraceCard, now_ms: f64) -> Option<bool> {
+    let canvas = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.get_element_by_id(&card.canvas_id))
-        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-    else {
-        return;
-    };
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())?;
+    let frozen = canvas
+        .closest("[data-story-capture=\"1\"]")
+        .ok()
+        .flatten()
+        .is_some();
+    let now_ms = if frozen { card.anchored_at_ms } else { now_ms };
     let Ok(Some(context)) = canvas.get_context("2d") else {
-        return;
+        return None;
     };
     let Ok(context) = context.dyn_into::<web_sys::CanvasRenderingContext2d>() else {
-        return;
+        return None;
     };
 
     // Match the backing store to the CSS box (the spike's `px()` helper):
@@ -289,17 +281,19 @@ fn paint_card(card: &TraceCard, now_ms: f64) {
 
     let reading = &card.reading;
     let period = f64::from(reading.period_seconds);
-    let frozen = !(period.is_finite() && period > 0.0);
+    // A frozen READING (period 0) holds still — distinct from the frozen
+    // PAGE above, which pins the paint time.
+    let held = !(period.is_finite() && period > 0.0);
     let elapsed = ((now_ms - card.anchored_at_ms) / 1000.0).max(0.0);
-    // The phase now, extrapolated from the probe anchor; frozen holds.
-    let phase_now = if frozen {
+    // The phase now, extrapolated from the probe anchor; held readings stay.
+    let phase_now = if held {
         f64::from(reading.phase)
     } else {
         f64::from(reading.phase) + elapsed / period
     };
     // How long this phasor has existed, in effective seconds — columns
     // older than its materialization draw nothing (the spike's `tx < 0`).
-    let age = if frozen {
+    let age = if held {
         f64::INFINITY
     } else {
         (f64::from(reading.cycle) + phase_now) * period
@@ -326,7 +320,7 @@ fn paint_card(card: &TraceCard, now_ms: f64) {
         if back > age {
             continue;
         }
-        let phase = if frozen {
+        let phase = if held {
             phase_now
         } else {
             phase_now - back / period
@@ -348,6 +342,7 @@ fn paint_card(card: &TraceCard, now_ms: f64) {
     // Same ready-marker contract as the preview canvases: the story
     // capture harness can wait for a painted first frame.
     let _ = canvas.set_attribute("data-preview-painted", "1");
+    Some(frozen)
 }
 
 /// The consumer's shaping, mirroring the engine's `shape_phasor`

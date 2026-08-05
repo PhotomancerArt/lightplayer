@@ -1546,9 +1546,6 @@
   .tw\:px-0 {
     padding-inline: calc(var(--tw-spacing) * 0);
   }
-  .tw\:px-0\.5 {
-    padding-inline: calc(var(--tw-spacing) * 0.5);
-  }
   .tw\:px-1 {
     padding-inline: calc(var(--tw-spacing) * 1);
   }
@@ -1842,6 +1839,10 @@
   .tw\:tracking-\[-0\.015em\] {
     --tw-tracking: -0.015em;
     letter-spacing: -0.015em;
+  }
+  .tw\:tracking-\[0\.1em\] {
+    --tw-tracking: 0.1em;
+    letter-spacing: 0.1em;
   }
   .tw\:tracking-\[0\.08em\] {
     --tw-tracking: 0.08em;
