@@ -64,10 +64,12 @@ pub fn PropertiesPopover(
     let lamp_total = selected_positions.len();
     let single = selection.single();
     let object = single.and_then(|index| doc.objects.get(index).cloned());
+    // The object's whole lamp range, strands merged: a repeat resolves to one
+    // span per instance, so `spans[index]` would report only its first strand.
     let span = single.and_then(|index| {
         resolved
             .as_ref()
-            .and_then(|resolved| resolved.spans.get(index).copied())
+            .and_then(|resolved| resolved.object_span(index as u32))
     });
     let count_summary = selection.objects.len();
     let object_total = doc.objects.len();
@@ -179,6 +181,7 @@ fn shape_kind_label(shape: &Map2dShape) -> &'static str {
         Map2dShape::Grid(_) => "grid",
         Map2dShape::Ring(_) => "ring",
         Map2dShape::Path(_) => "path",
+        Map2dShape::Repeat(_) => "repeat",
     }
 }
 
@@ -271,6 +274,22 @@ fn shape_fields(
                     apply: FieldApply::PathReversed,
                 }
                 PathGapsField { session, on_committed, index, gaps: path.gaps.clone() }
+            }
+        }
+        // Read-only for now: the repeat's own editing grammar (count field,
+        // center handle, expand-to-instances) is P5's. Showing the parameters
+        // beats showing an empty panel and pretending the object has none.
+        Map2dShape::Repeat(repeat) => {
+            let center = format!(
+                "{}, {}",
+                (repeat.center[0] * 10.0).round() / 10.0,
+                (repeat.center[1] * 10.0).round() / 10.0
+            );
+            rsx! {
+                div { class: "lpme-field",
+                    label { "instances" }
+                    span { class: "lpme-field-static", "×{repeat.count} about {center}" }
+                }
             }
         }
     }

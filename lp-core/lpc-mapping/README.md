@@ -41,9 +41,32 @@ index. `reversed` mirrors the gap indices with the points, so the same physical
 segments stay inert whichever end the data enters from. Gaps are a format-2
 construct: an older build would parse the field away and light the jumper.
 
+A shape may also be **repeated**: `repeat` wraps an inner shape and turns
+`count` copies of it evenly around a full circle about `center`, so one
+authored sector becomes a whole dome:
+
+```json
+{ "name": "sector", "shape": { "repeat": {
+  "shape": { "path": { "count": 12, "gaps": [1],
+    "points": [[200, 140], [200, 60], [240, 60], [240, 140]] } },
+  "center": [200, 200], "count": 5 } } }
+```
+
+Instance `k` is the inner shape turned `k * (360 / count)` degrees; instance 0
+is the inner shape untouched. Instances are consecutive in wiring order and
+each resolves to its **own span** — a repeated object is N physical strands,
+not one long run, which is what the fixture's honest spans and the output
+face's strip boundaries need to see. Repeats nest (spans multiply; the
+innermost instances are the strands), and the editor clamps `count` to
+`1..=64`. Like gaps, `repeat` is a format-2 construct — and the sharper case:
+an old build cannot ignore an unknown shape variant without losing every lamp
+the object carries.
+
 Shapes are externally tagged (`"shape": {"grid": {...}}`) rather than using a
 `kind` field: the repo bans serde `tag`/`untagged`/`flatten` in the firmware
 dependency graph (Content-machinery flash cost — `scripts/check-serde-content.sh`).
+`repeat`'s inner shape is boxed for the same reason a nested enum usually is:
+to keep `Map2dShape` small.
 
 `resolve(doc)` produces the ordered lamp list — doc-space positions plus
 derived DMX-style addresses (auto-flow at 170 RGB lamps/universe; wiring
@@ -105,8 +128,10 @@ is overwritten, and the stored document survives open → close byte-identical.
 
 ## Corpus
 
-`corpus::{basic_button, cat_ears, panel_16x16, gapped_path, fyeah}` are the
-shared test scenes (`gapped_path` is the format-2 archetype: one channel that
-jumpers across an inert segment; the last is the real fyeah sign, derived from
-its mapping SVG via the importer: 219 lamps, 2 universes). Studio stories and
+`corpus::{basic_button, cat_ears, panel_16x16, gapped_path, repeated_sector,
+fyeah}` are the shared test scenes. The two format-2 archetypes are
+`gapped_path` (one channel that jumpers across an inert segment) and
+`repeated_sector` (a mini-dome: one gapped sector repeated five times — one
+object, 5 strands, 60 lamps); the last is the real fyeah sign, derived from
+its mapping SVG via the importer: 219 lamps, 2 universes. Studio stories and
 editor fixtures should reuse these rather than inventing new geometry.

@@ -1581,6 +1581,15 @@ label:has(> input:not(:disabled)) {
     border-color: #4c9ffe;
 }
 
+/* A field the popover reports but cannot yet edit (the repeat's parameters):
+   the value column, without the input chrome that would invite a click. */
+.lpme-field-static {
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+    color: var(--studio-color-text-strong);
+    padding: 4px 0;
+}
+
 .lpme-seg {
     display: flex;
     background: var(--studio-color-app);

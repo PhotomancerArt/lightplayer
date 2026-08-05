@@ -356,7 +356,9 @@ impl MapEditorSession {
     pub fn expand_object(&mut self, index: usize) {
         let positions: Vec<[f32; 2]> = {
             let resolved = self.resolved();
-            let Some(span) = resolved.spans.get(index).copied() else {
+            // The object's WHOLE lamp range, strands merged: `spans[index]` is
+            // only the object's first strand once a repeat is in the document.
+            let Some(span) = resolved.object_span(index as u32) else {
                 return;
             };
             resolved.lamps[span.start as usize..(span.start + span.count) as usize]
@@ -544,6 +546,14 @@ fn translate_shape(shape: &mut Map2dShape, dx: f32, dy: f32) {
                 point[1] += dy;
             }
         }
+        // Moving a repeat moves the whole wheel: the inner shape and the
+        // center it turns about travel together, so the instances land where
+        // they looked like they would.
+        Map2dShape::Repeat(repeat) => {
+            translate_shape(&mut repeat.shape, dx, dy);
+            repeat.center[0] += dx;
+            repeat.center[1] += dy;
+        }
     }
 }
 
@@ -568,6 +578,13 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
                 *point = scale_point(*point);
             }
         }
+        // Same anchor for the inner shape and the center, so the wheel scales
+        // rigidly — scaling the inner shape alone would slide every instance
+        // off its rotation.
+        Map2dShape::Repeat(repeat) => {
+            scale_shape(&mut repeat.shape, anchor, factor);
+            repeat.center = scale_point(repeat.center);
+        }
     }
 }
 
@@ -582,21 +599,36 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
 fn sanitize_doc(doc: &mut Map2dDoc) {
     doc.normalize_format();
     for object in &mut doc.objects {
-        match &mut object.shape {
-            Map2dShape::Grid(grid) => {
-                grid.cols = grid.cols.max(1);
-                grid.rows = grid.rows.max(1);
-                grid.pitch = grid.pitch.max(0.5);
-            }
-            Map2dShape::Ring(ring) => {
-                ring.outer_count = ring.outer_count.max(1);
-                ring.radius = ring.radius.max(1.0);
-                ring.rings = ring.rings.max(1);
-            }
-            Map2dShape::Path(path) => {
-                path.count = path.count.max(1);
-                sanitize_path_gaps(path);
-            }
+        sanitize_shape(&mut object.shape);
+    }
+}
+
+/// Clamp one shape, recursing into [`RepeatShape`](lpc_mapping::RepeatShape) inners — a repeat's inner
+/// shape is authored through the same fields as a top-level one and gets the
+/// same guarantees.
+fn sanitize_shape(shape: &mut Map2dShape) {
+    match shape {
+        Map2dShape::Grid(grid) => {
+            grid.cols = grid.cols.max(1);
+            grid.rows = grid.rows.max(1);
+            grid.pitch = grid.pitch.max(0.5);
+        }
+        Map2dShape::Ring(ring) => {
+            ring.outer_count = ring.outer_count.max(1);
+            ring.radius = ring.radius.max(1.0);
+            ring.rings = ring.rings.max(1);
+        }
+        Map2dShape::Path(path) => {
+            path.count = path.count.max(1);
+            sanitize_path_gaps(path);
+        }
+        // `count` is bounded at both ends: 0 instances resolve to nothing, and
+        // an unbounded count multiplies the whole inner shape — a typo in a
+        // number field should not turn a 300-lamp strand into a six-figure
+        // document. `MAX_REPEAT_COUNT` is the shared ceiling.
+        Map2dShape::Repeat(repeat) => {
+            repeat.clamp_count();
+            sanitize_shape(&mut repeat.shape);
         }
     }
 }
@@ -679,7 +711,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_mapping::corpus;
+    use lpc_mapping::{RepeatShape, corpus};
 
     #[test]
     fn gesture_move_is_one_undo_step_without_drift() {
@@ -944,6 +976,111 @@ mod tests {
         assert_eq!(gaps_of(&session), Vec::<u32>::new()); // clamped: 1 segment left, and it must light
     }
 
+    // ---- rotational repeat ----------------------------------------------
+
+    /// Sanitize's contract reaches inside a repeat: the instance count is
+    /// bounded at both ends, and the inner shape gets the same clamps a
+    /// top-level shape would.
+    #[test]
+    fn sanitize_clamps_repeat_count_and_recurses_into_the_inner_shape() {
+        let mut session = session_with_repeat(5);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Repeat(repeat) = shape {
+                repeat.count = 0;
+                if let Map2dShape::Path(path) = repeat.shape.as_mut() {
+                    path.count = 0;
+                    path.gaps = vec![0, 1, 2, 9];
+                }
+            }
+        });
+        let repeat = repeat_of(&session);
+        assert_eq!(repeat.count, 1, "zero instances resolve to nothing");
+        let Map2dShape::Path(path) = repeat.shape.as_ref() else {
+            panic!("expected an inner path");
+        };
+        assert_eq!(path.count, 1);
+        // Inner gaps are sorted, clamped to real segments, and never all of
+        // them — the same guarantees a top-level path gets.
+        assert_eq!(path.gaps, vec![0, 1]);
+        assert!(session.resolve_error.is_none());
+
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Repeat(repeat) = shape {
+                repeat.count = 5_000;
+            }
+        });
+        assert_eq!(repeat_of(&session).count, lpc_mapping::MAX_REPEAT_COUNT);
+    }
+
+    /// A repeat is a format-2 construct: committing one stamps 2, and
+    /// unwrapping it drops the document back to 1.
+    #[test]
+    fn a_repeat_stamps_format_two_and_releases_it() {
+        let mut session = session_with_repeat(5);
+        assert_eq!(session.doc().format, 2);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Repeat(repeat) = shape {
+                *shape = (*repeat.shape).clone();
+            }
+        });
+        assert_eq!(session.doc().format, 1);
+    }
+
+    /// Dragging a repeat moves the whole wheel — inner shape and rotation
+    /// center together — so the lamps land exactly where the drag showed.
+    #[test]
+    fn moving_a_repeat_carries_its_center() {
+        let mut session = session_with_repeat(4);
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        session.selection.select_only(0);
+        session.begin_gesture();
+        session.move_selected_from_gesture(30.0, -12.0);
+        session.commit_gesture();
+
+        assert_eq!(repeat_of(&session).center, [130.0, 88.0]);
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(after.len(), before.len());
+        for (index, (a, b)) in after.iter().zip(&before).enumerate() {
+            assert!(
+                (a[0] - (b[0] + 30.0)).abs() < 1e-3 && (a[1] - (b[1] - 12.0)).abs() < 1e-3,
+                "lamp {index}: {a:?} is not {b:?} translated"
+            );
+        }
+    }
+
+    /// Resizing a repeat scales the wheel rigidly: lamp count is invariant and
+    /// the bbox scales, which it would not if the center stayed put.
+    #[test]
+    fn scaling_a_repeat_scales_the_whole_wheel() {
+        let mut session = session_with_repeat(4);
+        session.select_all();
+        let before = session.content_bounds().unwrap();
+        session.begin_gesture();
+        session.scale_selected_from_gesture([0.0, 0.0], 2.0);
+        session.commit_gesture();
+        let after = session.content_bounds().unwrap();
+        assert!((after.width - before.width * 2.0).abs() < 0.5);
+        assert!((after.height - before.height * 2.0).abs() < 0.5);
+        assert_eq!(repeat_of(&session).center, [200.0, 200.0]);
+        assert_eq!(session.lamp_count(), 16);
+    }
+
+    /// Expand bakes a repeat through its **whole** resolved range, not just
+    /// its first instance — `spans[index]` is one strand now.
+    #[test]
+    fn expanding_a_repeat_bakes_every_instance() {
+        let mut session = session_with_repeat(4);
+        assert_eq!(session.lamp_count(), 16);
+        session.expand_object(0);
+        let Map2dShape::Path(path) = &session.doc().objects[0].shape else {
+            panic!("expected a path after expand");
+        };
+        assert_eq!(path.points.len(), 16);
+        assert_eq!(session.lamp_count(), 16);
+        // Baked geometry needs nothing newer than the base format.
+        assert_eq!(session.doc().format, 1);
+    }
+
     #[test]
     fn dirty_tracks_saved_snapshot() {
         let mut session = session_with_ring();
@@ -972,6 +1109,37 @@ mod tests {
             }),
         });
         MapEditorSession::new(doc)
+    }
+
+    /// One four-lamp rib repeated `count` times about `[100, 100]`.
+    fn session_with_repeat(count: u32) -> MapEditorSession {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "sector".to_string(),
+            shape: Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(Map2dShape::Path(PathShape {
+                    points: vec![[100.0, 40.0], [100.0, 10.0], [130.0, 10.0], [130.0, 40.0]],
+                    count: 4,
+                    reversed: false,
+                    gaps: Vec::new(),
+                })),
+                center: [100.0, 100.0],
+                count,
+            }),
+        });
+        let mut session = MapEditorSession::new(doc);
+        // Open the document through a commit so it carries the stamp the
+        // editor would have written.
+        session.rename_object(0, "sector".to_string());
+        session.edit(|doc| doc.normalize_format());
+        session
+    }
+
+    fn repeat_of(session: &MapEditorSession) -> &RepeatShape {
+        let Map2dShape::Repeat(repeat) = &session.doc().objects[0].shape else {
+            panic!("expected repeat");
+        };
+        repeat
     }
 
     fn path_of(session: &MapEditorSession) -> &PathShape {
