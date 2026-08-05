@@ -300,6 +300,7 @@ impl ChannelState {
     /// `reset_stats` from thread context can lose one reset, which is
     /// harmless — the same is true of every other counter here.)
     #[inline]
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn record_lag(&self, advanced: usize, half_words: usize) {
         let advanced_i32 = advanced.min(i32::MAX as usize) as i32;
         self.refill_lag_sum.fetch_add(advanced_i32, Relaxed);
@@ -323,6 +324,7 @@ impl ChannelState {
     /// interrupt handler never nests with itself) makes the load/compare/store
     /// maximum sound.
     #[inline]
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn record_entry_delay(&self, delay: usize, half_words: usize) {
         let delay_i32 = delay.min(i32::MAX as usize) as i32;
         if self.entry_delay_max.load(Relaxed) < delay_i32 {
@@ -340,6 +342,7 @@ impl ChannelState {
     }
 
     /// The compiled timing as written by [`Self::set_timing`].
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn codes(&self) -> PulseCodes {
         PulseCodes {
             zero: self.pulse_zero.load(Relaxed),
@@ -349,6 +352,7 @@ impl ChannelState {
     }
 
     /// The configured byte order.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn color_order(&self) -> ColorOrder {
         // The only writer stores a valid discriminant, so the fallback is
         // unreachable; it exists so the ISR path has no panic.
@@ -412,6 +416,7 @@ impl ChannelState {
     /// versa) yields zeros or old-frame bytes on a frame that is being
     /// aborted anyway — never a dangling read.
     #[inline]
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn frame_byte(&self, index: usize) -> u8 {
         if index >= self.frame_len.load(Relaxed) {
             return 0;
@@ -451,6 +456,7 @@ impl ChannelState {
     /// store-buffer litmus). On Xtensa every one of these compiles to the
     /// same `memw`-fenced access an `Acquire` load costs, and it runs once
     /// per channel service, not per byte.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn is_complete_sync(&self) -> bool {
         self.frame_complete.load(SeqCst)
     }

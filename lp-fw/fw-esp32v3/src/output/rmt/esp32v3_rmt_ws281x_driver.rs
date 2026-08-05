@@ -87,24 +87,27 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 ///
 /// The bound is interrupt-service margin, not an RMT limitation. With the
 /// four-channel block plan every transmitter wants a refill each 80 µs
-/// (12.5 k/s per channel) against a measured per-core ISR delivery ceiling of
-/// ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Two answers,
-/// keyed on where the ISR runs this boot:
+/// (12.5 k/s per channel), and one refill costs ≈15 word-times (≈18.75 µs,
+/// measured; APB-write-bound, identical quiet or loaded). Two answers, keyed
+/// on where the ISR runs this boot:
 ///
-/// * **Dual-core (ISR on the dedicated APP core): 4** — every declared wire
-///   in one wave, overlapped with render. The budget argument: 50 k/s of
-///   demand against the ~48 k/s per-core delivery ceiling was measured
-///   trip-free even on a shared core; a core that does *nothing else* only
-///   gains margin. The number to re-judge at the silicon gate is the
-///   worst-case entry delay — 53/64 words when the four channels' coincident
-///   causes queued behind engine noise, expected far lower on the quiet
-///   core.
-/// * **Single-core fallback: 2** — the M4-shipped cap, unchanged. Measured
-///   2026-08-04 on the DOM-Z-102 app path (900 LEDs, 4×225, quiet-covered by
-///   the provider's flush barrier): both 2 and 4 ran clean (zero guard
-///   trips), but at 2 the worst entry delay was 8/64 words versus 53/64 at
-///   4, and that margin has to survive things the measurement did not
-///   exercise.
+/// * **Dual-core (ISR on the dedicated APP core): 3** — ≈70 % worst-case ISR
+///   duty, and the measured clean maximum with transmission overlapping
+///   render (DOM-Z-102, zook-dome-1500, 2026-08-04 late: zero trips, zero
+///   skips, zero errors on every wire over 130 s; worst steady entry delay
+///   35/64 words). **Not 4, and the reason is arithmetic, not tuning**: four
+///   coincident 18.75 µs refills ≈ 75 µs against the 80 µs deadline — ≈94 %
+///   duty with the trampoline and dispatch on top — and on silicon the two
+///   last-serviced wires starved on essentially every frame (4,753/4,755
+///   truncated) while the first two ran clean. M4's cap-4-clean measurement
+///   was the same arithmetic surviving only because the whole system was
+///   quiet-spinning. A fifth-plus wire waits in the admission spin; the
+///   render-overlap win survives (18 → 23 fps at 1500), but the wait is why
+///   4 declared wires do not reach the engine-bound ceiling (~31 fps) — the
+///   pin-mux wave milestone (P7) is the planned path to that.
+/// * **Single-core fallback: 2** — the M4-shipped cap, unchanged, proven
+///   unregressed with a forced-fallback boot (18 fps / 53 ms / zero trips at
+///   1500 — the merged-main baseline exactly).
 ///
 /// ⚠️ In the single-core shape, any transmission this cap admits is only
 /// safe while the CPU quietly spins: this chip's app path masks interrupts
@@ -115,10 +118,13 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 /// [`Ws281xOutput::background_tx_safe`] answer, so cap and barrier switch
 /// together. See `Esp32OutputProvider::flush`.
 ///
-/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free —
-/// in the fallback shape a four-wire flush is two waves of two.
+/// ⚠️ In the dual-core shape, the cap's safety additionally leans on the
+/// `isr-in-ram` feature of lp-ws281x: with the service path in flash, the
+/// APP core stalls behind the PRO core's cache misses on the shared SPI bus
+/// and even cap 3 trips at boot-time flash traffic (measured: a single
+/// service 112 words late during project load).
 fn max_concurrent_tx() -> usize {
-    if isr_on_app_core() { 4 } else { 2 }
+    if isr_on_app_core() { 3 } else { 2 }
 }
 
 /// Channels currently transmitting a frame, across the whole driver.
