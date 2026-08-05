@@ -642,6 +642,7 @@ fn map_firmware_flash_result(result: BrowserEsp32FlashResult) -> LinkFirmwareFla
             manifest_path: result.manifest.manifest_path,
         },
         chip_name: result.chip_name,
+        probed_mac: result.base_mac,
         logs: result.logs,
         progress: map_progress(result.progress),
     }
