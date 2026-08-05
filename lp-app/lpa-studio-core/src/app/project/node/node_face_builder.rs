@@ -506,9 +506,13 @@ fn phasor_period_control(
 /// (`resolve_gradient_config`) — or an ordinary slot edit at
 /// `consumed[<name>].gradient.some`.
 ///
-/// An ABSENT `gradient` option gets no control: the engine runs the slot on
-/// `GradientConfig::default()`, and a swatch editing a config that is not
-/// there would need the option-on gesture the generic row already owns.
+/// An ABSENT `gradient` option still gets a control, seeded with
+/// `GradientConfig::default()` — exactly what the engine runs the slot on.
+/// This is the realistic authored case: inline gradient configs are
+/// padded-form-only (`color.md` §5, M4-P5), so hand-authored palette slots
+/// arrive with the option absent and the swatch is how the first palette
+/// gets picked at all. The first pick's `AssignValue` at `…gradient.some`
+/// materializes the option (the overlay's ensure-present rule).
 fn palette_swatch_control(
     entry: &UiConfigSlot,
     top_rows: &[&UiConfigSlot],
@@ -518,22 +522,35 @@ fn palette_swatch_control(
     };
     let fields = &record.fields;
     let name = map_entry_name(entry);
-    let config_row = uniform_field(fields, "gradient")
-        .filter(|row| row.optionality.is_some_and(|opt| opt.included))?;
-    let UiConfigSlotBody::Value(config_value) = &config_row.body else {
-        return None;
+    let config_row = uniform_field(fields, "gradient")?;
+    let present = config_row.optionality.is_some_and(|opt| opt.included);
+    let (config_value, address) = if present {
+        let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+            return None;
+        };
+        // The value has to READ as a palette, or the swatch has nothing to
+        // sample and the web layer would fall back to a bare display anyway.
+        crate::app::project::gradient_config_value(&config_value.kind.to_lp_value())?;
+        (config_value.clone(), row_edit_address(config_row))
+    } else {
+        let default_value = crate::UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::default(),
+        ))
+        .with_editor(crate::UiSlotEditorHint::Gradient);
+        let address = config_row
+            .address
+            .as_ref()
+            .and_then(|address| address.child_field("some"));
+        (default_value, address)
     };
-    // The value has to READ as a palette, or the swatch has nothing to
-    // sample and the web layer would fall back to a bare display anyway.
-    crate::app::project::gradient_config_value(&config_value.kind.to_lp_value())?;
 
     let mut control = UiPanelControl {
         label: string_field(fields, "label")
             .filter(|label| !label.is_empty())
             .unwrap_or_else(|| entry.label.clone()),
-        address: row_edit_address(config_row),
+        address,
         widget: UiPanelWidget::PaletteSwatch,
-        value: config_value.clone(),
+        value: config_value,
         emit: crate::UiPanelEmit::Gradient,
         live_value: None,
         panel_target: None,
@@ -2223,6 +2240,58 @@ mod tests {
         // The row's display is the palette summary (P2), never the padded
         // 24-entry storage dump.
         assert_eq!(control.value.display, "oklab \u{b7} linear \u{b7} 3 stops");
+    }
+
+    /// The realistic authored case: inline gradient configs are
+    /// padded-form-only (M4-P5 decision b), so a hand-authored palette slot
+    /// arrives with the `gradient` option ABSENT — and still gets its
+    /// swatch, seeded with the same default the engine runs the slot on.
+    /// The first pick's `AssignValue` at `…gradient.some` materializes the
+    /// option (the overlay's ensure-present rule).
+    #[test]
+    fn an_absent_gradient_option_still_gets_a_default_seeded_swatch() {
+        let prefix = "consumed[palette]";
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::unset(),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::excluded(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        let uniform = UiConfigSlot::record(prefix.to_string(), "palette", fields)
+            .with_address(address(prefix));
+
+        let face = phasor_face(&phasor_sections(uniform, None));
+
+        assert_eq!(face.controls.len(), 1, "the absent option still presents");
+        let control = &face.controls[0];
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(
+            control.gradient_config(),
+            Some(lpc_model::GradientConfig::default()),
+            "the swatch shows what the engine actually runs"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("the first pick lands at the option's some")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
     }
 
     /// Publicity is the ordinary derived rule, and a wired palette's live
