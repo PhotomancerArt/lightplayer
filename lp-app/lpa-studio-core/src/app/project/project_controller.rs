@@ -2608,7 +2608,9 @@ impl ProjectController {
             };
             let (state, phasors) = match controller.sync.as_ref().and_then(|s| s.timebase(&product))
             {
-                Some(crate::UiTimebaseRead::Live { seconds, phasors, .. }) => {
+                Some(crate::UiTimebaseRead::Live {
+                    seconds, phasors, ..
+                }) => {
                     // The transport block's numeric seconds is probe-only —
                     // `clock_transport` (node_face_builder.rs) has no probe
                     // access, so it seeds `0.0`; this decoration pass is the
