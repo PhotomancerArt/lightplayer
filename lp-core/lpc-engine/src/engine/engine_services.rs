@@ -140,6 +140,11 @@ pub enum OutputFlushError {
         endpoint: HwEndpointSpec,
         error: OutputError,
     },
+    /// The end-of-frame [`OutputProvider::flush`] barrier failed — a
+    /// transmission begun by a `write` this frame did not complete. Carries no
+    /// node: the barrier is frame-wide, and the provider's own log names the
+    /// channel.
+    Flush { error: OutputError },
 }
 
 impl fmt::Display for OutputFlushError {
@@ -158,6 +163,7 @@ impl fmt::Display for OutputFlushError {
                 f,
                 "output node {node} channel {channel} {endpoint}: {error}"
             ),
+            Self::Flush { error } => write!(f, "output flush barrier: {error}"),
         }
     }
 }
@@ -692,6 +698,17 @@ fn flush_registered_sinks(
         }
     }
 
+    // The frame-wide barrier: a provider whose `write` starts transmissions
+    // without waiting (so wires transmit concurrently) completes them all
+    // here, before the engine goes back to rendering. Synchronous providers
+    // default this to a no-op.
+    if let Err(error) = provider.flush() {
+        failed += 1;
+        let error = OutputFlushError::Flush { error };
+        log::warn!("EngineServices: {error}");
+        first_error.get_or_insert(error);
+    }
+
     match first_error {
         None => Ok(()),
         Some(error) => {
@@ -1015,6 +1032,39 @@ mod tests {
             generation,
             "an unchanged config must not churn the hardware claim"
         );
+    }
+
+    /// Every flush must end with the provider's frame-wide barrier — the call
+    /// that completes transmissions a concurrent provider's `write` started
+    /// without waiting for. This pins the *engine* half of the contract; the
+    /// provider half lives in `fw-esp32-common`. It exists because the
+    /// barrier once vanished silently inside a delegating wrapper that did
+    /// not forward the defaulted method, and nothing on the host noticed.
+    #[test]
+    fn every_flush_ends_with_the_provider_barrier() {
+        let provider = Rc::new(CountingOutputProvider::new(MemoryOutputProvider::new()));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(
+            buffer_id,
+            node(1),
+            &OutputDef::new(endpoint("ws281x:local:D10")),
+        );
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("flush");
+        assert_eq!(provider.flush_calls(), 1, "one barrier per flush");
+
+        // A flush with nothing dirty still runs the barrier: whether anything
+        // is in flight is the provider's knowledge, not the engine's.
+        services
+            .flush_dirty_output_sinks(Revision::new(2), &buffers)
+            .expect("clean flush");
+        assert_eq!(provider.flush_calls(), 2);
     }
 
     #[test]
@@ -1833,10 +1883,14 @@ mod tests {
     }
 
     /// Counts `open` calls, which is how the parking tests tell "asked once"
-    /// from "asked every frame".
+    /// from "asked every frame" — and `flush` calls, which is how the barrier
+    /// test tells "the engine's end-of-frame barrier reached the provider"
+    /// from "a delegating wrapper swallowed it into the trait default" (the
+    /// exact silent failure `lpa-server`'s `SharedOutputProvider` shipped).
     struct CountingOutputProvider {
         inner: MemoryOutputProvider,
         open_calls: core::cell::Cell<usize>,
+        flush_calls: core::cell::Cell<usize>,
     }
 
     impl CountingOutputProvider {
@@ -1844,6 +1898,7 @@ mod tests {
             Self {
                 inner,
                 open_calls: core::cell::Cell::new(0),
+                flush_calls: core::cell::Cell::new(0),
             }
         }
 
@@ -1853,6 +1908,10 @@ mod tests {
 
         fn open_calls(&self) -> usize {
             self.open_calls.get()
+        }
+
+        fn flush_calls(&self) -> usize {
+            self.flush_calls.get()
         }
 
         fn hardware_generation(&self) -> u64 {
@@ -1880,6 +1939,11 @@ mod tests {
 
         fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
             self.0.inner.close(handle)
+        }
+
+        fn flush(&self) -> Result<(), OutputError> {
+            self.0.flush_calls.set(self.0.flush_calls.get() + 1);
+            OutputProvider::flush(&self.0.inner)
         }
 
         fn hardware_generation(&self) -> u64 {
