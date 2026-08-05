@@ -119,6 +119,16 @@ Notes:
 - All variants store F32 `coords`. `Unorm8` is reserved for
   display-encoded _output_ and never appears as a colorspace storage
   option here.
+- **Hue is degrees; everything else is a `0..1` fraction.** The
+  cylindrical spaces (`Hsl`, `Hsv`, `Oklch`) carry their hue angle in
+  degrees, matching CSS (`hsl(120deg …)`, `oklch(… 120)`) — which is
+  what a picker, a pasted CSS value, and every palette-import source
+  already speak. Nothing else in a `coords` triple is an angle, so the
+  whole rule is "the only unit that is not a fraction is a hue, and it
+  is degrees". Hues wrap; `Oklab`'s `a`/`b` and `Oklch`'s `C` are
+  signed/unbounded coordinates, not fractions. The lane-by-lane table
+  lives with the conversions
+  (`lp-core/lpc-engine/src/color/colorspace.rs`).
 - The integer encoding is a Rust enum `repr(i32)`. Stable values
   matter (it's serialized into `LpsValue`); reserve room
   (`LinearSrgb = 0`, others incrementing) and never renumber.
@@ -187,6 +197,23 @@ resources as `sampler2D` uniforms using the lp-shader
 textual and structured while avoiding fixed-size gradient uniform
 structs as the shader-facing ABI.
 
+**The shipped strip** (`lp-core/lpc-engine/src/color/gradient_bake.rs`)
+is **256 × 1 `Rgba16Unorm`, sampled `filter=linear wrap=repeat`**, and
+texel `i` holds the gradient at `t = (i + 0.5) / 256` — the texel
+*center*, so `texture(palette, vec2(u, 0))` returns the gradient at `u`
+exactly rather than half a texel off. `Repeat` is deliberate: a palette
+read past its end wraps, so a shader can scroll `u` without clamping
+and a gradient authored to wrap joins itself. The seam that follows
+from those two facts (`u = 0` is the midpoint of the last and first
+texels, not the first texel) is pinned by
+`lp-shader/lps-filetests/filetests/texture/palette_strip_*.glsl` on
+both numeric tiers.
+
+The engine supplies the matching compile-time `TextureBindingSpec` for
+every `palette`-kind shader slot; without it a `sampler2D` uniform does
+not compile at all. See
+[`lp-shader-texture-access.md`](./lp-shader-texture-access.md).
+
 ## 6. Gradient interpolation
 
 | Variant  | Notes                                                                           |
@@ -230,6 +257,20 @@ F32 LinearSrgb.
 |                                                     | correction when enabled for that fixture.          |
 | Fixture control samples → output transport          | At the output device boundary: interpolation,      |
 |                                                     | dithering, global brightness, and transport pack.  |
+
+The gradient rows are implemented in
+`lp-core/lpc-engine/src/color/`: `colorspace.rs` interpolates in the
+authored space and converts the result, `gradient_bake.rs` writes the
+texels. **The Unorm16 write is the only clamp in the palette path** —
+out-of-gamut and boosted coordinates (§10 rule 6) survive
+interpolation and conversion intact and give up their range exactly
+once, at the storage boundary that cannot hold them.
+
+A cross-fade between two palettes blends in **canonical LinearSrgb**,
+after each side has been interpolated and converted in its own space.
+That is the only well-defined choice when the two sides disagree about
+authoring space — which a cycle's set routinely does — and it is what
+a dissolve means physically.
 
 ## 8. Output stage responsibilities
 
@@ -324,8 +365,18 @@ These crates / files implement this contract:
   the static-or-cycle read of a palette.
 - `lp-core/lpc-model/src/value/legacy_kind.rs` — the legacy `Kind`
   storage recipes; `Kind::Gradient` delegates to the module above.
+- `lp-core/lpc-engine/src/color/colorspace.rs` — every authoring space
+  → canonical LinearSrgb, and in-space interpolation (§4, §6, §7).
+- `lp-core/lpc-engine/src/color/gradient_bake.rs` — the 256 × 1
+  `Rgba16Unorm` strip and the Unorm16 write boundary (§5, §7).
+- `lp-core/lpc-engine/src/nodes/shader/palette_eval.rs` — where one
+  full-cycle phasor puts a `GradientConfig::Cycle`, and the mix
+  quantization that bounds a fade's bakes.
+- `lp-core/lpc-engine/src/nodes/shader/palette_bake_cache.rs` — strips
+  keyed by the hash of the resolved value.
 - `lp-shader/lpvm/src/runtime/color.rs` — colorspace conversion at
-  uniform-binding time (not yet written).
+  uniform-binding time for single colors (not yet written; the palette
+  path above does its own).
 - Per-fixture drivers under `lp-core/lpc-engine/` — fixture-stage
   gamma, white balance, channel synthesis.
 
