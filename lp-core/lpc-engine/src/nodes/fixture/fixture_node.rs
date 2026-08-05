@@ -3974,6 +3974,7 @@ mod mapping_representation_differential {
             points: points.to_vec(),
             count,
             reversed: false,
+            gaps: Vec::new(),
         }))
     }
 

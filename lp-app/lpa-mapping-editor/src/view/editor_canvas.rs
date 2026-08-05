@@ -183,6 +183,25 @@ pub fn EditorCanvas(
             _ => None,
         })
         .collect();
+    // Inert (jumper) segments carry no lamps, so nothing else on the canvas
+    // shows them: draw the wire itself, dashed and dimmed. Gap indices always
+    // name authored segments — `reversed` mirrors them in the resolver so the
+    // same physical run stays inert — so no direction handling is needed here.
+    let gap_segments: Vec<[[f32; 2]; 2]> = doc
+        .objects
+        .iter()
+        .filter_map(|object| match &object.shape {
+            Map2dShape::Path(path) => Some(path),
+            _ => None,
+        })
+        .flat_map(|path| {
+            path.gaps.iter().filter_map(|gap| {
+                let start = path.points.get(*gap as usize)?;
+                let end = path.points.get(*gap as usize + 1)?;
+                Some([*start, *end])
+            })
+        })
+        .collect();
     let resolved = resolve(doc).unwrap_or(ResolvedMap2d {
         lamps: Vec::new(),
         spans: Vec::new(),
@@ -277,6 +296,7 @@ pub fn EditorCanvas(
                     points: draft_points.clone(),
                     count,
                     reversed: false,
+                    gaps: Vec::new(),
                 }),
             }],
             ..lpc_mapping::Map2dDoc::new()
@@ -583,6 +603,18 @@ pub fn EditorCanvas(
                             stroke_width: "{(radius * 0.14).clamp(0.4, 1.5)}",
                             marker_end: if seg.chain { "url(#lpme-arrow-head-chain)" } else { "url(#lpme-arrow-head)" },
                         }
+                    }
+                }
+                // Jumper wire: the segments an author marked inert.
+                for (index, segment) in gap_segments.iter().enumerate() {
+                    line {
+                        key: "gap{index}",
+                        class: "lpme-gapline",
+                        x1: "{segment[0][0]}",
+                        y1: "{segment[0][1]}",
+                        x2: "{segment[1][0]}",
+                        y2: "{segment[1][1]}",
+                        stroke_width: "{(1.6 / cam.scale).max(radius * 0.22)}",
                     }
                 }
                 // Wide invisible hit lines make skinny paths clickable.

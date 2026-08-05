@@ -1,4 +1,4 @@
-//! The mapping test corpus: three authored archetypes plus the real fyeah
+//! The mapping test corpus: four authored archetypes plus the real fyeah
 //! sign, shared by resolver tests, Studio stories, and editor fixtures.
 //!
 //! The JSON documents are the canonical corpus (they exercise serde on every
@@ -18,6 +18,10 @@ pub const CAT_EARS_JSON: &str = include_str!("corpus/cat_ears.map2d.json");
 /// A 16×16 snake-routed panel, 256 lamps across 2 universes.
 pub const PANEL_16X16_JSON: &str = include_str!("corpus/panel_16x16.map2d.json");
 
+/// One physical channel that leaves the lit run, jumpers across on inert
+/// wire, and comes back: the format-2 archetype (24 lamps, one object).
+pub const GAPPED_PATH_JSON: &str = include_str!("corpus/gapped_path.map2d.json");
+
 /// The real fyeah sign mapping SVG (10 labeled paths, 219 lamps).
 pub const FYEAH_SVG: &str = include_str!("corpus/fyeah_mapping.svg");
 
@@ -31,6 +35,10 @@ pub fn cat_ears() -> Map2dDoc {
 
 pub fn panel_16x16() -> Map2dDoc {
     Map2dDoc::from_json(PANEL_16X16_JSON).expect("corpus panel_16x16 parses")
+}
+
+pub fn gapped_path() -> Map2dDoc {
+    Map2dDoc::from_json(GAPPED_PATH_JSON).expect("corpus gapped_path parses")
 }
 
 pub fn fyeah() -> Map2dDoc {
@@ -72,6 +80,36 @@ mod tests {
         assert_eq!(resolved.lamps[16].pos, [100.0 + 15.0 * 26.0, 106.0]);
     }
 
+    /// The format-2 archetype: 24 lamps on two lit runs, none on the jumper
+    /// between them, and the whole channel still one object.
+    #[test]
+    fn gapped_path_lights_both_runs_and_never_the_jumper() {
+        let doc = gapped_path();
+        assert_eq!(doc.format, 2);
+        assert_eq!(doc.required_format(), 2);
+
+        let resolved = resolve(&doc).unwrap();
+        assert_eq!(resolved.lamps.len(), 24);
+        assert_eq!(resolved.spans.len(), 1);
+        // The jumper runs along y = 100 between x = 100 and x = 160; every
+        // lamp sits on one of the two vertical runs, none in between.
+        for lamp in &resolved.lamps {
+            assert!(
+                lamp.pos[0] == 100.0 || lamp.pos[0] == 160.0,
+                "lamp {} landed on the jumper at {:?}",
+                lamp.index,
+                lamp.pos
+            );
+        }
+        // Even split, and the pitch is continuous across the jumper.
+        let on_first = resolved
+            .lamps
+            .iter()
+            .filter(|lamp| lamp.pos[0] == 100.0)
+            .count();
+        assert_eq!(on_first, 12);
+    }
+
     #[test]
     fn fyeah_imports_all_labeled_paths() {
         let doc = fyeah();
@@ -104,6 +142,7 @@ mod tests {
             ("basic_button", basic_button()),
             ("cat_ears", cat_ears()),
             ("panel_16x16", panel_16x16()),
+            ("gapped_path", gapped_path()),
             ("fyeah", fyeah()),
         ] {
             let bytes = doc.to_json().len();
@@ -116,7 +155,13 @@ mod tests {
 
     #[test]
     fn corpus_documents_round_trip() {
-        for doc in [basic_button(), cat_ears(), panel_16x16(), fyeah()] {
+        for doc in [
+            basic_button(),
+            cat_ears(),
+            panel_16x16(),
+            gapped_path(),
+            fyeah(),
+        ] {
             let round_tripped = Map2dDoc::from_json(&doc.to_json()).unwrap();
             assert_eq!(round_tripped, doc);
             assert_eq!(resolve(&round_tripped).unwrap(), resolve(&doc).unwrap());
