@@ -18,6 +18,7 @@ pub use device_session::{
     DeviceLinkMode, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
     DeviceTimers, IncompatibleReason,
 };
+pub use provider::base_mac::normalize_base_mac;
 pub use provider::chip::{
     KNOWN_CHIP_IDS, chip_id_from_reported, chip_ids_match, normalize_chip_name,
 };
