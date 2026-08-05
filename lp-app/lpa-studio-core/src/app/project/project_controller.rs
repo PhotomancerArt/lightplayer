@@ -152,6 +152,16 @@ pub struct ProjectController {
     /// The local library, when the platform mounted a store (browser).
     /// Absent on host tests — flows degrade to the legacy deploy path.
     library: Option<LibraryContext>,
+    /// The open pre-flight's verdict on a package it refused to open (P3):
+    /// a classified issue — too old, too new, unreadable, migration refused
+    /// — held so the generic `fail(error.to_string())` the open path makes
+    /// on the way out does not overwrite it with a parser string. Drained
+    /// by [`Self::fail`]; cleared when a new open starts.
+    classified_open_issue: Option<UiIssue>,
+    /// Notices the open path produced and the studio controller has not
+    /// collected yet — today, "Upgraded project from format 4 to 5". Drained
+    /// by [`Self::take_open_notices`].
+    open_notices: Vec<UiNotice>,
 }
 
 /// One staged node removal (see `ProjectController::staged_removals`).
@@ -224,6 +234,8 @@ impl ProjectController {
             pending_focus: None,
             pending_panel_writes: BTreeMap::new(),
             library: None,
+            classified_open_issue: None,
+            open_notices: Vec::new(),
         }
     }
 
@@ -2067,6 +2079,7 @@ impl ProjectController {
 
     pub fn mark_opening_project(&mut self) {
         self.clear_loaded_project_state();
+        self.classified_open_issue = None;
         self.state = ProjectState::OpeningProject {
             progress: ProgressState::new("Opening project"),
         };
@@ -2098,12 +2111,26 @@ impl ProjectController {
         self.root_nodes.clear();
     }
 
+    /// Land in the failed state.
+    ///
+    /// When the open pre-flight already classified the failure (a project
+    /// too old, too new, unreadable, or one the migrator refused), that
+    /// classification wins: the caller's `error.to_string()` is the same
+    /// fact spelled as a wire/parser complaint, and the issue pane is where
+    /// the user reads what to do about it.
     pub fn fail(&mut self, message: impl Into<String>) {
         self.running_project_status = RunningProjectStatus::Unknown;
-        self.state = ProjectState::Failed {
-            issue: UiIssue::new(message),
-        };
+        let issue = self
+            .classified_open_issue
+            .take()
+            .unwrap_or_else(|| UiIssue::new(message));
+        self.state = ProjectState::Failed { issue };
         self.clear_loaded_project_state();
+    }
+
+    /// Take the notices the open path produced (the migration notice).
+    pub(crate) fn take_open_notices(&mut self) -> Vec<UiNotice> {
+        std::mem::take(&mut self.open_notices)
     }
 
     pub fn disconnect(&mut self) {
@@ -2208,13 +2235,16 @@ impl ProjectController {
         server: &mut StudioServerClient,
         opened: crate::app::library::OpenedProject,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let context = self.library.as_mut().ok_or_else(no_library_error)?;
-        if let Some(previous) = context.active.take() {
-            if previous.handle.uid != opened.uid {
-                context.pending_close.push(previous.handle.uid.to_string());
+        let now = {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(previous) = context.active.take() {
+                if previous.handle.uid != opened.uid {
+                    context.pending_close.push(previous.handle.uid.to_string());
+                }
             }
-        }
-        let handle = crate::app::library::PackageHandle::load(
+            (context.now_secs)()
+        };
+        let mut handle = crate::app::library::PackageHandle::load(
             opened.uid,
             opened.slug,
             opened.package_fs,
@@ -2223,12 +2253,23 @@ impl ProjectController {
         .map_err(library_ui_error)?;
         // the slug is THE user-facing identifier — it titles the editor
         let title = handle.slug.clone();
+
+        // Pre-flight (P3), BEFORE anything reads the package for the push:
+        // an older-but-supported project migrates in place and is SAVED
+        // first, because `open_library_project` verifies the runtime's hash
+        // against the library's — an in-flight migration would push bytes
+        // the library does not have. Anything the migrator will not touch
+        // stops here with a classified issue rather than opening half of a
+        // project.
+        self.migrate_package_on_open(&mut handle, now)?;
+
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
         let loaded = server
             .open_library_project(&self.runtime_storage_id, &files, &expected_hash)
             .await?;
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
@@ -2240,6 +2281,91 @@ impl ProjectController {
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
+    }
+
+    /// The open pre-flight (D11): classify the package, migrate it if this
+    /// build can, and refuse — with a classified issue, not a parser string
+    /// — if it cannot.
+    ///
+    /// The order is forced by the hash check in `open_library_project`: the
+    /// migrated bytes must be **on disk and saved** before anything reads
+    /// the package for the push. So this writes every changed file back
+    /// through `apply_update` and takes a `record_save` snapshot, which is
+    /// also what preserves the pre-migration state — the history event is
+    /// the undo path, for free.
+    fn migrate_package_on_open(
+        &mut self,
+        handle: &mut crate::app::library::PackageHandle,
+        now: f64,
+    ) -> Result<(), UiError> {
+        use crate::app::library::{PackageHealth, classify_package, health_for};
+
+        let class = {
+            let package_fs = handle.package_fs.borrow();
+            classify_package(&*package_fs)
+        };
+        match health_for(&class, None) {
+            PackageHealth::Ready => return Ok(()),
+            PackageHealth::UpgradesOnOpen { .. } => {}
+            PackageHealth::Blocked { headline, remedy } => {
+                return Err(self.refuse_open(handle, &headline, &remedy));
+            }
+        }
+
+        // The migration body is shared with the roster's Upgrade verb
+        // (`package_upgrade`): write every changed file back through
+        // `apply_update`, then `record_save` — which is also what preserves
+        // the pre-migration state.
+        let report = match crate::app::library::migrate_handle_to_current(handle, now) {
+            // Unreachable: `health_for` already said this one upgrades.
+            // Total rather than `unreachable!` — a mismatch must not panic
+            // the editor.
+            Ok(None) => return Ok(()),
+            Ok(Some(report)) => report,
+            Err(crate::app::library::LibraryError::Format(detail)) => {
+                // All-or-nothing by contract: nothing was written, so the
+                // package on disk is exactly as the user left it.
+                return Err(self.refuse_open(
+                    handle,
+                    &format!(
+                        "Format {} — this project could not be upgraded automatically",
+                        class.found().unwrap_or_default()
+                    ),
+                    &detail,
+                ));
+            }
+            Err(other) => return Err(library_ui_error(other)),
+        };
+
+        let mut message = format!(
+            "Upgraded \"{}\" from format {} to {}",
+            handle.slug, report.from, report.to
+        );
+        for note in report.notes.iter().chain(report.warnings.iter()) {
+            message.push_str(" · ");
+            message.push_str(note);
+        }
+        self.open_notices.push(if report.warnings.is_empty() {
+            UiNotice::info(message)
+        } else {
+            UiNotice::warning(message)
+        });
+        Ok(())
+    }
+
+    /// Refuse to open `handle`, leaving the editor showing what was found
+    /// and what to do about it. The returned error carries the same fact
+    /// for the log and the caller's error path.
+    fn refuse_open(
+        &mut self,
+        handle: &crate::app::library::PackageHandle,
+        headline: &str,
+        remedy: &str,
+    ) -> UiError {
+        self.classified_open_issue = Some(
+            UiIssue::new(format!("{}: {headline}", handle.slug)).with_detail(remedy.to_string()),
+        );
+        UiError::Project(format!("{}: {headline}. {remedy}", handle.slug))
     }
 
     /// Save-as-pull (D20/D8): after a successful commit, pull the changed
@@ -6459,6 +6585,163 @@ mod tests {
         let project = ProjectController::new();
 
         assert!(project.actions(false).is_empty());
+    }
+
+    /// A library holding one package built from `files`, plus its handle.
+    fn package_for_open(
+        files: &[(&str, &[u8])],
+    ) -> (
+        crate::app::library::LibraryStore,
+        crate::app::library::PackageSummary,
+    ) {
+        use crate::app::library::{LibraryStore, PackageProvenance};
+
+        let store = LibraryStore::new(
+            std::rc::Rc::new(std::cell::RefCell::new(lpfs::LpFsMemory::new())),
+            std::rc::Rc::new(|| [5u8; 16]),
+            std::rc::Rc::new(|| "2026-08-04-1800".to_string()),
+        );
+        let files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
+            .collect();
+        let summary = store
+            .install_package("old", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+        (store, summary)
+    }
+
+    #[test]
+    fn migrating_on_open_saves_the_upgrade_before_anything_reads_the_package() {
+        // The hard ordering constraint (P3/D11): `open_library_project`
+        // verifies the runtime's hash against the library's, so migrated
+        // bytes must be written back AND saved before the push payload is
+        // read. Migrating in flight would push bytes the library does not
+        // have and fail the hash check.
+        let (store, summary) = package_for_open(&[
+            ("project.json", br#"{"format":4,"name":"old"}"#),
+            ("module.json", br#"{"kind":"Module"}"#),
+        ]);
+        assert_eq!(
+            summary.health,
+            crate::app::library::PackageHealth::UpgradesOnOpen { found: 4 },
+            "the gallery calls this a normal card that migrates on open"
+        );
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head().expect("installed packages are saved");
+
+        let mut project = ProjectController::new();
+        project.migrate_package_on_open(&mut handle, 2.0).unwrap();
+
+        let files = handle.read_all_files().unwrap();
+        let (_, manifest) = files
+            .iter()
+            .find(|(path, _)| path == "project.json")
+            .expect("manifest");
+        let manifest = String::from_utf8(manifest.clone()).unwrap();
+        assert!(
+            manifest.contains(&format!(
+                "\"format\": {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            )),
+            "the migration is ON DISK, not in flight: {manifest}"
+        );
+
+        let head = handle.history.head().expect("head");
+        assert_ne!(head, before, "the migration recorded a save");
+        assert_eq!(
+            handle.content_hash().unwrap(),
+            head,
+            "the hash the server verifies is the saved one"
+        );
+
+        // the pre-migration state survives as a version to go back to
+        use lpfs::LpFs as _;
+        let history_fs = handle.history_fs.borrow();
+        let snapshots = lpc_history::SnapshotStore::new(&*history_fs);
+        let restored = lpfs::LpFsMemory::new();
+        snapshots.materialize(&before, &restored).unwrap();
+        let original = restored
+            .read_file(lpc_model::LpPath::new("/project.json"))
+            .unwrap();
+        assert!(
+            String::from_utf8(original)
+                .unwrap()
+                .contains("\"format\": 4"),
+            "the version before the upgrade is still restorable"
+        );
+
+        let notices = project.take_open_notices();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(
+            notices[0].message.contains(&format!(
+                "from format 4 to {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            )),
+            "{}",
+            notices[0].message
+        );
+    }
+
+    #[test]
+    fn a_current_format_package_is_neither_migrated_nor_announced() {
+        let (store, summary) = package_for_open(&[(
+            "project.json",
+            format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION).as_bytes(),
+        )]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head();
+
+        let mut project = ProjectController::new();
+        project.migrate_package_on_open(&mut handle, 2.0).unwrap();
+
+        assert_eq!(handle.history.head(), before, "no save, no churn");
+        assert!(project.take_open_notices().is_empty());
+    }
+
+    #[test]
+    fn a_below_floor_package_refuses_to_open_with_a_classified_issue() {
+        // The explicit ask: the editor must say "too old, here is what to
+        // do", not show a parser complaint about an unknown field.
+        let (store, summary) =
+            package_for_open(&[("project.json", br#"{"format":3,"name":"ancient"}"#)]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head();
+
+        let mut project = ProjectController::new();
+        let error = project
+            .migrate_package_on_open(&mut handle, 2.0)
+            .expect_err("below the floor");
+        assert!(error.message().contains("Format 3"), "{error}");
+        assert_eq!(
+            handle.history.head(),
+            before,
+            "a refused open never half-migrates the package"
+        );
+
+        // the studio controller's generic failure path must not overwrite it
+        project.fail(error.to_string());
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state, got {:?}", project.state);
+        };
+        assert!(
+            issue.message.contains("Format 3 — too old for this Studio"),
+            "{}",
+            issue.message
+        );
+        let detail = issue.detail.as_deref().expect("a remedy");
+        assert!(
+            detail.contains("too old to upgrade automatically"),
+            "{detail}"
+        );
+
+        // a later, unclassified failure still reports itself normally
+        project.fail("the runtime went away");
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state");
+        };
+        assert_eq!(issue.message, "the runtime went away");
+        assert_eq!(issue.detail, None);
     }
 
     /// GV fix 4: the project title (pane AND root card) comes from the

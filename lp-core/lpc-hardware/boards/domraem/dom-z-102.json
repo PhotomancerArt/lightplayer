@@ -168,6 +168,14 @@
         "rmt",
         "ws281x-output"
       ]
+    },
+    {
+      "address": "/rmt/ws281x4",
+      "display_label": "RMT WS281x 4",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
     }
   ]
 }
