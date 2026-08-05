@@ -120,8 +120,16 @@ column by the output count and the ceiling picks the winner:
   Read `refills` against `refills_wanted`, never `lag_max`, when diagnosing
   this.
 * 2 blocks → 12.5 k/s each → ~4 outputs, and the margin is thin (50 k demand
-  against a ~48 k ceiling). This is what `fw-esp32v3` ships; whether four
-  channels are genuinely clean is a silicon question, not an arithmetic one.
+  against a ~48 k ceiling). This is what `fw-esp32v3` ships. Answered on
+  silicon 2026-08-04 (DOM-Z-102 app path, 4×225 LEDs, concurrent flush):
+  **both two and four concurrent transmitters run trip-free** — provided the
+  CPU quietly spins for the whole transmission. The margins differ sharply
+  (worst entry delay 8 of 64 words at two concurrent, 53 of 64 at four), so
+  `fw-esp32v3` admits two at a time and holds further starts until a slot
+  frees. The proviso is not optional: that firmware's app path masks
+  interrupts in stretches that blow the 80 µs deadline, and a wire left
+  transmitting under engine load truncated ~99 % of its frames. Whoever calls
+  `start_frame` owns keeping the CPU quiet until the frame completes.
 
 Note that only slots `0, 2, 4, 6` exist at two blocks each — a backend must
 skip the absorbed slots when it creates channels, not merely when it
