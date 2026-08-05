@@ -2095,6 +2095,9 @@ fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str)
     }
     match slot_name {
         "time" | "seconds" | "delta_seconds" => Kind::Instant,
+        // A palette slot bound to a channel that is not the well-known
+        // `palette` still carries a gradient, not a color.
+        "palette" | "gradient" => Kind::Gradient,
         _ => Kind::Color,
     }
 }
