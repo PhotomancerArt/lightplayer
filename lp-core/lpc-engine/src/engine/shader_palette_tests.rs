@@ -21,10 +21,10 @@
 //! Cycle configs arrive on a bus **literal** rather than authored into the
 //! node JSON. That is not a shortcut around authoring: it is the `Shared`
 //! provenance path, which is the one this milestone has to get right, and
-//! `GradientConfig`'s authored-JSON surface is not the fixed-shape
-//! [`LpValue`] recipe the slot reader takes (`docs/design/color.md` §5), so a
-//! cycle authored inline would be an eight-entry, twenty-four-stop wall of
-//! padding. M4's studio surface is what makes that ergonomic.
+//! `GradientConfig`'s friendly authored-JSON surface is not the fixed
+//! [`LpValue`] recipe the slot reader takes (`docs/design/color.md` §5) —
+//! an inline cycle spells integer tags and `count` by hand. M4's studio
+//! surface is what makes inline authoring ergonomic.
 
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;

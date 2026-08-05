@@ -585,7 +585,7 @@ impl SlotController {
         // Composite values don't fit the scalar stat hero: surface the type
         // name as the compact value and the per-field readings as rows. A
         // palette is a struct too, but its fields (`space`, `method`,
-        // `count`, and 24 padded stops) say nothing the strip does not say
+        // `count`, and the stop array) say nothing the strip does not say
         // better — it carries the summary line and no field rows (M4 P2).
         let mut produced = match (&gradient, &ui_value.kind) {
             (Some(config), _) => UiProducedValue::new(

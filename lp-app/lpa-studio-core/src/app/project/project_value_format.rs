@@ -5,7 +5,7 @@ use lpc_model::{
 use crate::phasor_rate_display;
 
 pub fn format_lp_value(value: &LpValue) -> String {
-    // A gradient's storage is a 24-entry padded array; printed field by
+    // A gradient's storage is a stop array plus tags; printed field by
     // field it drowns every row it lands in. Every text surface says what
     // the palette IS instead (the strips are the picture — M4 P2).
     if let Some(config) = gradient_config_value(value) {
@@ -356,7 +356,7 @@ mod tests {
     }
 
     /// The summary is what every TEXT surface shows for a palette — never
-    /// the 24-entry padded storage dump.
+    /// the raw storage dump.
     #[test]
     fn summarizes_palettes_instead_of_dumping_storage() {
         assert_eq!(

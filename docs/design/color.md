@@ -175,10 +175,26 @@ pub const MAX_GRADIENT_STOPS: u32 = 24;
 24 rather than the original 16: WLED gradients carry up to 18 stops
 and importing one must not truncate (D2 of the palette spike).
 
-Storage is always the maximum size. The loader populates an explicit
-`count: i32` field with the number of authored entries; remaining
-slots are zero-padded. Shaders iterate `0..count`. No sentinel
-values; no ambiguity.
+The fixed size is the **type's maximum**, and an explicit `count: i32`
+field carries the number of authored entries; consumers iterate
+`0..count`. No sentinel values; no ambiguity.
+
+**Stored values are count-bounded, not padded** (amended 2026-08-05).
+The `LpValue` form carries exactly `count` array entries; readers
+accept any length in `count..=MAX` (the legacy zero-padded form still
+decodes; entries past `count` are never read). The original
+always-maximum-size rule put ~17.7 KiB of dead padding on every wire
+crossing — larger than the whole 16 KiB project-read frame budget by
+itself, which broke project sync the moment a palette pick landed a
+config on a bus channel (probe value echo) or in a def (slot-root
+echo). `lp-core/lpc-shared/tests/gradient_wire_size.rs` pins the
+count-bounded sizes; the residual maximal-cycle bound is
+`docs/debt/maximal-gradient-cycle-exceeds-frame.md`. Generically, the
+slot machinery treats a fixed `Array(N)` type as accepting **up to**
+`N` elements (codec read/write and `lp_value_matches_type`); the
+absent tail is type-default. A GPU-facing fixed layout, where one is
+ever needed, pads at materialization — gradients themselves never take
+that path (they bake to textures, below).
 
 Authored values _exceeding_ the maximum are a load error, not
 silently truncated. Larger collections are a one-constant bump in
@@ -193,12 +209,14 @@ GPU layout logic see.
 **Except in node-def JSON** (M4-P5 decision): a shader slot's inline
 `gradient` option is read by the shape-driven slot codec — a streaming
 reader guided by `LpType`, with no serde bridge — so what `shader.json`
-can spell there is the fixed recipe, padding, `count` and all.
-Teaching that codec the friendly form was considered and declined: it
-would plant a per-type special case keyed on struct name inside
+can spell there is the fixed recipe: integer tags, `count`, and a
+count-bounded (or legacy zero-padded) `set`/`stops` array. Teaching
+that codec the friendly form was considered and declined: it would
+plant a per-type special case keyed on struct name inside
 shape-generic machinery, well past the "small, in one place" bar the
-loader-maps-TOML-strings precedent sets. **Padded-form-only is the
-authored contract for inline gradient configs.** In practice nobody
+loader-maps-TOML-strings precedent sets. **The fixed recipe is the
+authored contract for inline gradient configs** — friendly enum
+strings and per-variant shapes do not belong there. In practice nobody
 hand-writes one: Studio's chooser (M4) writes configs as `LpValue`
 through `SetValue`, an unauthored palette slot falls back to
 `gradient_config()`'s default, and the friendly surface stays where
