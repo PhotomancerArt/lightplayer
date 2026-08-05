@@ -1343,6 +1343,12 @@ label:has(> input:not(:disabled)) {
     font-size: 12px;
 }
 
+/* Reference-image opacity: header furniture, so it stays slim. */
+.lpme-ref-opacity {
+    width: 72px;
+    accent-color: var(--studio-color-text-muted);
+}
+
 .lpme-canvas-wrap {
     position: relative;
     flex: 1;
@@ -1365,6 +1371,34 @@ label:has(> input:not(:disabled)) {
     fill: none;
     stroke: transparent;
     cursor: move;
+}
+
+/* Inert path segments: jumper wire that carries no lamps. Dashed and dimmed,
+   and never a pointer target — the path's own hit line owns the clicks. */
+.lpme-gapline {
+    fill: none;
+    stroke: rgba(198, 203, 212, 0.32);
+    stroke-dasharray: 3 4;
+    stroke-linecap: round;
+    pointer-events: none;
+}
+
+/* Non-zero instances of a selected repeated path: where the same polyline
+   runs once turned. Faint, never a pointer target — instance 0 is the one
+   that takes edits. */
+.lpme-ghost {
+    fill: none;
+    stroke: rgba(76, 159, 254, 0.28);
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+/* The point a selected repeat turns about. */
+.lpme-repeat-center {
+    fill: none;
+    stroke: rgba(76, 159, 254, 0.85);
+    stroke-linecap: round;
+    pointer-events: none;
 }
 
 /* Invisible enlarged pointer target over sparse (small-radius) lamps. */
@@ -1421,6 +1455,32 @@ label:has(> input:not(:disabled)) {
     border-bottom: 1px solid rgba(239, 83, 80, 0.5);
     color: var(--studio-color-text);
     font-size: 12px;
+}
+
+/* Refuse-to-edit: shown INSTEAD of the editor when a document cannot be
+   read (malformed, or written by a newer LightPlayer). Deliberately calm and
+   roomy — the document is intact; this build just will not touch it. */
+.lpme-refusal {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    color: var(--studio-color-text);
+    font-size: 12px;
+}
+
+.lpme-refusal-message {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.lpme-refusal-note {
+    max-width: 46em;
+    color: var(--studio-color-text-muted);
+    line-height: 1.5;
 }
 
 .lpme-hidden-input {
@@ -1543,6 +1603,15 @@ label:has(> input:not(:disabled)) {
 .lpme-field input:focus {
     outline: none;
     border-color: #4c9ffe;
+}
+
+/* A field the popover reports but cannot yet edit (the repeat's parameters):
+   the value column, without the input chrome that would invite a click. */
+.lpme-field-static {
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+    color: var(--studio-color-text-strong);
+    padding: 4px 0;
 }
 
 .lpme-seg {
