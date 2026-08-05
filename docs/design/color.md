@@ -190,6 +190,21 @@ snake-case enum strings and exactly the stops that were authored.
 between them; the fixed shape is what `LpValue` / `LpType` and the
 GPU layout logic see.
 
+**Except in node-def JSON** (M4-P5 decision): a shader slot's inline
+`gradient` option is read by the shape-driven slot codec — a streaming
+reader guided by `LpType`, with no serde bridge — so what `shader.json`
+can spell there is the fixed recipe, padding, `count` and all.
+Teaching that codec the friendly form was considered and declined: it
+would plant a per-type special case keyed on struct name inside
+shape-generic machinery, well past the "small, in one place" bar the
+loader-maps-TOML-strings precedent sets. **Padded-form-only is the
+authored contract for inline gradient configs.** In practice nobody
+hand-writes one: Studio's chooser (M4) writes configs as `LpValue`
+through `SetValue`, an unauthored palette slot falls back to
+`gradient_config()`'s default, and the friendly surface stays where
+serde actually reads it — the palette catalog's TOML
+(`lpa-palettes::entry`) and other serde-facing surfaces.
+
 For lpfx rendering, `Gradient` values materialize to width-by-one
 texture resources before shader binding. Shaders sample those
 resources as `sampler2D` uniforms using the lp-shader
