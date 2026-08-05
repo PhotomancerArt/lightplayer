@@ -22,6 +22,7 @@ pub enum ClientEvent {
         uptime_ms: u64,
         memory: Option<MemoryStats>,
         recovery: Option<RecoveryStatus>,
+        outputs: Option<Vec<lpc_wire::server::OutputWireStatus>>,
     },
     /// Firmware/server log line carried by the protocol.
     Log { level: LogLevel, message: String },
@@ -47,6 +48,7 @@ impl ClientEvent {
                 uptime_ms,
                 memory,
                 recovery,
+                outputs,
             } => Some(Self::Heartbeat {
                 fps,
                 frame_count,
@@ -54,6 +56,7 @@ impl ClientEvent {
                 uptime_ms,
                 memory,
                 recovery,
+                outputs,
             }),
             WireServerMsgBody::Log { level, message } => Some(Self::Log { level, message }),
             _ => None,

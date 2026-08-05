@@ -64,8 +64,10 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                         total_bytes: (esp_alloc::HEAP.free() + esp_alloc::HEAP.used()) as u32,
                     }),
                     // The harness boots without a recovery region installed,
-                    // so there is no crash-recovery state to report.
+                    // so there is no crash-recovery state to report — and no
+                    // per-wire output attribution either.
                     recovery: None,
+                    outputs: None,
                 },
             );
 
