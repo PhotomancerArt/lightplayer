@@ -10,8 +10,10 @@ related:
 ---
 # The clock's transport controls have no transport UI
 
-**Shape** — `ClockControls`
-(`lp-core/lpc-model/src/nodes/clock/clock_controls.rs`) exposes
+**Shape** — `ClockTransport`
+(`lp-core/lpc-model/src/nodes/clock/clock_transport.rs`, named
+`ClockControls` at `controls` until plan
+`2026-08-04-2355-clock-tape-hero` P1) exposes
 `running`, `rate`, and `scrub_offset_seconds` as Debug-role slots, and
 the engine consumes all three every frame. The UI for them is the
 generic slot renderer: a toggle, a number, and — for the scrub offset —
@@ -36,7 +38,7 @@ that it mostly is not done; the scrub slot reads as unfinished; and the
 `Debug` category carries an example that undercuts its own definition,
 which costs explanation every time the taxonomy is taught.
 
-**Workarounds** — Set `controls.scrub_offset_seconds` in the clock
+**Workarounds** — Set `transport.scrub_offset_seconds` in the clock
 card's Debug section and read the resulting time from the clock's
 produced state; Clear (per value or per node) returns to live time.
 

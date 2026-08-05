@@ -661,7 +661,7 @@ impl SlotController {
 
     /// Split one settings row into its Debug part — appended **flat** to
     /// `debug_slots`, so a Debug field never renders nested under the record
-    /// that declared it (D4: the clock's `controls.running/rate/
+    /// that declared it (D4: the clock's `transport.running/rate/
     /// scrub_offset_seconds` become three top-level Debug rows, not a
     /// "Controls › Controls" group) — and the Setting remainder, returned for
     /// the settings section. `None` when nothing but Debug fields remained.

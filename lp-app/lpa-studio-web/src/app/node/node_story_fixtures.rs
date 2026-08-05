@@ -153,7 +153,7 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
 }
 
 /// A Clock node card: one persisted **Settings** section plus the **Debug**
-/// section the D3/D4 partition produces. The clock's three `controls.*`
+/// section the D3/D4 partition produces. The clock's three `transport.*`
 /// fields are `SlotRole::Debug`, so core lifts them FLAT into
 /// `UiNodeSection::DebugSlots` — the card shows "Running / Rate / Scrub
 /// offset seconds" as top-level rows, never a nested "Controls" group.
@@ -175,13 +175,13 @@ pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView 
             UiSlotFieldState::editable().with_debug(true)
         };
         let mut row = UiConfigSlot::value(key, label, value)
-            .with_address(clock_slot_address(&format!("controls.{key}")))
+            .with_address(clock_slot_address(&format!("transport.{key}")))
             .with_state(state);
         if index < overrides {
             // An active override owns its overlay entry, which is what puts
             // the inline Clear verb on the row (untouched rows reserve its
             // footprint instead, so the two are the same box).
-            row = row.with_edit_entry_address(clock_slot_address(&format!("controls.{key}")));
+            row = row.with_edit_entry_address(clock_slot_address(&format!("transport.{key}")));
         }
         row
     };

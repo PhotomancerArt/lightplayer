@@ -16,7 +16,7 @@
         }
       },
       {
-        "name": "controls",
+        "name": "transport",
         "shape": {
           "record": {
             "fields": [
@@ -42,9 +42,8 @@
                     "shape": {
                       "editor": {
                         "slider": {
-                          "max": 4.0,
-                          "min": 0.0,
-                          "step": 0.05000000074505806
+                          "max": 8.0,
+                          "min": 0.25
                         }
                       },
                       "id": 885023043,

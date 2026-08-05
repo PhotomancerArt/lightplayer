@@ -1347,7 +1347,7 @@ mod tests {
     }
 
     fn overlay_test_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn put_cmd(id: u64, value: f32) -> (MutationCmd, MutationEffect) {
