@@ -36,6 +36,7 @@ pub fn svg_to_doc(svg: &str, sample_diameter: f32) -> Result<Map2dDoc, SvgImport
                 points,
                 count: group.count,
                 reversed: false,
+                gaps: Vec::new(),
             }),
         });
     }

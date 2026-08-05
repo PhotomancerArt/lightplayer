@@ -219,6 +219,33 @@ display-only (no runtime manifest) only while its SoC has no
 `HardwareTarget`; those live on an explicit allowlist in the drift tests with
 the reason recorded.
 
+### `default_led_wires` — where the pixels plug in
+
+Each sidecar states which wires LED output goes to by default, **best
+first**, using this board's own silkscreen labels:
+
+```json
+"default_led_wires": ["IO18", "IO16", "IO14", "IO2"]
+```
+
+An entry is a label from the board's own pin/terminal tables, so the
+project endpoint is that label with the target prefix —
+`ws281x:local:IO18` (`docs/adr/2026-08-03-multi-endpoint-output-node.md`:
+the middle segment names the device, the last one names the wire). The
+setup flow generates a board's first project onto the **head** of the list;
+multi-wire generation is future work, so the tail is documentation for now.
+
+Two gates keep it honest, because a wrong wire is the physical-damage class
+of mistake this document is about: `BoardDisplayFile::validate` refuses a
+name that is not an output-eligible pin or terminal carrying a gpio, and
+the drift tests require every catalog board to declare one *and* fail if
+its GPIO is reserved in (or absent from) the runtime manifest.
+
+Order is a board fact where the board has one — the DOM-Z-102 lists its
+four fused DATA terminals and omits IO13, which is a spare and is not
+level-shifted. On a generic devkit header, one plain `io` pin is the honest
+answer; do not pad the list to look thorough.
+
 ### Firmware compatibility is computed, not authored
 
 Which firmware a board runs is **derived**, never listed: `family` (the chip,

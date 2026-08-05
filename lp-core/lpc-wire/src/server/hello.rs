@@ -152,6 +152,11 @@ pub struct HardwareFacts {
     // adding a field from churning every test fixture that builds one.
     /// A radio service is wired on this unit.
     pub radio: bool,
+    /// The board manifest's measured total-LED envelope, when it carries
+    /// one — a SOFT limit (evidence of what has run clean, never a
+    /// refusal; see `lpc-hardware`'s `HwSoftLimits`). `None` from boards
+    /// without a record and embedders without a manifest.
+    pub total_led_budget: Option<u32>,
     /// A button input service is wired on this unit.
     pub button: bool,
     /// The board id from the unit's loaded board manifest, when it has

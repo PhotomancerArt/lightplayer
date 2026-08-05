@@ -568,20 +568,20 @@ mod tests {
     }
 
     #[test]
-    fn transient_clock_controls_round_trip_to_defaults() {
+    fn transient_clock_transport_round_trips_to_defaults() {
         let registry = SlotShapeRegistry::default();
         let mut clock = crate::ClockDef::default();
-        clock.controls.rate = crate::ValueSlot::new(3.0);
-        clock.controls.running = crate::ValueSlot::new(false);
+        clock.transport.rate = crate::ValueSlot::new(3.0);
+        clock.transport.running = crate::ValueSlot::new(false);
 
         let json = crate::NodeDef::Clock(clock).write_json(&registry).unwrap();
-        assert!(!json.contains("controls"), "{json}");
+        assert!(!json.contains("transport"), "{json}");
         assert!(!json.contains("rate"), "{json}");
 
         let back = crate::NodeDef::read_json(&registry, &json).unwrap();
         let back = back.as_clock().expect("clock def");
-        assert_eq!(*back.controls.rate.value(), 1.0);
-        assert!(*back.controls.running.value());
+        assert_eq!(*back.transport.rate.value(), 1.0);
+        assert!(*back.transport.running.value());
     }
 
     #[test]
