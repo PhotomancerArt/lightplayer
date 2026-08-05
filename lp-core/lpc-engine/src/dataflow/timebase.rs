@@ -772,13 +772,23 @@ mod tests {
     fn the_period_witness_follows_the_config_the_query_supplied() {
         let mut store = store_with_delta(0.1);
 
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(4.0), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::with_period(4.0),
+            (READER_NODE, &reader()),
+        );
         let entry = store.entry(CLOCK).expect("timebase");
         let (_, state) = entry.phasors().next().expect("one phasor");
         assert_eq!(state.period_seconds, 4.0);
 
         tick(&mut store, 0.1);
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(0.5), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::with_period(0.5),
+            (READER_NODE, &reader()),
+        );
         let rows: alloc::vec::Vec<_> = store
             .entry(CLOCK)
             .expect("timebase")
@@ -940,7 +950,7 @@ mod tests {
             (READER_NODE, &reader()),
         );
 
-        store.phasor_read(CLOCK, &key("a"));
+        let _ = store.phasor_read(CLOCK, &key("a"));
 
         assert_eq!(readings_of(&store, &key("a")).len(), 1);
     }
@@ -952,7 +962,12 @@ mod tests {
         let mut store = store_with_delta(0.25);
         assert_eq!(store.entry(CLOCK).expect("timebase").phasors().count(), 0);
 
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(1.0), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::with_period(1.0),
+            (READER_NODE, &reader()),
+        );
         for _ in 0..=PHASOR_IDLE_TICKS {
             tick(&mut store, 0.25);
             let _ = store.entry(CLOCK).expect("timebase").phasors().count();
@@ -972,7 +987,10 @@ mod tests {
             Some((0.25, 0))
         );
         tick(&mut store, 0.5);
-        assert_eq!(store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())), Some((0.5, 0)));
+        assert_eq!(
+            store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())),
+            Some((0.5, 0))
+        );
     }
 
     #[test]
@@ -980,7 +998,12 @@ mod tests {
         let mut store = TimebaseStore::new();
 
         assert_eq!(
-            store.phasor_tick(NodeId(42), &key("a"), &PhasorConfig::default(), (READER_NODE, &reader())),
+            store.phasor_tick(
+                NodeId(42),
+                &key("a"),
+                &PhasorConfig::default(),
+                (READER_NODE, &reader())
+            ),
             None
         );
         assert_eq!(store.seconds(NodeId(42)), None);
@@ -992,9 +1015,15 @@ mod tests {
         let mut store = store_with_delta(0.1);
         let config = PhasorConfig::with_period(1.0);
 
-        let first = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
-        let second = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
-        let third = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let first = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
+        let second = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
+        let third = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
 
         assert_eq!(first, (0.1, 0));
         assert_eq!(second, first);
@@ -1007,7 +1036,9 @@ mod tests {
         let config = PhasorConfig::with_period(1.0);
 
         for _ in 0..40 {
-            let (phase, _) = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+            let (phase, _) = store
+                .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+                .unwrap();
             assert!((0.0..1.0).contains(&phase), "phase escaped [0,1): {phase}");
             tick(&mut store, 0.25);
         }
@@ -1026,16 +1057,22 @@ mod tests {
             store.phasor_tick(CLOCK, &key("a"), &slow, (READER_NODE, &reader()));
             tick(&mut store, 0.1);
         }
-        let before = store.phasor_tick(CLOCK, &key("a"), &slow, (READER_NODE, &reader())).unwrap();
+        let before = store
+            .phasor_tick(CLOCK, &key("a"), &slow, (READER_NODE, &reader()))
+            .unwrap();
 
         // Swapping config with no time elapsed must move nothing at all.
         tick(&mut store, 0.0);
-        let at_event = store.phasor_tick(CLOCK, &key("a"), &fast, (READER_NODE, &reader())).unwrap();
+        let at_event = store
+            .phasor_tick(CLOCK, &key("a"), &fast, (READER_NODE, &reader()))
+            .unwrap();
         assert_eq!(at_event, before);
 
         // …and the next advance simply uses the new rate from there.
         tick(&mut store, 0.1);
-        let after = store.phasor_tick(CLOCK, &key("a"), &fast, (READER_NODE, &reader())).unwrap();
+        let after = store
+            .phasor_tick(CLOCK, &key("a"), &fast, (READER_NODE, &reader()))
+            .unwrap();
         assert!(
             (after.0 - (before.0 + 0.1)).abs() <= f32::EPSILON,
             "expected continuity at the config change: {before:?} -> {after:?}"
@@ -1057,15 +1094,22 @@ mod tests {
 
         store.phasor_tick(CLOCK, &key("a"), &running, (READER_NODE, &reader()));
         tick(&mut store, 0.1);
-        let held = store.phasor_tick(CLOCK, &key("a"), &frozen, (READER_NODE, &reader())).unwrap();
+        let held = store
+            .phasor_tick(CLOCK, &key("a"), &frozen, (READER_NODE, &reader()))
+            .unwrap();
 
         for _ in 0..5 {
             tick(&mut store, 0.1);
-            assert_eq!(store.phasor_tick(CLOCK, &key("a"), &frozen, (READER_NODE, &reader())), Some(held));
+            assert_eq!(
+                store.phasor_tick(CLOCK, &key("a"), &frozen, (READER_NODE, &reader())),
+                Some(held)
+            );
         }
 
         tick(&mut store, 0.1);
-        let resumed = store.phasor_tick(CLOCK, &key("a"), &running, (READER_NODE, &reader())).unwrap();
+        let resumed = store
+            .phasor_tick(CLOCK, &key("a"), &running, (READER_NODE, &reader()))
+            .unwrap();
         assert!(
             resumed.0 >= held.0 && resumed.0 - held.0 <= 0.1 + f32::EPSILON,
             "restoring the period must not displace the phase: {held:?} -> {resumed:?}"
@@ -1079,7 +1123,9 @@ mod tests {
         assert_eq!(resumed, held);
 
         tick(&mut store, 0.1);
-        let moving = store.phasor_tick(CLOCK, &key("a"), &running, (READER_NODE, &reader())).unwrap();
+        let moving = store
+            .phasor_tick(CLOCK, &key("a"), &running, (READER_NODE, &reader()))
+            .unwrap();
         assert!(
             (moving.0 - resumed.0 - 0.1).abs() <= f32::EPSILON,
             "…and from there it advances at the restored rate: {resumed:?} -> {moving:?}"
@@ -1095,8 +1141,14 @@ mod tests {
 
         for _ in 0..4 {
             tick(&mut store, 0.0);
-            assert_eq!(store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())), Some((0.1, 0)));
-            assert_eq!(store.phasor_tick(CLOCK, &key("b"), &config, (READER_NODE, &reader())), Some((0.1, 0)));
+            assert_eq!(
+                store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())),
+                Some((0.1, 0))
+            );
+            assert_eq!(
+                store.phasor_tick(CLOCK, &key("b"), &config, (READER_NODE, &reader())),
+                Some((0.1, 0))
+            );
         }
     }
 
@@ -1121,7 +1173,9 @@ mod tests {
 
         // Back half a cycle, from effective 1.0 to 0.5.
         scrub_to(&mut store, 0.5);
-        let (phase, cycle) = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let (phase, cycle) = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
 
         assert!((phase - 0.75).abs() < 1e-6, "phase: {phase}");
         assert_eq!(cycle, 0);
@@ -1132,7 +1186,9 @@ mod tests {
         let mut store = store_with_delta(-2.5);
         let config = PhasorConfig::with_period(1.0);
 
-        let (phase, cycle) = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let (phase, cycle) = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
 
         assert!((0.0..1.0).contains(&phase), "phase: {phase}");
         assert!((phase - 0.5).abs() < 1e-6, "phase: {phase}");
@@ -1144,12 +1200,16 @@ mod tests {
         let mut store = store_with_delta(f32::INFINITY);
         let config = PhasorConfig::with_period(1.0);
 
-        let (phase, _) = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let (phase, _) = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
         assert!(phase.is_finite() && (0.0..1.0).contains(&phase));
 
         store.sweep(|_| true);
         store.set_timebase(CLOCK, 0.0, f32::NAN, Revision::new(2));
-        let (phase, _) = store.phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let (phase, _) = store
+            .phasor_tick(CLOCK, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
         assert!(phase.is_finite() && (0.0..1.0).contains(&phase));
     }
 
@@ -1160,7 +1220,12 @@ mod tests {
         assert_eq!(store.phasor_read(CLOCK, &key("a")), Some((0.0, 0)));
         assert_eq!(store.entry(CLOCK).unwrap().phasor_count(), 0);
 
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(1.0), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::with_period(1.0),
+            (READER_NODE, &reader()),
+        );
         let read = store.phasor_read(CLOCK, &key("a")).unwrap();
         assert_eq!(store.phasor_read(CLOCK, &key("a")).unwrap(), read);
         assert_eq!(read, (0.5, 0));
@@ -1224,7 +1289,12 @@ mod tests {
     fn a_dead_clock_loses_its_whole_timebase() {
         let mut store = store_with_delta(0.25);
         store.set_timebase(NodeId(2), 1.0, 0.25, Revision::new(1));
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::default(), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::default(),
+            (READER_NODE, &reader()),
+        );
 
         let dropped = store.sweep(|clock| clock != CLOCK);
 
@@ -1242,8 +1312,12 @@ mod tests {
         store.set_timebase(inner, 3.0, 0.1, Revision::new(1));
         let config = PhasorConfig::with_period(1.0);
 
-        let outer_phase = store.phasor_tick(outer, &key("a"), &config, (READER_NODE, &reader())).unwrap();
-        let inner_phase = store.phasor_tick(inner, &key("a"), &config, (READER_NODE, &reader())).unwrap();
+        let outer_phase = store
+            .phasor_tick(outer, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
+        let inner_phase = store
+            .phasor_tick(inner, &key("a"), &config, (READER_NODE, &reader()))
+            .unwrap();
 
         assert_eq!(store.seconds(outer), Some(10.0));
         assert_eq!(store.seconds(inner), Some(3.0));
@@ -1314,8 +1388,12 @@ mod tests {
             phase_offset: 0.5,
         };
 
-        let a = store.phasor_tick(CLOCK, &key("a"), &ramp, (READER_NODE, &reader())).unwrap();
-        let b = store.phasor_tick(CLOCK, &key("b"), &shaped, (READER_NODE, &reader())).unwrap();
+        let a = store
+            .phasor_tick(CLOCK, &key("a"), &ramp, (READER_NODE, &reader()))
+            .unwrap();
+        let b = store
+            .phasor_tick(CLOCK, &key("b"), &shaped, (READER_NODE, &reader()))
+            .unwrap();
 
         assert_eq!(a, b, "the store's contract is the raw ramp");
     }
@@ -1345,7 +1423,12 @@ mod tests {
             }
             let t = store.seconds(CLOCK).expect("timebase");
             let value = store
-                .phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(period), (READER_NODE, &reader()))
+                .phasor_tick(
+                    CLOCK,
+                    &key("a"),
+                    &PhasorConfig::with_period(period),
+                    (READER_NODE, &reader()),
+                )
                 .expect("phasor");
             samples.push((t, value));
         }
@@ -1370,7 +1453,9 @@ mod tests {
         // Scrub back through history in the order a dragged slider would.
         for (t, recorded) in samples.iter().rev() {
             scrub_to(&mut store, *t);
-            let replayed = store.phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader())).expect("phasor");
+            let replayed = store
+                .phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader()))
+                .expect("phasor");
             assert_eq!(
                 replayed, *recorded,
                 "reconstruction at t={t} drifted from what was shown"
@@ -1403,7 +1488,9 @@ mod tests {
         );
         // …and the next frame carries on from there.
         tick(&mut store, 0.1);
-        let next = store.phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader())).expect("phasor");
+        let next = store
+            .phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader()))
+            .expect("phasor");
         assert_eq!(
             next,
             eval_segment(
@@ -1455,7 +1542,12 @@ mod tests {
 
         scrub_to(&mut store, punch_t);
         let punched = store
-            .phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(3.0), (READER_NODE, &reader()))
+            .phasor_tick(
+                CLOCK,
+                &key("a"),
+                &PhasorConfig::with_period(3.0),
+                (READER_NODE, &reader()),
+            )
             .expect("phasor");
 
         // The write lands *at* the scrub position: it changes the slope from
@@ -1595,8 +1687,12 @@ mod tests {
             let config = if frame < 8 { &slow } else { &fast };
             // Two consumers, same key, same tick: the second sees the first's
             // advance, not one of its own.
-            let first = store.phasor_tick(CLOCK, &shared, config, (READER_NODE, &reader())).expect("phasor");
-            let second = store.phasor_tick(CLOCK, &shared, config, (READER_NODE, &reader())).expect("phasor");
+            let first = store
+                .phasor_tick(CLOCK, &shared, config, (READER_NODE, &reader()))
+                .expect("phasor");
+            let second = store
+                .phasor_tick(CLOCK, &shared, config, (READER_NODE, &reader()))
+                .expect("phasor");
             assert_eq!(first, second);
             samples.push((store.seconds(CLOCK).expect("timebase"), first));
         }
@@ -1608,8 +1704,12 @@ mod tests {
         );
         for (t, recorded) in samples.iter().rev() {
             scrub_to(&mut store, *t);
-            let a = store.phasor_tick(CLOCK, &shared, &fast, (READER_NODE, &reader())).expect("phasor");
-            let b = store.phasor_tick(CLOCK, &shared, &fast, (READER_NODE, &reader())).expect("phasor");
+            let a = store
+                .phasor_tick(CLOCK, &shared, &fast, (READER_NODE, &reader()))
+                .expect("phasor");
+            let b = store
+                .phasor_tick(CLOCK, &shared, &fast, (READER_NODE, &reader()))
+                .expect("phasor");
             assert_eq!((a, b), (*recorded, *recorded), "shared scrub at t={t}");
         }
     }
@@ -1625,7 +1725,9 @@ mod tests {
         let live = PhasorConfig::with_period(period);
 
         scrub_to(&mut store, -500.0);
-        let (phase, cycle) = store.phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader())).expect("phasor");
+        let (phase, cycle) = store
+            .phasor_tick(CLOCK, &key("a"), &live, (READER_NODE, &reader()))
+            .expect("phasor");
 
         assert!((0.0..1.0).contains(&phase), "phase: {phase}");
         assert_eq!(cycle, 0, "the cycle counter saturates at the start");
@@ -1642,7 +1744,9 @@ mod tests {
         let edge = samples.last().expect("samples").0;
 
         scrub_to(&mut store, edge - 0.5);
-        let born = store.phasor_tick(CLOCK, &key("b"), &live, (READER_NODE, &reader())).expect("phasor");
+        let born = store
+            .phasor_tick(CLOCK, &key("b"), &live, (READER_NODE, &reader()))
+            .expect("phasor");
 
         assert!((0.0..1.0).contains(&born.0), "phase: {born:?}");
         assert_eq!(
@@ -1655,7 +1759,12 @@ mod tests {
     #[test]
     fn set_timebase_overwrites_rather_than_duplicating() {
         let mut store = store_with_delta(0.25);
-        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::default(), (READER_NODE, &reader()));
+        store.phasor_tick(
+            CLOCK,
+            &key("a"),
+            &PhasorConfig::default(),
+            (READER_NODE, &reader()),
+        );
 
         store.set_timebase(CLOCK, 7.5, -0.25, Revision::new(9));
 
