@@ -96,7 +96,7 @@
 //! * `APB_CONF` is written once at [`init_tx`], before the APP core binds.
 
 use esp_hal::peripherals::RMT;
-use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
+use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};
 
 /// RMT channels the classic ESP32 has, all of which can transmit.
 ///
@@ -261,6 +261,36 @@ impl RmtHw for V3Rmt {
         // reads this memory behind the compiler's back, so the store can be
         // neither elided nor reordered with the surrounding register writes.
         unsafe { ptr.write_volatile(value) };
+    }
+
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    //
+    // This is the hoisted form of [`ram_word`]'s per-word plan lookup: the
+    // same window derivation, performed once per fill (the boot probe
+    // measured the per-word form at ~4 CPU cycles/word — see
+    // `refill_floor_probe`). The bounds argument is identical: the base is
+    // `window_start` into the 512-word RMT RAM and the driver's stores stay
+    // below `words == window_words`, which the `index < TX_RAM_WORDS` check
+    // here bounds as a whole instead of per word.
+    #[inline(always)]
+    fn ram_window(&self, ch: u8) -> Option<RamWindow> {
+        let words = TX_PLAN.window_words(ch, BLOCK_WORDS);
+        if words == 0 {
+            return None;
+        }
+        let start = TX_PLAN.window_start(ch, BLOCK_WORDS);
+        if start + words > TX_RAM_WORDS {
+            return None;
+        }
+        // SAFETY: `RAM_BASE` is the RMT RAM window, `TX_RAM_WORDS` u32 words
+        // long; `start + words` was just bounded to it, so the base and every
+        // word the driver may store through it stay inside one MMIO object.
+        Some(RamWindow {
+            base: unsafe { (RAM_BASE as *mut u32).add(start) },
+            words,
+        })
     }
 
     // `always`: must land inside the IRAM-sectioned refill path (see the
