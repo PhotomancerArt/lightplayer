@@ -46,6 +46,8 @@ tests/
   guard.rs           the guard word and the start-of-frame race
   multi_channel.rs   four channels, no cross-talk, coincident interrupts,
                      blocks_per_channel
+  abort_handshake.rs the isr_seq service marker and abort's teardown guarantee
+  cross_core.rs      real-thread teardown races under Miri (`just ws281x-miri`)
   hooks.rs           the test_hooks instrumentation (feature-gated)
   hardware_golden.rs a frame as an ESP32-S3 actually transmitted it, decoded
                      and timing-checked against golden/ (hardware-derived
@@ -279,6 +281,26 @@ lp-ws281x = { path = "../lp-ws281x", default-features = false }
 The core uses `core::sync::atomic` directly (including `fetch_add`), which all
 three target chips support natively. A CAS-less target would need
 `portable-atomic`, as `xt-runner-core` does.
+
+### Cross-core deployment
+
+Thread context and the interrupt handler may run on different cores —
+`fw-esp32v3` binds the RMT ISR on the classic ESP32's otherwise-idle APP core so
+refills survive the render core's interrupt masking. Two things such a
+deployment must do:
+
+- **Enable the `isr-in-ram` feature**, which places the whole service path in
+  `.rwtext` (the section esp-hal's `#[ram]` uses). With the path in flash, the
+  ISR core stalls behind the *other* core's cache misses on the shared SPI bus —
+  measured as entry delays blowing the refill deadline the moment transmission
+  overlapped rendering, with per-refill cost unchanged.
+- **Respect the teardown handshake**: `abort` returns only once the handler is
+  provably out of service, and that is the whole reason frame bytes may be freed
+  when it returns. The ordering contract lives in `state.rs`'s module docs; the
+  adversarial proof is `tests/cross_core.rs` under Miri (`just ws281x-miri`),
+  whose oracle was validated against the known-broken shape.
+
+The standing invariant either way: exactly one core services the ISR.
 
 ## Validation
 
