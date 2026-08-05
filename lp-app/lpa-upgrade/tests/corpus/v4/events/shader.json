@@ -1,0 +1,30 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "events": {
+      "source": "bus:trigger"
+    },
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "events": {
+      "kind": "map",
+      "value": "lp::control::Message",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 8,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

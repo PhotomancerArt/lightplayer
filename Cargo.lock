@@ -5925,6 +5925,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-upgrade"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "lpc-registry",
+ "lpfs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpc-engine"
 version = "40.0.0"
 dependencies = [
