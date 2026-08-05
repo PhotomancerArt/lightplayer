@@ -327,5 +327,6 @@ fn readme_home_view() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }

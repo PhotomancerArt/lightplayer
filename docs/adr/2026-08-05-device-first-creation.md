@@ -1,7 +1,6 @@
 # ADR: Device-first creation
 
-- **Status:** Draft — the machine landed in P11; finalize in P06 when the UI
-  lands and the G2 hardware walk has run.
+- **Status:** Accepted — the machine landed in P11, the UI in P06.
 - **Date:** 2026-08-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -90,6 +89,61 @@ identity is anchored in silicon and survives an erase
 (`2026-08-04-device-identity-anchored-in-silicon.md`). The project keeps
 the library's own dated-slug convention — this flow re-implements neither.
 
+### 5 · The wizard is a card, and the card renders the state
+
+Placement was the open question the P01 spike ran four rounds on. The
+ruling (G1 round 2b): **devices are cards at a width the UI already sets,
+so the wizard is one of them.** It renders in the devices grid where the
+device card's setup form used to sit, its steps are card states, and at
+DEVICE_HOME it hands off to the real device card. The takeover, overlay,
+and expansion concepts — all drawn at page width — are retired.
+
+The composition that follows from that:
+
+- **One component per machine state**, matched exhaustively on
+  `SetupState`. A state with no rendering is a compile error, which is the
+  cheap version of the discipline; a state with no *reasonable* rendering
+  is a spec gap to report rather than a UI decision to make.
+- **Components dispatch gestures, never transitions.** `SetupGesture` is
+  the subset of `SetupEvent` a person can perform; the outcome events
+  (`ProbeCompleted`, `FlashSucceeded`, `PortGranted`, …) are things the
+  world says, and a component cannot fabricate one because it cannot name
+  one. The split also keeps the op vocabulary `Eq`, which the action layer
+  needs.
+- **Nothing is re-drawn that already exists.** The board picker is the
+  shipped setup-form component (`BoardPicker`), parameterised only by what
+  a pick means; the FLASHING step is the card-owned op flow's own activity
+  view; the abandon guard is the card-resident sheet grammar (D41). Three
+  surfaces that could have drifted, that now cannot.
+- **What the renderer is NOT allowed to derive** lives in core beside the
+  view model: the steps rail (`Connect › Flash › Project › Done`, or
+  `Board › Project › Done` when the target needs no connect) and the
+  PROVISION project line. Both are properties of where the machine stands.
+
+The **entry** splits to match: the single "connect a device" card becomes
+**connect a device** / **simulate a device**, half height in one grid cell,
+both opening the same machine on different targets. The bare "open the
+VID-filtered port chooser" action they replaced is deleted — connecting is
+the first step of a flow now, not a gesture of its own, so there is exactly
+one place a port grant can start and exactly one thing that knows what to
+do with the board on the other end.
+
+### 6 · Reaching the simulator is named at the call site
+
+`open_from_home_inner` was the only way to open anything, and it did two
+things at once: it *chose* the simulator (quiescing a device lens to get
+there) and it loaded the package. That is the "a simulator nobody asked
+for" of the Context, and it is why the wizard could not simply reuse it —
+the sim path would have inherited a lens-detach it has no business doing.
+
+The sim start is now `open_on_simulator`, named by each caller: project
+cards, example cards, and create-and-open call it because a library card
+opening in the sim is the D13 rule; the wizard calls it because the user
+pressed **simulate a device**. Behaviour for the existing paths is
+unchanged — what changed is that the destination is an argument rather than
+an assumption, and the wizard's PushProject reaches it through the
+machine's own command rather than through the open-anything lane.
+
 ## Consequences
 
 - The setup flow can be exercised end to end in unit tests, hardware or
@@ -104,10 +158,21 @@ the library's own dated-slug convention — this flow re-implements neither.
   through `SetupDispatch`.
 - WLED migration is out: the only WLED path is wipe-and-flash, and the copy
   says so.
-- Not yet decided (P06): what a failed generate or push leaves behind on a
-  board that is already flashed and registered. The machine has no
-  PROVISION failure edge, which is honest about the gap rather than
-  guessing at it.
+- **Still not decided, after P06**: what a failed generate or push leaves
+  behind on a board that is already flashed and registered. The machine
+  still has no PROVISION failure edge. P06 deliberately did not close it —
+  the missing piece is a product decision, and inventing a transition in
+  order to have something to render would have answered it by accident.
+  What the UI does instead is refuse to hide it: the failure is recorded
+  outside the machine (`UiSetupWizard::error`), shown on the PROVISION
+  step, and the ✕ stays the door; the board keeps whatever landed on it and
+  appears on the roster. The cost is that such a failure cannot be retried
+  in place. See `docs/design/device-setup-flow.md` §7.10.
+- Web Serial cannot distinguish "the user cancelled the chooser" from "the
+  chooser had nothing to offer" — both arrive as one `NotFoundError`. The
+  machine keeps `PortPickerEmpty` (the flow-spec's escalation edge), but
+  nothing produces it today; the escalation toward board-first rides the
+  intro's always-present secondary CTA instead.
 
 ## Alternatives Considered
 
@@ -122,7 +187,10 @@ the library's own dated-slug convention — this flow re-implements neither.
 
 ## Follow-ups
 
-- P06: the UI, the PROVISION failure edge, and finalizing this ADR.
-- G2 hardware walk after P06.
+- The PROVISION failure edge (above) — a decision, then §2, the reducer,
+  and the transition tests in one commit.
+- G2 hardware walk: fresh board → connect → flash → provision → device
+  home; a WLED board if one is on the bench; an already-LightPlayer board
+  (adopt); the sim path.
 - Verify WLED detection against a real WLED board; widen the markers only
   with evidence, never toward `LightPlayer`.

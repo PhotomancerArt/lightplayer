@@ -4,21 +4,20 @@ use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
 
-use crate::app::home::device_card::{
-    ConnectDeviceCard, DeviceCard, connect_device_action, flash_device_action,
-};
+use crate::app::home::device_card::{ConnectDeviceCard, DeviceCard, flash_device_action};
 use crate::app::home::example_card::ExampleCard;
 use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
 use crate::app::home::package_card::{PackageCard, home_action};
+use crate::app::home::setup_wizard::SetupWizardCard;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
 /// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
 /// a map of everywhere the user's light lives. The runtime roster leads
 /// the page (SDI addendum: Home reads window-switcher-first,
-/// library-second); the connect card opens the VID-filtered chooser
-/// directly — connecting is never a dialog trip (the old dialog's
-/// `NeedsDevice` state is unreachable from here).
+/// library-second); the two entry cards open the setup wizard, which is
+/// itself a card in that roster (P06) and asks for the port through the
+/// flow's own `RequestPort` — connecting is never a dialog trip.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomeGallery(
@@ -169,22 +168,40 @@ pub fn HomeGallery(
                                 on_action,
                             }
                         }
-                        ConnectDeviceCard { on_action }
+                        // The wizard is a CARD (flow design F5b): it sits
+                        // in the grid where the entry cards are, at the
+                        // same width, and becomes the device card when the
+                        // flow lands. The entry cards stand down while it
+                        // runs — one flow at a time, one serial port.
+                        if let Some(wizard) = home.setup.clone() {
+                            SetupWizardCard { wizard, on_action }
+                        } else {
+                            ConnectDeviceCard { on_action }
+                        }
                     }
                 }
+            } else if let Some(wizard) = home.setup.clone() {
+                // Nothing granted yet and no roster: the wizard still gets
+                // its grid, because it IS the first card.
+                div { class: device_grid_class(),
+                    SetupWizardCard { wizard, on_action }
+                }
             } else {
-                div { class: "tw:flex tw:items-center tw:gap-2",
-                    ActionButton {
-                        action: connect_device_action(),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
+                // First run: no device has ever been granted here, so the
+                // roster is empty — and the two entry cards ARE the page's
+                // first move (device-first creation). The recovery flash
+                // stays as a quiet chip beneath them.
+                section { class: "tw:grid tw:gap-3",
+                    div { class: device_grid_class(),
+                        ConnectDeviceCard { on_action }
                     }
-                    ActionButton {
-                        action: flash_device_action(&flash_card_key, device_connected),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
+                    div { class: "tw:flex tw:items-center tw:gap-2",
+                        ActionButton {
+                            action: flash_device_action(&flash_card_key, device_connected),
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
                     }
                 }
             }
