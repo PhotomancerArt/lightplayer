@@ -149,9 +149,13 @@ An all-zero RMT word stops the transmitter. After each refill the driver plants
 one at the **first word of the half the transmitter is currently reading** — a
 slot it has already consumed, and the slot it would next re-read if the
 following refill interrupt never arrived. A lost interrupt therefore truncates
-the frame instead of replaying a stale half over and over: one dim frame instead
-of visible flicker. In healthy operation the next refill overwrites the guard
-before it is ever reached.
+the frame instead of replaying a stale half over and over: one *torn* frame —
+the LEDs past the stop point latch and keep showing the last data they
+received — instead of visible flicker. (A tear is far less noticeable than
+flicker or black, which is also why chronic truncation hides from the eye on
+a bench strip; read `trips` and `refills`-vs-`wanted`, not the LEDs.) In
+healthy operation the next refill overwrites the guard before it is ever
+reached.
 
 Two things differ deliberately from the ancestor:
 
