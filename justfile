@@ -439,6 +439,26 @@ studio-dev: install-wasm32-target studio-firmware-package-served
             cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/${build_id}/manifest.json"
             cp "${firmware_dir}"/*.bin "${public_dir}/firmware/${build_id}/"
         done
+        # Design spikes, at /spikes/index.html — the Tools menu's "Design
+        # spikes" entry, which the app shows in debug builds only. Copied
+        # HERE and nowhere else on purpose: this loop runs only while a dev
+        # server is up, so no build artifact can ever carry the spikes, and
+        # the Pages allowlist in scripts/pages/prepare-pages-artifact.mjs
+        # would drop them even if one did. They are internal design records
+        # with gate verdicts in their copy; they do not ship.
+        #
+        # Page by page, not `cp -R spikes/.`: the code spikes are cargo
+        # crates, and one `cargo test` in there would put a target/ dir in
+        # this once-a-second copy. Overwrite in place rather than
+        # rm-then-copy, so the browser never catches a spike mid-delete; a
+        # spike deleted from the repo lingers until dx next wipes public/,
+        # which is the cheaper of the two wrong answers.
+        mkdir -p "${public_dir}/spikes"
+        cp spikes/index.html "${public_dir}/spikes/index.html"
+        for spike_page in spikes/*/index.html; do
+            mkdir -p "${public_dir}/$(dirname "${spike_page}")"
+            cp "${spike_page}" "${public_dir}/${spike_page}"
+        done
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
         # appear on the next reload via this 1s loop.
@@ -1597,7 +1617,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus lint-spikes-index
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -1624,6 +1644,18 @@ lint-vec-corpus:
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
     ./scripts/check-schemars-fw.sh
+
+# Rewrite spikes/index.html — the browsable contact sheet for the design
+# spikes, derived from their own <title> and opening paragraph. Run it after
+# adding a spike; `just studio-dev` serves the result at /spikes/index.html.
+spikes-index:
+    node scripts/spikes-index.mjs
+
+# spikes/index.html is generated from the spikes' own titles and opening
+# paragraphs. The gate is what makes the page trustworthy: without it a new
+# spike is simply missing from the index, and nothing ever says so.
+lint-spikes-index:
+    node scripts/spikes-index.mjs --check
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.
