@@ -121,6 +121,54 @@ pub struct WireMailbox {
     /// idle. Advisory (`Relaxed`): exists solely for the poster's defensive
     /// abort on the pusher-wedged path, which is already a defect state.
     active_channel: AtomicU8,
+    /// Poster-side timestamp of the last post (µs, wrapping): the queue-wait
+    /// measurement's start edge. The crate has no clock, so the poster
+    /// supplies it and the pusher's `now_us` supplies the other edge.
+    posted_at_us: AtomicU32,
+    // --- per-wire attribution counters (pusher writes, anyone reads) ---
+    // The per-slot counters in `ChannelState` aggregate every wire that
+    // shared the slot; these are the per-WIRE view an 8-wire run needs to be
+    // readable. All `Relaxed` — a telemetry snapshot may be stale, never
+    // torn (u32 loads are atomic).
+    transmitted: AtomicU32,
+    torn: AtomicU32,
+    waved: AtomicU32,
+    takeovers: AtomicU32,
+    queue_wait_max_us: AtomicU32,
+    aborted: AtomicU32,
+    cancelled: AtomicU32,
+    start_failed: AtomicU32,
+}
+
+/// A read-only snapshot of one wire's attribution counters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WireStats {
+    /// Frames the poster has published (the posted sequence number).
+    pub posted: u32,
+    /// Frames that reached `tx_end` (truncated or not).
+    pub transmitted: u32,
+    /// Transmitted frames that ended on a guard word — the per-slot
+    /// `guard_trips` delta across exactly this wire's occupancy of its slot,
+    /// which is what makes the attribution exact.
+    pub torn: u32,
+    /// Frames that had to WAIT for a slot before starting — the second-wave
+    /// signature. A takeover with no wait (the steady-state slot ping-pong
+    /// at five wires over four slots) does not count.
+    pub waved: u32,
+    /// Frames that started by rebinding another wire's slot through the pad
+    /// matrix — the mux-churn observable. Structural at N wires > S slots
+    /// (two per frame at 5×4), not a defect signal by itself.
+    pub takeovers: u32,
+    /// Worst post→start latency seen, µs — the per-wire overlap health
+    /// number. Wave-1 wires sit near zero; a waved wire near one wave of
+    /// wire time (~9 ms at 300 LEDs).
+    pub queue_wait_max_us: u32,
+    /// Frames aborted off the wire (hang recovery or close).
+    pub aborted: u32,
+    /// Frames cancelled unstarted (abort/close while queued).
+    pub cancelled: u32,
+    /// Frames the driver refused to start (a defect).
+    pub start_failed: u32,
 }
 
 impl WireMailbox {
@@ -137,6 +185,30 @@ impl WireMailbox {
             close_req_seq: AtomicU32::new(0),
             close_ack_seq: AtomicU32::new(0),
             active_channel: AtomicU8::new(NO_CHANNEL),
+            posted_at_us: AtomicU32::new(0),
+            transmitted: AtomicU32::new(0),
+            torn: AtomicU32::new(0),
+            waved: AtomicU32::new(0),
+            takeovers: AtomicU32::new(0),
+            queue_wait_max_us: AtomicU32::new(0),
+            aborted: AtomicU32::new(0),
+            cancelled: AtomicU32::new(0),
+            start_failed: AtomicU32::new(0),
+        }
+    }
+
+    /// Snapshot the per-wire attribution counters.
+    pub fn wire_stats(&self) -> WireStats {
+        WireStats {
+            posted: self.posted_seq.load(Relaxed),
+            transmitted: self.transmitted.load(Relaxed),
+            torn: self.torn.load(Relaxed),
+            waved: self.waved.load(Relaxed),
+            takeovers: self.takeovers.load(Relaxed),
+            queue_wait_max_us: self.queue_wait_max_us.load(Relaxed),
+            aborted: self.aborted.load(Relaxed),
+            cancelled: self.cancelled.load(Relaxed),
+            start_failed: self.start_failed.load(Relaxed),
         }
     }
 
@@ -153,11 +225,12 @@ impl WireMailbox {
     /// disposed of by an acked [`Self::request_close`], or an
     /// [`Self::request_abort`] covering it completes. This is
     /// `start_frame`'s byte contract, transferred through the mailbox.
-    pub unsafe fn post(&self, gpio: u8, ptr: *const u8, len: usize) -> u32 {
+    pub unsafe fn post(&self, gpio: u8, ptr: *const u8, len: usize, now_us: u32) -> u32 {
         let seq = self.posted_seq.load(Relaxed).wrapping_add(1);
         self.frame_ptr.store(ptr.cast_mut(), Relaxed);
         self.frame_len.store(len, Relaxed);
         self.gpio.store(gpio, Relaxed);
+        self.posted_at_us.store(now_us, Relaxed);
         // The publish edge: everything above must be visible before the
         // pusher can observe the new sequence.
         self.posted_seq.store(seq, Release);
@@ -258,10 +331,13 @@ struct SlotState {
 /// length). Slots are the subset of channels the block plan gave memory to,
 /// passed at construction; `cap` bounds concurrent transmissions (the ISR
 /// duty budget — 4 on the dual-core classic).
-pub struct Pusher<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> {
+pub struct Pusher<'d, H: RmtHw, P: PadOps, F: Fn() -> u32, const N: usize, const W: usize> {
     driver: &'d Ws281xDriver<H, N>,
     mailboxes: &'d [WireMailbox; W],
     pads: P,
+    /// The pusher's clock, µs, wrapping — the queue-wait measurement's end
+    /// edge (the crate itself has no clock). Host tests pass `|| 0`.
+    now_us: F,
     cap: usize,
     slots: [SlotState; N],
     slot_count: usize,
@@ -269,13 +345,21 @@ pub struct Pusher<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> {
     started: [u32; W],
     /// Wire has a started, not-yet-completed frame, and on which channel.
     wire_channel: [u8; W],
+    /// The slot's `guard_trips` at this wire's start — the baseline the
+    /// completion-time delta (exactly this wire's torn frames) is taken from.
+    trips_at_start: [usize; W],
+    /// The wire's pending frame failed at least one acquire — when it
+    /// finally starts, it counts as `waved`.
+    waited: [bool; W],
     /// Round-robin scan origin for starts, so no wire starves behind
     /// lower-indexed siblings at two-wave occupancy.
     rr_next: usize,
     transmitting: usize,
 }
 
-impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N, W> {
+impl<'d, H: RmtHw, P: PadOps, F: Fn() -> u32, const N: usize, const W: usize>
+    Pusher<'d, H, P, F, N, W>
+{
     /// A pusher over `slots` (channel numbers the plan configured), starting
     /// with every slot unowned and every wire idle.
     ///
@@ -284,6 +368,7 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
         driver: &'d Ws281xDriver<H, N>,
         mailboxes: &'d [WireMailbox; W],
         pads: P,
+        now_us: F,
         slot_channels: &[u8],
         cap: usize,
     ) -> Self {
@@ -301,11 +386,14 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
             driver,
             mailboxes,
             pads,
+            now_us,
             cap: cap.min(slot_count),
             slots,
             slot_count,
             started: [0; W],
             wire_channel: [NO_CHANNEL; W],
+            trips_at_start: [0; W],
+            waited: [false; W],
             rr_next: 0,
             transmitting: 0,
         }
@@ -339,6 +427,20 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
                 // forwards the whole chain to the poster, which may free
                 // the bytes on observing it. See state.rs, "completion
                 // forwarding".
+                //
+                // Torn attribution: between this wire's start and this
+                // completion the slot carried exactly this wire's frame, so
+                // the slot-counter delta is this wire's alone.
+                let torn = self
+                    .driver
+                    .stats(ch)
+                    .guard_trips
+                    .saturating_sub(self.trips_at_start[wire]);
+                if torn > 0 {
+                    self.mailboxes[wire]
+                        .torn
+                        .fetch_add(torn.min(u32::MAX as usize) as u32, Relaxed);
+                }
                 self.release_wire_slot(wire);
                 self.finish_wire(wire, self.started[wire], WireOutcome::Transmitted);
                 progress = true;
@@ -426,8 +528,11 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
                 progress = true;
                 continue;
             }
-            let Some(slot_idx) = self.acquire_slot(wire as u8, gpio) else {
-                // Every slot busy: a completion interrupt re-runs this pass.
+            let Some((slot_idx, took_over)) = self.acquire_slot(wire as u8, gpio) else {
+                // Every slot busy: the frame waits — that wait is the
+                // second-wave signature `waved` records at its eventual
+                // start. A completion interrupt re-runs this pass.
+                self.waited[wire] = true;
                 continue;
             };
             let ch = self.slots[slot_idx].channel;
@@ -443,8 +548,22 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
                     self.slots[slot_idx].busy = true;
                     self.wire_channel[wire] = ch;
                     self.started[wire] = seq;
+                    self.trips_at_start[wire] = self.driver.stats(ch).guard_trips;
                     self.transmitting += 1;
                     mailbox.active_channel.store(ch, Relaxed);
+                    if took_over {
+                        mailbox.takeovers.fetch_add(1, Relaxed);
+                    }
+                    if core::mem::take(&mut self.waited[wire]) {
+                        // The second-wave signature: this frame had to wait
+                        // for a slot. (A takeover with no wait — the
+                        // steady-state slot ping-pong — is only `takeovers`.)
+                        mailbox.waved.fetch_add(1, Relaxed);
+                    }
+                    let wait = (self.now_us)().wrapping_sub(mailbox.posted_at_us.load(Relaxed));
+                    if mailbox.queue_wait_max_us.load(Relaxed) < wait {
+                        mailbox.queue_wait_max_us.store(wait, Relaxed);
+                    }
                     // Fairness: the next scan starts after this wire.
                     self.rr_next = (wire + 1) % W;
                 }
@@ -463,13 +582,16 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
     /// the slot this wire already owns (zero matrix writes in the steady
     /// four-wire state), an unowned slot, then takeover of any idle slot. A
     /// busy slot is never taken.
-    fn acquire_slot(&mut self, wire: u8, gpio: u8) -> Option<usize> {
+    fn acquire_slot(&mut self, wire: u8, gpio: u8) -> Option<(usize, bool)> {
         let usable = &self.slots[..self.slot_count];
         let mine = usable.iter().position(|s| s.owner_wire == wire && !s.busy);
         let pick = mine
             .or_else(|| usable.iter().position(|s| s.owner_wire == NONE && !s.busy))
             .or_else(|| usable.iter().position(|s| !s.busy))?;
         let slot = &mut self.slots[pick];
+        // A takeover — the second-wave signature — is displacing another
+        // wire, not the first claim of a fresh slot.
+        let took_over = slot.owner_wire != NONE && slot.owner_wire != wire;
         if slot.owner_wire != wire || slot.bound_gpio != gpio {
             // Takeover: park the displaced pad first (its strand then holds
             // its latched frame), then point the slot's signal at ours.
@@ -480,7 +602,7 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
             slot.bound_gpio = gpio;
             slot.owner_wire = wire;
         }
-        Some(pick)
+        Some((pick, took_over))
     }
 
     /// Mark `wire`'s slot no longer busy (frame completed or aborted).
@@ -518,7 +640,15 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
     /// poster's licence to reuse the frame bytes.
     fn finish_wire(&mut self, wire: usize, seq: u32, outcome: WireOutcome) {
         self.started[wire] = seq;
+        self.waited[wire] = false;
         let mailbox = &self.mailboxes[wire];
+        let counter = match outcome {
+            WireOutcome::Transmitted => &mailbox.transmitted,
+            WireOutcome::Aborted => &mailbox.aborted,
+            WireOutcome::Cancelled => &mailbox.cancelled,
+            WireOutcome::StartFailed => &mailbox.start_failed,
+        };
+        counter.fetch_add(1, Relaxed);
         mailbox.result.store(outcome as u8, Relaxed);
         mailbox.completed_seq.store(seq, Release);
     }

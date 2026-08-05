@@ -760,11 +760,13 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
             // unmodified until `wait_complete` returns (or drops this
             // output, whose `Drop` quiesces the wire through the pusher's
             // close ack first).
-            let seq = unsafe { mailbox.post(self.gpio, data.as_ptr(), data.len()) };
+            let now = Instant::now();
+            let now_us = now.duration_since_epoch().as_micros() as u32;
+            let seq = unsafe { mailbox.post(self.gpio, data.as_ptr(), data.len(), now_us) };
             wire_pusher::ring_doorbell();
             self.posted = Some(PostedFrame {
                 seq,
-                at: Instant::now(),
+                at: now,
                 #[cfg(feature = "frame-dump")]
                 ptr: data.as_ptr(),
                 #[cfg(feature = "frame-dump")]

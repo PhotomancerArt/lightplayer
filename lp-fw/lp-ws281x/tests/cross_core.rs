@@ -256,7 +256,7 @@ fn pusher_forwards_completion_and_the_poster_frees_safely() {
             }
         });
         s.spawn(|| {
-            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, &[0], 1);
+            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, || 0, &[0], 1);
             // The poster finishes every round (outcome or ack) before it
             // sets `stop`, so exiting on quiet-and-stopped strands nothing.
             loop {
@@ -272,7 +272,7 @@ fn pusher_forwards_completion_and_the_poster_frees_safely() {
             let frame: Box<[u8]> = ramp_frame(60).into_boxed_slice();
             // SAFETY: freed only once the mailbox reports the sequence
             // disposed (outcome observed, or close acked below).
-            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len()) };
+            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len(), 0) };
             let mut waits = 0u32;
             while mailboxes[0].completed_outcome(seq).is_none() && waits < WAIT_BOUND {
                 thread::yield_now();
@@ -316,7 +316,7 @@ fn close_request_lets_the_poster_free_immediately_on_the_ack() {
             }
         });
         s.spawn(|| {
-            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, &[0], 1);
+            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, || 0, &[0], 1);
             loop {
                 let progress = pusher.service();
                 if stop.load(Ordering::Relaxed) && !progress && pusher.transmitting() == 0 {
@@ -331,7 +331,7 @@ fn close_request_lets_the_poster_free_immediately_on_the_ack() {
             // SAFETY: freed only after the close below is acked (or the
             // frame completed first — either way the mailbox has disposed
             // of the sequence).
-            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len()) };
+            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len(), 0) };
 
             // Let refills stream before closing — an instant close never
             // lands inside a live transmission and validates much less.

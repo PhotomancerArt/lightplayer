@@ -122,6 +122,15 @@ impl PadOps for MatrixPads {
     }
 }
 
+/// The pusher's clock: µs since boot, wrapping u32 — the queue-wait
+/// measurement's end edge (the poster stamps the start edge at post).
+#[esp_hal::ram]
+fn now_us() -> u32 {
+    esp_hal::time::Instant::now()
+        .duration_since_epoch()
+        .as_micros() as u32
+}
+
 /// The APP core's forever-loop: schedule until quiet, then idle behind the
 /// doorbell. Replaces the bare `waiti` loop of the pre-pusher deployment —
 /// and like it, this function must NEVER return (a returned core-1 entry is
@@ -138,10 +147,11 @@ pub(super) fn run() -> ! {
         *slot = ch.load(Relaxed);
     }
 
-    let mut pusher: Pusher<'static, _, _, TX_CHANNELS, TX_CHANNELS> = Pusher::new(
+    let mut pusher: Pusher<'static, _, _, _, TX_CHANNELS, TX_CHANNELS> = Pusher::new(
         &DRIVER,
         &MAILBOXES,
         MatrixPads,
+        now_us,
         &channels[..count],
         PUSHER_CAP,
     );

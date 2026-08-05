@@ -55,9 +55,9 @@ fn driver() -> Ws281xDriver<MockRmt, 4> {
 
 /// Advance every transmitter and dispatch the handler, then run one
 /// scheduling pass — the host's stand-in for "an interrupt woke the pusher".
-fn tick<const W: usize>(
+fn tick<F: Fn() -> u32, const W: usize>(
     driver: &Ws281xDriver<MockRmt, 4>,
-    pusher: &mut Pusher<'_, MockRmt, RecorderPads, 4, W>,
+    pusher: &mut Pusher<'_, MockRmt, RecorderPads, F, 4, W>,
 ) {
     driver.hw().advance_all(4);
     driver.on_interrupt();
@@ -81,7 +81,7 @@ fn post_all<const W: usize>(mailboxes: &[WireMailbox; W]) -> (Vec<Box<[u8]>>, Ve
         let frame: Box<[u8]> = ramp_frame(4).into_boxed_slice();
         // SAFETY: `frames` outlives every transmission — the test drains the
         // pusher before dropping it.
-        let seq = unsafe { mailbox.post(wire as u8 + 10, frame.as_ptr(), frame.len()) };
+        let seq = unsafe { mailbox.post(wire as u8 + 10, frame.as_ptr(), frame.len(), 0) };
         frames.push(frame);
         seqs.push(seq);
     }
@@ -89,9 +89,9 @@ fn post_all<const W: usize>(mailboxes: &[WireMailbox; W]) -> (Vec<Box<[u8]>>, Ve
 }
 
 /// Run ticks until every posted sequence reports an outcome (bounded).
-fn drain<const W: usize>(
+fn drain<F: Fn() -> u32, const W: usize>(
     driver: &Ws281xDriver<MockRmt, 4>,
-    pusher: &mut Pusher<'_, MockRmt, RecorderPads, 4, W>,
+    pusher: &mut Pusher<'_, MockRmt, RecorderPads, F, 4, W>,
     mailboxes: &[WireMailbox; W],
     seqs: &[u32],
 ) {
@@ -110,7 +110,14 @@ fn drain<const W: usize>(
 fn eight_wires_transmit_as_two_waves_of_four() {
     let driver = driver();
     let mailboxes: [WireMailbox; 8] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS, 4);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS,
+        4,
+    );
 
     let (frames, seqs) = post_all(&mailboxes);
     pusher.service();
@@ -148,6 +155,23 @@ fn eight_wires_transmit_as_two_waves_of_four() {
         assert_eq!(driver.stats(ch).frames, 2, "slot {ch} carries two wires");
         assert_eq!(driver.stats(ch).guard_trips, 0);
     }
+    // Per-wire attribution: wave 1 claimed fresh slots (no takeover), wave 2
+    // is all takeovers — the `waved` counter is the second-wave signature.
+    for (wire, mailbox) in mailboxes.iter().enumerate() {
+        let stats = mailbox.wire_stats();
+        assert_eq!(stats.transmitted, 1, "wire {wire}");
+        assert_eq!(stats.torn, 0, "wire {wire}");
+        assert_eq!(
+            stats.waved,
+            if wire < 4 { 0 } else { 1 },
+            "wire {wire}: waved must mark exactly the second wave"
+        );
+        assert_eq!(
+            stats.takeovers,
+            if wire < 4 { 0 } else { 1 },
+            "wire {wire}: wave 2 rebinds, wave 1 claimed fresh slots"
+        );
+    }
     drop(frames);
 }
 
@@ -158,7 +182,14 @@ fn eight_wires_transmit_as_two_waves_of_four() {
 fn five_wires_wave_four_plus_one() {
     let driver = driver();
     let mailboxes: [WireMailbox; 5] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS, 4);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS,
+        4,
+    );
 
     let (frames, seqs) = post_all(&mailboxes);
     pusher.service();
@@ -176,6 +207,14 @@ fn five_wires_wave_four_plus_one() {
     let mut per_slot: Vec<usize> = (0..4).map(|ch| driver.stats(ch).frames).collect();
     per_slot.sort_unstable();
     assert_eq!(per_slot, vec![1, 1, 1, 2], "the 2:1 muxing signature");
+    // Only the fifth wire waved.
+    for (wire, mailbox) in mailboxes.iter().enumerate() {
+        assert_eq!(
+            mailbox.wire_stats().waved,
+            if wire == 4 { 1 } else { 0 },
+            "wire {wire}"
+        );
+    }
     drop(frames);
 }
 
@@ -186,7 +225,14 @@ fn five_wires_wave_four_plus_one() {
 fn cap_three_runs_eight_wires_as_three_waves() {
     let driver = driver();
     let mailboxes: [WireMailbox; 8] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS, 3);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS,
+        3,
+    );
 
     let (frames, seqs) = post_all(&mailboxes);
     pusher.service();
@@ -221,13 +267,13 @@ fn takeover_parks_the_displaced_pad_before_routing() {
     let pads = RecorderPads::default();
     let log = Rc::clone(&pads.0);
     // One slot, two wires: every handover is a takeover.
-    let mut pusher = Pusher::new(&driver, &mailboxes, pads, &SLOTS[..1], 1);
+    let mut pusher = Pusher::new(&driver, &mailboxes, pads, || 0, &SLOTS[..1], 1);
 
     let frame_a: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     let frame_b: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: both frames outlive their transmissions (drained below).
-    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
-    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
+    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len(), 0) };
+    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len(), 0) };
 
     pusher.service();
     // Fresh slot: route only, no park (nothing was displaced).
@@ -265,7 +311,7 @@ fn takeover_parks_the_displaced_pad_before_routing() {
     let events_before = log.borrow().len();
     let frame_c: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: drained below.
-    let seq_c = unsafe { mailboxes[1].post(11, frame_c.as_ptr(), frame_c.len()) };
+    let seq_c = unsafe { mailboxes[1].post(11, frame_c.as_ptr(), frame_c.len(), 0) };
     for _ in 0..10_000 {
         if mailboxes[1].completed_outcome(seq_c).is_some() {
             break;
@@ -291,14 +337,21 @@ fn close_aborts_in_flight_and_cancels_queued() {
     let driver = driver();
     let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
     // One slot: wire 0 will be in flight, wire 1 stuck queued behind it.
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS[..1],
+        1,
+    );
 
     let frame_a: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     let frame_b: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     // SAFETY: frame_a is quiesced by the acked close below; frame_b is
     // cancelled unstarted by its own close.
-    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
-    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
+    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len(), 0) };
+    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len(), 0) };
     pusher.service();
     assert_eq!(active_wires(&mailboxes), vec![0]);
 
@@ -326,7 +379,7 @@ fn close_aborts_in_flight_and_cancels_queued() {
     // The wire lives on after a close: a fresh post transmits normally.
     let frame_c: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: drained below.
-    let seq_c = unsafe { mailboxes[0].post(10, frame_c.as_ptr(), frame_c.len()) };
+    let seq_c = unsafe { mailboxes[0].post(10, frame_c.as_ptr(), frame_c.len(), 0) };
     for _ in 0..10_000 {
         if mailboxes[0].completed_outcome(seq_c).is_some() {
             break;
@@ -346,13 +399,20 @@ fn close_aborts_in_flight_and_cancels_queued() {
 fn abort_request_disposes_in_flight_and_queued_frames() {
     let driver = driver();
     let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS[..1],
+        1,
+    );
 
     let frame_a: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     let frame_b: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     // SAFETY: both frames outlive their disposal (asserted below).
-    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
-    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
+    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len(), 0) };
+    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len(), 0) };
     pusher.service();
 
     mailboxes[0].request_abort(seq_a);
@@ -380,11 +440,11 @@ fn takeover_after_close_never_parks_the_closed_wires_pad() {
     let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
     let pads = RecorderPads::default();
     let log = Rc::clone(&pads.0);
-    let mut pusher = Pusher::new(&driver, &mailboxes, pads, &SLOTS[..1], 1);
+    let mut pusher = Pusher::new(&driver, &mailboxes, pads, || 0, &SLOTS[..1], 1);
 
     let frame_a: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: quiesced by the acked close below.
-    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
+    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len(), 0) };
     pusher.service();
     let close_a = mailboxes[0].request_close();
     pusher.service();
@@ -398,7 +458,7 @@ fn takeover_after_close_never_parks_the_closed_wires_pad() {
     log.borrow_mut().clear();
     let frame_b: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: drained below.
-    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
+    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len(), 0) };
     for _ in 0..10_000 {
         if mailboxes[1].completed_outcome(seq_b).is_some() {
             break;
@@ -424,11 +484,18 @@ fn unconfigured_slot_reports_start_failed() {
     let driver: Ws281xDriver<MockRmt, 4> = Ws281xDriver::new(MockRmt::new(4, 48));
     // Deliberately no configure_default_clock.
     let mailboxes: [WireMailbox; 1] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
+    let mut pusher = Pusher::new(
+        &driver,
+        &mailboxes,
+        RecorderPads::default(),
+        || 0,
+        &SLOTS[..1],
+        1,
+    );
 
     let frame: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: disposed of (StartFailed) before the drop.
-    let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len()) };
+    let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len(), 0) };
     pusher.service();
     assert_eq!(
         mailboxes[0].completed_outcome(seq),
