@@ -560,7 +560,16 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
             iterations = iterations.wrapping_add(1);
             if iterations % 1024 == 0 && in_flight.started.elapsed() > FRAME_TIMEOUT {
                 timed_out = true;
-                DRIVER.abort(self.channel);
+                if !DRIVER.abort(self.channel) {
+                    // The teardown handshake could not confirm the ISR idle —
+                    // reachable only if the ISR core wedged mid-service. The
+                    // frame's bytes may still be referenced; shout, because
+                    // this is a defect report, not a recoverable condition.
+                    log::error!(
+                        "RMT channel {}: abort handshake timed out — ISR core wedged mid-service?",
+                        self.channel
+                    );
+                }
                 break;
             }
         }
@@ -606,7 +615,15 @@ impl Drop for Esp32V3RmtWs281xOutput {
     /// release the lease — in that order, so the channel is never offered to a
     /// new open while its transmitter is still running.
     fn drop(&mut self) {
-        DRIVER.abort(self.channel);
+        if !DRIVER.abort(self.channel) {
+            // See wait_complete's timeout path: an unconfirmed handshake means
+            // the ISR core wedged mid-service and the frame bytes may still be
+            // referenced when the channel storage is torn down below.
+            log::error!(
+                "RMT channel {}: abort handshake timed out in drop — ISR core wedged?",
+                self.channel
+            );
+        }
         if let Some(slot) = self.channels.borrow_mut()[self.index].as_mut() {
             slot.in_use = false;
         }
