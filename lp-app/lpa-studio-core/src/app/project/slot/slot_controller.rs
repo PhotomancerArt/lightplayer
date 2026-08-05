@@ -670,10 +670,13 @@ impl SlotController {
 
     /// Split one settings row into its Debug part — appended **flat** to
     /// `debug_slots`, so a Debug field never renders nested under the record
-    /// that declared it (D4: the clock's `controls.running/rate/
-    /// scrub_offset_seconds` become three top-level Debug rows, not a
-    /// "Controls › Controls" group) — and the Setting remainder, returned for
-    /// the settings section. `None` when nothing but Debug fields remained.
+    /// that declared it (D4: a Debug field inside a record becomes a
+    /// top-level Debug row keyed by its full path, never a nested group;
+    /// the clock's `transport.*` fields flatten this way too, though their
+    /// rows then retire into the tape face —
+    /// `node_controller::retire_face_claimed_debug_rows`) — and the Setting
+    /// remainder, returned for the settings section. `None` when nothing
+    /// but Debug fields remained.
     ///
     /// A row with no Debug descendant takes the fast path and is built exactly
     /// as before, so the common case is unchanged.

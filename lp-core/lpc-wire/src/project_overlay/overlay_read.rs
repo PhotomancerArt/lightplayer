@@ -77,7 +77,7 @@ mod tests {
     fn overlay_read_response_round_trips_base_values() {
         let mut overlay = ProjectOverlay::new();
         let artifact = ArtifactLocation::file("/clock.json");
-        let path = SlotPath::parse("controls.rate").unwrap();
+        let path = SlotPath::parse("transport.rate").unwrap();
         overlay.put_slot_edit(
             artifact.clone(),
             SlotEdit::assign_value(path.clone(), lpc_model::LpValue::F32(2.0)),

@@ -110,38 +110,107 @@ pub(in crate::app::project) fn kind_face(
     }
 }
 
-/// The clock card's face: the published time product, the tiny seconds
-/// readout for the PHASORS section header, and (after the decoration pass)
-/// the per-reading trace cards riding this timebase — parent D10, reshaped
-/// by clock-face v2.
-///
-/// The old produced-value rows are gone from the face: seconds shrank into
-/// the section header and the Delta row was deleted outright ("isn't useful
-/// at all" — G2). The rows still exist as produced slots; only the face
-/// stopped renting them space.
+/// The clock card's face: the published time product, the transport
+/// instrument (run/pause, rate, scrub, probe-anchored seconds), and (after
+/// the decoration pass) the per-reading trace cards riding this timebase —
+/// parent D10, reshaped by clock-face v2 and the tape-hero plan's P2.
 ///
 /// `None` — generic-sections fallback — when the node publishes no time
 /// product row, which is the state of a clock whose runtime state has not
-/// landed yet. The trace cards are deliberately NOT derivable here: they
-/// live in the engine's timebase store, not in any slot, so they arrive
-/// through `ProjectController::apply_clock_faces` exactly the way the
-/// output face's board facts do.
+/// landed yet. The trace cards, and the transport block's numeric
+/// `seconds`, are deliberately NOT derivable here: they live in the
+/// engine's timebase store, not in any slot, so they arrive through
+/// `ProjectController::apply_clock_faces` exactly the way the output
+/// face's board facts do.
 fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
     let product = product_of_kind(sections, UiProductKind::Time)?;
     let mut face = crate::UiClockFace::new(product);
-    face.seconds = sections
-        .iter()
-        .find_map(|section| match section {
-            UiNodeSection::ProducedValues(values) => Some(values.as_slice()),
-            _ => None,
-        })
-        .and_then(|values| {
-            values
-                .iter()
-                .find(|value| value.key == "seconds")
-                .map(|value| value.value.clone())
-        });
+    face.transport = clock_transport(sections);
     Some(face)
+}
+
+/// The clock's transport block, lifted from the flattened `transport.*`
+/// Debug rows (D4: `SlotController::collect_config` flattens every Debug
+/// field to a top-level row regardless of the record that declared it, so
+/// there is no `transport` record row to descend into — three sibling rows
+/// keyed by their full path).
+///
+/// Value + address + editability ride straight off each row exactly as the
+/// panel controls read them (`row_edit_address`, `UiSlotFieldState
+/// ::editable`) — staged edits flow through the same edit-buffer join the
+/// rows already carry, so the DTO reflects an in-flight drag immediately
+/// (the echo-suppression contract the tape widgets rely on, P3/P4).
+///
+/// `None` when the three rows have not landed (unread project — the Debug
+/// section is absent, or a differently-shaped clock). Numeric `seconds`
+/// starts at `0.0`; only `ProjectController::apply_clock_faces` can fill it
+/// in, from the cached timebase probe.
+fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport> {
+    let rows = debug_rows(sections);
+    let running_row = rows.iter().find(|row| row.key == "transport.running")?;
+    let rate_row = rows.iter().find(|row| row.key == "transport.rate")?;
+    let scrub_row = rows
+        .iter()
+        .find(|row| row.key == "transport.scrub_offset_seconds")?;
+    Some(crate::UiClockTransport {
+        seconds: 0.0,
+        running: row_bool(running_row)?,
+        rate: row_f32(rate_row)?,
+        scrub_offset_seconds: row_f32(scrub_row)?,
+        running_address: editable_row_address(running_row),
+        rate_address: editable_row_address(rate_row),
+        scrub_address: editable_row_address(scrub_row),
+        running_override: row_override(running_row),
+        rate_override: row_override(rate_row),
+        scrub_override: row_override(scrub_row),
+    })
+}
+
+/// The row's active debug-override entry: `Some` while the row is dirty
+/// (an override is live this session), carrying the address the per-value
+/// **Clear** dispatches — the row's own edit entry, or the row address for
+/// a scalar whose entry annotation has not landed yet. `None` = clean, no
+/// tint, no Clear.
+fn row_override(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if row.state.dirty == crate::UiNodeDirtyState::Clean {
+        return None;
+    }
+    row.edit_entry_address
+        .clone()
+        .or_else(|| row.address.clone())
+}
+
+/// A row's scalar `f32` value, when its body is a plain value of that kind.
+fn row_f32(row: &UiConfigSlot) -> Option<f32> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::F32(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A row's scalar `bool` value, when its body is a plain value of that kind.
+fn row_bool(row: &UiConfigSlot) -> Option<bool> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::Bool(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// [`row_edit_address`], but `None` when the row itself is not editable —
+/// the DTO's own "not editable" signal (transport rows are ordinarily
+/// always writable Debug fields, but the address should never invite a
+/// dispatch the row can't accept).
+fn editable_row_address(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if !row.state.editable {
+        return None;
+    }
+    row_edit_address(row)
 }
 
 /// The shader card's face: visual hero, panel knobs, code drawer. `None`
@@ -264,6 +333,23 @@ fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
         .iter()
         .filter_map(|section| match section {
             UiNodeSection::ConfigSlots(slots) => Some(slots),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// Flattened Debug rows — the `config_rows` twin over `UiNodeSection
+/// ::DebugSlots` instead. Debug rows are already flat at the section level
+/// (`SlotController::partition_debug` lifts every Debug field to a
+/// top-level row regardless of nesting depth in the record that declared
+/// it), so this needs no record-descent the way `config_rows` never needed
+/// one either.
+fn debug_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            UiNodeSection::DebugSlots(slots) => Some(slots),
             _ => None,
         })
         .flatten()
@@ -2406,12 +2492,122 @@ mod tests {
         };
         assert_eq!(face.product.kind, UiProductKind::Time);
         assert_eq!(
-            face.seconds.as_deref(),
-            Some("3.5"),
-            "seconds shrinks into the section header; delta is not carried at all"
+            face.transport, None,
+            "no Debug rows yet — the transport block waits, same as the probe"
         );
         assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
         assert!(face.phasors.is_empty());
+    }
+
+    fn transport_row(field: &str, value: UiSlotValue) -> UiConfigSlot {
+        let key = format!("transport.{field}");
+        UiConfigSlot::value(&key, field, value).with_address(clock_slot_address(&key))
+    }
+
+    fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.module/node.clock").expect("valid address"),
+            ProjectSlotRoot::Def,
+            SlotPath::parse(path).expect("valid path"),
+        )
+    }
+
+    /// The transport block lifts value + address + editability straight off
+    /// the flattened Debug rows — the tape widgets' whole read surface.
+    #[test]
+    fn clock_face_lifts_the_transport_block_from_the_debug_rows() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(false)),
+                transport_row("rate", UiSlotValue::f32(2.0)),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(-12.4)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("three rows present → block present");
+        assert!(!transport.running);
+        assert_eq!(transport.rate, 2.0);
+        assert_eq!(transport.scrub_offset_seconds, -12.4);
+        assert_eq!(transport.seconds, 0.0, "numeric seconds is probe-only");
+        assert_eq!(
+            transport.rate_address,
+            Some(clock_slot_address("transport.rate")),
+            "editable row → dispatch address"
+        );
+        assert!(transport.running_address.is_some());
+        assert!(transport.scrub_address.is_some());
+    }
+
+    /// A read-only row keeps its value but withholds the dispatch address —
+    /// the widgets render inert chrome instead of dead handlers (P4).
+    #[test]
+    fn a_read_only_transport_row_withholds_its_dispatch_address() {
+        let read_only = UiSlotFieldState {
+            editable: false,
+            ..UiSlotFieldState::editable()
+        };
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(1.0)).with_state(read_only),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("values still lift");
+        assert_eq!(transport.rate, 1.0);
+        assert_eq!(transport.rate_address, None, "read-only → no dispatch");
+        assert!(transport.running_address.is_some(), "siblings unaffected");
+    }
+
+    /// A dirty Debug row (an active session override) lifts its own edit
+    /// entry as the override marker — the tape's changed-tint flag and
+    /// per-value Clear target in one; clean rows lift `None`.
+    #[test]
+    fn an_active_override_lifts_its_clear_target() {
+        let dirty = UiSlotFieldState::editable().with_dirty(crate::UiNodeDirtyState::Dirty);
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(2.0))
+                    .with_state(dirty)
+                    .with_edit_entry_address(clock_slot_address("transport.rate")),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("block present");
+        assert_eq!(
+            transport.rate_override,
+            Some(clock_slot_address("transport.rate")),
+            "dirty row → its edit entry is the Clear target"
+        );
+        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.scrub_override, None);
     }
 
     /// A clock with no produced product row keeps the generic sections —

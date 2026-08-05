@@ -285,7 +285,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
             br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }

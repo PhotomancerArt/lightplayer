@@ -546,13 +546,13 @@
           },
           "type": "object"
         },
-        "controls": {
+        "kind": {
+          "const": "Clock"
+        },
+        "transport": {
           "additionalProperties": false,
           "properties": {},
           "type": "object"
-        },
-        "kind": {
-          "const": "Clock"
         }
       },
       "required": [
