@@ -508,9 +508,16 @@ impl<'d, H: RmtHw, P: PadOps, F: Fn() -> u32, const N: usize, const W: usize>
         let mailboxes = self.mailboxes;
         // The scan origin is captured once: `rr_next` moves as starts land,
         // and folding that movement into the scan index skips wires.
+        //
+        // Every wire is scanned even once the cap is reached: a pending
+        // frame blocked by the cap is WAITING, and the `waited` mark is what
+        // makes its eventual start count as `waved` (the second-wave
+        // signature). Exiting the scan at the cap would leave second-wave
+        // frames invisible to the flag — they would start instantly once a
+        // slot freed, wait unrecorded (the shape CI caught).
         let origin = self.rr_next;
         let mut scanned = 0;
-        while self.transmitting < self.cap && scanned < W {
+        while scanned < W {
             let wire = (origin + scanned) % W;
             scanned += 1;
             if self.wire_channel[wire] != NO_CHANNEL {
@@ -528,10 +535,15 @@ impl<'d, H: RmtHw, P: PadOps, F: Fn() -> u32, const N: usize, const W: usize>
                 progress = true;
                 continue;
             }
+            if self.transmitting >= self.cap {
+                // Pending but the duty budget is spent: the frame waits for
+                // the current wave.
+                self.waited[wire] = true;
+                continue;
+            }
             let Some((slot_idx, took_over)) = self.acquire_slot(wire as u8, gpio) else {
-                // Every slot busy: the frame waits — that wait is the
-                // second-wave signature `waved` records at its eventual
-                // start. A completion interrupt re-runs this pass.
+                // Every slot busy: the frame waits — same signature. A
+                // completion interrupt re-runs this pass.
                 self.waited[wire] = true;
                 continue;
             };
