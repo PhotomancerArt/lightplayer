@@ -322,6 +322,9 @@ fn ModulePanelControlBody(
                     state: control.state.clone(),
                     bound: following,
                     engaged,
+                    address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
+                    on_action,
                 }
             }
         }

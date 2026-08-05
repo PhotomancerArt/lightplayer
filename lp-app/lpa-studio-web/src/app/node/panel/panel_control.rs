@@ -284,6 +284,9 @@ fn PanelControlBody(
                     config,
                     state: control.state.clone(),
                     bound,
+                    address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
+                    on_action,
                 }
             }
         }

@@ -12,6 +12,8 @@
 
 mod h_fader_field;
 mod knob_field;
+pub mod palette_catalog;
+mod palette_chooser;
 mod palette_swatch_field;
 mod panel_control;
 mod panel_emit;
@@ -23,6 +25,8 @@ pub use knob_field::KnobField;
 /// story stays a faithful record of what the app renders.
 #[cfg(feature = "stories")]
 pub(crate) use knob_field::knob_snap;
+pub use palette_catalog::{PaletteCatalog, PaletteChoice, PaletteGroup, project_palette_choices};
+pub use palette_chooser::{PaletteChooser, PaletteChooserTab};
 pub use palette_swatch_field::PaletteSwatchField;
 pub use panel_control::PanelControl;
 pub(crate) use panel_control::phasor_speed_display;
