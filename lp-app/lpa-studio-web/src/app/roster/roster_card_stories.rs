@@ -20,8 +20,8 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
-    DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource,
+    DegradedReason, DeviceCardTab, DeviceFormatStanding, RosterCardState, UiDeviceCard,
+    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::{BuildFacts, HardwareFacts};
 
@@ -174,6 +174,28 @@ fn holds_unreadable_data() -> Element {
         },
         false,
     )])
+}
+
+#[story(
+    description = "Amber filled edge: the board holds a project at a format this Studio does not use (P5, 2026-08-04). Left: a format the migration chain reaches — the card names what it found and offers ONE verb, Upgrade, which pulls, migrates in the LIBRARY and pushes the result (the device is never rewritten in place, D14); it dispatches without a confirm because the pre-upgrade copy is already banked. Right: below the upgrade floor — no automatic path exists, so there is no button that would only refuse; the note names the remedy and the way out stays the wipe. Both replace what used to be a Running card lying about a board whose firmware had refused to load the project."
+)]
+fn holds_old_format_project() -> Element {
+    sheet(vec![
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::Upgradable { found: 4 },
+                expected: 5,
+            },
+            false,
+        ),
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::TooOld { found: Some(2) },
+                expected: 5,
+            },
+            false,
+        ),
+    ])
 }
 
 #[story(

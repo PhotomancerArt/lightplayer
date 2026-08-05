@@ -97,6 +97,32 @@ const fn bit(bits: u32, ch: u8) -> bool {
     bits & mask(ch) != 0
 }
 
+/// A contiguous raw view of one channel's RMT RAM window, for backends whose
+/// RAM is plain memory-mapped words.
+///
+/// Returned by [`RmtHw::ram_window`] so the refill path can hoist the window
+/// base and bound out of its per-word loop: measured on the classic ESP32,
+/// the per-word block-plan lookup and double bounds check behind
+/// [`RmtHw::write_ram`] cost ~4 CPU cycles per word against a ~12-cycle APB
+/// store — real money at four coincident refills against an 80 µs deadline.
+///
+/// # Contract (on the backend returning `Some`)
+///
+/// * `base` addresses exactly [`RmtHw::ram_words`]`(ch)` writable `u32`
+///   words — the same window, the same size — and stays valid for the
+///   driver's lifetime (block plans are fixed at init).
+/// * Stores through it must be equivalent to [`RmtHw::write_ram`] calls: the
+///   driver performs volatile word stores and never reads back.
+///
+/// The driver never holds one across calls; it is re-fetched per fill.
+#[derive(Debug, Clone, Copy)]
+pub struct RamWindow {
+    /// First word of the channel's window.
+    pub base: *mut u32,
+    /// Words in the window (equal to [`RmtHw::ram_words`] for the channel).
+    pub words: usize,
+}
+
 /// The chip-specific half of the driver.
 ///
 /// # Implementing a backend
@@ -124,6 +150,21 @@ pub trait RmtHw {
 
     /// Write one word into `ch`'s RAM window. Backends do a volatile store.
     fn write_ram(&self, ch: u8, word_idx: usize, value: u32);
+
+    /// A raw contiguous view of `ch`'s RAM window, or `None` when the backend
+    /// cannot (or need not) offer one.
+    ///
+    /// The default is `None`, which keeps every existing backend and the mock
+    /// on the per-word [`Self::write_ram`] path — same writes, same modelled
+    /// costs, same assertions. A memory-mapped backend that returns `Some`
+    /// lets the refill loop hoist the window base and bound once per fill;
+    /// see [`RamWindow`] for the contract and the measured why. Both paths
+    /// write identical words in identical order — this is a cost lever, not
+    /// a semantic fork.
+    fn ram_window(&self, ch: u8) -> Option<RamWindow> {
+        let _ = ch;
+        None
+    }
 
     /// Set `ch`'s threshold (`tx_lim`) to `words`.
     ///

@@ -8,7 +8,9 @@
 //! `docs/adr/2026-07-16-device-card-state-vocabulary.md`.
 //!
 //! Concept map:
-//! - [`roster_card_state`]: the 14-state enum + its status-line copy.
+//! - [`roster_card_state`]: the state enum + its status-line copy (grows
+//!   as new states earn a place in the vocabulary — count it, don't quote
+//!   it here).
 //! - [`roster_state_spec`]: the status-circle spec (shape × status family).
 //! - [`roster_affordance`]: the one affordance each state carries (identity
 //!   only in M2 — wiring lands with the flows that make each state real).
@@ -37,7 +39,7 @@ pub use card_tabs::{CardTabView, DeviceCardTab, device_card_tabs};
 pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_rich_object};
 pub use firmware_update::{BundledFirmware, firmware_update_available};
 pub use roster_affordance::RosterAffordance;
-pub use roster_card_state::{ConnectPhase, DegradedReason, RosterCardState};
+pub use roster_card_state::{ConnectPhase, DegradedReason, DeviceFormatStanding, RosterCardState};
 pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
 pub use roster_state_spec::{RosterStateSpec, RosterTreatment};
 pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};
