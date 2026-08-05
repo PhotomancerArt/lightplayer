@@ -9,6 +9,7 @@ use alloc::sync::Arc;
 use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
+use crate::dataflow::timebase::PhasorKey;
 use crate::engine::{ButtonService, RadioService};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
@@ -20,13 +21,14 @@ use crate::products::visual::{
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
 use lpc_model::{
-    AssetLocation, FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath,
-    SlotShapeRegistry, WithRevision, lookup_slot_data_and_shape,
+    AssetLocation, FromLpValue, NodeId, PhasorConfig, Revision, SlotAccess, SlotAccessor, SlotPath,
+    SlotShapeRegistry, TimeProduct, WithRevision, lookup_slot_data_and_shape,
 };
 use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
 use lpc_shared::time::TimeProvider;
 use lpfs::LpFs;
 
+use super::ScopeRef;
 use super::node_error::NodeError;
 
 /// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
@@ -338,6 +340,82 @@ impl<'r> TickContext<'r> {
             .map_err(|e| NodeError::msg(alloc::format!("render control: {}", e.message)))
     }
 
+    /// Publishes this node's timebase for the current tick.
+    ///
+    /// A node that produces a [`lpc_model::TimeProduct`] calls this from its
+    /// `produce` so that everything holding the handle can be answered from
+    /// the engine's timebase store instead of by dispatching back into the
+    /// node. `effective_seconds` is the timebase's own notion of now (not
+    /// [`Self::time_seconds`], which stays raw engine wall clock);
+    /// `delta_seconds` is what it advanced this tick, and may be negative
+    /// when a device scrubs backwards.
+    pub fn publish_timebase(&mut self, effective_seconds: f32, delta_seconds: f32) {
+        let node = self.node_id;
+        let revision = self.revision;
+        self.resolver
+            .publish_timebase(node, effective_seconds, delta_seconds, revision);
+    }
+
+    /// The bus scope this node reads from — the scope half of a scoped
+    /// [`QueryKey::Bus`](crate::dataflow::resolver::QueryKey) key. `None` on
+    /// hosts with no scope model.
+    pub fn bus_read_scope(&self) -> Option<ScopeRef> {
+        self.resolver.node_scope(self.node_id)
+    }
+
+    /// The channel + writer scope supplying one of this node's consumed
+    /// slots, when a bus channel with a live writer is what supplies it —
+    /// the provenance a phasor identity is derived from (parent D3).
+    pub fn consumed_slot_bus_provenance(
+        &self,
+        slot: &SlotPath,
+    ) -> Option<(ScopeRef, lpc_model::ChannelName)> {
+        self.resolver
+            .consumed_slot_bus_provenance(self.node_id, slot)
+    }
+
+    /// The effective seconds behind a time product.
+    pub fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.resolver
+            .time_product_seconds(product)
+            .map_err(|e| NodeError::msg(alloc::format!("time product seconds: {}", e.message)))
+    }
+
+    /// How far a time product advanced during the current tick.
+    pub fn time_product_delta(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.resolver
+            .time_product_delta(product)
+            .map_err(|e| NodeError::msg(alloc::format!("time product delta: {}", e.message)))
+    }
+
+    /// A time product's wrapped `[0,1)` cycle position and completed-cycle
+    /// count, under `config`, for the integrator named by `key`.
+    ///
+    /// Tick-side: the first call in a tick advances the phasor, later calls
+    /// in the same tick see the same values. `key` is provenance-derived
+    /// (where the config came from), never caller-invented — that is what
+    /// makes two consumers of one channel-driven config share a phase while
+    /// two slot-local configs stay independent.
+    ///
+    /// The result is the RAW ramp: [`PhasorConfig::waveform`] and
+    /// `phase_offset` are the caller's to apply.
+    ///
+    /// `reader` names who is asking — this node and the consumed slot the
+    /// config was resolved for. The store records it (with the config's
+    /// shaping) as witness data for the timebase probe; it never affects
+    /// the answer.
+    pub fn time_product_phasor(
+        &mut self,
+        product: TimeProduct,
+        key: &PhasorKey,
+        config: &PhasorConfig,
+        reader: (NodeId, &SlotPath),
+    ) -> Result<(f32, u32), NodeError> {
+        self.resolver
+            .time_product_phasor(product, key, config, reader)
+            .map_err(|e| NodeError::msg(alloc::format!("time product phasor: {}", e.message)))
+    }
+
     /// Mutates a single existing runtime buffer in place and marks it changed for `frame`.
     pub fn with_runtime_buffer_mut<F>(
         &mut self,
@@ -450,10 +528,62 @@ impl<'a> ControlRenderContext<'a> {
     ) -> Result<(), NodeError> {
         self.services.sample_visual_into(product, request, target)
     }
+
+    /// The effective seconds behind a time product.
+    pub fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.services.time_product_seconds(product)
+    }
+
+    /// How far a time product advanced during the most recent tick.
+    pub fn time_product_delta(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.services.time_product_delta(product)
+    }
+
+    /// A phasor's raw ramp as the last tick left it — see [`TimebaseRead`]
+    /// for why render never advances one.
+    pub fn time_product_phasor_read(
+        &self,
+        product: TimeProduct,
+        key: &PhasorKey,
+    ) -> Result<(f32, u32), NodeError> {
+        self.services.time_product_phasor_read(product, key)
+    }
+}
+
+/// Read-only timebase access shared by both render-phase service traits.
+///
+/// Render is not a tick: `render_texture_into`/`sample_visual_into` can run
+/// more than once per tick and can run outside a tick entirely (probes,
+/// preview surfaces). A phasor that advanced or materialized here would tie
+/// its rate to how many previews happen to be open, so the render phase only
+/// ever *reads* — an unmaterialized phasor reads as the start of its first
+/// cycle rather than being born.
+///
+/// Defaulted throughout so node-level test fakes keep compiling.
+pub trait TimebaseRead {
+    fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        let _ = product;
+        Err(NodeError::msg("render context has no timebase access"))
+    }
+
+    fn time_product_delta(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        let _ = product;
+        Err(NodeError::msg("render context has no timebase access"))
+    }
+
+    /// The phasor's current raw ramp, without materializing or advancing it.
+    fn time_product_phasor_read(
+        &self,
+        product: TimeProduct,
+        key: &PhasorKey,
+    ) -> Result<(f32, u32), NodeError> {
+        let _ = (product, key);
+        Err(NodeError::msg("render context has no timebase access"))
+    }
 }
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
-pub trait ControlRenderServices {
+pub trait ControlRenderServices: TimebaseRead {
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -476,7 +606,7 @@ pub trait ControlRenderServices {
 }
 
 /// Services available while materializing a [`crate::products::visual::VisualProduct`].
-pub trait VisualRenderServices {
+pub trait VisualRenderServices: TimebaseRead {
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -605,6 +735,33 @@ impl<'a> RenderContext<'a> {
             .as_mut()
             .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
             .sample_visual_into(product, request, target)
+    }
+
+    /// The effective seconds behind a time product.
+    pub fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.timebase()?.time_product_seconds(product)
+    }
+
+    /// How far a time product advanced during the most recent tick.
+    pub fn time_product_delta(&self, product: TimeProduct) -> Result<f32, NodeError> {
+        self.timebase()?.time_product_delta(product)
+    }
+
+    /// A phasor's raw ramp as the last tick left it — see [`TimebaseRead`]
+    /// for why render never advances one.
+    pub fn time_product_phasor_read(
+        &self,
+        product: TimeProduct,
+        key: &PhasorKey,
+    ) -> Result<(f32, u32), NodeError> {
+        self.timebase()?.time_product_phasor_read(product, key)
+    }
+
+    fn timebase(&self) -> Result<&dyn VisualRenderServices, NodeError> {
+        self.services
+            .as_ref()
+            .map(|services| &**services)
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))
     }
 }
 

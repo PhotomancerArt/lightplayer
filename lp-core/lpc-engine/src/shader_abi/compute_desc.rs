@@ -37,11 +37,22 @@ pub fn compute_desc_from_model_def<'a>(
     );
 
     for (name, slot) in &def.consumed_slots.entries {
+        // A palette declares a sampler, which is not an `LpsType` the value
+        // lookup can answer — so that lookup must not run for it.
+        if slot.kind.value().is_texture() {
+            return Err(ComputeDescError::Unsupported(alloc::format!(
+                "compute shader slot {name:?} is a palette; texture uniforms are supported on visual shaders only"
+            )));
+        }
         let ty = lps_type_for_slot_value(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            // A phasor/seconds uniform IS an f32 uniform to the compiler; the
+            // host fills it from the timebase instead of from slot data.
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 desc = desc.with_consumed(name.clone(), ty);
             }
+            // Refused above, before the type lookup.
+            ShaderSlotKind::Palette => continue,
             ShaderSlotKind::Map => {
                 ensure_u32_map_key(slot)?;
                 let mapping = slot
@@ -65,11 +76,18 @@ pub fn compute_desc_from_model_def<'a>(
     }
 
     for (name, slot) in &def.produced_slots.entries {
+        if slot.kind.value().is_texture() {
+            return Err(ComputeDescError::Unsupported(alloc::format!(
+                "compute shader slot {name:?} is a palette, which cannot be produced"
+            )));
+        }
         let ty = lps_type_for_slot_value(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 desc = desc.with_produced(name.clone(), ty);
             }
+            // Refused above, before the type lookup.
+            ShaderSlotKind::Palette => continue,
             ShaderSlotKind::Map => {
                 ensure_u32_map_key(slot)?;
                 let mapping = slot
@@ -263,6 +281,8 @@ void tick() {{
                 kind: ValueSlot::new(lpc_model::ShaderSlotKind::Value),
                 value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
                 key: lpc_model::OptionSlot::none(),
+                phasor: lpc_model::OptionSlot::none(),
+                gradient: lpc_model::OptionSlot::none(),
                 default: lpc_model::OptionSlot::none(),
                 min: lpc_model::OptionSlot::none(),
                 max: lpc_model::OptionSlot::none(),

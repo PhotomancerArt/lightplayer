@@ -12,6 +12,8 @@ mod binding_authoring_section;
 #[cfg(feature = "stories")]
 pub(crate) mod binding_authoring_stories;
 mod binding_chip;
+#[cfg(feature = "stories")]
+pub(crate) mod clock_face_stories;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
@@ -88,12 +90,13 @@ pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub(crate) use face::node_ui_action;
 pub use face::{
-    FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace, PlaylistFace,
-    ShaderFace,
+    ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
+    PlaylistFace, ShaderFace,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
+pub(crate) use panel::phasor_speed_display;
 pub use panel::{HFaderField, KnobField, PanelControl, PanelEmit, ToggleField};
 pub use produced_product_view::ProducedProductView;
 pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};

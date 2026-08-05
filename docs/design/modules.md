@@ -529,9 +529,20 @@ exports are where conventions become contracts. Until then: names above
 are provisional conventions, not schema; new channels cost nothing (R3);
 nothing in this document depends on the vocabulary's final shape.
 
+One entry graduated 2026-08-04: **`time` is a product channel** like
+`visual.out`/`control.out` — the clock publishes a `TimeProduct`
+handle, and raw seconds never ride the bus (an `f32` slot bound to
+`bus:time` warns loudly and runs on its default). Consumers declare
+`phasor`/`seconds` uniform kinds instead of doing time arithmetic;
+a phasor slot's binding names a *config channel* carrying a
+`PhasorConfig` (period only when driven). There is no raw-seconds
+vocabulary to standardize anymore
+(ADR 2026-08-04-time-is-a-product).
+
 Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
 multi-point, per-touch identity; shape question tracked as panel.md
-P-Q5) and the `phase` convention (panel.md P3).
+P-Q5). The old `phase` channel convention (panel.md P3) is superseded
+by the phasor uniform kind above.
 
 ## 8. Provenance (field set settled — Q7)
 
@@ -587,6 +598,12 @@ somebody owes. Recorded 2026-08-03 at the close of
 `planning/2026-08-03-1021-modules-vision-push` unless noted.
 
 **Design passes owed**
+
+- **LFO node.** Registered 2026-08-04 at the TimeProduct G1 (D11): the
+  panel exposes a phasor's *period only*; wanting waveform, phase
+  offset, or free-running modulation on a panel is answered by a
+  dedicated LFO node publishing a config/value channel — never by
+  widening the panel contract. No owner yet.
 
 - **Wiring-drawer redesign.** DONE 2026-08-04 — the flow view
   (writers → value box → readers, arrowed wires, tone-matched colors,

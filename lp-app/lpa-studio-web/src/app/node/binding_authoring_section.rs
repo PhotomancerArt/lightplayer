@@ -17,7 +17,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    LpValue, UiAction, UiBindingAuthoring, UiChannelChoice, UiSlotAffordance, UiSlotAspect,
+    LpValue, UiAction, UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice,
+    UiSlotAffordance, UiSlotAspect,
 };
 
 use crate::app::node::slot_detail_button::{SlotDetailRow, aspect_detail_rows, binding_title};
@@ -184,6 +185,7 @@ pub(crate) fn BindingAuthoringSection(
                 div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:pl-[18px] tw:pt-1",
                     for choice in choices.clone() {
                         BindingChannelChoice {
+                            product_on_scalar: product_on_scalar(&authoring, &choice),
                             choice: choice.clone(),
                             mismatch: kind_mismatch(&current_kind, &choice),
                             on_pick: {
@@ -248,9 +250,13 @@ pub(crate) fn BindingAuthoringSection(
 fn BindingChannelChoice(
     choice: UiChannelChoice,
     mismatch: bool,
+    /// The channel carries a product handle and this slot takes a number —
+    /// see [`product_on_scalar`].
+    #[props(default = false)]
+    product_on_scalar: bool,
     on_pick: EventHandler<()>,
 ) -> Element {
-    let title = match (choice.doc, mismatch) {
+    let mut title = match (choice.doc, mismatch) {
         (Some(doc), false) => doc.to_string(),
         (Some(doc), true) => format!("{doc} — kind differs from the current channel"),
         (None, true) => {
@@ -258,6 +264,11 @@ fn BindingChannelChoice(
         }
         (None, false) => "Observed in this project".to_string(),
     };
+    if product_on_scalar {
+        title.push_str(
+            " — carries a product handle, not a number; this slot cannot convert it (the node will Warn)",
+        );
+    }
 
     rsx! {
         button {
@@ -280,6 +291,9 @@ fn BindingChannelChoice(
             if mismatch {
                 span { class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-status-warning-foreground", "kind?" }
             }
+            if product_on_scalar {
+                span { class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-status-warning-foreground", "product" }
+            }
             if choice.well_known {
                 span {
                     class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-subtle-foreground",
@@ -289,6 +303,25 @@ fn BindingChannelChoice(
             }
         }
     }
+}
+
+/// Whether picking `choice` for this slot would wire a **product handle**
+/// into a slot that takes a number (P7 item 3).
+///
+/// Since the M2 break `bus:time` carries a `TimeProduct` — the same family
+/// as `visual.out` — so the one channel a person is most likely to reach
+/// for is now the one most likely to be wrong on an f32 uniform. The
+/// engine already answers that with a per-input conversion failure and a
+/// `Warn` card; this only says it a moment EARLIER, and says it without
+/// gating: the row stays clickable, free text stays legal, and `time` keeps
+/// its place at the head of the well-known list (D9 — the picker teaches
+/// the norm, it does not enforce it).
+fn product_on_scalar(authoring: &UiBindingAuthoring, choice: &UiChannelChoice) -> bool {
+    // Only a CONSUMING slot can be filled by the wrong thing. A produced
+    // slot publishing onto a product channel is how products get there.
+    authoring.direction == UiBindingAuthoringDirection::Source
+        && authoring.scalar_slot
+        && choice.carries_product
 }
 
 fn kind_mismatch(current_kind: &Option<String>, choice: &UiChannelChoice) -> bool {

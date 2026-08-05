@@ -1,0 +1,29 @@
+[package]
+name = "lpa-upgrade"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The only thing this crate needs from the model: the format constant the
+# step chain has to end at. Deliberately NOT the artifact types — the
+# migrator rewrites JSON the current model can no longer parse.
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+# JSON parsing only. The crate never round-trips through `serde_json::Value`
+# (see `json::JsonNode` for why) and never enables `preserve_order`, which
+# would be a workspace-wide feature flip.
+serde_json = { workspace = true }
+# The one `Deserialize` impl the order-preserving document tree needs. No
+# derives: nothing here is a typed model.
+serde = { workspace = true }
+
+[dev-dependencies]
+# The real reader, so a migrated project is proved loadable rather than
+# merely well-formed (docs/defects/2026-07-27-created-package-unloadable.md).
+lpc-registry = { path = "../../lp-core/lpc-registry" }
+lpfs = { path = "../../lp-base/lpfs" }
+
+[lints]
+workspace = true

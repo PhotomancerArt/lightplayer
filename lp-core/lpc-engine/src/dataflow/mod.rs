@@ -8,3 +8,4 @@ pub mod binding;
 pub mod bus;
 pub mod panel_writers;
 pub mod resolver;
+pub mod timebase;

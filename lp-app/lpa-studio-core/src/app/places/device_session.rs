@@ -1,9 +1,18 @@
 //! Connect-is-a-pull (D8): what Studio learns — and banks — when it
 //! attaches to a real device.
 //!
-//! On attach the studio pulls the device's project copy, reads its
-//! identity (`/.lp/device.json` at the device's fs ROOT) and manifest,
-//! and relates the content to the library:
+//! On attach the studio pulls the device's project copy, reads the legacy
+//! identity file (`/.lp/device.json` at the device's fs ROOT) and the
+//! manifest, and relates the content to the library. The file is only
+//! evidence now — the session RESOLVES its identity from silicon first
+//! (`super::identity_resolution`, design §3) — but the read stays: it is
+//! rule A3, and it is what re-keys a legacy row at first sight.
+//!
+//! Because identity is known at attach, adoption runs THERE for any
+//! MAC-reporting board; `DeviceContent::PendingIdentity` is now only the
+//! A4 corner (no MAC, no stamp). Nothing waits for a provisioning stamp.
+//!
+//! The classifications:
 //!
 //! - **Known uid, known hash** → nothing to store (the library already
 //!   knows this version); a `Connected` observation is still recorded.
@@ -24,6 +33,7 @@
 //! observation is skipped with a log line (the classification still
 //! reaches the UI; the lock, not the badge, is the truth).
 
+use lpa_upgrade::{FormatClass, ProjectFiles};
 use lpc_history::{ContentHash, EventLog, PrefixedUid, SnapshotStore, SyncRelation};
 use lpfs::{AsLpPath, LpFs, LpFsMemory, LpPath};
 
@@ -36,7 +46,11 @@ use crate::{UiError, UiLogDraft};
 /// attach time and held while the device stays connected.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceSyncState {
-    /// Stamped identity, when `/.lp/device.json` exists on the device.
+    /// The identity this session RESOLVED (see
+    /// `super::identity_resolution`): the uid derived from the board's
+    /// efuse MAC, else a legacy stamped uid, else `None` for a board
+    /// that can name neither. The `name` is the registry's (D34) and may
+    /// be empty — an identified board is not a named one.
     pub identity: Option<DeviceIdentity>,
     pub content: DeviceContent,
 }
@@ -60,14 +74,62 @@ pub enum DeviceContent {
         slug: String,
         observed: ContentHash,
     },
-    /// A project the library doesn't know, on a device with no stamped
-    /// identity: adoption waits for provisioning to stamp a `dev_` uid
-    /// (the deploy wizard re-pulls after stamping). Classification only —
-    /// nothing is persisted for anonymous hardware.
+    /// A project the library doesn't know, on a board with NO identity at
+    /// all: adoption waits until the board can be attributed (the deploy
+    /// wizard re-pulls after naming). Classification only — nothing is
+    /// persisted for anonymous hardware.
+    ///
+    /// This is rule A4's corner now
+    /// (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`): a
+    /// board that reports its efuse MAC has a uid from its first hello,
+    /// so its unknown content ADOPTS at connect. Old firmware with no
+    /// MAC and no stamp is what still lands here.
     PendingIdentity { observed: ContentHash },
+    /// A readable project whose authored FORMAT is not this build's
+    /// ([`lpa_upgrade::classify`] on the pulled `project.json`).
+    ///
+    /// The firmware refuses to load it, so every "Running…" classification
+    /// would be a lie — this one preempts [`Self::Known`]/[`Self::Adopted`]
+    /// whatever the hash relation says. The banking those branches do still
+    /// happens first: the board's bytes are in the library either way (D8),
+    /// which is what makes the upgrade verb non-destructive.
+    ///
+    /// Usually an OLDER format (a board left behind by a Studio update),
+    /// but a board written by a NEWER LightPlayer lands here too — `class`
+    /// carries which, and only [`FormatClass::Upgradable`] earns the
+    /// Upgrade affordance.
+    OldFormat {
+        /// The library package holding this project's line — the migration
+        /// subject and the push source. `None` when the library has no copy
+        /// of it (adoption did not run for this board).
+        project_uid: Option<String>,
+        /// Library slug at pull time (display only).
+        slug: Option<String>,
+        observed: ContentHash,
+        /// What the manifest sniff found. Never `Current` — that is a
+        /// [`Self::Known`]/[`Self::Adopted`] board.
+        class: FormatClass,
+    },
     /// Files exist but the manifest is missing/unparseable. Not fatal:
     /// the link stays usable (flash/erase still work).
     Unreadable { detail: String },
+}
+
+/// The pulled device copy as the upgrader sees it: package-relative paths
+/// → bytes, with the device-scoped `/.lp/*` sidecars dropped (identity
+/// belongs to the board, never to the project).
+pub fn device_project_files(files: &[(String, Vec<u8>)]) -> ProjectFiles {
+    files
+        .iter()
+        .filter(|(path, _)| !path.trim_start_matches('/').starts_with(".lp/"))
+        .map(|(path, bytes)| (path.clone(), bytes.clone()))
+        .collect()
+}
+
+/// Sniff the format of a pulled device copy — lenient, never through the
+/// strict manifest parser (see [`lpa_upgrade::classify`]).
+pub fn classify_device_project(files: &[(String, Vec<u8>)]) -> FormatClass {
+    lpa_upgrade::classify(&device_project_files(files))
 }
 
 /// The raw pull: every file in the device's project storage, plus the
@@ -253,6 +315,8 @@ pub fn registry_entry_for(
         last_seen_at: now,
         association: None,
         board_id: None,
+        hardware_id: None,
+        previous_uids: Vec::new(),
     }
 }
 
@@ -282,6 +346,17 @@ pub fn upsert_device_merged(
         // provisioning (or a future hello report), never on sight.
         if device.board_id.is_none() {
             device.board_id = existing.board_id;
+        }
+        // So does the migration trail (device identity design §4): the
+        // uids this board used to wear are what make its OLD history
+        // events resolve, and a sighting is the one event that must never
+        // cost a device its past. The re-key writes them; every later
+        // sighting carries them forward.
+        if device.previous_uids.is_empty() {
+            device.previous_uids = existing.previous_uids;
+        }
+        if device.hardware_id.is_none() {
+            device.hardware_id = existing.hardware_id;
         }
         if !existing.name.is_empty() {
             device.name = existing.name;
@@ -573,6 +648,8 @@ mod tests {
             last_seen_at: 50.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         }
     }
 
@@ -580,7 +657,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                format!(r#"{{"format":4,"name":"Demo {marker}"}}"#).into_bytes(),
+                format!(r#"{{"format":5,"name":"Demo {marker}"}}"#).into_bytes(),
             ),
             ("shader.glsl".to_string(), marker.as_bytes().to_vec()),
         ]
@@ -691,7 +768,7 @@ mod tests {
         let mut files = vec![
             (
                 "project.json".to_string(),
-                br#"{"format":4,"uid":"prj_zzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
+                br#"{"format":5,"uid":"prj_zzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
             ),
             ("shader.glsl".to_string(), b"wild".to_vec()),
             (".lp/device.json".to_string(), b"{}".to_vec()),
@@ -729,6 +806,58 @@ mod tests {
         assert_eq!(listed.len(), 1);
     }
 
+    /// The pull's format sniff (P5): what the board's `project.json`
+    /// states, read leniently and with the device's own `/.lp/*` sidecars
+    /// kept out of the project (they are the board's identity, not the
+    /// project's content — a stray `.lp/project.json` must never decide
+    /// the verdict).
+    #[test]
+    fn the_pulled_copy_is_classified_by_its_manifest_alone() {
+        let pulled = |manifest: &str| {
+            vec![
+                ("project.json".to_string(), manifest.as_bytes().to_vec()),
+                (".lp/device.json".to_string(), b"{}".to_vec()),
+                ("shader.glsl".to_string(), b"void main() {}".to_vec()),
+            ]
+        };
+        assert_eq!(
+            classify_device_project(&pulled(&format!(
+                r#"{{"format":{}}}"#,
+                lpc_model::PROJECT_FORMAT_VERSION
+            ))),
+            FormatClass::Current
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":4}"#)),
+            FormatClass::Upgradable { found: 4 }
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":3}"#)),
+            FormatClass::BelowFloor { found: Some(3) }
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":99}"#)),
+            FormatClass::FutureFormat { found: 99 }
+        );
+        assert!(matches!(
+            classify_device_project(&pulled("{ not json")),
+            FormatClass::Unreadable { .. }
+        ));
+        // identity-only storage is not a project
+        assert_eq!(
+            classify_device_project(&[(".lp/device.json".to_string(), b"{}".to_vec())]),
+            FormatClass::NotAProject
+        );
+        // the device's own sidecar never plays the manifest
+        assert_eq!(
+            classify_device_project(&[(
+                ".lp/project.json".to_string(),
+                br#"{"format":4}"#.to_vec()
+            )]),
+            FormatClass::NotAProject
+        );
+    }
+
     #[test]
     fn registry_merge_preserves_association() {
         let store = store();
@@ -751,6 +880,36 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(listed[0].last_seen_at, 99.0);
         assert_eq!(listed[0].association, seeded.association);
+    }
+
+    #[test]
+    fn registry_merge_preserves_the_rekey_trail() {
+        // device identity design §4: the sighting that FOLLOWS a re-key
+        // carries a fresh entry (no previous_uids, and only the origin
+        // the live session resolved). Neither may erase what the re-key
+        // recorded — the old uids are what resolve this device's older
+        // history events.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        let mut rekeyed = device();
+        rekeyed.previous_uids = vec!["dev_000000000000old1".to_string()];
+        rekeyed.hardware_id = Some("efuse:aa:bb:cc:dd:ee:ff".to_string());
+        registry.upsert(rekeyed).unwrap();
+
+        let mut sighting = device();
+        sighting.last_seen_at = 99.0;
+        upsert_device_merged(&store, sighting).unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(
+            listed[0].previous_uids,
+            vec!["dev_000000000000old1".to_string()]
+        );
+        assert_eq!(
+            listed[0].hardware_id.as_deref(),
+            Some("efuse:aa:bb:cc:dd:ee:ff")
+        );
+        assert_eq!(listed[0].last_seen_at, 99.0);
     }
 
     #[test]

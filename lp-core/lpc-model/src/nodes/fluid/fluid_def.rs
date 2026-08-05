@@ -1,6 +1,6 @@
 use crate::{
     BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, PositiveF32, PositiveF32Slot, Ratio,
-    RatioSlot, Slotted, ValueSlot,
+    RatioSlot, Slotted, TimeProductSlot, ValueSlot,
 };
 
 /// Authored fluid simulation node definition.
@@ -28,9 +28,11 @@ pub struct FluidDef {
     /// Fluid viscosity.
     pub viscosity: PositiveF32Slot,
 
-    /// Simulation time in seconds.
+    /// Timebase the simulation steps against — the scope's time product,
+    /// queried for effective seconds (the solver gates on elapsed wall time
+    /// and guards against a rewind, so it needs Seconds, not a delta).
     #[slot(consumed, default_bind = "bus:time")]
-    pub time: ValueSlot<f32>,
+    pub time: TimeProductSlot,
 
     /// Stable-key emitter map consumed by the fluid simulation.
     #[slot(
@@ -87,8 +89,8 @@ fn default_viscosity() -> PositiveF32Slot {
     PositiveF32Slot::new(PositiveF32(0.00003))
 }
 
-fn default_time() -> ValueSlot<f32> {
-    ValueSlot::new(0.0)
+fn default_time() -> TimeProductSlot {
+    TimeProductSlot::default()
 }
 
 #[cfg(test)]

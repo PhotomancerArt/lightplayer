@@ -152,6 +152,16 @@ pub struct ProjectController {
     /// The local library, when the platform mounted a store (browser).
     /// Absent on host tests — flows degrade to the legacy deploy path.
     library: Option<LibraryContext>,
+    /// The open pre-flight's verdict on a package it refused to open (P3):
+    /// a classified issue — too old, too new, unreadable, migration refused
+    /// — held so the generic `fail(error.to_string())` the open path makes
+    /// on the way out does not overwrite it with a parser string. Drained
+    /// by [`Self::fail`]; cleared when a new open starts.
+    classified_open_issue: Option<UiIssue>,
+    /// Notices the open path produced and the studio controller has not
+    /// collected yet — today, "Upgraded project from format 4 to 5". Drained
+    /// by [`Self::take_open_notices`].
+    open_notices: Vec<UiNotice>,
 }
 
 /// One staged node removal (see `ProjectController::staged_removals`).
@@ -224,6 +234,8 @@ impl ProjectController {
             pending_focus: None,
             pending_panel_writes: BTreeMap::new(),
             library: None,
+            classified_open_issue: None,
+            open_notices: Vec::new(),
         }
     }
 
@@ -397,6 +409,9 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
+        // Hoisted out of the per-channel pass: the always-live set is a
+        // graph scan, and every value box asks the same question of it.
+        let always_live = self.always_live_products();
         // Sites carry their binding's priority out so the per-channel pass
         // below can mark shadowed writers and top-priority ties (E3).
         let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
@@ -498,37 +513,26 @@ impl ProjectController {
                     }
                 }
 
-                // The value box shows the picture when the resolved value
-                // is a visual product in the tracked preview stream.
-                // Control products keep their formatted value only — their
-                // preview is the fixture face's lamp-layout business.
-                let preview = channel
-                    .value
-                    .as_ref()
-                    .and_then(|value| value.value.as_ref())
-                    .and_then(|value| match value {
-                        lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
-                            let product = UiProductRef::from_product_ref(*product);
-                            let bytes = self
-                                .sync
-                                .as_ref()
-                                .and_then(|sync| sync.product_preview(&product))?
-                                .clone();
-                            let tracking =
-                                if self.primary_visual_product().as_ref() == Some(&product) {
-                                    crate::UiProductTrackingState::Tracking
-                                } else {
-                                    crate::UiProductTrackingState::Paused
-                                };
-                            Some(crate::UiBusChannelPreview {
-                                kind: crate::UiProductKind::Visual,
-                                preview: bytes,
-                                tracking,
-                                frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
-                            })
-                        }
-                        _ => None,
-                    });
+                // The value box shows the picture whenever the resolved
+                // value is a product in the tracked preview stream —
+                // visual pixels or a control product's lamp layout, both
+                // drawn by the one shared preview component (a control
+                // channel showing `control product #7:0` said nothing the
+                // lamps do not say better).
+                let preview = channel_product(channel).and_then(|product| {
+                    let product = UiProductRef::from_product_ref(product);
+                    let bytes = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))?
+                        .clone();
+                    Some(crate::UiBusChannelPreview {
+                        kind: ui_product_kind(product),
+                        preview: bytes,
+                        tracking: borrowed_tracking(&always_live, product),
+                        frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+                    })
+                });
 
                 crate::UiBusChannelView {
                     scope: channel.scope,
@@ -627,12 +631,78 @@ impl ProjectController {
             .channels
             .iter()
             .find(|channel| channel.primary_visual)?;
-        let value = channel.value.as_ref()?.value.as_ref()?;
-        let lpc_model::LpValue::Product(product) = value else {
-            return None;
-        };
-        matches!(product, lpc_model::ProductRef::Visual(_))
-            .then(|| UiProductRef::from_product_ref(*product))
+        match channel_product(channel)? {
+            product @ lpc_model::ProductRef::Visual(_) => {
+                Some(UiProductRef::from_product_ref(product))
+            }
+            lpc_model::ProductRef::Control(_) | lpc_model::ProductRef::Time(_) => None,
+        }
+    }
+
+    /// The project's **primary control product**: the resolved value of the
+    /// root scope's `bus:control.out` — the rendered lamps hardware outputs
+    /// drive from (the symmetric convention the same ADR declared, now that
+    /// a preview surface consumes it: the root module's hero and the wiring
+    /// drawer's value box).
+    ///
+    /// Read exactly like [`Self::primary_visual_product`] — off the cached
+    /// graph, never re-deriving precedence — except that the root-scope test
+    /// is client-side. The probe flags only the visual channel, and a second
+    /// wire flag would cost the device's serde surface for a name comparison
+    /// Studio can make itself.
+    pub fn primary_control_product(&self) -> Option<UiProductRef> {
+        let graph = self.binding_graph()?;
+        let root = self.root_module_scope();
+        let channel = graph.channels.iter().find(|channel| {
+            channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL
+                // Pre-scope snapshots list one unscoped set of channels;
+                // that set IS the root scope (the engine's own rule for
+                // flagging the primary visual).
+                && (channel.scope == root || channel.scope.is_none())
+        })?;
+        match channel_product(channel)? {
+            product @ lpc_model::ProductRef::Control(_) => {
+                Some(UiProductRef::from_product_ref(product))
+            }
+            lpc_model::ProductRef::Visual(_) | lpc_model::ProductRef::Time(_) => None,
+        }
+    }
+
+    /// The products Studio streams no matter what has focus: the project's
+    /// primary visual and primary control outputs.
+    ///
+    /// These are the project's face and its rendered lamps — the two things
+    /// permanent surfaces (the root module's hero, every wiring drawer's
+    /// value box) show without anyone asking, so they ride every pull
+    /// regardless of the focus/lens gate that governs ordinary node
+    /// products (M6 P3, generalized).
+    pub fn always_live_products(&self) -> Vec<UiProductRef> {
+        self.primary_visual_product()
+            .into_iter()
+            .chain(self.primary_control_product())
+            .collect()
+    }
+
+    /// The root module's scope, when the project has a root node.
+    fn root_module_scope(&self) -> Option<lpc_wire::WireScopeRef> {
+        let owner = self.root_nodes.first()?.target().node_id;
+        Some(lpc_wire::WireScopeRef::Module { owner })
+    }
+
+    /// The product a scope's named channel resolved to, when it resolved to
+    /// one at all. Strictly scoped — a channel of the same name one scope
+    /// out is a different channel.
+    fn scope_channel_product(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        name: &str,
+    ) -> Option<UiProductRef> {
+        let channel = graph
+            .channels
+            .iter()
+            .find(|channel| channel.scope == Some(scope) && channel.name == name)?;
+        channel_product(channel).map(UiProductRef::from_product_ref)
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -640,7 +710,7 @@ impl ProjectController {
     /// first (M4). Kinds come from the registry, falling back to the wire
     /// graph's established kind.
     pub fn ui_channel_choices(&self) -> Vec<crate::UiChannelChoice> {
-        let observed: Vec<(String, Option<String>)> = self
+        let observed: Vec<(String, Option<String>, bool)> = self
             .binding_graph()
             .map(|graph| {
                 graph
@@ -654,6 +724,16 @@ impl ProjectController {
                         (
                             channel.name.clone(),
                             channel.kind.map(|kind| format!("{kind:?}")),
+                            // What the channel is OBSERVED to carry beats
+                            // any registry claim: a project channel Studio
+                            // has never heard of can still hold a product.
+                            matches!(
+                                channel
+                                    .value
+                                    .as_ref()
+                                    .and_then(|value| value.value.as_ref()),
+                                Some(lpc_model::LpValue::Product(_))
+                            ),
                         )
                     })
                     .collect()
@@ -666,10 +746,11 @@ impl ProjectController {
                 kind: Some(format!("{:?}", channel.kind)),
                 doc: Some(channel.doc),
                 well_known: true,
-                observed: observed.iter().any(|(name, _)| name == channel.name),
+                observed: observed.iter().any(|(name, _, _)| name == channel.name),
+                carries_product: channel.carries_product,
             })
             .collect();
-        for (name, kind) in observed {
+        for (name, kind, carries_product) in observed {
             if choices.iter().any(|choice| choice.name == name) {
                 continue;
             }
@@ -679,6 +760,7 @@ impl ProjectController {
                 doc: None,
                 well_known: false,
                 observed: true,
+                carries_product,
             });
         }
         choices
@@ -730,7 +812,7 @@ impl ProjectController {
 
     /// Project root node controllers into node-pane DTOs in project tree order.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
-        let primary_visual = self.primary_visual_product();
+        let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -748,7 +830,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     &remove_action,
-                    primary_visual.as_ref(),
+                    &always_live,
                     &subscribes,
                 )
             })
@@ -816,6 +898,11 @@ impl ProjectController {
                 ),
                 authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
                     .then(|| endpoint.clone()),
+                // A binding-DERIVED row: the slot is implicit (no shape
+                // arrived with it), so the picker's product guard has
+                // nothing to test against and stays quiet rather than
+                // guessing.
+                scalar_slot: false,
             };
             // The live bus reading rides the (display-only) endpoint AFTER
             // the authoring surface is built, so Retarget/Unbind state never
@@ -1622,7 +1709,7 @@ impl ProjectController {
     /// current reading (P6 item 1) — the display-only `live_value` a bound
     /// panel control renders in the violet family. Values come off the
     /// binding-graph snapshot that already rides every pull; quantization
-    /// and the monotonic/time-kind exclusion live in
+    /// and the scalar-instant exclusion live in
     /// [`live_channel_value`], so this pass only dirties DTOs when a
     /// displayed reading actually moves. Runs after the binding overlays,
     /// which (re)build the endpoints it decorates.
@@ -1845,7 +1932,7 @@ impl ProjectController {
         inventory: &ProjectInventorySummary,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
-        let primary_visual = self.primary_visual_product();
+        let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -1864,7 +1951,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     &remove_action,
-                    primary_visual.as_ref(),
+                    &always_live,
                     &subscribes,
                 )
             })
@@ -1895,6 +1982,10 @@ impl ProjectController {
         if let Some(root) = nodes.first_mut() {
             root.header.title = project_name.clone();
         }
+        // The clock face's phasor listing is engine state, not slot state
+        // (D10) — it lands here, before the module pass, the same way the
+        // output face's board facts do.
+        self.apply_clock_faces(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -1981,6 +2072,7 @@ impl ProjectController {
 
     pub fn mark_opening_project(&mut self) {
         self.clear_loaded_project_state();
+        self.classified_open_issue = None;
         self.state = ProjectState::OpeningProject {
             progress: ProgressState::new("Opening project"),
         };
@@ -2012,12 +2104,26 @@ impl ProjectController {
         self.root_nodes.clear();
     }
 
+    /// Land in the failed state.
+    ///
+    /// When the open pre-flight already classified the failure (a project
+    /// too old, too new, unreadable, or one the migrator refused), that
+    /// classification wins: the caller's `error.to_string()` is the same
+    /// fact spelled as a wire/parser complaint, and the issue pane is where
+    /// the user reads what to do about it.
     pub fn fail(&mut self, message: impl Into<String>) {
         self.running_project_status = RunningProjectStatus::Unknown;
-        self.state = ProjectState::Failed {
-            issue: UiIssue::new(message),
-        };
+        let issue = self
+            .classified_open_issue
+            .take()
+            .unwrap_or_else(|| UiIssue::new(message));
+        self.state = ProjectState::Failed { issue };
         self.clear_loaded_project_state();
+    }
+
+    /// Take the notices the open path produced (the migration notice).
+    pub(crate) fn take_open_notices(&mut self) -> Vec<UiNotice> {
+        std::mem::take(&mut self.open_notices)
     }
 
     pub fn disconnect(&mut self) {
@@ -2122,13 +2228,16 @@ impl ProjectController {
         server: &mut StudioServerClient,
         opened: crate::app::library::OpenedProject,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let context = self.library.as_mut().ok_or_else(no_library_error)?;
-        if let Some(previous) = context.active.take() {
-            if previous.handle.uid != opened.uid {
-                context.pending_close.push(previous.handle.uid.to_string());
+        let now = {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(previous) = context.active.take() {
+                if previous.handle.uid != opened.uid {
+                    context.pending_close.push(previous.handle.uid.to_string());
+                }
             }
-        }
-        let handle = crate::app::library::PackageHandle::load(
+            (context.now_secs)()
+        };
+        let mut handle = crate::app::library::PackageHandle::load(
             opened.uid,
             opened.slug,
             opened.package_fs,
@@ -2137,12 +2246,23 @@ impl ProjectController {
         .map_err(library_ui_error)?;
         // the slug is THE user-facing identifier — it titles the editor
         let title = handle.slug.clone();
+
+        // Pre-flight (P3), BEFORE anything reads the package for the push:
+        // an older-but-supported project migrates in place and is SAVED
+        // first, because `open_library_project` verifies the runtime's hash
+        // against the library's — an in-flight migration would push bytes
+        // the library does not have. Anything the migrator will not touch
+        // stops here with a classified issue rather than opening half of a
+        // project.
+        self.migrate_package_on_open(&mut handle, now)?;
+
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
         let loaded = server
             .open_library_project(&self.runtime_storage_id, &files, &expected_hash)
             .await?;
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
@@ -2154,6 +2274,91 @@ impl ProjectController {
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
+    }
+
+    /// The open pre-flight (D11): classify the package, migrate it if this
+    /// build can, and refuse — with a classified issue, not a parser string
+    /// — if it cannot.
+    ///
+    /// The order is forced by the hash check in `open_library_project`: the
+    /// migrated bytes must be **on disk and saved** before anything reads
+    /// the package for the push. So this writes every changed file back
+    /// through `apply_update` and takes a `record_save` snapshot, which is
+    /// also what preserves the pre-migration state — the history event is
+    /// the undo path, for free.
+    fn migrate_package_on_open(
+        &mut self,
+        handle: &mut crate::app::library::PackageHandle,
+        now: f64,
+    ) -> Result<(), UiError> {
+        use crate::app::library::{PackageHealth, classify_package, health_for};
+
+        let class = {
+            let package_fs = handle.package_fs.borrow();
+            classify_package(&*package_fs)
+        };
+        match health_for(&class, None) {
+            PackageHealth::Ready => return Ok(()),
+            PackageHealth::UpgradesOnOpen { .. } => {}
+            PackageHealth::Blocked { headline, remedy } => {
+                return Err(self.refuse_open(handle, &headline, &remedy));
+            }
+        }
+
+        // The migration body is shared with the roster's Upgrade verb
+        // (`package_upgrade`): write every changed file back through
+        // `apply_update`, then `record_save` — which is also what preserves
+        // the pre-migration state.
+        let report = match crate::app::library::migrate_handle_to_current(handle, now) {
+            // Unreachable: `health_for` already said this one upgrades.
+            // Total rather than `unreachable!` — a mismatch must not panic
+            // the editor.
+            Ok(None) => return Ok(()),
+            Ok(Some(report)) => report,
+            Err(crate::app::library::LibraryError::Format(detail)) => {
+                // All-or-nothing by contract: nothing was written, so the
+                // package on disk is exactly as the user left it.
+                return Err(self.refuse_open(
+                    handle,
+                    &format!(
+                        "Format {} — this project could not be upgraded automatically",
+                        class.found().unwrap_or_default()
+                    ),
+                    &detail,
+                ));
+            }
+            Err(other) => return Err(library_ui_error(other)),
+        };
+
+        let mut message = format!(
+            "Upgraded \"{}\" from format {} to {}",
+            handle.slug, report.from, report.to
+        );
+        for note in report.notes.iter().chain(report.warnings.iter()) {
+            message.push_str(" · ");
+            message.push_str(note);
+        }
+        self.open_notices.push(if report.warnings.is_empty() {
+            UiNotice::info(message)
+        } else {
+            UiNotice::warning(message)
+        });
+        Ok(())
+    }
+
+    /// Refuse to open `handle`, leaving the editor showing what was found
+    /// and what to do about it. The returned error carries the same fact
+    /// for the log and the caller's error path.
+    fn refuse_open(
+        &mut self,
+        handle: &crate::app::library::PackageHandle,
+        headline: &str,
+        remedy: &str,
+    ) -> UiError {
+        self.classified_open_issue = Some(
+            UiIssue::new(format!("{}: {headline}", handle.slug)).with_detail(remedy.to_string()),
+        );
+        UiError::Project(format!("{}: {headline}. {remedy}", handle.slug))
     }
 
     /// Save-as-pull (D20/D8): after a successful commit, pull the changed
@@ -2506,6 +2711,134 @@ impl ProjectController {
         }
     }
 
+    /// Fill every clock face's phasor listing from the cached timebase
+    /// probe (parent D10).
+    ///
+    /// The rows cannot derive from the card walk: what rides a timebase
+    /// lives in the engine's timebase store, keyed by the clock's node,
+    /// and nothing in the project's slots knows about it. So this is a
+    /// decoration pass over already-built faces, exactly like the output
+    /// face's board facts.
+    ///
+    /// A face with no cached read stays [`crate::UiTimebaseState::Unread`]
+    /// rather than rendering an empty listing: "no read has landed" and
+    /// "nothing is running" are different sentences, and only the second
+    /// one is reassuring.
+    fn apply_clock_faces(&self, nodes: &mut [UiNodeView]) {
+        fn walk(controller: &ProjectController, face: Option<&mut crate::UiNodeFace>) {
+            let Some(crate::UiNodeFace::Clock(clock)) = face else {
+                return;
+            };
+            let Some(product) = clock.product.product else {
+                return;
+            };
+            let (state, phasors) = match controller.sync.as_ref().and_then(|s| s.timebase(&product))
+            {
+                Some(crate::UiTimebaseRead::Live { phasors, .. }) => (
+                    crate::UiTimebaseState::Live,
+                    phasors
+                        .iter()
+                        .flat_map(|row| controller.ui_phasor_readings(row))
+                        .collect(),
+                ),
+                Some(crate::UiTimebaseRead::Unknown) => {
+                    (crate::UiTimebaseState::Unknown, Vec::new())
+                }
+                None => (crate::UiTimebaseState::Unread, Vec::new()),
+            };
+            clock.timebase = state;
+            clock.phasors = phasors;
+        }
+        fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
+            for child in children {
+                walk(controller, child.face.as_mut());
+                walk_children(controller, &mut child.children);
+            }
+        }
+        for node in nodes {
+            walk(self, node.face.as_mut());
+            walk_children(self, &mut node.children);
+        }
+    }
+
+    /// One wire phasor row → its trace cards, one per downstream READING
+    /// (clock-face v2; the flattening the G2 gate converged on).
+    ///
+    /// Cards are named by the READER — "plasma · phase", with the
+    /// departed-node fallback "node 8 · phase" — because "what is riding
+    /// this clock" is a question about consumers. The integrator's own
+    /// identity survives as the `shared` flag plus a channel detail:
+    ///
+    /// - **`Node`** origin — config private to one node's slot. Its one
+    ///   reading IS that node; nobody else rides this phase.
+    /// - **`Channel`** origin — config driven by a bus channel: every
+    ///   reader of that `(scope, channel)` is on one integrator (parent
+    ///   D3), so each of its cards wears the violet shared treatment and
+    ///   names the channel in `detail`.
+    ///
+    /// A row with NO readings yet (the probe can race the first tick-side
+    /// query) falls back to one unshaped card named by the origin, so the
+    /// card count never flickers to zero.
+    fn ui_phasor_readings(&self, row: &lpc_wire::WirePhasorRow) -> Vec<crate::UiPhasorReading> {
+        let node_label = |node: u32| {
+            self.node_by_runtime_id(lpc_model::NodeId::new(node))
+                .map(|node| node.label().to_string())
+                // A node that just left the tree still has rows in the
+                // store until the next sweep; naming it by id beats
+                // dropping the card and pretending it stopped.
+                .unwrap_or_else(|| format!("node {node}"))
+        };
+        let (shared, detail) = match &row.origin {
+            lpc_wire::WirePhasorOrigin::Node { .. } => (false, None),
+            lpc_wire::WirePhasorOrigin::Channel { scope, channel } => {
+                let owner = node_label(scope.owner().0);
+                let place = match scope {
+                    lpc_wire::WireScopeRef::Module { .. } => format!("in {owner}"),
+                    lpc_wire::WireScopeRef::Sink { entry, .. } => {
+                        format!("in {owner} entry {entry}")
+                    }
+                };
+                (true, Some(format!("bus:{channel} {place}")))
+            }
+        };
+        let card = |label: String,
+                    waveform: lpc_model::Waveform,
+                    phase_offset: f32|
+         -> crate::UiPhasorReading {
+            crate::UiPhasorReading {
+                label,
+                detail: detail.clone(),
+                shared,
+                phase: row.phase,
+                cycle: row.cycle,
+                period_seconds: row.period_seconds,
+                rate_display: crate::phasor_rate_display(row.period_seconds),
+                waveform,
+                phase_offset,
+            }
+        };
+        if row.readings.is_empty() {
+            // Unshaped fallback named by the integrator's own origin.
+            let label = match &row.origin {
+                lpc_wire::WirePhasorOrigin::Node { node, slot } => {
+                    format!("{} · {slot}", node_label(*node))
+                }
+                lpc_wire::WirePhasorOrigin::Channel { channel, .. } => format!("bus:{channel}"),
+            };
+            return vec![card(label, lpc_model::Waveform::Ramp, 0.0)];
+        }
+        row.readings
+            .iter()
+            .map(|reading| {
+                card(
+                    format!("{} · {}", node_label(reading.node), reading.slot),
+                    reading.waveform,
+                    reading.phase_offset,
+                )
+            })
+            .collect()
+    }
+
     /// One module card's face. `None` when the card's address resolves to no
     /// controller (a card built from a tree the controllers no longer carry).
     fn module_face(
@@ -2542,44 +2875,51 @@ impl ProjectController {
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
 
-        // The module's own visual mirror (R7); a module with no visual
+        // The module's own visual mirror (R7); a module with no output
         // simply has no hero (E6). The mirror ROW supplies identity and
         // meta, but its bytes ride the scope's resolved `visual.out`
         // product: the mirror's own product ref is outside the preview
-        // stream (only the primary visual and the focused node's products
-        // are tracked), so without this rehoming the root hero renders
+        // stream (only always-live products and the focused node's are
+        // tracked), so without this rehoming the root hero renders
         // black while the shader card below it is live.
         let mut preview =
             super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
-        if let Some(hero) = preview.as_mut()
-            && let Some(product) = graph
-                .channels
-                .iter()
-                .find(|channel| {
-                    channel.scope == Some(scope)
-                        && channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL
-                })
-                .and_then(|channel| channel.value.as_ref())
-                .and_then(|value| value.value.as_ref())
-                .and_then(|value| match value {
-                    lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
-                        Some(UiProductRef::from_product_ref(*product))
-                    }
-                    _ => None,
-                })
-            && let Some(bytes) = self
-                .sync
-                .as_ref()
-                .and_then(|sync| sync.product_preview(&product))
-        {
-            hero.preview = bytes.clone();
-            let primary = self.primary_visual_product();
-            hero.tracking = if primary.as_ref() == Some(&product) {
-                crate::UiProductTrackingState::Tracking
-            } else {
-                crate::UiProductTrackingState::Paused
-            };
-            hero.product = Some(product);
+        let scope_visual = self
+            .scope_channel_product(graph, scope, lpc_model::PRIMARY_VISUAL_CHANNEL)
+            .filter(|product| matches!(product, UiProductRef::Visual { .. }));
+        if let Some(hero) = preview.as_mut() {
+            if let Some(product) = scope_visual {
+                if let Some(bytes) = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_preview(&product))
+                {
+                    hero.preview = bytes.clone();
+                    hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                    hero.product = Some(product);
+                }
+            } else if let Some(product) = self
+                .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
+                .filter(|product| matches!(product, UiProductRef::Control { .. }))
+            {
+                // A control-first module: nothing writes the scope's
+                // visual, so the mirror node renders CLEARED — a black
+                // square is not this module's output, its fixtures' lamps
+                // are. The hero becomes the control product outright
+                // (kind included, so the shared preview draws the lamp
+                // layout), and says "not tracked" honestly when the bytes
+                // are not in the stream instead of showing the cleared
+                // mirror.
+                hero.kind = ui_product_kind(product);
+                hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                hero.product = Some(product);
+                hero.preview = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_preview(&product))
+                    .cloned()
+                    .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
+            }
         }
 
         Some(crate::UiModuleFace {
@@ -2928,10 +3268,13 @@ impl ProjectController {
         for node in &self.root_nodes {
             self.collect_subscribed_products(node, &mut product_refs);
         }
-        // The primary visual streams whenever a project is open — the
-        // project's face is always live regardless of node focus (ADR
-        // 2026-07-16-primary-visual-product; M6 P3).
-        product_refs.extend(self.primary_visual_product());
+        // The primary visual and primary control stream whenever a project
+        // is open — the project's face and its rendered lamps are always
+        // live regardless of node focus (ADR 2026-07-16-primary-visual-product;
+        // M6 P3). Without the control half, a device lens has no bytes for
+        // the `control.out` value box or a control module's hero unless the
+        // producing fixture happens to be the focused node.
+        product_refs.extend(self.always_live_products());
         product_refs.into_iter().collect()
     }
 
@@ -3442,7 +3785,7 @@ impl ProjectController {
         binding_kind: lpc_model::Kind,
     ) -> Option<String> {
         match self.pending_panel_write(scope, channel) {
-            Some(value) => crate::app::project::format_live_scalar(value),
+            Some(value) => crate::app::project::format_live_panel_value(value),
             None => live_channel_value(graph, scope, channel, binding_kind),
         }
     }
@@ -5458,11 +5801,15 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             }
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls; an output face carries wires, not panel widgets.
+            // not controls; an output face carries wires, not panel widgets;
+            // a clock face carries a READ-ONLY phasor listing (D10) — the one
+            // editable period lives on the consuming shader's knob, never
+            // here.
             Some(
                 crate::UiNodeFace::Module(_)
                 | crate::UiNodeFace::Playlist(_)
-                | crate::UiNodeFace::Output(_),
+                | crate::UiNodeFace::Output(_)
+                | crate::UiNodeFace::Clock(_),
             )
             | None => {}
         }
@@ -5478,23 +5825,63 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     out
 }
 
+/// The product a channel's resolved value carries, when it carries one.
+fn channel_product(channel: &lpc_wire::WireBusChannel) -> Option<lpc_model::ProductRef> {
+    match channel.value.as_ref()?.value.as_ref()? {
+        lpc_model::LpValue::Product(product) => Some(*product),
+        _ => None,
+    }
+}
+
+/// The product family a UI product ref belongs to — the preview component
+/// picks its treatment (pixel canvas vs lamp layout) from this.
+fn ui_product_kind(product: UiProductRef) -> crate::UiProductKind {
+    match product {
+        UiProductRef::Visual { .. } => crate::UiProductKind::Visual,
+        UiProductRef::Control { .. } => crate::UiProductKind::Control,
+        UiProductRef::Time { .. } => crate::UiProductKind::Time,
+    }
+}
+
+/// How a product presents on a surface that BORROWS it (a channel's value
+/// box, a module's output hero) rather than owning it: always-live products
+/// read as tracking, anything else as paused — Studio has bytes for it, but
+/// this surface is not what keeps them coming.
+fn borrowed_tracking(
+    always_live: &[UiProductRef],
+    product: UiProductRef,
+) -> crate::UiProductTrackingState {
+    if always_live.contains(&product) {
+        crate::UiProductTrackingState::Tracking
+    } else {
+        crate::UiProductTrackingState::Paused
+    }
+}
+
 /// The live reading for a consumed bus channel, prepared for display on a
 /// bound panel control (P6 item 1). `None` — no live display — for:
 ///
-/// - **monotonic/time-kind channels** (`Kind::Instant`: `time`, `trigger`),
-///   excluded BY KIND so the per-tick clock advance never dirties node DTOs
-///   (the whole-DTO change gate would fire on every pull otherwise);
+/// - **scalar instant channels** (`Kind::Instant` carrying a number:
+///   `trigger`, and `time` before the M2 break), excluded so the per-tick
+///   advance never dirties node DTOs (the whole-DTO change gate would fire
+///   on every pull otherwise);
 /// - channels without a resolved scalar value ([`format_live_scalar`], which
 ///   also quantizes floats to ≤2 decimals before DTO entry).
+///
+/// **The Instant exclusion is narrower than it used to be (P7 item 2).** It
+/// was never about the *kind*; it was about CHURN. A product handle does not
+/// churn — `bus:time` now carries a `TimeProduct`, whose identity is
+/// `(node, output)` and is stable across every tick the clock keeps
+/// producing — so a product-valued channel displays its product chip
+/// regardless of kind, exactly as `visual.out` does, and the DTO gate stays
+/// quiet. What remains excluded is the case the gate was written for: an
+/// Instant channel whose value is a live-advancing NUMBER.
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
 ) -> Option<String> {
-    if binding_kind == lpc_model::Kind::Instant {
-        return None;
-    }
     // The reading is the CONSUMING endpoint's row — channels are keyed
     // (scope, name) since wire 6, and a playlist entry's sink row (wire 8)
     // must never be confused with an enclosing scope's same-named channel.
@@ -5503,10 +5890,28 @@ fn live_channel_value(
     let channel = graph.channels.iter().find(|channel| {
         channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
     })?;
-    if channel.kind == Some(lpc_model::Kind::Instant) {
+    let value = channel.value.as_ref()?.value.as_ref()?;
+    // A product handle first, before any kind test: the chip is revision-
+    // stable, so no exclusion applies to it.
+    if let lpc_model::LpValue::Product(product) = value {
+        return Some(
+            crate::UiProductKind::of_product_ref(*product)
+                .detail_label()
+                .to_string(),
+        );
+    }
+    // A PhasorConfig on a config channel displays as its period: the value
+    // only moves when someone writes it (a knob, an authored writer), so the
+    // churn worry behind the instant exclusion does not apply, and the speed
+    // knob riding the channel needs the reading to track its own writes.
+    if let Some(period) = crate::app::project::phasor_config_period(value) {
+        return crate::app::project::format_live_scalar(&lpc_model::LpValue::F32(period));
+    }
+    let instant =
+        binding_kind == lpc_model::Kind::Instant || channel.kind == Some(lpc_model::Kind::Instant);
+    if instant {
         return None;
     }
-    let value = channel.value.as_ref()?.value.as_ref()?;
     crate::app::project::format_live_scalar(value)
 }
 
@@ -6173,6 +6578,163 @@ mod tests {
         let project = ProjectController::new();
 
         assert!(project.actions(false).is_empty());
+    }
+
+    /// A library holding one package built from `files`, plus its handle.
+    fn package_for_open(
+        files: &[(&str, &[u8])],
+    ) -> (
+        crate::app::library::LibraryStore,
+        crate::app::library::PackageSummary,
+    ) {
+        use crate::app::library::{LibraryStore, PackageProvenance};
+
+        let store = LibraryStore::new(
+            std::rc::Rc::new(std::cell::RefCell::new(lpfs::LpFsMemory::new())),
+            std::rc::Rc::new(|| [5u8; 16]),
+            std::rc::Rc::new(|| "2026-08-04-1800".to_string()),
+        );
+        let files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
+            .collect();
+        let summary = store
+            .install_package("old", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+        (store, summary)
+    }
+
+    #[test]
+    fn migrating_on_open_saves_the_upgrade_before_anything_reads_the_package() {
+        // The hard ordering constraint (P3/D11): `open_library_project`
+        // verifies the runtime's hash against the library's, so migrated
+        // bytes must be written back AND saved before the push payload is
+        // read. Migrating in flight would push bytes the library does not
+        // have and fail the hash check.
+        let (store, summary) = package_for_open(&[
+            ("project.json", br#"{"format":4,"name":"old"}"#),
+            ("module.json", br#"{"kind":"Module"}"#),
+        ]);
+        assert_eq!(
+            summary.health,
+            crate::app::library::PackageHealth::UpgradesOnOpen { found: 4 },
+            "the gallery calls this a normal card that migrates on open"
+        );
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head().expect("installed packages are saved");
+
+        let mut project = ProjectController::new();
+        project.migrate_package_on_open(&mut handle, 2.0).unwrap();
+
+        let files = handle.read_all_files().unwrap();
+        let (_, manifest) = files
+            .iter()
+            .find(|(path, _)| path == "project.json")
+            .expect("manifest");
+        let manifest = String::from_utf8(manifest.clone()).unwrap();
+        assert!(
+            manifest.contains(&format!(
+                "\"format\": {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            )),
+            "the migration is ON DISK, not in flight: {manifest}"
+        );
+
+        let head = handle.history.head().expect("head");
+        assert_ne!(head, before, "the migration recorded a save");
+        assert_eq!(
+            handle.content_hash().unwrap(),
+            head,
+            "the hash the server verifies is the saved one"
+        );
+
+        // the pre-migration state survives as a version to go back to
+        use lpfs::LpFs as _;
+        let history_fs = handle.history_fs.borrow();
+        let snapshots = lpc_history::SnapshotStore::new(&*history_fs);
+        let restored = lpfs::LpFsMemory::new();
+        snapshots.materialize(&before, &restored).unwrap();
+        let original = restored
+            .read_file(lpc_model::LpPath::new("/project.json"))
+            .unwrap();
+        assert!(
+            String::from_utf8(original)
+                .unwrap()
+                .contains("\"format\": 4"),
+            "the version before the upgrade is still restorable"
+        );
+
+        let notices = project.take_open_notices();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(
+            notices[0].message.contains(&format!(
+                "from format 4 to {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            )),
+            "{}",
+            notices[0].message
+        );
+    }
+
+    #[test]
+    fn a_current_format_package_is_neither_migrated_nor_announced() {
+        let (store, summary) = package_for_open(&[(
+            "project.json",
+            format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION).as_bytes(),
+        )]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head();
+
+        let mut project = ProjectController::new();
+        project.migrate_package_on_open(&mut handle, 2.0).unwrap();
+
+        assert_eq!(handle.history.head(), before, "no save, no churn");
+        assert!(project.take_open_notices().is_empty());
+    }
+
+    #[test]
+    fn a_below_floor_package_refuses_to_open_with_a_classified_issue() {
+        // The explicit ask: the editor must say "too old, here is what to
+        // do", not show a parser complaint about an unknown field.
+        let (store, summary) =
+            package_for_open(&[("project.json", br#"{"format":3,"name":"ancient"}"#)]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let before = handle.history.head();
+
+        let mut project = ProjectController::new();
+        let error = project
+            .migrate_package_on_open(&mut handle, 2.0)
+            .expect_err("below the floor");
+        assert!(error.message().contains("Format 3"), "{error}");
+        assert_eq!(
+            handle.history.head(),
+            before,
+            "a refused open never half-migrates the package"
+        );
+
+        // the studio controller's generic failure path must not overwrite it
+        project.fail(error.to_string());
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state, got {:?}", project.state);
+        };
+        assert!(
+            issue.message.contains("Format 3 — too old for this Studio"),
+            "{}",
+            issue.message
+        );
+        let detail = issue.detail.as_deref().expect("a remedy");
+        assert!(
+            detail.contains("too old to upgrade automatically"),
+            "{detail}"
+        );
+
+        // a later, unclassified failure still reports itself normally
+        project.fail("the runtime went away");
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state");
+        };
+        assert_eq!(issue.message, "the runtime went away");
+        assert_eq!(issue.detail, None);
     }
 
     /// GV fix 4: the project title (pane AND root card) comes from the
@@ -7718,6 +8280,185 @@ mod tests {
         );
     }
 
+    /// The fixture-shaped control product a `control.out` channel resolves
+    /// to: node 3's second output, two rows of 16 samples.
+    fn fixture_control_product() -> lpc_model::ControlProduct {
+        lpc_model::ControlProduct::new(
+            lpc_model::NodeId::new(3),
+            1,
+            lpc_model::ControlExtent::new(2, 16),
+        )
+    }
+
+    /// A scope's `control.out` carrying a resolved control product, with the
+    /// scope's `visual.out` optionally present (a control-first module has
+    /// no visual writer at all).
+    fn control_out_graph(
+        scope: lpc_wire::WireScopeRef,
+        visual: Option<lpc_model::ProductRef>,
+    ) -> lpc_wire::WireBindingGraph {
+        let channel = |name: &str, value: lpc_model::ProductRef, primary_visual: bool| {
+            lpc_wire::WireBusChannel {
+                scope: Some(scope),
+                name: name.to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::Product(value)),
+                    error: None,
+                }),
+                primary_visual,
+            }
+        };
+        let mut channels = vec![channel(
+            lpc_model::PRIMARY_CONTROL_CHANNEL,
+            lpc_model::ProductRef::control(fixture_control_product()),
+            false,
+        )];
+        if let Some(visual) = visual {
+            channels.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
+        }
+        lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels,
+        }
+    }
+
+    #[test]
+    fn the_value_box_shows_control_products_not_only_visuals() {
+        // A control channel's value box is the fixture's lamps, not
+        // "control product #3:1" — the same shared preview payload the
+        // visual rows carry, with the control family on it.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+        // The product enters the tracked stream (Pending until the first
+        // probe answers) exactly as a subscribed node's product would.
+        let product = UiProductRef::from_control_product(fixture_control_product());
+        let _ = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![product]);
+
+        let bus = project
+            .ui_bus_view_for_scope(scope)
+            .expect("wiring view for the root scope");
+        let channel = bus
+            .channels
+            .iter()
+            .find(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .expect("the control channel lists");
+        let preview = channel
+            .preview
+            .as_ref()
+            .expect("a control product in the stream shows its picture");
+        assert_eq!(preview.kind, crate::UiProductKind::Control);
+        assert_eq!(preview.preview, UiProductPreview::Pending);
+        assert_eq!(
+            preview.tracking,
+            UiProductTrackingState::Tracking,
+            "the root scope's control.out is the always-live primary control"
+        );
+    }
+
+    #[test]
+    fn the_primary_control_product_is_always_subscribed() {
+        // Nothing focused, device lens: the project's rendered lamps still
+        // stream, or no surface outside the focused fixture card could ever
+        // show them.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::from_control_product(fixture_control_product())]
+        );
+    }
+
+    #[test]
+    fn a_control_first_module_heroes_its_control_output() {
+        // No visual writer anywhere in the scope: the module's own mirror
+        // renders CLEARED, so the hero is the scope's control product —
+        // family included, since that is what picks the lamp layout.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Control);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_control_product(fixture_control_product()))
+        );
+        assert_eq!(hero.tracking, UiProductTrackingState::Tracking);
+    }
+
+    #[test]
+    fn a_module_with_a_visual_keeps_its_visual_hero() {
+        // The control fallback is exactly that: a scope that resolves a
+        // visual still heroes the visual, control channel or not.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        let visual = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(2),
+            0,
+        ));
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, Some(visual)));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Visual);
+    }
+
     #[test]
     fn sim_lens_subscribes_unfocused_nodes_device_stays_focused_only() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
@@ -8058,7 +8799,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_rows_carry_quantized_live_values_and_skip_time_kind() {
+    fn bound_rows_carry_quantized_live_values_and_skip_scalar_instants() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
         let mut project = ProjectController::new();
@@ -8152,14 +8893,83 @@ mod tests {
             bound_endpoint("Wired in").live_value.as_deref(),
             Some("0.12")
         );
-        // Time-kind channels are excluded so the per-tick clock advance
-        // never dirties the DTO change gate.
+        // A SCALAR instant channel stays excluded: its number advances every
+        // tick and would dirty the DTO change gate on every pull.
         assert_eq!(bound_endpoint("Wired time").live_value, None);
         // Def-root slot wired by the overlay: the live pass decorates it.
         assert_eq!(
             bound_endpoint("Brightness").live_value.as_deref(),
             Some("0.12")
         );
+    }
+
+    /// P7 item 2: the Instant exclusion was about CHURN, not about the kind.
+    /// Since the M2 break `bus:time` carries a `TimeProduct` handle, whose
+    /// identity is revision-stable, so it displays its product chip like
+    /// `visual.out` does — and the chip is a constant string, so the
+    /// whole-DTO change gate stays quiet across ticks.
+    #[test]
+    fn a_product_valued_instant_channel_shows_its_chip_instead_of_being_excluded() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let product_channel = |name: &str, value: LpValue| lpc_wire::WireBusChannel {
+            scope: None,
+            name: name.to_string(),
+            kind: Some(lpc_model::Kind::Instant),
+            providers: Vec::new(),
+            consumers: Vec::new(),
+            value: Some(lpc_wire::WireBusChannelValue {
+                revision: Revision::new(2),
+                value: Some(value),
+                error: None,
+            }),
+            primary_visual: false,
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("wired_time").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Instant,
+                    panel_show: false,
+                }],
+                channels: vec![product_channel(
+                    "time",
+                    LpValue::Product(lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
+                        lpc_model::NodeId::new(2),
+                        0,
+                    ))),
+                )],
+            });
+        project.apply_default_binding_overlay();
+        project.apply_bound_live_values();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let row = config
+            .iter()
+            .find(|slot| slot.label == "Wired time")
+            .unwrap();
+        let UiSlotSourceState::Bound(endpoint) = &row.source else {
+            panic!("expected the time row to be bound, got {:?}", row.source);
+        };
+        assert_eq!(endpoint.live_value.as_deref(), Some("Time product"));
     }
 
     /// GV fix 5: a panel write echoes locally, so the control reads its new
@@ -8750,6 +9560,223 @@ mod tests {
             NodeRuntimeStatus::Ok,
         ));
         view
+    }
+
+    /// Clock-face v2: one card per downstream READING, named by the reader;
+    /// a shared integrator fans out one violet card per reader; a row the
+    /// probe caught before its first reading falls back to one origin-named
+    /// card so the count never flickers to zero.
+    #[test]
+    fn phasor_rows_flatten_into_reader_named_cards() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        // A private row with its own reading: one card, reader-named.
+        let private = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Node {
+                node: 1,
+                slot: "phase".to_string(),
+            },
+            phase: 0.256,
+            cycle: 3,
+            period_seconds: 4.0,
+            readings: vec![lpc_wire::WirePhasorReading {
+                node: 1,
+                slot: "phase".to_string(),
+                waveform: lpc_model::Waveform::Sine,
+                phase_offset: 0.25,
+            }],
+        });
+        assert_eq!(private.len(), 1);
+        assert_eq!(
+            private[0].label, "Orbit · phase",
+            "reader node label · consumed slot"
+        );
+        assert!(!private[0].shared, "a node+slot key is nobody else's");
+        assert_eq!(private[0].detail, None);
+        assert_eq!(private[0].rate_display, "15/min");
+        assert_eq!(private[0].waveform, lpc_model::Waveform::Sine);
+        assert_eq!(private[0].phase_offset, 0.25);
+        assert_eq!((private[0].phase, private[0].cycle), (0.256, 3));
+
+        // A shared row with two readers: two cards, both violet, each with
+        // its OWN shaping of the one cycle, channel named in the detail.
+        let shared = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Channel {
+                scope: lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                },
+                channel: "speed".to_string(),
+            },
+            phase: 0.5,
+            cycle: 0,
+            period_seconds: 0.0,
+            readings: vec![
+                lpc_wire::WirePhasorReading {
+                    node: 1,
+                    slot: "wave".to_string(),
+                    waveform: lpc_model::Waveform::Ramp,
+                    phase_offset: 0.0,
+                },
+                lpc_wire::WirePhasorReading {
+                    node: 99,
+                    slot: "wave".to_string(),
+                    waveform: lpc_model::Waveform::Square,
+                    phase_offset: 0.5,
+                },
+            ],
+        });
+        assert_eq!(shared.len(), 2, "one card per reader of the channel");
+        assert_eq!(shared[0].label, "Orbit · wave");
+        // A node the tree no longer carries still has readings in the store
+        // until the next sweep: name it by id rather than dropping it.
+        assert_eq!(shared[1].label, "node 99 · wave");
+        assert!(shared.iter().all(|card| card.shared));
+        assert!(
+            shared
+                .iter()
+                .all(|card| card.detail.as_deref() == Some("bus:speed in Orbit")),
+            "{shared:?}"
+        );
+        assert_eq!(
+            shared[0].rate_display, "0/s",
+            "frozen never cycles (unit-awareness: the rate says 0, not a period)"
+        );
+        assert_eq!(shared[1].waveform, lpc_model::Waveform::Square);
+
+        // No readings yet (probe raced the first advance): one fallback
+        // card named by the origin, unshaped.
+        let fallback = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Channel {
+                scope: lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                },
+                channel: "speed".to_string(),
+            },
+            phase: 0.5,
+            cycle: 0,
+            period_seconds: 2.0,
+            readings: vec![],
+        });
+        assert_eq!(fallback.len(), 1, "the card count never drops to zero");
+        assert_eq!(fallback[0].label, "bus:speed");
+        assert_eq!(fallback[0].waveform, lpc_model::Waveform::Ramp);
+        assert_eq!(fallback[0].phase_offset, 0.0);
+    }
+
+    /// P7 item 4, the decoration seam: the listing is engine state, so it
+    /// lands on an already-built face from the cached probe — and the three
+    /// answers stay three answers. "No read yet" must NOT collapse into
+    /// "nothing is running".
+    #[test]
+    fn the_clock_face_takes_its_listing_from_the_cached_timebase_probe() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let product = lpc_model::TimeProduct::new(lpc_model::NodeId::new(2), 0);
+        let product_ref = crate::UiProductRef::from_time_product(product);
+        let clock_node = || {
+            let face = crate::UiClockFace::new(
+                crate::UiProducedProduct::time("Product").with_product(product_ref),
+            );
+            let mut node = crate::UiNodeView::new(
+                crate::UiNodeHeader::new("Clock", "Clock", "/demo.module/clock.clock"),
+                vec![crate::UiNodeTab::main(Vec::new())],
+            );
+            node.face = Some(crate::UiNodeFace::Clock(face));
+            vec![node]
+        };
+        let listing = |nodes: &[crate::UiNodeView]| {
+            let Some(crate::UiNodeFace::Clock(face)) = &nodes[0].face else {
+                panic!("clock face");
+            };
+            (face.timebase, face.phasors.clone())
+        };
+
+        // Nothing cached: Unread, not an empty listing.
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unread);
+
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: vec![lpc_wire::WirePhasorRow {
+                    origin: lpc_wire::WirePhasorOrigin::Node {
+                        node: 1,
+                        slot: "phase".to_string(),
+                    },
+                    phase: 0.5,
+                    cycle: 2,
+                    period_seconds: 4.0,
+                    readings: vec![],
+                }],
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        let (state, rows) = listing(&nodes);
+        assert_eq!(state, crate::UiTimebaseState::Live);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Orbit · phase");
+        assert_eq!(rows[0].rate_display, "15/min");
+
+        // A live answer with no rows is STILL Live: nothing is riding it.
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: Vec::new(),
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(
+            listing(&nodes),
+            (crate::UiTimebaseState::Live, Vec::new()),
+            "an empty listing is a real answer, not the unread state"
+        );
+
+        project
+            .sync_mut()
+            .unwrap()
+            .set_timebase_for_test(product_ref, crate::UiTimebaseRead::Unknown);
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unknown);
+    }
+
+    /// P7 item 3: the picker knows which channels carry a HANDLE, so it can
+    /// mark a pick that could only earn a Warn — without moving `time` off
+    /// the head of the list or refusing anything.
+    #[test]
+    fn channel_choices_flag_the_product_carrying_channels() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let choices = project.ui_channel_choices();
+        let carries = |name: &str| {
+            choices
+                .iter()
+                .find(|choice| choice.name == name)
+                .unwrap_or_else(|| panic!("{name} is a well-known channel"))
+                .carries_product
+        };
+        assert_eq!(choices[0].name, "time", "time still leads the list");
+        assert!(carries("time"), "bus:time carries a TimeProduct since M2");
+        assert!(carries("visual.out"));
+        assert!(carries("control.out"));
+        assert!(!carries("brightness"), "brightness is a plain amplitude");
+        assert!(!carries("trigger"));
     }
 
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {

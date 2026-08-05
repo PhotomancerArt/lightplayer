@@ -279,6 +279,91 @@
         "description": {
           "type": "string"
         },
+        "gradient": {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "fade_seconds": {
+              "type": "number"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "set": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "space": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "stops": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "number"
+                        },
+                        "c": {
+                          "items": {
+                            "type": "number"
+                          },
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "c"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 24,
+                    "minItems": 24,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "space",
+                  "method",
+                  "count",
+                  "stops"
+                ],
+                "type": "object"
+              },
+              "maxItems": 8,
+              "minItems": 8,
+              "type": "array"
+            },
+            "step_seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "set",
+            "count",
+            "step_seconds",
+            "fade_seconds"
+          ],
+          "type": "object"
+        },
         "key": {
           "type": "string"
         },
@@ -296,6 +381,26 @@
         },
         "min": {
           "type": "number"
+        },
+        "phasor": {
+          "additionalProperties": false,
+          "properties": {
+            "period_seconds": {
+              "type": "number"
+            },
+            "phase_offset": {
+              "type": "number"
+            },
+            "waveform": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "period_seconds",
+            "waveform",
+            "phase_offset"
+          ],
+          "type": "object"
         },
         "step": {
           "type": "number"
@@ -685,7 +790,39 @@
           "type": "number"
         },
         "time": {
-          "type": "number"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "time"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "viscosity": {
           "description": "Intended non-negative float (not enforced on read).",
@@ -728,7 +865,39 @@
           "const": "Playlist"
         },
         "time": {
-          "type": "number"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "time"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "trigger": {
           "additionalProperties": {

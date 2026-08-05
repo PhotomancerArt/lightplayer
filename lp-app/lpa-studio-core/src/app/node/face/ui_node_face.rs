@@ -1,7 +1,8 @@
 //! The kind-specific face variants a node card can render.
 
 use crate::{
-    UiFixtureFace, UiModuleFace, UiOutputFace, UiPanelGroup, UiPlaylistFace, UiShaderFace,
+    UiClockFace, UiFixtureFace, UiModuleFace, UiOutputFace, UiPanelGroup, UiPlaylistFace,
+    UiShaderFace,
 };
 
 /// Kind-specific permanent face for a node card.
@@ -21,6 +22,12 @@ pub enum UiNodeFace {
     /// Output card: one row per physical wire, over the running device's
     /// board diagram when its board is known.
     Output(UiOutputFace),
+    /// Clock card (D10): the published time product plus the read-only
+    /// listing of the phasors riding its timebase. Its rows come from the
+    /// timebase probe, not from the node's slots, so — like the output
+    /// face's board facts — they arrive through a controller decoration
+    /// pass rather than the section walk.
+    Clock(UiClockFace),
     /// Module card (`docs/design/modules.md` §5): output-mirror hero, the
     /// scope's panel, and the bus-wiring drawer. Worn at every depth — root
     /// workspace card and embedded child card alike. Its children render

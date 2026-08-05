@@ -18,14 +18,15 @@
 
 use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace,
-    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState,
-    UiSlotFieldState, UiSlotValue, UiStatus,
+    UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
+    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
+    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
+use crate::app::node::node_story_fixtures::control_preview_product;
 
 use super::PanelGesture;
 
@@ -99,6 +100,7 @@ fn knob(
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Knob { min, max, step },
@@ -121,6 +123,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Fader {
@@ -147,6 +150,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Toggle,
@@ -390,6 +394,63 @@ pub(crate) fn root_face() -> UiModuleFace {
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
         // The project root owns panel persistence (P11).
         auto_save: Some(true),
+    }
+}
+
+/// A control-first module's face: nothing writes the scope's visual, so
+/// the mirror would render cleared and the hero is the scope's `control.out`
+/// product instead — the fixture's lamp layout, drawn by the same preview
+/// component the fixture card uses.
+pub(crate) fn control_root_face() -> UiModuleFace {
+    UiModuleFace {
+        preview: Some(
+            control_preview_product("output")
+                .with_detail("16 RGB lamps · mirrors control.out")
+                .with_tracking(UiProductTrackingState::Tracking),
+        ),
+        panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
+            .with_target(scope_target(ROOT_SCOPE))
+            .with_controls(vec![at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            )]),
+        wiring: Some(control_wiring()),
+        wiring_open: false,
+        provenance: None,
+        auto_save: Some(true),
+    }
+}
+
+/// A control-first scope's wiring: the fixture renders the lamps and the
+/// hardware output reads them; no channel carries a visual.
+fn control_wiring() -> UiBusView {
+    UiBusView {
+        channels: vec![
+            channel(
+                "time",
+                "Instant",
+                Some("12.44"),
+                vec![site("clock", "seconds")],
+                vec![site("scanner", "time")],
+            ),
+            UiBusChannelView {
+                // The hero and the value box show the SAME lamps: both
+                // hang off the scope's resolved control product.
+                preview: Some(UiBusChannelPreview {
+                    kind: UiProductKind::Control,
+                    preview: control_preview_product("output").preview,
+                    tracking: UiProductTrackingState::Tracking,
+                    frame: UiProductPreviewFrame::VISUAL_DEFAULT,
+                }),
+                ..channel(
+                    "control.out",
+                    "Color",
+                    Some("control product #7:0"),
+                    vec![site("Fixture", "output")],
+                    vec![site("Output", "input")],
+                )
+            },
+        ],
     }
 }
 

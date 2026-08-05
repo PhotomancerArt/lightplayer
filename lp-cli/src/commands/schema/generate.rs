@@ -5,13 +5,11 @@
 //!
 //! - `project.schema.json` — the `project.json` container manifest (not a
 //!   node envelope): `format` pinned to
-//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`/`target`,
-//!   nothing else (mirrors the loader gate in `lpc-registry`, which
-//!   hard-refuses a missing/malformed manifest and rejects mismatched
-//!   formats). ⚠️ `author`/`version`/`license`/`created` are real
-//!   `ProjectManifest` fields the schema does not yet declare — a
-//!   pre-existing gap, not introduced here (P02 of the gallery-rework plan
-//!   only adds `target`).
+//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`/`target`
+//!   plus the optional provenance fields (`author`/`version`/`license`/
+//!   `created`), nothing else (mirrors the loader gate in `lpc-registry`,
+//!   which hard-refuses a missing/malformed manifest and rejects mismatched
+//!   formats).
 //! - `module.schema.json` — the `module.json` root module node artifact:
 //!   top-level `kind: "Module"` const plus the compiled `ModuleDef` shape.
 //! - `node.schema.json` — any authored node artifact: `oneOf` over every
@@ -147,15 +145,19 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 ///
 /// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
 /// carries the workspace identity — `format` pinned to the current
-/// [`PROJECT_FORMAT_VERSION`], optional `uid`, `name`, and `target` — and
-/// nothing else (`additionalProperties: false` mirrors the strict streaming
-/// reader in `lpc_model::ProjectManifest`, which rejects unknown fields).
+/// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the advisory `target`,
+/// and the optional provenance fields `author`/`version`/`license`/`created`
+/// — and nothing else (`additionalProperties: false` mirrors the strict
+/// streaming reader in `lpc_model::ProjectManifest`, which rejects unknown
+/// fields). The property list must track `ProjectManifest`'s fields
+/// one-for-one: the reader accepts exactly these keys, so a field missing
+/// here is legal on disk but flagged by schema validation as unknown.
 fn project_schema() -> Result<Value> {
     Ok(json!({
         "title": "LightPlayer project container manifest",
         "description": "Workspace identity of a project folder: format \
-    version, library uid, and display name. Not a node artifact — the root \
-    module node lives in module.json.",
+    version, library uid, display name, and provenance. Not a node artifact \
+    — the root module node lives in module.json.",
         "type": "object",
         "properties": {
             "format": {
@@ -168,6 +170,22 @@ fn project_schema() -> Result<Value> {
             },
             "name": {
                 "title": "Human-readable project name",
+                "type": "string",
+            },
+            "author": {
+                "title": "Provenance: author attribution",
+                "type": "string",
+            },
+            "version": {
+                "title": "Provenance: authored version string (no semver semantics yet)",
+                "type": "string",
+            },
+            "license": {
+                "title": "Provenance: license identifier (e.g. \"CC0-1.0\")",
+                "type": "string",
+            },
+            "created": {
+                "title": "Provenance: ISO date the project was created",
                 "type": "string",
             },
             "target": {

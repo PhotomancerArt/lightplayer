@@ -45,6 +45,17 @@ pub struct UiBindingAuthoring {
     /// a default is a plain Bind, and removing the authored entry re-enables
     /// the default).
     pub authored: Option<UiBindingEndpoint>,
+    /// The slot this authors takes a plain NUMBER.
+    ///
+    /// Which makes a product-carrying channel — `bus:time` since the M2
+    /// break, `bus:visual.out`, `bus:control.out` — a pick that cannot
+    /// resolve: the consumer gets a handle where it wanted an f32, and the
+    /// engine reports the per-input conversion failure as a `Warn` card.
+    /// The picker uses this to say so BEFORE the pick (P7 item 3), which is
+    /// all it does: the engine's Warn stays the authority, arbitrary names
+    /// stay legal, and nothing here refuses a click (D9 — the picker
+    /// teaches the norm, it does not gate).
+    pub scalar_slot: bool,
 }
 
 impl UiBindingAuthoring {
@@ -78,4 +89,9 @@ pub struct UiChannelChoice {
     pub well_known: bool,
     /// True when the channel is currently observed in the project.
     pub observed: bool,
+    /// The channel carries a **product handle** (a lazy graph capability),
+    /// not a number — `time`, `visual.out`, `control.out`. Paired with
+    /// [`UiBindingAuthoring::scalar_slot`] this is what lets the picker
+    /// mark a pick that would only produce a `Warn`.
+    pub carries_product: bool,
 }

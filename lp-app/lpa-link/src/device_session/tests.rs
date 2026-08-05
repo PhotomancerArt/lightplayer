@@ -15,8 +15,8 @@ use lpc_wire::{ClientMessage, ClientRequest, WIRE_PROTO_VERSION};
 use crate::provider::endpoint::LinkEndpointId;
 use crate::providers::fake::FakeProvider;
 use crate::providers::fake_device::{
-    FAKE_IMAGE_IDENTITY, FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device,
-    FakeFailurePlan, FakeLightPlayerState,
+    FAKE_IMAGE_IDENTITY, FAKE_PROBED_MAC, FakeBootState, FakeDeviceIdentity, FakeDeviceScript,
+    FakeEsp32Device, FakeFailurePlan, FakeLightPlayerState,
 };
 use crate::{
     LinkConnector, LinkEndpointStatus, LinkManagementRequest, LinkManagementResult,
@@ -841,6 +841,131 @@ async fn probe_link_mode_is_authoritative_and_carries_chip_identity() {
     assert!(
         !mode.probe_would_help(),
         "an answered probe is final — re-probing only costs another reboot"
+    );
+}
+
+// --- probed MAC: download-mode identity evidence (rule A2) ---------------
+
+#[tokio::test]
+async fn the_flash_preflight_records_a_normalized_probed_mac() {
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+    assert_eq!(
+        session.snapshot().probed_mac,
+        None,
+        "nothing has entered the bootloader yet, so there is no A2 evidence"
+    );
+
+    let outcome = session
+        .manage(
+            LinkManagementRequest::FlashFirmware { build_id: None },
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap();
+
+    // The flash still lands exactly where it did before the MAC read: the
+    // evidence rides along, it does not steer.
+    assert!(matches!(
+        outcome.result,
+        LinkManagementResult::FlashFirmware(_)
+    ));
+    assert!(outcome.state.is_ready());
+    // Reported uppercase by the flasher, stored lowercase — the hello's
+    // spelling, so both acquisition rules produce one comparable string.
+    assert_eq!(
+        session.snapshot().probed_mac.as_deref(),
+        Some("60:55:f9:0a:0b:0c")
+    );
+    assert_ne!(FAKE_PROBED_MAC, "60:55:f9:0a:0b:0c");
+}
+
+#[tokio::test]
+async fn probed_mac_evidence_outlives_the_link_generation_that_read_it() {
+    // The classifier is wiped on every rebuild — stale boot lines must not
+    // classify a new link. Silicon identity is the opposite kind of fact:
+    // the erase that follows a flash learns no MAC of its own, and must not
+    // erase the one already known either.
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+    session
+        .manage(
+            LinkManagementRequest::FlashFirmware { build_id: None },
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap();
+
+    session
+        .manage(
+            LinkManagementRequest::EraseDeviceFlash,
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        session.snapshot().probed_mac.as_deref(),
+        Some("60:55:f9:0a:0b:0c"),
+        "an erase reads no MAC; that is not evidence the board changed"
+    );
+}
+
+#[tokio::test]
+async fn a_reported_mac_that_is_not_one_leaves_the_session_anonymous() {
+    // The browser flasher's read crosses untestable JS, so the gate is here.
+    // A refused value must leave the session exactly as anonymous as it was
+    // — never half-stored, never a made-up identity.
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    for reported in [
+        None,
+        Some("00:00:00:00:00:00"),
+        // An EUI-64: the same chip, the same spelling, a different address.
+        Some("60:55:f9:ff:fe:0a:0b:0c"),
+        Some("MAC: 60:55:f9:0a:0b:0c"),
+    ] {
+        session.shared.record_probed_mac(reported);
+        assert_eq!(session.snapshot().probed_mac, None, "{reported:?}");
+    }
+
+    session.shared.record_probed_mac(Some(FAKE_PROBED_MAC));
+    session.shared.record_probed_mac(Some("nonsense"));
+    assert_eq!(
+        session.snapshot().probed_mac.as_deref(),
+        Some("60:55:f9:0a:0b:0c"),
+        "a later unreadable answer does not unsay a MAC already read"
     );
 }
 

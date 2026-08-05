@@ -10,6 +10,7 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
     ProjectSyncPhase, RosterCardState, UiAgentStatus, UiDeviceCard, UiDeviceProjectChip,
@@ -242,6 +243,7 @@ fn readme_home_view() -> UiHomeView {
             }),
             running_in_sim: false,
             target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -254,6 +256,7 @@ fn readme_home_view() -> UiHomeView {
             connected_device: None,
             running_in_sim: true,
             target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -266,6 +269,7 @@ fn readme_home_view() -> UiHomeView {
             connected_device: None,
             running_in_sim: false,
             target: None,
+            health: PackageHealth::Ready,
         },
     ];
     let devices = vec![

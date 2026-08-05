@@ -1,5 +1,7 @@
 //! One library package as the gallery shows it.
 
+use crate::app::library::PackageHealth;
+
 /// A "Your projects" card. The thumbnail is deliberately absent from the
 /// model: the source is swappable by design (placeholder now, cached rendered
 /// frame later) and lives entirely in the renderer.
@@ -41,6 +43,12 @@ pub struct UiPackageCard {
     /// meaning attaches to it here — the engine never reads it, and the
     /// mismatch warning is P06's job, not this card's.
     pub target: Option<String>,
+
+    /// The package's format standing: openable as-is, openable after an
+    /// automatic migration, or not openable at all — in which case the card
+    /// says what was found and what to do instead of the package quietly
+    /// not being here (P3).
+    pub health: PackageHealth,
 }
 
 /// The live-device indication a unified project card carries (D24).

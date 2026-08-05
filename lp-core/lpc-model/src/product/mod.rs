@@ -11,5 +11,6 @@ pub use crate::products::control::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
     ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan,
 };
+pub use crate::products::time::TimeProduct;
 pub use crate::products::visual::VisualProduct;
 pub use product_ref::{ProductKind, ProductRef};

@@ -22,5 +22,6 @@ pub use knob_field::KnobField;
 #[cfg(feature = "stories")]
 pub(crate) use knob_field::knob_snap;
 pub use panel_control::PanelControl;
+pub(crate) use panel_control::phasor_speed_display;
 pub use panel_emit::PanelEmit;
 pub use toggle_field::ToggleField;

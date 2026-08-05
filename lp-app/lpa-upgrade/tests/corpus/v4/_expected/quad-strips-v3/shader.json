@@ -1,0 +1,20 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "consumed": {
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  },
+  "float_mode": "fixed"
+}

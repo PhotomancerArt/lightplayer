@@ -18,7 +18,7 @@ use crate::node::kind::NodeKind;
 use crate::nodes::fixture::{FixtureDef, MappingConfig};
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSlotDef};
 use crate::nodes::texture::TextureDef;
-use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef};
+use crate::{AssetSlot, EnumSlot, MapSlot, NodeDef, PhasorConfig, Waveform};
 
 /// Placeholder in starter asset names and asset references. Callers substitute
 /// the artifact file stem (e.g. `pulse.json` ⇒ stem `pulse`) via
@@ -26,12 +26,14 @@ use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef};
 pub const STARTER_STEM_PLACEHOLDER: &str = "{stem}";
 
 /// Canonical scaffold shader: the smallest animating body in the repo (red
-/// pulse). It proves compile plus clock binding on first render.
+/// pulse). It proves compile plus clock binding on first render, and it
+/// teaches the phasor idiom — `phase` already wraps in `[0,1)`, so no shader
+/// ever has to fold raw seconds itself.
 pub const STARTER_SHADER_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec4 render(vec2 pos) {
-    return vec4(mod(time, 1.0), 0.0, 0.0, 1.0);
+    return vec4(phase, 0.0, 0.0, 1.0);
 }
 ";
 
@@ -39,7 +41,7 @@ vec4 render(vec2 pos) {
 /// A compute shader's bare default references a dangling `main.glsl` and
 /// fails the runtime spine load outright, so the starter must scaffold a
 /// real, trivially-compiling source.
-pub const STARTER_COMPUTE_GLSL: &str = "void tick() { phase = mod(time, 1.0); }
+pub const STARTER_COMPUTE_GLSL: &str = "void tick() { pulse = phase; }
 ";
 
 /// Canonical scaffold mapping document: a small grid, immediately visible
@@ -182,14 +184,28 @@ pub fn starter_def_for_kind(kind: NodeKind) -> NodeDef {
     starter_for_kind(kind).map_or_else(|| NodeDef::default_for_kind(kind), |starter| starter.def)
 }
 
-/// The `time` consumed slot every starter shader declares, default-bound to
-/// the project clock bus so the scaffold animates without manual wiring.
-pub fn starter_time_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
+/// The period, in seconds, of the `phase` uniform every starter shader
+/// declares. Four seconds is slow enough to read as motion rather than
+/// flicker on a first render.
+pub const STARTER_PHASE_PERIOD_SECONDS: f32 = 4.0;
+
+/// The `phase` consumed slot every starter shader declares: a phasor uniform
+/// riding the scope's time product, so the scaffold animates without manual
+/// wiring AND teaches the idiom (wrapped cycle position, never raw seconds —
+/// raw seconds overflow Q16.16 after about nine hours on device).
+pub fn starter_phase_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
     let mut slots = lp_collection::VecMap::new();
     slots.insert(
-        String::from("time"),
-        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None)
-            .with_default_bind(BindingRef::parse("bus:time").expect("bus:time endpoint")),
+        String::from("phase"),
+        ShaderSlotDef::phasor(
+            "Phase",
+            "Cycle position (0-1) over the phasor period",
+            PhasorConfig {
+                period_seconds: STARTER_PHASE_PERIOD_SECONDS,
+                waveform: Waveform::Ramp,
+                phase_offset: 0.0,
+            },
+        ),
     );
     MapSlot::new(slots)
 }
@@ -197,7 +213,7 @@ pub fn starter_time_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 fn starter_shader_def() -> ShaderDef {
     ShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        consumed_slots: starter_time_consumed_slots(),
+        consumed_slots: starter_phase_consumed_slots(),
         ..ShaderDef::default()
     }
 }
@@ -205,12 +221,12 @@ fn starter_shader_def() -> ShaderDef {
 fn starter_compute_shader_def() -> ComputeShaderDef {
     let mut produced = lp_collection::VecMap::new();
     produced.insert(
-        String::from("phase"),
-        ShaderSlotDef::value_f32("Phase", "Computed clock phase (0..1)", 0.0, None),
+        String::from("pulse"),
+        ShaderSlotDef::value_f32("Pulse", "Computed pulse level (0..1)", 0.0, None),
     );
     ComputeShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        consumed_slots: starter_time_consumed_slots(),
+        consumed_slots: starter_phase_consumed_slots(),
         produced_slots: MapSlot::new(produced),
         ..ComputeShaderDef::default()
     }
@@ -274,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_shader_starter_scaffolds_a_real_source_with_time_and_phase() {
+    fn compute_shader_starter_scaffolds_a_real_source_with_phase_and_pulse() {
         // The bare ComputeShader default references a dangling `main.glsl`
         // and fails the runtime spine load — the starter must scaffold a
         // real source plus the slots its body uses.
@@ -292,8 +308,8 @@ mod tests {
                 .to_string(),
             "pulse.glsl"
         );
-        assert!(compute.consumed_slots.entries.get("time").is_some());
-        assert!(compute.produced_slots.entries.get("phase").is_some());
+        assert!(compute.consumed_slots.entries.get("phase").is_some());
+        assert!(compute.produced_slots.entries.get("pulse").is_some());
         assert_eq!(
             starter.assets,
             vec![(
@@ -317,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn shader_starter_references_stem_glsl_with_time_slot_and_asset() {
+    fn shader_starter_references_stem_glsl_with_phase_slot_and_asset() {
         let starter = starter_for_kind(NodeKind::Shader).expect("shader starter");
         let NodeDef::Shader(shader) = &starter.def else {
             panic!("expected shader");
@@ -326,20 +342,23 @@ mod tests {
             shader.shader_source().artifact_value().unwrap().to_string(),
             "{stem}.glsl"
         );
-        let time = shader
+        let phase = shader
             .consumed_slots
             .entries
-            .get("time")
-            .expect("time consumed slot");
-        assert_eq!(*time.kind.value(), crate::ShaderSlotKind::Value);
+            .get("phase")
+            .expect("phase consumed slot");
+        // A phasor slot rides the scope's time product — it takes no
+        // `bus:time` binding of its own (that channel now carries a product,
+        // and an f32 uniform bound to it would warn, not animate).
+        assert_eq!(*phase.kind.value(), crate::ShaderSlotKind::Phasor);
+        assert!(phase.default_bind.data.is_none());
         assert_eq!(
-            time.default_bind
-                .data
-                .as_ref()
-                .expect("default bind")
-                .value()
-                .to_string(),
-            "bus:time"
+            phase.phasor_config(),
+            crate::PhasorConfig {
+                period_seconds: STARTER_PHASE_PERIOD_SECONDS,
+                waveform: crate::Waveform::Ramp,
+                phase_offset: 0.0,
+            }
         );
         assert_eq!(
             *shader.float_mode.value(),

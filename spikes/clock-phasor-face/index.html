@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clock face v2 — phasor-first — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio dark palette (from spikes/wiring-ui) ----------------- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --raised: #20272e;
+    --terminal: #0c1114;
+    --track: #10151a;
+
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-strong: #3e4852;
+
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+
+    --bound-bg: #241a33;
+    --bound-border: #5f4a85;
+    --bound-text: #c9b1f5;
+
+    --attn-bg: #291f14; --attn-border: #795833; --attn-text: #f0b97a;
+    --live-text: #9cc8ee;
+
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 18px; max-width: 720px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 34px 0 6px; }
+  h2 small { color: var(--dim); text-transform: none; letter-spacing: 0; font-weight: 400; }
+  p.note { color: var(--dim); font-size: 11.5px; margin: 0 0 12px; max-width: 720px; }
+
+  /* ---- exploration controls ---------------------------------------- */
+  .controls {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px;
+    position: sticky; top: 8px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(6px); z-index: 5;
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; }
+  .controls .group b { color: var(--text); font-weight: 600; font-size: 11px;
+                       text-transform: uppercase; letter-spacing: .08em; }
+  .controls button {
+    font: 11px var(--mono); color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 9px; cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--border-strong); color: var(--text); }
+  .controls button[data-on] { color: var(--accent); border-color: var(--accent); }
+  .controls button.scrub[data-on] { color: var(--attn-text); border-color: var(--attn-border); }
+
+  /* ---- the clock card shell ---------------------------------------- */
+  .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .card {
+    width: 380px; border-radius: 10px; overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .card.wide { width: 560px; }
+  .card > header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: var(--terminal);
+    border-bottom: 1px solid var(--border); font-size: 13px;
+  }
+  .card > header .kind { color: var(--dim); font-size: 11px; margin-left: auto; font-family: var(--mono); }
+  .concept-tag {
+    font: 10px var(--mono); color: var(--dim); letter-spacing: .06em;
+    padding: 2px 0 8px 2px;
+  }
+
+  .section {
+    border-top: 1px solid var(--border-muted);
+    display: grid; grid-template-columns: 18px 1fr; min-height: 40px;
+  }
+  .section:first-of-type { border-top: 0; }
+  .section > .rail {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--dim); display: flex; align-items: center; justify-content: center;
+    padding: 6px 2px; border-right: 1px solid var(--border-muted);
+    background: var(--surface-muted);
+  }
+  .section > .body { min-width: 0; padding: 8px 10px; }
+
+  .sec-head {
+    display: flex; align-items: baseline; gap: 8px; padding: 0 2px 6px;
+  }
+  .sec-head .t-secs {
+    margin-left: auto; font: 10px var(--mono); color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .sec-head .t-secs b { color: var(--subtle); font-weight: 500; }
+
+  /* ---- concept A: production rows ----------------------------------- */
+  .prow { display: grid; gap: 3px; padding: 4px 2px; }
+  .prow .l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .prow .origin { font: 600 11px var(--mono); color: var(--strong);
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow.shared .origin { color: var(--bound-text); }
+  .prow .stag { font: 700 9px var(--mono); text-transform: uppercase;
+                letter-spacing: .06em; color: var(--bound-text); }
+  .prow .period { margin-left: auto; font: 10px var(--mono); color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+  .prow .l2 { display: flex; align-items: center; gap: 8px; }
+  .prow .bar { height: 4px; flex: 1; background: var(--border-strong);
+               border-radius: 2px; overflow: hidden; }
+  .prow .fill { height: 100%; background: var(--accent); border-radius: 2px; }
+  .prow.shared .fill { background: var(--bound-text); }
+  .prow .phi, .prow .cyc { font: 10px var(--mono); color: var(--muted);
+                           font-variant-numeric: tabular-nums; }
+  .prow .cyc { color: var(--dim); }
+
+  /* ---- concept B: trace cards --------------------------------------- */
+  .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+  .tcard {
+    background: var(--terminal); border: 1px solid var(--border-muted);
+    border-radius: 6px; overflow: hidden; min-width: 0;
+    display: flex; flex-direction: column;
+  }
+  .tcard.shared { border-color: var(--bound-border); }
+  .tcard canvas { display: block; width: 100%; height: 42px; }
+  .tcard .meta { padding: 3px 6px 5px; display: grid; gap: 1px; min-width: 0; }
+  .tcard .id { font: 600 10px var(--mono); color: var(--muted);
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tcard.shared .id { color: var(--bound-text); }
+  .tcard .sub { display: flex; gap: 6px; align-items: baseline; }
+  .tcard .sub .rate { font: 10px var(--mono); color: var(--subtle); font-variant-numeric: tabular-nums; }
+  .tcard .sub .cyc  { font: 9px var(--mono); color: var(--dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+  .tcard .sub .wf   { font: 9px var(--mono); color: var(--dim); }
+
+  /* ---- concept C: integrator cards ---------------------------------- */
+  .igrid { display: grid; gap: 8px; }
+  .icard { background: var(--terminal); border: 1px solid var(--border-muted);
+           border-radius: 6px; overflow: hidden; }
+  .icard.shared { border-color: var(--bound-border); }
+  .icard .head { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px 2px; }
+  .icard .key { font: 600 10.5px var(--mono); color: var(--strong); }
+  .icard.shared .key { color: var(--bound-text); }
+  .icard .head .rate { margin-left: auto; font: 10px var(--mono); color: var(--subtle); }
+  .icard canvas { display: block; width: 100%; height: 52px; }
+  .icard .readers { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px 6px; }
+  .icard .rchip { font: 9.5px var(--mono); color: var(--muted);
+                  border: 1px solid var(--border-muted); border-radius: 4px;
+                  padding: 1px 5px; display: inline-flex; gap: 4px; align-items: center; }
+  .icard .rchip .swatch { width: 10px; height: 2px; }
+
+  /* ---- concept D: scope strip ---------------------------------------- */
+  .scope { background: var(--terminal); border: 1px solid var(--border-muted); border-radius: 6px; overflow: hidden; }
+  .scope canvas { display: block; width: 100%; height: 96px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px 8px 7px; }
+  .lchip { font: 9.5px var(--mono); color: var(--muted); border: 1px solid var(--border-muted);
+           border-radius: 4px; padding: 1px 6px; display: inline-flex; gap: 5px; align-items: center;
+           cursor: pointer; }
+  .lchip .swatch { width: 10px; height: 2px; background: var(--text); }
+  .lchip.shared { color: var(--bound-text); border-color: var(--bound-border); }
+  .lchip[data-dim] { opacity: .35; }
+
+  .emptymsg { font-size: 11.5px; color: var(--subtle); padding: 8px 2px; margin: 0; }
+
+  /* ---- section 2: speed language ------------------------------------- */
+  .langrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: stretch; }
+  .langcard { width: 168px; background: var(--surface); border: 1px solid var(--border);
+              border-radius: 10px; padding: 12px 10px 10px; display: flex; flex-direction: column;
+              align-items: center; gap: 6px; }
+  .langcard .knob { width: 46px; height: 46px; }
+  .langcard .klabel { font: 700 10px -apple-system, sans-serif; letter-spacing: .08em;
+                      text-transform: uppercase; color: var(--subtle); }
+  .langcard .kread { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .langcard .kread b { color: var(--text); font-weight: 600; }
+  .langcard .verdict { margin-top: auto; font-size: 10.5px; color: var(--dim);
+                       border-top: 1px dashed var(--border-muted); padding-top: 6px; }
+  .dragsim { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px;
+             font-size: 11px; color: var(--muted); }
+  .dragsim input[type=range] { width: 320px; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Clock face v2 — the phasors ARE the face</h1>
+<p class="hint">
+  Thesis (G2 feedback): the clock card's body stops being readouts and becomes the phasors
+  riding it — little black-and-white time-series, one card per <em>downstream reading</em>,
+  showing the consumer's <em>actual shaped waveform</em>. Delta-t is gone; seconds survives
+  as a tiny readout in the section header. Section 5 explores the speed-knob display
+  language separately (the "1/T s" provisional from the gate).
+</p>
+
+<div class="controls">
+  <span class="group"><b>time</b>
+    <button id="c-pause">pause</button>
+    <button data-warp="1">1×</button>
+    <button data-warp="8" data-on>8×</button>
+    <button data-warp="40">40×</button>
+  </span>
+  <span class="group"><b>scrub</b>
+    <button class="scrub" id="c-scrub">−12 s and hold</button>
+  </span>
+  <span class="group"><b>data</b>
+    <button data-set="plasma">plasma</button>
+    <button data-set="rich" data-on>rich</button>
+    <button data-set="crowd">crowd + awkward</button>
+    <button data-set="empty">empty</button>
+    <button data-set="unread">unread</button>
+  </span>
+</div>
+
+<h2>1 · Today's production listing <small>— the comparison baseline</small></h2>
+<p class="note">Faithful reproduction: raw-ramp bars, φ readout, cycle count. The raw ramp was a
+deliberate choice (shaping is per-consumer) — v2 reverses it by making the card per-reading.</p>
+<div class="row">
+  <div class="card">
+    <header>Clock <span class="kind">clock</span></header>
+    <div class="section"><div class="rail">output</div><div class="body">
+      <div class="sec-head" style="padding-bottom:2px">
+        <span style="font:600 12px -apple-system">Time product</span>
+        <span style="font-size:11px;color:var(--dim)">seconds · delta · phasors</span>
+      </div>
+      <div id="a-rows"></div>
+    </div></div>
+  </div>
+</div>
+
+<h2>2 · Trace cards <small>— ★ CHOSEN at the gate (scrolling history confirmed; rate labels now auto-denominated)</small></h2>
+<p class="note">B/W scrolling traces of the <em>shaped</em> value each consumer actually reads.
+Violet border/label = a shared integrator (config channel). The header carries the whole
+seconds story now. Click nothing — this surface stays read-only; a later detail view answers
+"where is this used".</p>
+<div class="row">
+  <div class="card" id="b-card">
+    <header>Clock <span class="kind">clock</span></header>
+    <div class="section"><div class="rail">phasors</div><div class="body">
+      <div class="sec-head">
+        <span style="font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)">RIDING THIS CLOCK</span>
+        <span class="t-secs">t <b class="secs">0.0</b> s</span>
+      </div>
+      <div class="tgrid" id="b-grid"></div>
+      <p class="emptymsg" id="b-empty" hidden></p>
+    </div></div>
+  </div>
+</div>
+
+<h2>3 · Integrator cards, readings overlaid <small>— REJECTED at the gate: "keep it really simple, overlapping graphs bad"</small></h2>
+<p class="note">Kept for contrast only. The shared story lives in concept 2's violet border +
+a future per-card detail view instead.</p>
+<div class="row">
+  <div class="card" id="c-card">
+    <header>Clock <span class="kind">clock</span></header>
+    <div class="section"><div class="rail">phasors</div><div class="body">
+      <div class="sec-head">
+        <span style="font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)">INTEGRATORS</span>
+        <span class="t-secs">t <b class="secs">0.0</b> s</span>
+      </div>
+      <div class="igrid" id="c-grid"></div>
+      <p class="emptymsg" id="c-empty" hidden></p>
+    </div></div>
+  </div>
+</div>
+
+<h2>4 · Scope strip <small>— REJECTED at the gate: overlapping graphs, spaghettis under load</small></h2>
+<p class="note">Kept for contrast only.</p>
+<div class="row">
+  <div class="card wide" id="d-card">
+    <header>Clock <span class="kind">clock</span></header>
+    <div class="section"><div class="rail">phasors</div><div class="body">
+      <div class="sec-head">
+        <span style="font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)">SCOPE</span>
+        <span style="display:inline-flex;gap:4px;margin-left:10px">
+          <button class="swin" data-win="10" style="font:9px var(--mono);background:none;border:1px solid var(--border-muted);border-radius:3px;color:var(--dim);cursor:pointer;padding:0 4px">10s</button>
+          <button class="swin" data-win="30" data-on style="font:9px var(--mono);background:none;border:1px solid var(--border-strong);border-radius:3px;color:var(--muted);cursor:pointer;padding:0 4px">30s</button>
+          <button class="swin" data-win="120" style="font:9px var(--mono);background:none;border:1px solid var(--border-muted);border-radius:3px;color:var(--dim);cursor:pointer;padding:0 4px">120s</button>
+        </span>
+        <span class="t-secs">t <b class="secs">0.0</b> s</span>
+      </div>
+      <div class="scope"><canvas id="d-canvas"></canvas></div>
+      <div class="legend" id="d-legend"></div>
+      <p class="emptymsg" id="d-empty" hidden></p>
+    </div></div>
+  </div>
+</div>
+
+<h2>5 · Speed-knob display language <small>— ★ CONVERGED: auto-denominated rate (2/s → 3/min → 15/hr), unit-aware by principle</small></h2>
+<p class="note">The knob still edits <code style="font-family:var(--mono)">period_seconds</code>.
+The readout picks the smallest time unit that keeps the count ≥ 1 — watch the unit flip as you
+drag. Curve buttons still compare drag mappings (open: my lean is log-period).</p>
+<div class="dragsim">
+  <span>drag</span>
+  <input type="range" id="lang-drag" min="0" max="1000" value="500">
+  <span class="group"><b style="font-size:10px;letter-spacing:.08em">curve</b>
+    <button data-curve="linP">linear period</button>
+    <button data-curve="logP" data-on>log period</button>
+    <button data-curve="linR">linear rate</button>
+  </span>
+</div>
+<div class="langrow" id="langrow"></div>
+
+<script>
+/* ================= data ================= */
+const WF = {
+  ramp:     x => x,
+  sine:     x => 0.5 + 0.5 * Math.sin(2 * Math.PI * x),
+  triangle: x => 1 - Math.abs(2 * x - 1),
+  square:   x => (x % 1) < 0.5 ? 1 : 0,
+};
+// One entry per downstream READING. `key` groups readings on one integrator.
+const SETS = {
+  plasma: [
+    { id: "Shader · phase", key: "speed", shared: true, wf: "ramp", T: 100, off: 0 },
+  ],
+  rich: [
+    { id: "Shader · phase",        key: "speed",  shared: true,  wf: "ramp",     T: 100,  off: 0 },
+    { id: "Glow · pulse",          key: "speed",  shared: true,  wf: "sine",     T: 100,  off: 0.25 },
+    { id: "Strand A · sweep",      key: "p1",     shared: false, wf: "sine",     T: 7.3,  off: 0 },
+    { id: "Strand B · sweep",      key: "p2",     shared: false, wf: "triangle", T: 11.1, off: 0 },
+    { id: "Sparkle · gate",        key: "p3",     shared: false, wf: "square",   T: 0.9,  off: 0 },
+    { id: "Band · scroll",         key: "p4",     shared: false, wf: "ramp",     T: 20,   off: 0.5 },
+  ],
+  crowd: [
+    { id: "Shader · phase",        key: "speed", shared: true,  wf: "ramp",     T: 100,  off: 0 },
+    { id: "Glow · pulse",          key: "speed", shared: true,  wf: "sine",     T: 100,  off: 0.25 },
+    { id: "fyeah-button-attract-secondary · phase_offset_slow", key: "p5", shared: false, wf: "sine", T: 33, off: 0 },
+    { id: "Strand A · sweep",      key: "p1",    shared: false, wf: "sine",     T: 7.3,  off: 0 },
+    { id: "Strand B · sweep",      key: "p2",    shared: false, wf: "triangle", T: 11.1, off: 0 },
+    { id: "Sparkle · gate",        key: "p3",    shared: false, wf: "square",   T: 0.9,  off: 0 },
+    { id: "Band · scroll",         key: "p4",    shared: false, wf: "ramp",     T: 20,   off: 0.5 },
+    { id: "Frozen · hold",         key: "p6",    shared: false, wf: "ramp",     T: 0,    off: 0.3 },
+    { id: "Shimmer · flicker",     key: "p7",    shared: false, wf: "triangle", T: 0.25, off: 0 },
+  ],
+  empty: [],
+  unread: null,
+};
+
+/* ================= time model ================= */
+let warp = 8, paused = false, scrubbed = false;
+let tEff = 447.0;              // effective clock seconds (starts with history — every window full)
+let lastFrame = performance.now();
+const SCRUB_BACK = 12;
+
+function phaseOf(p, t) {
+  if (p.T <= 0) return p.off % 1;            // frozen: shaped constant
+  return ((t / p.T) + p.off) % 1;
+}
+function valueOf(p, t) { return WF[p.wf](phaseOf(p, t)); }
+function cyclesOf(p, t) { return p.T > 0 ? Math.floor(t / p.T) : 0; }
+// Auto-denominated rate (CONVERGED): smallest time unit keeping the count
+// >= 1 — 2/s, 3/min, 15/hr. Frozen never cycles: 0/s.
+function rateLabel(p) { return autoRate(p.T); }
+function autoRate(T) {
+  if (T <= 0) return "0/s";
+  const ladder = [[1, "s"], [60, "min"], [3600, "hr"]];
+  for (const [secs, unit] of ladder) {
+    const count = secs / T;
+    if (count >= 1 || unit === "hr")
+      return (count >= 9.95 ? Math.round(count)
+              : (Math.round(count * 10) / 10).toString().replace(/\.0$/, "")) + "/" + unit;
+  }
+}
+function trim(n) {
+  const s = n < 10 ? n.toFixed(1) : Math.round(n).toString();
+  return s.endsWith(".0") ? s.slice(0, -2) : s;
+}
+
+/* ================= shared render helpers ================= */
+function px(canvas) {
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(r.width * dpr)) {
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+  }
+  return { w: canvas.width, h: canvas.height, dpr };
+}
+// Draw one reading's trailing window onto ctx. Newest at the right edge.
+// The trace is an analytic function of effective time, so a scrub redraws
+// the identical curve — which is exactly the engine's scrub-exact contract.
+function drawTrace(ctx, w, h, p, t, windowS, style) {
+  ctx.strokeStyle = style.color; ctx.lineWidth = style.width;
+  if (style.dash) ctx.setLineDash(style.dash); else ctx.setLineDash([]);
+  ctx.beginPath();
+  const pad = 3;
+  let started = false;
+  for (let x = 0; x < w; x++) {
+    const tx = t - windowS * (1 - x / w);
+    if (tx < 0) continue;             // before the clock existed: draw nothing
+    const v = valueOf(p, tx);
+    const y = pad + (1 - v) * (h - 2 * pad);
+    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+function clearScope(ctx, w, h) {
+  ctx.fillStyle = "#0c1114"; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "rgba(255,255,255,.05)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+}
+function windowFor(p) { return p.T > 0 ? Math.max(4, Math.min(2.5 * p.T, 300)) : 8; }
+
+/* ================= concept A ================= */
+function renderA(set) {
+  const host = document.getElementById("a-rows");
+  if (!set || !set.length) {
+    host.innerHTML = '<p class="emptymsg">' +
+      (set ? "Nothing is riding this timebase." : "Reading the timebase…") + "</p>";
+    return;
+  }
+  host.innerHTML = set.map((p, i) => {
+    const phi = phaseOf(p, tEff);
+    return `<div class="prow ${p.shared ? "shared" : ""}">
+      <div class="l1"><span class="origin">${p.id}</span>
+        ${p.shared ? '<span class="stag">shared</span>' : ""}
+        <span class="period">${p.T > 0 ? trim(p.T) + "s" : "frozen"}</span></div>
+      <div class="l2"><div class="bar"><div class="fill" style="width:${(phi * 100).toFixed(0)}%"></div></div>
+        <span class="phi">φ ${phi.toFixed(2)}</span>
+        <span class="cyc">×${cyclesOf(p, tEff)}</span></div>
+    </div>`;
+  }).join("");
+}
+
+/* ================= concept B ================= */
+let bCanvases = [];
+function buildB(set) {
+  const grid = document.getElementById("b-grid");
+  const empty = document.getElementById("b-empty");
+  grid.innerHTML = ""; bCanvases = [];
+  if (!set || !set.length) {
+    empty.hidden = false;
+    empty.textContent = set ? "Nothing is riding this timebase." : "Reading the timebase…";
+    return;
+  }
+  empty.hidden = true;
+  for (const p of set) {
+    const el = document.createElement("div");
+    el.className = "tcard" + (p.shared ? " shared" : "");
+    el.innerHTML = `<canvas></canvas>
+      <div class="meta">
+        <span class="id" title="${p.id}">${p.id}</span>
+        <span class="sub"><span class="rate"></span><span class="wf">${p.wf}</span><span class="cyc"></span></span>
+      </div>`;
+    grid.appendChild(el);
+    bCanvases.push({ p, canvas: el.querySelector("canvas"),
+                     rate: el.querySelector(".rate"), cyc: el.querySelector(".cyc") });
+  }
+}
+function renderB() {
+  for (const { p, canvas, rate, cyc } of bCanvases) {
+    const { w, h } = px(canvas);
+    const ctx = canvas.getContext("2d");
+    clearScope(ctx, w, h);
+    drawTrace(ctx, w, h, p, tEff, windowFor(p),
+      { color: p.shared ? "#c9b1f5" : "#e6e4de", width: Math.max(1.25, w / 200) });
+    rate.textContent = rateLabel(p);
+    cyc.textContent = "×" + cyclesOf(p, tEff);
+  }
+}
+
+/* ================= concept C ================= */
+const DASHES = [null, [4, 3], [1.5, 2.5], [7, 3]];
+let cCards = [];
+function buildC(set) {
+  const grid = document.getElementById("c-grid");
+  const empty = document.getElementById("c-empty");
+  grid.innerHTML = ""; cCards = [];
+  if (!set || !set.length) {
+    empty.hidden = false;
+    empty.textContent = set ? "Nothing is riding this timebase." : "Reading the timebase…";
+    return;
+  }
+  empty.hidden = true;
+  const groups = new Map();
+  for (const p of set) {
+    if (!groups.has(p.key)) groups.set(p.key, []);
+    groups.get(p.key).push(p);
+  }
+  for (const [key, readers] of groups) {
+    const shared = readers[0].shared;
+    const el = document.createElement("div");
+    el.className = "icard" + (shared ? " shared" : "");
+    el.innerHTML = `<div class="head">
+        <span class="key">${shared ? "bus:" + key : readers[0].id}</span>
+        ${shared ? '<span class="stag" style="font:700 9px var(--mono);color:var(--bound-text);text-transform:uppercase">shared</span>' : ""}
+        <span class="rate">${rateLabel(readers[0])}</span>
+      </div><canvas></canvas><div class="readers"></div>`;
+    const chips = el.querySelector(".readers");
+    readers.forEach((p, i) => {
+      const chip = document.createElement("span");
+      chip.className = "rchip";
+      const sw = DASHES[i % DASHES.length];
+      chip.innerHTML = `<span class="swatch" style="background:${shared ? "#c9b1f5" : "#e6e4de"};
+        ${sw ? "background:repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px);color:" + (shared ? "#c9b1f5" : "#e6e4de") : ""}"></span>${p.id} · ${p.wf}`;
+      chips.appendChild(chip);
+    });
+    document.getElementById("c-grid").appendChild(el);
+    cCards.push({ readers, canvas: el.querySelector("canvas"), shared });
+  }
+}
+function renderC() {
+  for (const { readers, canvas, shared } of cCards) {
+    const { w, h } = px(canvas);
+    const ctx = canvas.getContext("2d");
+    clearScope(ctx, w, h);
+    const windowS = Math.max(...readers.map(windowFor));
+    readers.forEach((p, i) => drawTrace(ctx, w, h, p, tEff, windowS,
+      { color: shared ? "#c9b1f5" : "#e6e4de", width: Math.max(1.25, w / 400),
+        dash: DASHES[i % DASHES.length] ? DASHES[i % DASHES.length].map(d => d * (w / 300)) : null }));
+  }
+}
+
+/* ================= concept D ================= */
+let dSet = [], dDim = new Set();
+function buildD(set) {
+  const legend = document.getElementById("d-legend");
+  const empty = document.getElementById("d-empty");
+  legend.innerHTML = ""; dSet = set || []; dDim = new Set();
+  if (!set || !set.length) {
+    empty.hidden = false;
+    empty.textContent = set ? "Nothing is riding this timebase." : "Reading the timebase…";
+    document.getElementById("d-canvas").parentElement.style.display = set ? "" : "none";
+    return;
+  }
+  empty.hidden = true;
+  document.getElementById("d-canvas").parentElement.style.display = "";
+  set.forEach((p, i) => {
+    const chip = document.createElement("span");
+    chip.className = "lchip" + (p.shared ? " shared" : "");
+    chip.innerHTML = `<span class="swatch" style="background:${p.shared ? "#c9b1f5" : "#e6e4de"}"></span>${p.id}`;
+    chip.onclick = () => {
+      if (dDim.has(i)) dDim.delete(i); else dDim.add(i);
+      chip.toggleAttribute("data-dim", dDim.has(i));
+    };
+    legend.appendChild(chip);
+  });
+}
+let scopeWindow = 30;
+function renderD() {
+  if (!dSet.length) return;
+  const canvas = document.getElementById("d-canvas");
+  const { w, h } = px(canvas);
+  const ctx = canvas.getContext("2d");
+  clearScope(ctx, w, h);
+  const windowS = scopeWindow;
+  dSet.forEach((p, i) => {
+    if (dDim.has(i)) return;
+    drawTrace(ctx, w, h, p, tEff, windowS,
+      { color: p.shared ? "#c9b1f5" : "rgba(230,228,222," + (0.95 - 0.06 * i) + ")",
+        width: Math.max(1.1, w / 700) });
+  });
+}
+
+/* ================= section 5: language cards ================= */
+const AUTH_T = 100;               // plasma's authored period
+const LANGS = [
+  { name: "Auto-denominated rate", read: T => { const r = autoRate(T); const i = r.indexOf("/");
+      return `${r.slice(0, i)} <b>${r.slice(i)}</b>`; },
+    verdict: "★ CHOSEN. Unit-aware: the denominator picks itself so the count is always natural. LightPlayer-wide principle." },
+  { name: "reciprocal (rejected)", read: T => T > 0 ? `1/${trim(T)} <b>s</b>` : "1/∞ <b>s</b>",
+    verdict: "the earlier provisional — asks the reader to do division." },
+  { name: "fixed /min (rejected)", read: T => T > 0 ? `${trim(60 / T)} <b>/min</b>` : "0 <b>/min</b>",
+    verdict: "right idea, wrong rigidity: 0.6/min for plasma. Auto-denomination fixes exactly this." },
+  { name: "cycle time (rejected)", read: T => T > 0 ? `${trim(T)} <b>s</b>` : "frozen",
+    verdict: "plain but direction-inverted vs the felt quantity." },
+];
+const CURVES = {
+  linP: u => 120 * (1 - u),                       // period linear, right = faster
+  logP: u => Math.exp(Math.log(120) * (1 - u) + Math.log(0.25) * u),
+  linR: u => u <= 0.001 ? 0 : 1 / (u * (1 / 0.25) ) , // rate linear: f = u * fmax
+};
+let curCurve = "logP";
+function buildLangs() {
+  const host = document.getElementById("langrow");
+  host.innerHTML = "";
+  for (const lang of LANGS) {
+    const el = document.createElement("div");
+    el.className = "langcard";
+    el.innerHTML = `
+      <svg class="knob" viewBox="0 0 48 48">
+        <path d="M10.56 37.44 A19 19 0 1 1 37.44 37.44" pathLength="100" fill="none"
+              stroke="#3e4852" stroke-width="2.5" stroke-linecap="round"/>
+        <path class="arc" d="M10.56 37.44 A19 19 0 1 1 37.44 37.44" pathLength="100" fill="none"
+              stroke="#7be0b2" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0 100"/>
+        <circle cx="24" cy="24" r="12.5" fill="#20272e" stroke="#3e4852"/>
+        <line class="ptr" x1="24" y1="19" x2="24" y2="12.5" stroke="#7be0b2" stroke-width="2"
+              stroke-linecap="round" transform="rotate(0 24 24)"/>
+      </svg>
+      <span class="klabel">Speed</span>
+      <span class="kread"></span>
+      <span class="verdict">${lang.verdict}</span>`;
+    host.appendChild(el);
+    lang.el = el;
+  }
+  renderLangs();
+}
+function renderLangs() {
+  const u = document.getElementById("lang-drag").value / 1000;
+  const T = curCurve === "linR" ? (u <= 0.002 ? 0 : 1 / (u * 4)) : CURVES[curCurve](u);
+  for (const lang of LANGS) {
+    lang.el.querySelector(".kread").innerHTML = lang.read(T);
+    const frac = u; // knob position IS the drag position — every language shares the axis
+    lang.el.querySelector(".arc").setAttribute("stroke-dasharray", `${(frac * 100).toFixed(1)} 100`);
+    lang.el.querySelector(".ptr").setAttribute("transform", `rotate(${-135 + frac * 270} 24 24)`);
+  }
+}
+
+/* ================= wiring ================= */
+let curSet = "rich";
+function rebuild() {
+  const set = SETS[curSet];
+  renderA(set); buildB(set); buildC(set); buildD(set);
+}
+document.querySelectorAll("[data-warp]").forEach(b => b.onclick = () => {
+  warp = +b.dataset.warp;
+  document.querySelectorAll("[data-warp]").forEach(x => x.toggleAttribute("data-on", x === b));
+});
+document.querySelectorAll("[data-set]").forEach(b => b.onclick = () => {
+  curSet = b.dataset.set;
+  document.querySelectorAll("[data-set]").forEach(x => x.toggleAttribute("data-on", x === b));
+  rebuild();
+});
+document.getElementById("c-pause").onclick = e => {
+  paused = !paused;
+  e.target.textContent = paused ? "run" : "pause";
+  e.target.toggleAttribute("data-on", paused);
+};
+document.getElementById("c-scrub").onclick = e => {
+  scrubbed = !scrubbed;
+  tEff = Math.max(0, tEff + (scrubbed ? -SCRUB_BACK : SCRUB_BACK));
+  e.target.toggleAttribute("data-on", scrubbed);
+  e.target.textContent = scrubbed ? "return to live" : "−12 s and hold";
+};
+document.querySelectorAll("[data-curve]").forEach(b => b.onclick = () => {
+  curCurve = b.dataset.curve;
+  document.querySelectorAll("[data-curve]").forEach(x => x.toggleAttribute("data-on", x === b));
+  renderLangs();
+});
+document.getElementById("lang-drag").oninput = renderLangs;
+document.querySelectorAll(".swin").forEach(b => b.onclick = () => {
+  scopeWindow = +b.dataset.win;
+  document.querySelectorAll(".swin").forEach(x => {
+    const on = x === b;
+    x.toggleAttribute("data-on", on);
+    x.style.borderColor = on ? "var(--border-strong)" : "var(--border-muted)";
+    x.style.color = on ? "var(--muted)" : "var(--dim)";
+  });
+});
+
+function frame(now) {
+  const dt = (now - lastFrame) / 1000; lastFrame = now;
+  if (!paused) tEff += dt * warp;
+  for (const el of document.querySelectorAll(".secs")) el.textContent = tEff.toFixed(1);
+  renderA(SETS[curSet]); renderB(); renderC(); renderD();
+  requestAnimationFrame(frame);
+}
+rebuild(); buildLangs();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

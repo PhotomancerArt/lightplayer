@@ -27,6 +27,14 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
+/// - `5` — `bus:time` carries a **time product**, not raw seconds:
+///   `ClockState` publishes a new `product` output on the channel (its
+///   `seconds`/`delta_seconds` stay produced-but-unbound), `FluidDef.time`
+///   and `PlaylistDef.time` are product-typed consumed slots rather than
+///   f32 values, and `ShaderSlotDef` gained the `phasor`/`seconds` kinds
+///   with a `phasor` config record. Version-4 artifacts author `"time": 0`
+///   on fluid/playlist nodes and bind plain `f32` shader uniforms to
+///   `bus:time`; both are refused rather than migrated.
 /// - `4` — multi-endpoint output nodes: `OutputDef.endpoint` (one string)
 ///   became `channels` (a map of `{endpoint, count}` records), and endpoint
 ///   specs name the target device instead of a driver mechanism
@@ -52,7 +60,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 4;
+pub const PROJECT_FORMAT_VERSION: u32 = 5;
 
 /// Parsed `project.json` container manifest.
 ///
@@ -304,7 +312,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 4,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 5,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -324,7 +332,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 4,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n"
+            "{\n  \"format\": 5,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);

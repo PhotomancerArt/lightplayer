@@ -18,6 +18,7 @@ default = [
     "node-clock",
     "node-shader",
     "resolver-payload-cache",
+    "scrub-log",
 ]
 # Panic recovery via catch_unwind (shader compilation, node render)
 naga = ["lpc-engine/naga"]
@@ -56,6 +57,13 @@ node-shader = ["lpc-engine/node-shader"]
 # `lpc-engine/resolver-payload-cache`, defaults on, and a firmware taking
 # `default-features = false` simply omits it to trade frame time for heap.
 resolver-payload-cache = ["lpc-engine/resolver-payload-cache"]
+
+# Removal-only, same contract again: forwards to `lpc-engine/scrub-log`, the
+# per-phasor breakpoint log that makes clock scrubbing exact on a host. It
+# defaults on for the studio and every host consumer; a firmware taking
+# `default-features = false` omits it and gets the forward-only integrator
+# with zero log allocation.
+scrub-log = ["lpc-engine/scrub-log"]
 
 # --- FIXTURE builds — test scaffolding, never shipped ------------------
 #
