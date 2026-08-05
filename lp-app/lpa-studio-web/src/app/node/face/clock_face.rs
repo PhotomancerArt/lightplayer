@@ -161,10 +161,21 @@ fn PhasorTraceCard(
         div { class: card_class,
             // The canvas inherits its stroke color from `color` (B/W trace
             // tone); painting is imperative from the face's rAF driver —
-            // never through the vdom.
+            // never through the vdom. `ux-box-sized-canvas` declares that
+            // this canvas's backing store tracks its CSS box, which the
+            // story-capture ready gate asserts before it shoots.
+            //
+            // The BOX is inline rather than tailwind classes, and that is
+            // load-bearing: the driver sizes the backing store from this
+            // element's box, and an unstyled canvas takes its box from the
+            // `width`/`height` attributes the driver writes — which at
+            // dpr > 1 feeds itself and grows the element every frame until
+            // the stylesheet lands. Inline declarations apply on the first
+            // layout, before the stylesheet the wasm bundle injects.
             canvas {
                 id: "{canvas_id}",
-                class: "tw:block tw:h-[42px] tw:w-full tw:text-strong-foreground",
+                style: "display:block;width:100%;height:42px",
+                class: "ux-box-sized-canvas tw:text-strong-foreground",
                 onmounted: move |_| driver.canvas_mounted(index),
             }
             div { class: "tw:grid tw:min-w-0 tw:gap-px tw:px-1.5 tw:pb-1 tw:pt-0.5",
