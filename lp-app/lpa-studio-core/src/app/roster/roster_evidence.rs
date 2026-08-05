@@ -67,11 +67,17 @@ pub struct RosterEvidence<'a> {
     pub local_saved_at: Option<f64>,
     /// When we last pushed to this device (its registry association).
     pub pushed_at: Option<f64>,
-    /// The connect-as-pull landed WITHOUT a stamped identity (M8′): an
-    /// EMPTY unstamped board must ask for its name before anything can
-    /// be pushed to it (the provisioning order: flash → name → choose).
-    /// `false` while no sync landed or when an identity exists.
-    pub unstamped: bool,
+    /// The connect-as-pull landed on a board with NO NAME (M8′): an
+    /// empty unnamed board must ask for its name before anything can be
+    /// pushed to it (the provisioning order: flash → name → choose).
+    /// `false` while no sync landed, or once the board is named.
+    ///
+    /// It used to mean "no stamped identity", which was the same thing
+    /// while a uid arrived only at provisioning. Since identity anchors
+    /// in silicon (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`)
+    /// a board has a uid from its first hello and still has no name, so
+    /// the evidence is about the NAME.
+    pub unnamed: bool,
     /// The registry entry, when the device is remembered.
     pub registry: Option<&'a RegisteredDevice>,
     /// What the connect flow / management operation is doing right now.
@@ -151,10 +157,10 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
             },
         },
         Some(DeviceContent::Adopted { .. }) => RosterCardState::RunningUpToDate,
-        // An empty UNSTAMPED board names itself before anything else
+        // An empty UNNAMED board names itself before anything else
         // (M8′ provisioning order: flash → name → choose — a push needs
-        // the identity); a stamped empty board offers the picker.
-        Some(DeviceContent::Empty) if evidence.unstamped => RosterCardState::NeedsAName,
+        // the name); a named empty board offers the picker.
+        Some(DeviceContent::Empty) if evidence.unnamed => RosterCardState::NeedsAName,
         Some(DeviceContent::Empty) => RosterCardState::ConnectedEmpty,
         Some(DeviceContent::PendingIdentity { .. }) => RosterCardState::NeedsAName,
         // A readable project at a format this build does not use. The
@@ -532,28 +538,28 @@ mod tests {
             head_version: None,
             local_saved_at: None,
             pushed_at: None,
-            unstamped: false,
+            unnamed: false,
             registry: None,
             connect: ConnectEvidence::Idle,
         }
     }
 
     #[test]
-    fn empty_unstamped_board_asks_for_a_name_before_the_picker() {
+    fn empty_unnamed_board_asks_for_a_name_before_the_picker() {
         // M8′ provisioning order: flash → NAME → choose — a push needs
-        // the stamped identity, so the empty unstamped board's card is
-        // Needs-a-name; the stamped empty board offers the picker.
+        // the name, so the empty unnamed board's card is Needs-a-name;
+        // the named empty board offers the picker.
         let ready = ready_link();
-        let mut unstamped = evidence();
-        unstamped.link = Some(&ready);
-        unstamped.content = Some(&DeviceContent::Empty);
-        unstamped.unstamped = true;
-        assert_eq!(derive(&unstamped), RosterCardState::NeedsAName);
+        let mut unnamed = evidence();
+        unnamed.link = Some(&ready);
+        unnamed.content = Some(&DeviceContent::Empty);
+        unnamed.unnamed = true;
+        assert_eq!(derive(&unnamed), RosterCardState::NeedsAName);
 
-        let mut stamped = evidence();
-        stamped.link = Some(&ready);
-        stamped.content = Some(&DeviceContent::Empty);
-        assert_eq!(derive(&stamped), RosterCardState::ConnectedEmpty);
+        let mut named = evidence();
+        named.link = Some(&ready);
+        named.content = Some(&DeviceContent::Empty);
+        assert_eq!(derive(&named), RosterCardState::ConnectedEmpty);
     }
 
     fn ready_link() -> DeviceState {
@@ -604,6 +610,8 @@ mod tests {
             last_seen_at: 50.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         }
     }
 

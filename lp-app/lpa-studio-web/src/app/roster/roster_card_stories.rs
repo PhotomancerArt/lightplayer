@@ -199,7 +199,7 @@ fn holds_old_format_project() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name stamps at first post-flash contact."
+    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
 )]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
@@ -263,7 +263,7 @@ fn needs_firmware_update() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: holds a project but no stamped identity; the Name-it row (and the title-bar name) open the D41 name-stamping sheet — card-anchored, never a dialog."
+    description = "Amber filled edge: a live board with no name yet; the Name-it row (and the title-bar name) open the D41 naming sheet — card-anchored, never a dialog."
 )]
 fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
@@ -608,7 +608,7 @@ fn erase_sheet_open() -> Element {
 }
 
 #[story(
-    description = "The name-stamping sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; naming stamps the uid and returns the card to Status. Supersedes the title-bar form for the unstamped board — a stamped device still renames inline in the title bar."
+    description = "The naming sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; the name writes to the registry and returns the card to Status. Supersedes the title-bar form for the unnamed board — a named device still renames inline in the title bar."
 )]
 fn name_sheet_open() -> Element {
     sheet(vec![rsx! {
