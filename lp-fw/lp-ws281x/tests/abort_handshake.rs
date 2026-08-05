@@ -50,7 +50,10 @@ fn marker_is_even_whenever_thread_code_can_observe_it() {
 #[test]
 fn abort_of_an_idle_channel_reports_idle_isr() {
     let d = driver(64);
-    assert!(d.abort(0), "no service pass can be in flight single-threaded");
+    assert!(
+        d.abort(0),
+        "no service pass can be in flight single-threaded"
+    );
     // Out-of-range channels are a no-op that still upholds the guarantee.
     assert!(d.abort(99));
 }
