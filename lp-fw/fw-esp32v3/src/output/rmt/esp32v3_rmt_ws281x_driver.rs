@@ -87,24 +87,25 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 ///
 /// The bound is interrupt-service margin, not an RMT limitation. With the
 /// four-channel block plan every transmitter wants a refill each 80 µs
-/// (12.5 k/s per channel), and one refill costs ≈15 word-times (≈18.75 µs,
-/// measured; APB-write-bound, identical quiet or loaded). Two answers, keyed
-/// on where the ISR runs this boot:
+/// (12.5 k/s per channel). Two answers, keyed on where the ISR runs this
+/// boot:
 ///
-/// * **Dual-core (ISR on the dedicated APP core): 3** — ≈70 % worst-case ISR
-///   duty, and the measured clean maximum with transmission overlapping
-///   render (DOM-Z-102, zook-dome-1500, 2026-08-04 late: zero trips, zero
-///   skips, zero errors on every wire over 130 s; worst steady entry delay
-///   35/64 words). **Not 4, and the reason is arithmetic, not tuning**: four
-///   coincident 18.75 µs refills ≈ 75 µs against the 80 µs deadline — ≈94 %
-///   duty with the trampoline and dispatch on top — and on silicon the two
-///   last-serviced wires starved on essentially every frame (4,753/4,755
-///   truncated) while the first two ran clean. M4's cap-4-clean measurement
-///   was the same arithmetic surviving only because the whole system was
-///   quiet-spinning. A fifth-plus wire waits in the admission spin; the
-///   render-overlap win survives (18 → 23 fps at 1500), but the wait is why
-///   4 declared wires do not reach the engine-bound ceiling (~31 fps) — the
-///   pin-mux wave milestone (P7) is the planned path to that.
+/// * **Dual-core (ISR on the dedicated APP core): 4** — every declared wire
+///   transmits in one wave, fully overlapped with render. This was 3 until
+///   the `fill_half` hoists (lp-ws281x, 2026-08-05) cut the measured
+///   64-word service cost from ~11.2 µs to ~8.1 µs against a raw APB floor
+///   of ~3.2 µs (`refill_floor_probe` — the refill was code-bound, not
+///   bus-bound; the old ~18.75 µs figure priced four coincident refills at
+///   ≈94 % of the deadline and starved the two last-serviced wires).
+///   Re-measured after the hoists (DOM-Z-102, zook-dome-1500, 170 s /
+///   5,327 frames): **zero trips, zero skips, zero errors on all four
+///   wires, 31.3 fps** — the engine-bound ceiling, up from 23.8 at cap 3.
+///   Worst steady entry delay 51/64 words (ch6, the last-serviced wire),
+///   worst refill lag 17 words; the boot-time flash-stall service (112
+///   words late, once, during project load) no longer trips the guard.
+///   That 51-word worst entry is the number to watch if a fifth declared
+///   wire ever admission-waits here — P7 pin-mux waves remains the path
+///   past four.
 /// * **Single-core fallback: 2** — the M4-shipped cap, unchanged, proven
 ///   unregressed with a forced-fallback boot (18 fps / 53 ms / zero trips at
 ///   1500 — the merged-main baseline exactly).
@@ -121,10 +122,10 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 /// ⚠️ In the dual-core shape, the cap's safety additionally leans on the
 /// `isr-in-ram` feature of lp-ws281x: with the service path in flash, the
 /// APP core stalls behind the PRO core's cache misses on the shared SPI bus
-/// and even cap 3 trips at boot-time flash traffic (measured: a single
+/// and boot-time flash traffic alone blew the deadline (measured: a single
 /// service 112 words late during project load).
 fn max_concurrent_tx() -> usize {
-    if isr_on_app_core() { 3 } else { 2 }
+    if isr_on_app_core() { 4 } else { 2 }
 }
 
 /// Channels currently transmitting a frame, across the whole driver.
@@ -236,6 +237,11 @@ impl Esp32V3RmtWs281xDriver {
         // once here, after esp-hal has finished touching `APB_CONF` in
         // `configure_tx`.
         v3_rmt::init_tx();
+
+        // One-shot refill-cost floor measurement, telemetry builds only —
+        // prints [PROBE] lines before any output can open. See the module.
+        #[cfg(feature = "ws281x_telemetry")]
+        super::refill_floor_probe::run();
 
         log::info!(
             "Esp32V3RmtWs281xDriver: {} WS281x channels for {} declared (plan={:?} \
