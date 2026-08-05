@@ -328,6 +328,41 @@
               padding: 8px 10px; display: grid; gap: 6px; }
   .provcard .pnm { font: 700 11px var(--mono); color: var(--name); display: flex; align-items: center; gap: 7px; }
 
+  /* §9: the panel dropdown (converged control) */
+  .memchips { display: inline-flex; gap: 3px; align-items: center; cursor: pointer; }
+  .memchips .mc { width: 34px; height: 16px; border-radius: 3px; overflow: hidden;
+                  border: 1px solid var(--border-strong); background: #000; position: relative; }
+  .memchips .mc.live { border-color: var(--good); box-shadow: 0 0 0 1px rgba(63,214,142,.45); }
+  .ratechip { font: 700 9px var(--mono); color: var(--good); background: var(--good-bg);
+              border-radius: 3px; padding: 2px 5px; white-space: nowrap; }
+  .ddrow-open .swatchwrap, .ddrow-open .memchips .mc.live { border-color: var(--held); }
+  .ddrow-open { background: var(--held-bg); }
+  .ddsetstrip { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px;
+                border-bottom: 1px solid var(--border); background: var(--card); }
+  .ddchip { display: inline-block; width: 92px; border: 1px solid var(--border-strong);
+            border-radius: 5px; overflow: hidden; background: #000; }
+  .ddchip .cv { display: block; height: 18px; position: relative; }
+  .ddchip .nm { font: 600 9px var(--mono); color: var(--muted); padding: 2px 4px;
+                background: var(--terminal); white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; display: block; }
+  .ddchip .acts { display: flex; border-top: 1px solid var(--border); background: var(--terminal); }
+  .ddchip .acts button { flex: 1; appearance: none; border: 0; background: transparent;
+                         color: var(--dim); font-size: 10px; padding: 2px 0; cursor: pointer; }
+  .ddchip .acts button:hover { color: var(--text); background: rgba(255,255,255,.05); }
+  .ddchip .acts button.tr:hover { color: var(--error); }
+  .ddchip .acts button + button { border-left: 1px solid var(--border); }
+  .ddcyclebar { padding: 9px 10px; border-top: 1px solid var(--border); background: var(--card);
+                display: grid; gap: 7px; }
+  .ddhint { font: 10.5px var(--mono); color: var(--dim); }
+  .ddedit-title { display: flex; gap: 8px; align-items: center; padding: 9px 10px;
+                  border-bottom: 1px solid var(--border); background: var(--card); }
+  .ddedit-title .t { font: 700 11px var(--mono); color: var(--strong); }
+  .ddedit-title .prov { font: 10px var(--mono); color: var(--dim); }
+  .ddedit-title input { background: var(--terminal); border: 1px solid var(--border-strong);
+                        border-radius: 5px; color: var(--text); font: 11px var(--mono);
+                        padding: 4px 7px; width: 130px; }
+  .ddedit-title .done { margin-left: auto; }
+
   /* §8: node-question cards */
   .qcard { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--terminal);
            padding: 9px 11px; display: grid; gap: 7px; }
@@ -899,6 +934,100 @@
       </div>
       <p class="sub" style="margin:8px 0 0">art-tier sharing falls back to per-slot authored configs
         (each effect carries its own cycle — no phase lock across effects without a channel writer).</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 9 ================= -->
+<h2>9 · The panel dropdown — §1 × §6C converged (round 3b, live)</h2>
+<p class="sub">
+  Yona's vision pass: on the module panel the control is <b>member chips + cycle info — basically a
+  dropdown</b>. Click it → the popup opens: the set chips <b>grow trash cans</b> (and ✎), palettes
+  not in the set list below for adding, the cycle/crossfade controls sit at the bottom. Hitting ✎
+  flips the <b>whole popup</b> into the gradient editor — editing a built-in forks a project copy
+  (copy-on-use, provenance kept). Everything left of the popup is live; both closed-row variants
+  drive the same value.
+  <span class="lean">Micro-decisions made here, all revisable: <b>one member = static</b> (a 1-cycle
+  — no mode bit anywhere); list click <b>replaces</b> when static but <b>adds</b> when cycling
+  (＋↻ forces add from static); the open dropdown = the engaged writer (gold on the row); search
+  stays (30+ built-ins). Gate: closed-row variant <b>a</b> (chips) vs <b>b</b> (blended strip +
+  badge)? My lean: <b>b on narrow panels, a when width allows</b> — chips stop reading below ~4
+  members' width, but a is the honest "this is a set" signal.</span>
+</p>
+<div class="gallery">
+  <div class="concept wide" id="c9" style="width:860px;max-width:100%">
+    <header><span class="tag">DD</span><span class="title">Module panel + dropdown (live)</span>
+      <span class="note">click a palette row to open/close · ✎ = editor takes over the popup</span></header>
+    <div class="bodyp" style="display:grid;grid-template-columns:390px 1fr;gap:16px;align-items:start">
+      <div>
+        <div class="modpanel" style="width:100%">
+          <header><span class="nm">aurora-dome</span><span class="k">root module · panel</span></header>
+          <div class="bodyp" style="padding:4px 12px 8px">
+            <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+              <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+            <div class="panelrow pal" id="ddrowA" style="grid-template-columns:64px 1fr auto">
+              <span class="lbl bound">palette</span>
+              <span class="memchips" id="ddmemchips" title="open"></span>
+              <span class="readout state-slot" id="ddstateA"></span>
+            </div>
+            <div class="panelrow pal" id="ddrowB" style="grid-template-columns:64px 1fr auto">
+              <span class="lbl bound">palette</span>
+              <div class="swatchwrap"><canvas class="strip" id="ddstripB"></canvas>
+                <span class="pname" id="ddnameB"></span><span class="chev">▾</span></div>
+              <span class="readout state-slot" id="ddstateB"></span>
+            </div>
+            <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+              <span class="readout">0.62</span></div>
+          </div>
+        </div>
+        <p class="sub" style="margin:10px 0 0">two closed-row variants of the SAME control:
+          <b>a</b> member chips (live one ringed) + rate chip · <b>b</b> blended strip + badge.
+          In production the popup anchors under the row, panel-grade (phones included, P12).</p>
+      </div>
+      <div class="picker" id="ddpop">
+        <div id="ddview-list">
+          <div class="ddsetstrip" id="ddsetstrip"></div>
+          <div class="searchbar"><input type="search" placeholder="search palettes…" id="ddsearch">
+            <button class="imp" title="Paste WLED palette JSON">⇪ import</button></div>
+          <div class="plist" id="ddplist" style="max-height:210px"></div>
+          <div class="ddcyclebar" id="ddcyclebar">
+            <div class="trayrow" id="ddspeedrow"><span class="speedlbl">speed</span>
+              <input type="range" id="ddspeed" min="0" max="100">
+              <span class="speedval" id="ddspeedval"></span></div>
+            <div class="trayrow" id="ddfaderow"><span class="speedlbl">fade</span>
+              <span class="seg" id="ddfade">
+                <button data-v="0">cut</button><button data-v="300">0.3 s</button><button data-v="900" class="on">0.9 s</button>
+              </span></div>
+            <div class="ddhint" id="ddhint"></div>
+          </div>
+        </div>
+        <div id="ddview-edit" hidden>
+          <div class="ddedit-title">
+            <span class="t">✎</span><input id="ddename" value="">
+            <span class="prov" id="ddeprov"></span>
+            <button class="imp done" id="ddedone">done</button>
+            <button class="imp" id="ddecancel" title="discard">✕</button>
+          </div>
+          <div class="editor">
+            <div class="gradbar" id="ddgradbar"><canvas class="strip" id="ddeditcanvas"></canvas></div>
+            <div class="editrow">
+              <label>stop <input type="color" id="ddstopcolor"></label>
+              <label>at <input type="number" id="ddstoppos" min="0" max="1" step="0.01"></label>
+              <button id="dddelstop">delete stop</button>
+              <span style="flex:1"></span>
+              <span class="seg" id="ddsegspace">
+                <button data-v="srgb">sRGB</button><button data-v="oklab" class="on">Oklab</button>
+              </span>
+              <span class="seg" id="ddsegmethod">
+                <button data-v="step">Step</button><button data-v="linear">Linear</button><button data-v="smooth" class="on">Smooth</button>
+              </span>
+            </div>
+            <p class="sub" style="margin:10px 0 0">dbl-click the bar to add a stop · drag handles ·
+              the edit lands as a <b>project custom</b> and replaces the chip in the set; the
+              built-in stays untouched in the catalog.</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1633,6 +1762,176 @@ document.getElementById('segslew').querySelectorAll('button').forEach(b => b.onc
   slew.ms = +b.dataset.v;
 });
 
+/* ---- §9: the panel dropdown (converged control) ---- */
+const dd = { set: ['Aurora','Lava','Icefire','Party'], stepMs: 4000, fadeMs: 900,
+             open: true, view: 'list', editing: -1, edit: null };
+const ddCfg = () => ({ set: dd.set, stepMs: dd.stepMs, fadeMs: dd.fadeMs });
+function ddToggle() { dd.open = !dd.open; dd.view = 'list'; dd.edit = null; renderDD(); }
+document.getElementById('ddmemchips').onclick = ddToggle;
+document.getElementById('ddstripB').parentElement.onclick = ddToggle;
+
+function renderDD() {
+  document.getElementById('ddpop').style.visibility = dd.open ? 'visible' : 'hidden';
+  document.getElementById('ddview-list').hidden = dd.view !== 'list';
+  document.getElementById('ddview-edit').hidden = dd.view !== 'edit';
+  ['ddrowA','ddrowB'].forEach(id => document.getElementById(id).classList.toggle('ddrow-open', dd.open));
+
+  /* closed variant a: member chips + rate chip (live ring painted by the tick) */
+  const mem = document.getElementById('ddmemchips');
+  mem.innerHTML = '';
+  dd.set.forEach(n => {
+    const c = document.createElement('span'); c.className = 'mc'; c.dataset.n = n;
+    const cv = document.createElement('canvas'); cv.className = 'strip'; c.appendChild(cv);
+    mem.appendChild(c); renderStrip(cv, byName(n));
+  });
+  const rate = document.createElement('span'); rate.className = 'ratechip';
+  rate.textContent = dd.set.length >= 2 ? `↻ ${dd.set.length} · ${speedDisp(dd.stepMs/1000)}` : 'static';
+  mem.appendChild(rate);
+  const chev = document.createElement('span');
+  chev.style.cssText = 'color:var(--dim);font-size:10px;margin-left:2px';
+  chev.textContent = '▾'; mem.appendChild(chev);
+
+  /* popup: the set, wearing trash cans + ✎ while open */
+  const strip = document.getElementById('ddsetstrip');
+  strip.innerHTML = '';
+  dd.set.forEach((n, i) => {
+    const ch = document.createElement('span'); ch.className = 'ddchip';
+    ch.innerHTML = `<span class="cv"><canvas class="strip"></canvas></span><span class="nm">${n}</span>
+      <span class="acts"><button title="edit (forks a project copy)">✎</button><button class="tr" title="remove from set">🗑</button></span>`;
+    const [ed, tr] = ch.querySelectorAll('button');
+    ed.onclick = () => ddEditOpen(i);
+    tr.onclick = () => { if (dd.set.length > 1) { dd.set.splice(i, 1); renderDD(); } };
+    strip.appendChild(ch);
+    renderStrip(ch.querySelector('canvas'), byName(n));
+  });
+
+  /* list = not-in-set. Click REPLACES when static, ADDS when cycling; ＋↻ forces add */
+  const q = document.getElementById('ddsearch').value.trim().toLowerCase();
+  const root = document.getElementById('ddplist');
+  root.innerHTML = '';
+  let lastCat = null;
+  for (const p of CATALOG.filter(p => !dd.set.includes(p.name))
+                         .filter(p => !q || p.name.toLowerCase().includes(q))
+                         .sort((a, b) => CATORDER[a.cat] - CATORDER[b.cat])) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat];
+      root.appendChild(h);
+    }
+    const row = document.createElement('div'); row.className = 'prow';
+    row.innerHTML = `<span class="pn">${p.name}${p.meta ? `<small>${p.meta}</small>` : ''}</span>
+                     <span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => { if (dd.set.length === 1) dd.set = [p.name]; else dd.set.push(p.name); renderDD(); };
+    const b = document.createElement('button'); b.className = 'addcyc'; b.textContent = '＋↻';
+    b.title = 'add to the cycle';
+    b.onclick = e => { e.stopPropagation(); dd.set.push(p.name); renderDD(); };
+    row.appendChild(b);
+    root.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+
+  /* cycle bar */
+  const cycling = dd.set.length >= 2;
+  document.getElementById('ddspeedrow').style.display = cycling ? '' : 'none';
+  document.getElementById('ddfaderow').style.display = cycling ? '' : 'none';
+  document.getElementById('ddspeed').value = period2slid(dd.stepMs/1000);
+  ddSyncReadouts();
+}
+function ddSyncReadouts() {
+  const cycling = dd.set.length >= 2;
+  document.getElementById('ddspeedval').textContent = `${speedDisp(dd.stepMs/1000)} · ${fmtStep(dd.stepMs)}`;
+  document.getElementById('ddhint').textContent = cycling
+    ? `cycle { set: ${dd.set.length} · step ${fmtStep(dd.stepMs)} · fade ${fmtStep(dd.fadeMs)} } — one full-cycle phasor, ${fmtPeriod(dd.stepMs*dd.set.length/1000)}`
+    : 'one member = static — add another palette to cycle';
+}
+document.getElementById('ddsearch').oninput = renderDD;
+document.getElementById('ddspeed').oninput = e => {
+  dd.stepMs = slid2period(+e.target.value) * 1000;
+  const rc = document.querySelector('#ddmemchips .ratechip');
+  if (rc && dd.set.length >= 2) rc.textContent = `↻ ${dd.set.length} · ${speedDisp(dd.stepMs/1000)}`;
+  ddSyncReadouts();
+};
+document.getElementById('ddfade').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('ddfade').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  dd.fadeMs = +b.dataset.v; ddSyncReadouts();
+});
+
+/* the editor takeover */
+function syncSeg(id, v) {
+  document.getElementById(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
+}
+function ddEditOpen(i) {
+  const src = byName(dd.set[i]);
+  dd.editing = i;
+  dd.edit = { fromBuiltin: src.cat !== 'project',
+              space: src.space === 'oklab' ? 'oklab' : 'srgb',
+              method: src.method, sel: 0,
+              stops: src.stops.map(s => ({ at: s.at, c: s.c.slice() })) };
+  dd.view = 'edit';
+  document.getElementById('ddename').value = src.name + (dd.edit.fromBuiltin ? ' *' : '');
+  document.getElementById('ddeprov').textContent = dd.edit.fromBuiltin
+    ? `copy of built-in "${src.name}" → This project` : 'project custom';
+  syncSeg('ddsegspace', dd.edit.space);
+  syncSeg('ddsegmethod', dd.edit.method);
+  renderDD(); renderDDEdit();
+}
+const ddEditPal = () => ({ stops: dd.edit.stops, space: dd.edit.space, method: dd.edit.method });
+const ddgradbar = document.getElementById('ddgradbar');
+function renderDDEdit() {
+  if (!dd.edit) return;
+  dd.edit.stops.sort((a, b) => a.at - b.at);
+  renderStrip(document.getElementById('ddeditcanvas'), ddEditPal());
+  ddgradbar.querySelectorAll('.stop').forEach(n => n.remove());
+  dd.edit.stops.forEach((s, i) => {
+    const h = document.createElement('div');
+    h.className = 'stop' + (i === dd.edit.sel ? ' sel' : '');
+    h.style.left = (s.at*100) + '%';
+    h.innerHTML = `<span class="dot" style="background:${hex(s.c)}"></span>`;
+    h.onpointerdown = ev => {
+      dd.edit.sel = i; renderDDEdit();
+      const rect = ddgradbar.getBoundingClientRect();
+      const move = e => { s.at = clamp01((e.clientX - rect.left) / rect.width); renderDDEdit(); };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      ev.preventDefault();
+    };
+    ddgradbar.appendChild(h);
+  });
+  const s = dd.edit.stops[dd.edit.sel] ?? dd.edit.stops[0];
+  document.getElementById('ddstopcolor').value = hex(s.c);
+  document.getElementById('ddstoppos').value = s.at.toFixed(2);
+}
+ddgradbar.ondblclick = e => {
+  if (!dd.edit) return;
+  const rect = ddgradbar.getBoundingClientRect();
+  const at = clamp01((e.clientX - rect.left) / rect.width);
+  const c = samplePal(ddEditPal(), at, dd.edit.space, dd.edit.method);
+  dd.edit.stops.push({ at, c: c.slice() });
+  dd.edit.sel = dd.edit.stops.length - 1;
+  renderDDEdit();
+};
+document.getElementById('ddstopcolor').oninput = e => { dd.edit.stops[dd.edit.sel].c = unhex(e.target.value); renderDDEdit(); };
+document.getElementById('ddstoppos').oninput = e => { dd.edit.stops[dd.edit.sel].at = clamp01(+e.target.value || 0); renderDDEdit(); };
+document.getElementById('dddelstop').onclick = () => {
+  if (dd.edit.stops.length > 2) { dd.edit.stops.splice(dd.edit.sel, 1); dd.edit.sel = 0; renderDDEdit(); }
+};
+document.getElementById('ddsegspace').querySelectorAll('button').forEach(b => b.onclick = () => {
+  dd.edit.space = b.dataset.v; syncSeg('ddsegspace', b.dataset.v); renderDDEdit(); });
+document.getElementById('ddsegmethod').querySelectorAll('button').forEach(b => b.onclick = () => {
+  dd.edit.method = b.dataset.v; syncSeg('ddsegmethod', b.dataset.v); renderDDEdit(); });
+document.getElementById('ddedone').onclick = () => {
+  const name = document.getElementById('ddename').value.trim() || 'custom';
+  const pal = { name, cat: 'project', space: dd.edit.space, method: dd.edit.method,
+                stops: dd.edit.stops.map(s => ({ at: s.at, c: s.c.slice() })),
+                meta: dd.edit.fromBuiltin ? 'edited copy' : undefined };
+  const existing = CATALOG.findIndex(p => p.name === name);
+  if (existing >= 0) CATALOG[existing] = pal; else CATALOG.push(pal);
+  dd.set[dd.editing] = name;
+  dd.view = 'list'; dd.edit = null;
+  renderDD(); renderPickers(); /* the fresh custom shows up in §2's pickers too */
+};
+document.getElementById('ddecancel').onclick = () => { dd.view = 'list'; dd.edit = null; renderDD(); };
+
 /* ============ section 7: live compute generator ============ */
 const dyn = { grabbed: false, frozen: null, t: 0 };
 function breatherStops(t) {
@@ -1692,6 +1991,27 @@ function masterTick(ts) {
     tickE6();
     const s8 = document.getElementById('strip8B'); if (s8) drawCycle(s8, e6.cfg);
 
+    /* §9 closed rows — both variants resolve the same config */
+    {
+      const cfg = ddCfg();
+      if (cfg.set.length >= 2) {
+        const e = cycEval(cfg, cycPhase(cfg));
+        document.querySelectorAll('#ddmemchips .mc').forEach(mc => mc.classList.toggle('live', mc.dataset.n === e.name));
+        renderStripBlend(document.getElementById('ddstripB'), e.a, e.b, e.mix);
+        document.getElementById('ddnameB').textContent = e.fading ? `${e.name} → ${e.next}` : e.name;
+        document.getElementById('ddstateA').innerHTML = `<span class="statechip cyc">↻ ${speedDisp(cfg.stepMs/1000)}</span>`;
+        document.getElementById('ddstateB').innerHTML = `<span class="statechip cyc">↻ ${cfg.set.length} · ${speedDisp(cfg.stepMs/1000)}</span>`;
+      } else {
+        const p = byName(cfg.set[0]);
+        document.querySelectorAll('#ddmemchips .mc').forEach(mc => mc.classList.remove('live'));
+        renderStrip(document.getElementById('ddstripB'), p);
+        document.getElementById('ddnameB').textContent = p.name;
+        const st = '<span class="statechip held">held</span>';
+        document.getElementById('ddstateA').innerHTML = st;
+        document.getElementById('ddstateB').innerHTML = st;
+      }
+    }
+
     /* slew strip */
     if (slew.t < 1) slew.t = Math.min(1, slew.t + dt / Math.max(1, slew.ms));
     const scv = document.getElementById('slewstrip');
@@ -1729,6 +2049,7 @@ renderD6();
 grabOn('prevstrip6B', b6, b6Cfg);
 grabOn('prevstrip6C', c6, () => c6.cfg);
 grabOn('prevstrip6D', d6, d6Cfg);
+renderDD();
 /* §8 mock content */
 {
   const chips = document.getElementById('chips8A');
@@ -1758,6 +2079,9 @@ dynState();
   }
   if (H.get('c6') === 'cycle') { c6.cfg.set = ['Sunset','Aurora','Icefire']; renderC6(); }
   if (H.get('grab6B')) { b6.grabbed = true; b6.frozen = cycEval(b6.cfg, cycPhase(b6.cfg)); }
+  if (H.get('dd') === 'closed') { dd.open = false; renderDD(); }
+  if (H.get('dd') === 'edit') ddEditOpen(0);
+  if (H.get('dd') === 'static') { dd.set = ['Aurora']; renderDD(); }
 }
 heroTick();
 requestAnimationFrame(masterTick);
