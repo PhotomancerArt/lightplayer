@@ -376,12 +376,11 @@ const PHASOR_SLOT_KIND: &str = "phasor";
 const SECONDS_SLOT_KIND: &str = "seconds";
 
 /// Widest period a phasor knob reaches when the uniform authors no range:
-/// two minutes. Past that a "cycle" is not something a person watching the
-/// lights can perceive as one, and the longest period in the whole migrated
-/// example corpus is 100 s — so the default range covers every shipped
-/// phasor with headroom, and an author who wants more says so with
-/// `min`/`max` like any other uniform.
-const PHASOR_PERIOD_MAX_SECONDS: f32 = 120.0;
+/// one hour. The knob sweeps LOG-period, so the slow decades cost no
+/// resolution at the fast end — and G3 judged the old two-minute floor
+/// (30/hr) "too fast" for the slow end of the sweep. An author who wants a
+/// different range says so with `min`/`max` like any other uniform.
+const PHASOR_PERIOD_MAX_SECONDS: f32 = 3600.0;
 
 /// One phasor uniform → its **period** knob (P7 item 5).
 ///
@@ -1928,7 +1927,7 @@ mod tests {
                 max: PHASOR_PERIOD_MAX_SECONDS,
                 step: None,
             },
-            "unauthored range falls back to 0..120 s, continuous"
+            "unauthored range falls back to 0..3600 s, continuous"
         );
         assert_eq!(
             control
