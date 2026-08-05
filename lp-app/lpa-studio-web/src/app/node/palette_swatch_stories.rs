@@ -146,6 +146,49 @@ fn states() -> Element {
     }
 }
 
+/// One engaged swatch: a panel writer holds the channel, so the frame and
+/// readout wear whatever the engaged family resolves to in this subtree.
+fn engaged_swatch(label: &str) -> lpa_studio_core::UiPanelControl {
+    let mut control =
+        palette_swatch_control(label, &palette_cycle(), UiSlotFieldState::editable(), true);
+    if let Some(target) = control.panel_target.as_mut() {
+        target.engaged = true;
+    }
+    control.live_value = Some(lpa_studio_core::app::project::format_gradient_summary(
+        &palette_cycle(),
+    ));
+    control
+}
+
+const CANDIDATE_LABEL_CLASS: &str =
+    "tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
+
+#[story(
+    description = "GATE DECISION — the engaged color family, three candidates on the same engaged swatch (a panel writer holds the channel). A: the shipped stand-in, the existing amber `status-attention` family. B: the spike's gold (#e4c065), raw — border and text both wear the bright value, as the spike drew it. C: a minted `status-engaged` family — the same gold hue laddered like every other status family (dark tinted bg, mid border, bright text), which is what a real token family would ship as. The vars are overridden story-locally; the app is NOT restyled."
+)]
+fn engaged_family_candidates() -> Element {
+    rsx! {
+        SwatchStoryCard {
+            div { class: "tw:grid tw:gap-1.5",
+                span { class: CANDIDATE_LABEL_CLASS, "A — amber status-attention (shipped stand-in)" }
+                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
+            }
+            div {
+                class: "tw:grid tw:gap-1.5",
+                style: "--studio-status-attention-bg: rgba(228,192,101,.10); --studio-status-attention-border: #e4c065; --studio-status-attention-text: #e4c065;",
+                span { class: CANDIDATE_LABEL_CLASS, "B — the spike's gold, raw (#e4c065)" }
+                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
+            }
+            div {
+                class: "tw:grid tw:gap-1.5",
+                style: "--studio-status-attention-bg: #292213; --studio-status-attention-border: #8a6f35; --studio-status-attention-text: #e8c56b;",
+                span { class: CANDIDATE_LABEL_CLASS, "C — minted status-engaged (gold, laddered)" }
+                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
+            }
+        }
+    }
+}
+
 #[story(
     description = "Detail pinned open via the LABEL trigger — the same slot-row popover every other panel control opens, with the palette's authored value stated as its summary line rather than the 24-entry padded storage."
 )]

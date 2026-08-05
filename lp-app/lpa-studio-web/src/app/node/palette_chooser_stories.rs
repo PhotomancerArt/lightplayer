@@ -255,6 +255,92 @@ fn editor_takeover_cycle_member() -> Element {
     }
 }
 
+/// One voice's column in the rate-language decision render: the timing row
+/// as the Cycle tab would wear it, at the three telling rates.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RateVoiceColumn(heading: String, label: String, readouts: Vec<(String, String)>) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-2 tw:rounded-sm tw:border tw:border-border-muted tw:p-2",
+            span { class: "tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground",
+                "{heading}"
+            }
+            for (case , readout) in readouts {
+                div { class: "tw:grid tw:gap-0.5",
+                    span { class: "tw:text-[9px] tw:uppercase tw:tracking-[0.06em] tw:text-dim-foreground",
+                        "{case}"
+                    }
+                    div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                        span { class: "tw:text-[0.66rem] tw:font-bold tw:uppercase tw:leading-none tw:tracking-[0.08em] tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        span { class: "tw:font-mono tw:text-[0.7rem] tw:tabular-nums tw:text-muted-foreground",
+                            "{readout}"
+                        }
+                    }
+                    input {
+                        class: "tw:w-full tw:min-w-0 tw:cursor-pointer",
+                        r#type: "range",
+                        disabled: true,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "GATE DECISION — the cycle rate's language, both voices side by side on the same three rates (a quick 0.5 s step, the 4 s default, a slow 20 s, and frozen). SPEED speaks the auto-denominated rate idiom every periodic reading in Studio uses (`2/s`, `15/min`) — same knob language as the phasor, whose Speed wording is still PROVISIONAL and is settled by this same answer. STEP speaks the seconds the slider actually moves through (`every 4 s`). The shipped control currently hedges with both (`15/min · 4 s`); the gate picks the one that leads."
+)]
+fn rate_language() -> Element {
+    let speed_cases = [
+        (0.5f32, "quick"),
+        (4.0, "default"),
+        (20.0, "slow"),
+        (0.0, "frozen"),
+    ];
+    let speed: Vec<(String, String)> = speed_cases
+        .iter()
+        .map(|&(seconds, case)| {
+            let readout = if seconds > 0.0 {
+                lpa_studio_core::phasor_rate_display(seconds)
+            } else {
+                "held".to_string()
+            };
+            (format!("{case} ({seconds} s step)"), readout)
+        })
+        .collect();
+    let step: Vec<(String, String)> = speed_cases
+        .iter()
+        .map(|&(seconds, case)| {
+            let readout = if seconds > 0.0 {
+                if seconds < 1.0 {
+                    format!("every {seconds} s")
+                } else {
+                    format!("every {} s", seconds as i64)
+                }
+            } else {
+                "held".to_string()
+            };
+            (format!("{case} ({seconds} s step)"), readout)
+        })
+        .collect();
+    rsx! {
+        div { class: "tw:grid tw:w-full tw:max-w-[560px] tw:grid-cols-2 tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-6",
+            RateVoiceColumn {
+                heading: "A — Speed (rate idiom)".to_string(),
+                label: "Speed".to_string(),
+                readouts: speed,
+            }
+            RateVoiceColumn {
+                heading: "B — Step (plain seconds)".to_string(),
+                label: "Step".to_string(),
+                readouts: step,
+            }
+        }
+    }
+}
+
 #[story(
     description = "A project nobody has authored a palette in yet: the `This project` heading is simply absent rather than an empty section, and the catalog carries the whole list."
 )]

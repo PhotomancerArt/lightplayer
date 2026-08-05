@@ -143,6 +143,10 @@ fn PanelControlBody(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let bound = control.bound();
+    let engaged = control
+        .panel_target
+        .as_ref()
+        .is_some_and(|target| target.engaged);
     // A panel-targeted control with an ENGAGED writer gets the clear
     // affordance (panel.md P2): a small ↺ beside the readout releasing the
     // held value back to the authored wiring.
@@ -174,7 +178,11 @@ fn PanelControlBody(
     // in parentheses it read as a second value and, worse, reflowed the
     // control's width on every step of a drag.
     let live = control.live_value.is_some();
-    let readout_class = if live {
+    // Engaged outranks the bound-violet family on the readout, same ladder
+    // as the swatch frame: a held value is the panel's own, not the wire's.
+    let readout_class = if engaged {
+        "tw:text-status-attention-foreground"
+    } else if live {
         "tw:text-status-bound-foreground"
     } else {
         "tw:text-muted-foreground"
@@ -284,6 +292,7 @@ fn PanelControlBody(
                     config,
                     state: control.state.clone(),
                     bound,
+                    engaged,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     on_action,
