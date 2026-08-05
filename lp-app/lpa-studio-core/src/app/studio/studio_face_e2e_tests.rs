@@ -1258,29 +1258,11 @@ fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("the refresh emits a snapshot");
 
-    // The engine refused the layout and the mapping body has not been
-    // fetched yet, so there is nothing to synthesize from either.
-    assert!(
-        fixture_display_layout(&snapshot).is_none(),
-        "the dome layout is over the wire budget, so the engine sends none"
-    );
-
-    // The fixture face's mapping editor fetches the document — the same
-    // gesture the web component makes when the card mounts.
-    let Some(UiNodeFace::Fixture(face)) = node_by_kind(&snapshot, "Fixture").face else {
-        panic!("the dome fixture wears a fixture face");
-    };
-    let editor = face
-        .mapping_editor
-        .expect("a map2d fixture carries the in-face mapping editor");
-    handle.tx.send(StudioCommand::Action(editor.fetch_action()));
-    drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
-
+    // The engine refused the layout (over the wire budget), and the sync
+    // path fetched the mapping document itself — no card has to mount, no
+    // editor has to open. The synthesized layout is already on the preview.
     let layout = fixture_display_layout(&snapshot)
-        .expect("with the document local, the client synthesizes the layout the engine refused");
+        .expect("the sync fetches the document and synthesizes the layout the engine refused");
     assert_eq!(layout.lamps.len(), 1500, "every dome lamp is laid out");
     assert_eq!(
         (layout.width_hint, layout.height_hint),

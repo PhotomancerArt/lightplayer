@@ -99,6 +99,11 @@ pub struct ProjectController {
     /// invalidated after commit acks (save rewrites files) and overlay
     /// clears (revert).
     asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
+    /// Mapping documents the display-layout fallback already tried to
+    /// fetch ([`Self::fetch_missing_layout_documents`]). Successes land in
+    /// the body cache and stop qualifying; failures are remembered here so
+    /// a broken read warns once instead of on every refresh.
+    attempted_layout_document_fetches: BTreeSet<ArtifactLocation>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -216,6 +221,7 @@ impl ProjectController {
             asset_edit_buffer: BTreeMap::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
+            attempted_layout_document_fetches: BTreeSet::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
@@ -3238,6 +3244,7 @@ impl ProjectController {
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
+        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3293,6 +3300,7 @@ impl ProjectController {
             Err(error) => return Err(error),
         }
         self.apply_synced_project_view()?;
+        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3370,6 +3378,7 @@ impl ProjectController {
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -3497,6 +3506,79 @@ impl ProjectController {
         for (product, layout) in synthesized {
             sync.set_control_display_layout(&product, layout);
         }
+    }
+
+    /// Fetch the mapping documents the display-layout fallback is starved
+    /// of, then re-run the synthesis over the freshly cached bodies.
+    ///
+    /// [`Self::apply_synthesized_display_layouts`] is a pure local read — it
+    /// can only use bodies already in the cache, and nothing fetches a
+    /// mapping document until its editor mounts. A dome-scale fixture whose
+    /// card sits unopened would keep "no display layout" forever. This is
+    /// the async half: called by both sync paths right after the view
+    /// applies, it fetches each qualifying document once per connection
+    /// (successes land in the body cache; failures warn once rather than on
+    /// every refresh) and re-applies the synthesis.
+    async fn fetch_missing_layout_documents(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Vec<UiLogDraft> {
+        let artifacts = self.missing_layout_document_artifacts();
+        if artifacts.is_empty() {
+            return Vec::new();
+        }
+        let mut logs = Vec::new();
+        for artifact in artifacts {
+            self.attempted_layout_document_fetches
+                .insert(artifact.clone());
+            match self.asset_content(server, &artifact).await {
+                Ok(run) => logs.extend(run.logs),
+                // Not fatal to the sync: the preview keeps the engine's
+                // answer (no layout) and the editor path can still recover
+                // the body later.
+                Err(error) => logs.push(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "mapping document fetch for the display-layout \
+                         fallback failed ({}): {error}",
+                        artifact.file_path().as_str()
+                    ),
+                )),
+            }
+        }
+        self.apply_synthesized_display_layouts();
+        logs
+    }
+
+    /// Mapping-document artifacts wanted by the display-layout fallback but
+    /// absent from the local body cache (and not already attempted this
+    /// connection). Mirrors [`Self::synthesized_display_layout`]'s lookup
+    /// chain up to the body read.
+    fn missing_layout_document_artifacts(&self) -> Vec<ArtifactLocation> {
+        let Some(sync) = self.sync.as_ref() else {
+            return Vec::new();
+        };
+        sync.control_products_missing_display_layout()
+            .into_iter()
+            .filter_map(|(product, _revision)| {
+                let UiProductRef::Control { node_id, .. } = product else {
+                    return None;
+                };
+                let node = self.node_by_runtime_id(NodeId::new(node_id))?;
+                if !node.kind().eq_ignore_ascii_case("fixture") {
+                    return None;
+                }
+                let source = fixture_map2d_source(node)?;
+                let artifact = self.resolve_node_asset_artifact(node, &source)?;
+                if self.asset_content_cached(&artifact).is_some()
+                    || self.attempted_layout_document_fetches.contains(&artifact)
+                {
+                    return None;
+                }
+                Some(artifact)
+            })
+            .collect()
     }
 
     /// The display layout `product`'s producing fixture would publish, built
@@ -3876,6 +3958,7 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -3916,6 +3999,7 @@ impl ProjectController {
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
         // The wholesale Clear also un-stages every node removal (site edits
         // and Delete overlays included) — the records go with them.
         self.staged_removals.clear();
