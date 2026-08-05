@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LightPlayer design spikes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  GENERATED FILE — do not edit by hand.
+  Source: scripts/spikes-index.mjs (`just spikes-index`); `just lint-spikes-index`
+  fails when this copy has drifted from the spikes it describes.
+-->
+<style>
+  /* ---- studio dark palette (from spikes/wiring-ui) ----------------- */
+  :root {
+    --bg: #101317;
+    --surface: #171b20;
+    --raised: #20272e;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 30px 90px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 4px; max-width: 760px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 34px 0 10px; }
+
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  a.card {
+    display: grid; gap: 6px; align-content: start;
+    padding: 14px 15px 15px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+    color: inherit; text-decoration: none;
+    transition: background .12s, border-color .12s, transform .12s;
+  }
+  a.card:hover { background: var(--raised); border-color: var(--border-strong); transform: translateY(-1px); }
+  a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .meta { display: flex; align-items: baseline; gap: 10px; }
+  .meta .name { font: 500 11px/1 var(--mono); color: var(--accent); letter-spacing: .02em; }
+  .meta .date { margin-left: auto; flex: none; font: 400 11px/1 var(--mono); color: var(--subtle); }
+  .card .title { font-size: 13.5px; font-weight: 600; color: var(--strong); }
+  .card .lede { font-size: 12px; line-height: 1.5; color: var(--dim); }
+
+  ul.code { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-width: 760px; }
+  ul.code li {
+    padding: 10px 13px;
+    background: var(--surface); border: 1px solid var(--border-muted); border-radius: 6px;
+  }
+  ul.code .name { color: var(--subtle); }
+  ul.code .lede { font-size: 12px; color: var(--dim); margin-top: 5px; }
+
+  footer { margin-top: 40px; color: var(--subtle); font-size: 11px; }
+  code { font-family: var(--mono); color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>LightPlayer design spikes</h1>
+<p class="hint">
+  Self-contained HTML playgrounds, one per design exploration. They are
+  <b>records, not living UI</b> — each is frozen at the state it was judged in,
+  and several carry their gate verdicts in the copy, so a spike disagreeing with
+  the shipped Studio means the design moved on, not that the spike is broken.
+</p>
+<p class="hint">
+  Newest first. Titles and blurbs are read straight out of each spike, so this
+  page cannot describe them wrongly for long; the dates come from
+  <code>spikes/dates.json</code>, which records when each spike landed.
+</p>
+
+<h2>Playgrounds <span style="color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">· 11</span></h2>
+<div class="grid">
+  <a class="card" href="./clock-phasor-face/index.html">
+    <span class="meta">
+      <span class="name">clock-phasor-face</span>
+      <span class="date">2026-08-04</span>
+    </span>
+    <span class="title">Clock face v2 — phasor-first — design spike</span>
+    <span class="lede">Thesis (G2 feedback): the clock card's body stops being readouts and becomes the phasors riding it — little black-and-white time-series, one card per downstream reading, showing the consumer's actual shaped waveform. Delta-t is gone; seconds survives as a…</span>
+  </a>
+  <a class="card" href="./palettes/index.html">
+    <span class="meta">
+      <span class="name">palettes</span>
+      <span class="date">2026-08-04</span>
+    </span>
+    <span class="title">Palettes — chooser, cycle configs, editor — design spike (round 3)</span>
+    <span class="lede">Companion to the palette exploration spike (planning: 2026-08-03-1803-palette-exploration-spike). Thesis, revised by D17 + the landed TimeProduct M2 (PR #328): the chooser writes a GradientConfig = static(Gradient) | cycle{set, step, fade} — a plain held…</span>
+  </a>
+  <a class="card" href="./lightplayer-logo/index.html">
+    <span class="meta">
+      <span class="name">lightplayer-logo</span>
+      <span class="date">2026-08-03</span>
+    </span>
+    <span class="title">LightPlayer logo — concept spike</span>
+    <span class="lede">Exploring the LightPlayer brand from the liked direction — a play triangle inside a WS2811-style addressable-LED package — plus motifs harvested from the Light at Play archive (spiral play, circuit-trace letterforms with via dots, rainbow-as-identity). §1…</span>
+  </a>
+  <a class="card" href="./wiring-ui/index.html">
+    <span class="meta">
+      <span class="name">wiring-ui</span>
+      <span class="date">2026-08-03</span>
+    </span>
+    <span class="title">Wiring UI — visualizing the bus (design spike)</span>
+    <span class="lede">Decision log. Gate 1 (2026-08-03): horizontal flow is the direction; selection parked; node-graph later. Gate 2: value box confirmed at this small size; wires grew arrowheads to carry direction; nomenclature decided — D: panel (module) + settings (leaf), with…</span>
+  </a>
+  <a class="card" href="./board-selector/index.html">
+    <span class="meta">
+      <span class="name">board-selector</span>
+      <span class="date">2026-08-02</span>
+    </span>
+    <span class="title">Board selector — setup panel spike (converged: tiles)</span>
+    <span class="lede">Gate round 1 picked concept 2 (tiles): we can't know which board they have, tiles read as hardware, and the grid wraps as the served set grows. Decisions applied: NO default selection (generic install unless the user picks — except when identity is CERTAIN…</span>
+  </a>
+  <a class="card" href="./top-bar/index.html">
+    <span class="meta">
+      <span class="name">top-bar</span>
+      <span class="date">2026-08-01</span>
+    </span>
+    <span class="title">Top bar &amp; site chrome — design spike</span>
+    <span class="lede">Thesis: the top bar becomes real site navigation. LightPlayer is one cohesive app — Studio (the gallery + editor), Boards, and Docs are its sections. The logo is brand, not the home link (that's reserved for a future landing page); an explicit Studio nav item…</span>
+  </a>
+  <a class="card" href="./hardware-boards/index.html">
+    <span class="meta">
+      <span class="name">hardware-boards</span>
+      <span class="date">2026-07-31</span>
+    </span>
+    <span class="title">Hardware &amp; board selection — design spike</span>
+    <span class="lede">Rev 2 after gate feedback: the pin row is the layout unit — one row height drives pads, cells, and type, and every pin can hold cells simultaneously. Pin discovery switched from motion patterns to solid color codes with a color-order pretest. All boards still…</span>
+  </a>
+  <a class="card" href="./mapping-editor/index.html">
+    <span class="meta">
+      <span class="name">mapping-editor</span>
+      <span class="date">2026-07-27</span>
+    </span>
+    <span class="title">2D mapping editor — UX spike, round 2</span>
+    <span class="lede">Multi-select (marquee / ⇧-click), corner-handle resize, universe colors (U), multi-ring circles, properties popover. Undo: ⌘Z / ⇧⌘Z.</span>
+  </a>
+  <a class="card" href="./device-stateflow/index.html">
+    <span class="meta">
+      <span class="name">device-stateflow</span>
+      <span class="date">2026-07-26</span>
+    </span>
+    <span class="title">Device state-flow · filmstrips</span>
+    <span class="lede">Each journey is the ratified end-state, laid out as the sequence of cards the user actually sees — green arrows are user clicks, amber arrows happen on their own. Grounded in the real 16-state RosterCardState vocabulary; the model doc (§ numbers referenced…</span>
+  </a>
+  <a class="card" href="./device-card-panel/index.html">
+    <span class="meta">
+      <span class="name">device-card-panel</span>
+      <span class="date">2026-07-24</span>
+    </span>
+    <span class="title">Device card as control panel — design spike</span>
+    <span class="lede">The card IS the device: no dialogs, no status icon — the tinted chrome carries state, an icon-tab row under the title carries the detail, the console rides the bottom edge, and the same card grows into the editor pane. Everything below is interactive.</span>
+  </a>
+  <a class="card" href="./contiguous-popup/index.html">
+    <span class="meta">
+      <span class="name">contiguous-popup</span>
+      <span class="date">2026-07-15</span>
+    </span>
+    <span class="title">Contiguous popup — SVG outline prototype</span>
+    <span class="lede">One SVG path per group: the union of the participants' rects, corners rounded (convex and concave use the same arc emission). The popup opens by animating its input rect; the outline is recomputed each frame, so the border visibly grows around it.</span>
+  </a>
+</div>
+
+<h2>Code spikes <span style="color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">· 3, not browsable</span></h2>
+<ul class="code">
+  <li>
+    <div class="meta">
+      <span class="name">spikes/classic-oom-allocator</span>
+      <span class="date">2026-08-02</span>
+    </div>
+    <div class="lede">Host replay of the classic ESP32 OOM in docs/defects/2026-08-02-classic-oom-retry-succeeds.md.</div>
+  </li>
+  <li>
+    <div class="meta">
+      <span class="name">spikes/glsl-compile-working-set</span>
+      <span class="date">2026-08-02</span>
+    </div>
+    <div class="lede">How does the GLSL compiler's peak heap scale with shader size?</div>
+  </li>
+  <li>
+    <div class="meta">
+      <span class="name">spikes/naga-wasm-poc</span>
+      <span class="date">2026-03-21</span>
+    </div>
+    <div class="lede">Spike crate: GLSL → Naga IR → WASM with optional Q32 (i32 fixed-point) emission, validated by wasmtime integration tests.</div>
+  </li>
+</ul>
+
+<footer>
+  Generated by <code>scripts/spikes-index.mjs</code> — regenerate with <code>just spikes-index</code>.
+  Served by <code>just studio-dev</code> at <code>/spikes/index.html</code>; never deployed.
+</footer>
+
+</body>
+</html>

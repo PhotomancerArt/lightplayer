@@ -145,6 +145,15 @@ fn NavTab(
 /// card: what the tool is, not just its name, since these are surfaces
 /// most people meet rarely. They open in a new tab so the studio session
 /// behind them keeps running.
+///
+/// The last card, the design-spike index, is **debug-build only**. The
+/// spikes are internal design records — several state gate verdicts as
+/// settled fact — and the deployed site would 404 on them anyway: only
+/// `just studio-dev` copies `spikes/` into the served directory, and the
+/// Pages allowlist in `scripts/pages/prepare-pages-artifact.mjs` does not
+/// name it. `debug_assertions` is the gate rather than the `stories`
+/// feature, which the release Pages build also turns on. Story capture
+/// builds `--release`, so the card is absent from the baselines too.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ToolsMenu() -> Element {
@@ -170,6 +179,14 @@ fn ToolsMenu() -> Element {
                 title: "Board editor",
                 detail: "Draw and edit the board diagrams behind the catalog.",
                 href: "#/boards/edit",
+            }
+            if cfg!(debug_assertions) {
+                ToolCard {
+                    icon: StudioIconName::DesignSpike,
+                    title: "Design spikes",
+                    detail: "The HTML design playgrounds behind these surfaces, with their gate verdicts.",
+                    href: "/spikes/index.html",
+                }
             }
         }
     }

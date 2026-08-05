@@ -496,3 +496,20 @@ hours), and neither is an exit path on its own.
   Generous on purpose: the goal is to convert a wedge into a fast red, not to
   make a slow-but-healthy run flaky. **This bounds the damage; it does not
   explain the hang.** The entry stays open on the root cause.
+
+- 2026-08-05 — **The auto-commit can churn forever, and it looks like
+  ordinary drift.** On PR #349 (touching no clock-face code) two
+  consecutive green runs each fired the baseline auto-commit and moved the
+  same clock-face stories *back and forth*: run 30984999205 rewrote
+  `clock-face__crowd__lg` and `__shared__sm`, and run 30985988371 restored
+  both to **blob hashes byte-identical to main**. Filed as
+  `docs/defects/2026-08-05-clock-face-baselines-oscillate.md`
+  (`nondeterministic-capture`, open).
+  The operational lesson for this entry: the ADR's accepted tradeoff — merge
+  with the green run one commit behind the bot's — assumes the bot commit is
+  a one-time settling. Under oscillation the gap never closes, because the
+  next run disagrees with the one that just wrote, so waiting for
+  "green on the head" is an infinite loop. **When a baseline refresh lands,
+  diff its blob hashes against the PREVIOUS refresh, not only against main**;
+  a hash returning to an earlier value is the signature, and byte counts
+  alone hide it.
