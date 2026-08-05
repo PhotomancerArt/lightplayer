@@ -176,25 +176,52 @@ fn resolve_repeat(
         return Err(invalid("repeat count must be at least 1"));
     }
     let inner = resolve_shape(&repeat.shape, invalid)?;
-    let step = 360.0 / repeat.count as f32;
-    let [center_x, center_y] = repeat.center;
     let mut positions = Vec::with_capacity(inner.positions.len() * repeat.count as usize);
     let mut strands = Vec::with_capacity(inner.strands.len() * repeat.count as usize);
     for instance in 0..repeat.count {
-        let radians = instance as f32 * step * (core::f32::consts::PI / 180.0);
-        let cos = libm::cosf(radians);
-        let sin = libm::sinf(radians);
+        let rotation = Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
         for position in &inner.positions {
-            let dx = position[0] - center_x;
-            let dy = position[1] - center_y;
-            positions.push([
-                center_x + dx * cos - dy * sin,
-                center_y + dx * sin + dy * cos,
-            ]);
+            positions.push(rotation.apply(*position));
         }
         strands.extend_from_slice(&inner.strands);
     }
     Ok(ShapeLamps { positions, strands })
+}
+
+/// A rotation about a point, precomputed once and applied per point.
+///
+/// This is the *only* place a repeat's turn is computed, so an editor that
+/// rotates authored geometry (expanding a repeat into independent objects,
+/// drawing ghost instance outlines) gets bit-identical results to the
+/// resolver instead of its own re-derived trig. Screen coordinates, y-down:
+/// a positive angle turns clockwise, matching [`resolve_ring`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rotation2d {
+    center: [f32; 2],
+    sin: f32,
+    cos: f32,
+}
+
+impl Rotation2d {
+    #[must_use]
+    pub fn about(center: [f32; 2], degrees: f32) -> Self {
+        let radians = degrees * (core::f32::consts::PI / 180.0);
+        Self {
+            center,
+            sin: libm::sinf(radians),
+            cos: libm::cosf(radians),
+        }
+    }
+
+    #[must_use]
+    pub fn apply(&self, point: [f32; 2]) -> [f32; 2] {
+        let dx = point[0] - self.center[0];
+        let dy = point[1] - self.center[1];
+        [
+            self.center[0] + dx * self.cos - dy * self.sin,
+            self.center[1] + dx * self.sin + dy * self.cos,
+        ]
+    }
 }
 
 fn address_of(index: u32) -> LampAddress {

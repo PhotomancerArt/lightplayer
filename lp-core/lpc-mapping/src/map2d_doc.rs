@@ -238,6 +238,17 @@ impl RepeatShape {
     pub fn clamp_count(&mut self) {
         self.count = self.count.clamp(1, MAX_REPEAT_COUNT);
     }
+
+    /// Degrees instance `instance` is turned by.
+    ///
+    /// The resolver and every editor that rotates authored geometry read the
+    /// angle from here, in this exact arithmetic order, so an expanded
+    /// instance lands on the same floats the repeat resolved to.
+    #[must_use]
+    pub fn instance_degrees(&self, instance: u32) -> f32 {
+        let step = 360.0 / self.count.max(1) as f32;
+        instance as f32 * step
+    }
 }
 
 impl Map2dDoc {

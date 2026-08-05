@@ -37,5 +37,5 @@ pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
 pub use map2d_resolve::{
     CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectSpan, ResolvedLamp, ResolvedMap2d,
-    resolve,
+    Rotation2d, resolve,
 };
