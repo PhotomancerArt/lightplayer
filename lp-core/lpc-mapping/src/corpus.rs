@@ -1,4 +1,4 @@
-//! The mapping test corpus: four authored archetypes plus the real fyeah
+//! The mapping test corpus: the authored archetypes plus the real fyeah
 //! sign, shared by resolver tests, Studio stories, and editor fixtures.
 //!
 //! The JSON documents are the canonical corpus (they exercise serde on every
@@ -22,6 +22,10 @@ pub const PANEL_16X16_JSON: &str = include_str!("corpus/panel_16x16.map2d.json")
 /// wire, and comes back: the format-2 archetype (24 lamps, one object).
 pub const GAPPED_PATH_JSON: &str = include_str!("corpus/gapped_path.map2d.json");
 
+/// One gapped sector strand repeated five times around a hub — the smallest
+/// honest model of the dome: 5 physical strands of 12 lamps, one object.
+pub const REPEATED_SECTOR_JSON: &str = include_str!("corpus/repeated_sector.map2d.json");
+
 /// The real fyeah sign mapping SVG (10 labeled paths, 219 lamps).
 pub const FYEAH_SVG: &str = include_str!("corpus/fyeah_mapping.svg");
 
@@ -39,6 +43,10 @@ pub fn panel_16x16() -> Map2dDoc {
 
 pub fn gapped_path() -> Map2dDoc {
     Map2dDoc::from_json(GAPPED_PATH_JSON).expect("corpus gapped_path parses")
+}
+
+pub fn repeated_sector() -> Map2dDoc {
+    Map2dDoc::from_json(REPEATED_SECTOR_JSON).expect("corpus repeated_sector parses")
 }
 
 pub fn fyeah() -> Map2dDoc {
@@ -110,6 +118,57 @@ mod tests {
         assert_eq!(on_first, 12);
     }
 
+    /// The mini-dome: one authored sector, five physical strands. The span
+    /// list is what the fixture and the output face read, so this pins the
+    /// structure (5 × 12, consecutive, all one object) and not just the total.
+    #[test]
+    fn repeated_sector_resolves_five_strands_of_one_object() {
+        let doc = repeated_sector();
+        assert_eq!(doc.format, 2);
+        assert_eq!(doc.required_format(), 2);
+        assert_eq!(doc.objects.len(), 1);
+
+        let resolved = resolve(&doc).unwrap();
+        assert_eq!(resolved.lamps.len(), 60);
+        assert_eq!(resolved.spans.len(), 5);
+        for (instance, span) in resolved.spans.iter().enumerate() {
+            assert_eq!(span.object, 0, "every instance is the same object");
+            assert_eq!(span.count, 12);
+            assert_eq!(span.start, instance as u32 * 12);
+        }
+        // The whole object is still one contiguous range for per-object UI.
+        let whole = resolved.object_span(0).unwrap();
+        assert_eq!((whole.start, whole.count), (0, 60));
+
+        // Instance 0 is the authored sector untouched: both ribs are vertical
+        // lines, and no lamp lands on the jumper that crosses between them.
+        for lamp in &resolved.lamps[..12] {
+            assert!(
+                lamp.pos[0] == 200.0 || lamp.pos[0] == 240.0,
+                "lamp {} landed off the ribs at {:?}",
+                lamp.index,
+                lamp.pos
+            );
+        }
+        // And every later instance is that same strand turned about the hub,
+        // so the inert segment stays inert all the way round.
+        for instance in 1..5u32 {
+            for lamp in 0..12u32 {
+                let first = hub_radius(resolved.lamps[lamp as usize].pos);
+                let rotated = hub_radius(resolved.lamps[(instance * 12 + lamp) as usize].pos);
+                assert!(
+                    (first - rotated).abs() < 0.01,
+                    "instance {instance} lamp {lamp}: radius {rotated} vs {first}"
+                );
+            }
+        }
+    }
+
+    /// Distance from the mini-dome's hub at `[200, 200]`.
+    fn hub_radius(pos: [f32; 2]) -> f32 {
+        ((pos[0] - 200.0).powi(2) + (pos[1] - 200.0).powi(2)).sqrt()
+    }
+
     #[test]
     fn fyeah_imports_all_labeled_paths() {
         let doc = fyeah();
@@ -143,6 +202,7 @@ mod tests {
             ("cat_ears", cat_ears()),
             ("panel_16x16", panel_16x16()),
             ("gapped_path", gapped_path()),
+            ("repeated_sector", repeated_sector()),
             ("fyeah", fyeah()),
         ] {
             let bytes = doc.to_json().len();
@@ -160,6 +220,7 @@ mod tests {
             cat_ears(),
             panel_16x16(),
             gapped_path(),
+            repeated_sector(),
             fyeah(),
         ] {
             let round_tripped = Map2dDoc::from_json(&doc.to_json()).unwrap();

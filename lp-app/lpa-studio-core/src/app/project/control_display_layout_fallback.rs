@@ -58,8 +58,9 @@ pub(crate) fn synthesized_map2d_layout(
             radius: point.radius,
         })
         .collect();
-    // Mirrors `fixture_path_spans`' `Compact` arm: one span per document
-    // object that actually has lamps, in channel-assignment order.
+    // Mirrors `fixture_path_spans`' `Compact` arm: one span per physical
+    // strand that actually has lamps, in channel-assignment order — a
+    // rotational `repeat` object contributes one per instance.
     let paths = mapping
         .spans
         .iter()
@@ -164,6 +165,34 @@ mod tests {
             vec![(0, 4), (4, 3)],
             "one span per object, in wiring order"
         );
+    }
+
+    /// A repeated object is many strands: the synthesized layout must publish
+    /// one path span per instance, exactly as the engine's carrier does, or
+    /// the client-side preview would draw one long strand where the fixture
+    /// has five.
+    #[test]
+    fn a_repeated_object_synthesizes_one_path_span_per_instance() {
+        let doc = lpc_mapping::corpus::repeated_sector();
+
+        let layout = synthesized_map2d_layout(&doc, Revision::new(2), 64, 64)
+            .expect("repeated document synthesizes");
+
+        assert_eq!(doc.objects.len(), 1, "one authored object");
+        assert_eq!(layout.lamps.len(), 60);
+        assert_eq!(
+            layout
+                .paths
+                .iter()
+                .map(|span| (span.first_lamp, span.lamp_count))
+                .collect::<Vec<_>>(),
+            vec![(0, 12), (12, 12), (24, 12), (36, 12), (48, 12)],
+        );
+        // Lamp numbering still runs straight through the instances.
+        for (index, lamp) in layout.lamps.iter().enumerate() {
+            assert_eq!(lamp.lamp_index, index as u32);
+            assert_eq!(lamp.sample_start, index as u32 * 3);
+        }
     }
 
     #[test]

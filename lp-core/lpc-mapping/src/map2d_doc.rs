@@ -24,6 +24,7 @@
 //!    construct drops the document back to the older format, so it becomes
 //!    readable by older builds again.
 
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -44,6 +45,18 @@ const MAP2D_FORMAT_BASE: u32 = 1;
 /// wire and shift every downstream wiring index — so gapped documents declare
 /// this and old builds refuse them whole.
 const MAP2D_FORMAT_PATH_GAPS: u32 = 2;
+
+/// The format a document needs once any object is a [`RepeatShape`]. A
+/// format-1 build has never heard of the variant and cannot ignore it — it
+/// would lose every lamp the object carries — so repeated documents declare
+/// this and old builds refuse them whole.
+const MAP2D_FORMAT_REPEAT: u32 = 2;
+
+/// Largest [`RepeatShape::count`] an editor may author. The resolver itself
+/// has no ceiling — a hand-authored document is the author's business — but a
+/// slider or a typo should not be able to multiply a 300-lamp strand into a
+/// six-figure document.
+pub const MAX_REPEAT_COUNT: u32 = 64;
 
 /// Default lamp sample diameter (texture-space units, matches the legacy
 /// per-fixture default).
@@ -86,6 +99,7 @@ pub enum Map2dShape {
     Grid(GridShape),
     Ring(RingShape),
     Path(PathShape),
+    Repeat(RepeatShape),
 }
 
 /// A rectilinear lamp grid with snake or raster routing.
@@ -194,6 +208,38 @@ pub struct PathShape {
     pub gaps: Vec<u32>,
 }
 
+/// `count` rotated instances of an inner shape, equally spaced over a full
+/// circle around [`center`](Self::center).
+///
+/// Instance `k` is the inner shape rotated `k * (360 / count)` degrees;
+/// instance 0 is the inner shape unrotated. Instances are consecutive in
+/// wiring order and each one resolves to its **own span** — a repeated
+/// document's instances are physical strands, not one long run, so the
+/// fixture's honest spans and the output face's strip boundaries see N
+/// strands of `inner_count` lamps. Nesting is allowed; spans multiply, and
+/// the innermost instances are the strands.
+///
+/// The inner shape is boxed so the enum stays small (a `Map2dShape` is
+/// otherwise dominated by [`PathShape`]'s vectors), and the nesting is plain
+/// external tagging — `{"repeat": {"shape": {"path": {...}}, ...}}` — because
+/// the firmware graph admits no serde `tag`/`untagged`/`flatten`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepeatShape {
+    pub shape: Box<Map2dShape>,
+    /// Rotation center in doc space.
+    pub center: [f32; 2],
+    pub count: u32,
+}
+
+impl RepeatShape {
+    /// Clamp `count` into the range an editor may author
+    /// (`1..=`[`MAX_REPEAT_COUNT`]). Pure so the editor's sanitize pass and
+    /// any other writer agree on the bound.
+    pub fn clamp_count(&mut self) {
+        self.count = self.count.clamp(1, MAX_REPEAT_COUNT);
+    }
+}
+
 impl Map2dDoc {
     /// An empty document (the editor's starting point). Empty content needs
     /// nothing newer than the base format — see [`Self::required_format`].
@@ -218,12 +264,7 @@ impl Map2dDoc {
     pub fn from_json(json: &str) -> Result<Self, Map2dError> {
         let peek: FormatPeek =
             serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
-        if peek.format == 0 || peek.format > MAP2D_FORMAT {
-            return Err(Map2dError::UnsupportedFormat {
-                found: peek.format,
-                supported: MAP2D_FORMAT,
-            });
-        }
+        format_gate(peek.format, MAP2D_FORMAT)?;
         let doc: Self = serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
         Ok(doc)
     }
@@ -235,17 +276,13 @@ impl Map2dDoc {
     /// grows a case per newer construct, so removing the last newer construct
     /// from a document drops it back to 1 and makes it readable by old builds
     /// again.
+    /// The walk recurses through [`RepeatShape`] inners: a gapped path nested
+    /// inside a repeat is still a gapped path, and a repeat is itself a
+    /// construct no format-1 build can represent.
     pub fn required_format(&self) -> u32 {
         let mut required = MAP2D_FORMAT_BASE;
         for object in &self.objects {
-            match &object.shape {
-                // Inert path segments (format 2): an old build would parse
-                // `gaps` away and light the jumper wire.
-                Map2dShape::Path(path) if !path.gaps.is_empty() => {
-                    required = required.max(MAP2D_FORMAT_PATH_GAPS);
-                }
-                _ => {}
-            }
+            required = required.max(shape_required_format(&object.shape));
         }
         required
     }
@@ -279,6 +316,33 @@ impl Map2dDoc {
 impl Default for Map2dDoc {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The format gate itself, `supported` passed in rather than read from
+/// [`MAP2D_FORMAT`].
+///
+/// The parameter is what makes the *old build's* behavior testable: this crate
+/// can only ever be its own version, so "would a build that reads up to 1
+/// refuse this document?" is otherwise unaskable. That refusal is the designed
+/// outcome for every format-2 construct, so it gets a test, not a promise.
+fn format_gate(found: u32, supported: u32) -> Result<(), Map2dError> {
+    if found == 0 || found > supported {
+        return Err(Map2dError::UnsupportedFormat { found, supported });
+    }
+    Ok(())
+}
+
+/// The lowest format able to read one shape, inner shapes included.
+fn shape_required_format(shape: &Map2dShape) -> u32 {
+    match shape {
+        // Inert path segments (format 2): an old build would parse `gaps`
+        // away and light the jumper wire.
+        Map2dShape::Path(path) if !path.gaps.is_empty() => MAP2D_FORMAT_PATH_GAPS,
+        // The rotational repeat (format 2): an unknown variant cannot be
+        // ignored — the whole object's lamps would vanish.
+        Map2dShape::Repeat(repeat) => MAP2D_FORMAT_REPEAT.max(shape_required_format(&repeat.shape)),
+        _ => MAP2D_FORMAT_BASE,
     }
 }
 
@@ -451,6 +515,87 @@ mod tests {
         assert!(json.contains("\"format\":1"));
     }
 
+    /// The repeat variant is the other format-2 construct, and the first new
+    /// [`Map2dShape`] variant ever added — the case the whole loud-refusal
+    /// posture was designed around.
+    #[test]
+    fn a_repeat_requires_format_two_and_releases_it() {
+        let mut doc = repeated_doc(4);
+        assert_eq!(doc.required_format(), 2);
+        doc.normalize_format();
+        assert_eq!(doc.format, 2);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+
+        // Unwrap the repeat and the document is plain again.
+        let Map2dShape::Repeat(repeat) = &doc.objects[0].shape else {
+            panic!("expected repeat");
+        };
+        doc.objects[0].shape = (*repeat.shape).clone();
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+    }
+
+    /// `required_format` walks *into* repeats: the format a document needs is
+    /// the highest anything inside it needs, however deep.
+    #[test]
+    fn the_format_walk_recurses_through_repeat_inners() {
+        // A repeat wrapping a repeat wrapping a plain path is still just 2 —
+        // recursion must not inflate the stamp.
+        let nested = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "nested".to_string(),
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Repeat(RepeatShape {
+                        shape: Box::new(plain_path(Vec::new())),
+                        center: [0.0, 0.0],
+                        count: 2,
+                    })),
+                    center: [10.0, 10.0],
+                    count: 3,
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(nested.required_format(), 2);
+
+        // And a gapped path buried inside a repeat still counts as gapped —
+        // the inner shape is not out of sight of the stamp.
+        let gapped_inner = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "sector".to_string(),
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(plain_path(vec![1])),
+                    center: [0.0, 0.0],
+                    count: 5,
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(gapped_inner.required_format(), 2);
+    }
+
+    /// The designed failure: a build that reads up to format 1 meets a
+    /// repeated document and refuses it whole, with an honest "you need a
+    /// newer build" — never a half-read document missing every repeated lamp.
+    #[test]
+    fn a_format_one_build_refuses_a_repeated_document_honestly() {
+        let mut doc = repeated_doc(5);
+        doc.normalize_format();
+        let stamped = doc.format;
+
+        assert_eq!(
+            format_gate(stamped, 1),
+            Err(Map2dError::UnsupportedFormat {
+                found: 2,
+                supported: 1
+            })
+        );
+        // The same build reads every format-1 document it always could.
+        assert_eq!(format_gate(corpus::cat_ears().format, 1), Ok(()));
+        // And this build reads the repeated one.
+        assert!(Map2dDoc::from_json(&doc.to_json()).is_ok());
+    }
+
     #[test]
     fn ignores_unknown_fields_for_additive_evolution() {
         let doc = Map2dDoc::from_json(
@@ -460,5 +605,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(doc.objects.len(), 1);
+    }
+
+    /// A three-point path, optionally with inert segments.
+    fn plain_path(gaps: Vec<u32>) -> Map2dShape {
+        Map2dShape::Path(PathShape {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+            count: 4,
+            reversed: false,
+            gaps,
+        })
+    }
+
+    fn repeated_doc(count: u32) -> Map2dDoc {
+        Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "sector".to_string(),
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(plain_path(Vec::new())),
+                    center: [5.0, 5.0],
+                    count,
+                }),
+            }],
+            ..Map2dDoc::new()
+        }
     }
 }

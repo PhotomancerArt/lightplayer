@@ -1689,11 +1689,12 @@ fn fixture_path_spans(config: MappingRef<'_>) -> Vec<FixturePathSpan> {
             }
             spans
         }
-        // One span per document object, in the same channel-assignment
+        // One span per physical strand, in the same channel-assignment
         // order the slot form's `paths.entries.values()` walk produced —
-        // empty objects skipped, so `palette_index` stays a running index
-        // over the spans that actually have lamps. Studio's wiring arrows
-        // and universe coloring read these.
+        // empty strands skipped, so `palette_index` stays a running index
+        // over the spans that actually have lamps. A repeated document
+        // therefore yields one honest span per instance. Studio's wiring
+        // arrows and universe coloring read these.
         MappingRef::Compact(compact) => {
             let mut spans = Vec::new();
             for span in &compact.spans {
@@ -2499,6 +2500,36 @@ mod tests {
             ControlHint::RgbPixels {
                 count: 4,
                 color_order: ColorOrder::Rgb,
+            }
+        );
+    }
+
+    /// Honest spans for a *repeated* document: one authored object, five
+    /// rotated instances, five spans. The instances are physical strands, so
+    /// an output slicing along span boundaries lands on real wire ends — one
+    /// covering span of 60 lamps would be a lie about the fixture.
+    #[test]
+    fn a_repeated_map2d_fixture_publishes_one_span_per_instance() {
+        let doc = lpc_mapping::corpus::repeated_sector();
+        let mapping = crate::nodes::fixture::mapping::map2d::mapping_from_map2d_doc(&doc, 64, 64)
+            .expect("repeated document resolves");
+
+        let spans = fixture_control_spans(MappingRef::Compact(&mapping), ColorOrder::Grb, 60 * 3);
+
+        assert_eq!(doc.objects.len(), 1, "one authored object");
+        assert_eq!(spans.len(), 5, "five instances, five honest spans");
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| (span.start, span.len))
+                .collect::<Vec<_>>(),
+            vec![(0, 36), (36, 36), (72, 36), (108, 36), (144, 36)],
+        );
+        assert_eq!(
+            spans[4].encoding,
+            ControlHint::RgbPixels {
+                count: 12,
+                color_order: ColorOrder::Grb,
             }
         );
     }
