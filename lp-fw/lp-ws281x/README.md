@@ -129,7 +129,13 @@ column by the output count and the ceiling picks the winner:
   frees. The proviso is not optional: that firmware's app path masks
   interrupts in stretches that blow the 80 µs deadline, and a wire left
   transmitting under engine load truncated ~99 % of its frames. Whoever calls
-  `start_frame` owns keeping the CPU quiet until the frame completes.
+  `start_frame` owns keeping the CPU quiet until the frame completes — with
+  one escape: the constraint is a property of the *core that services the
+  ISR*, not of the chip. A handler bound on a core the caller's masking
+  cannot touch (the classic's otherwise-idle APP core) dissolves it, and the
+  frame lifecycle is written for exactly that cross-core deployment — see
+  the teardown handshake on `Ws281xDriver::abort` and the ordering contract
+  in `state.rs`.
 
 Note that only slots `0, 2, 4, 6` exist at two blocks each — a backend must
 skip the absorbed slots when it creates channels, not merely when it
