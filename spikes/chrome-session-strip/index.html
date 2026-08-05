@@ -726,6 +726,14 @@
   // works without onNav; chips in static frames stay inert (menus are the demo).
 
   renderAll();
+
+  /* hash-boot for capture / linking: #flyout=a-sm opens that frame's session flyout */
+  const m = location.hash.match(/flyout=([a-z]+)-(wide|md|sm)/);
+  if (m){
+    const frame = document.querySelector(`[data-concept="${m[1]}"][data-bp="${m[2]}"]`);
+    const trigger = frame && frame.querySelector('.countpill, .tabbadge, .morechip');
+    if (trigger) trigger.click();
+  }
 })();
 </script>
 </body>
