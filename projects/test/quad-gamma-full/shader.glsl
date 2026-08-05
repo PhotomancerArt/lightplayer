@@ -8,7 +8,7 @@
 // lit even where the dot is not.
 
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec3 bandColor(float band) {
     if (band < 0.5) {
@@ -27,9 +27,10 @@ vec4 render(vec2 pos) {
     vec2 uv = pos / outputSize;
     float band = floor(uv.y * 4.0);
 
-    // Band-specific chase: distinct speed and phase per strip.
-    float speed = 0.25 + band * 0.1;
-    float head = fract(time * speed + band * 0.25);
+    // Band-specific chase: `phase` is one 20 s cycle and each band rides a
+    // whole-number multiple of it (0.25, 0.35, 0.45, 0.55 Hz originally), so
+    // the bands stay in the same relation without unbounded seconds.
+    float head = fract(phase * (5.0 + band * 2.0) + band * 0.25);
     float d = abs(uv.x - head);
     d = min(d, 1.0 - d);
     float dot_i = smoothstep(0.12, 0.0, d);

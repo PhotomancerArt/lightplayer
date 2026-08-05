@@ -205,6 +205,13 @@ fn format_product_ref(product: ProductRef) -> String {
                 extent.samples_per_row
             )
         }
+        ProductRef::Time(product) => {
+            format!(
+                "time product node {} output {}",
+                product.node(),
+                product.output()
+            )
+        }
     }
 }
 

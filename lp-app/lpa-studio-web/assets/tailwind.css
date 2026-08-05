@@ -1312,6 +1312,9 @@
   .tw\:bg-border-muted {
     background-color: var(--tw-color-border-muted);
   }
+  .tw\:bg-border-strong {
+    background-color: var(--tw-color-border-strong);
+  }
   .tw\:bg-card {
     background-color: var(--tw-color-card);
   }
@@ -1350,6 +1353,9 @@
   }
   .tw\:bg-status-bound-bg {
     background-color: var(--tw-color-status-bound-bg);
+  }
+  .tw\:bg-status-bound-foreground {
+    background-color: var(--tw-color-status-bound-foreground);
   }
   .tw\:bg-status-error-bg {
     background-color: var(--tw-color-status-error-bg);

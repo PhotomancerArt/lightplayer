@@ -1,5 +1,7 @@
 // 0=heatmap, 1=rainbow, 2=fire, 3=cool, 4=warm (5s per palette, 1s lerp transition)
 
+const float TAU = 6.28318530718;
+
 // Lygia heatmap: blue -> cyan -> green -> yellow -> red
 vec3 paletteHeatmap(float t) {
     vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
@@ -75,20 +77,23 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 }
 
 layout(binding = 0) uniform vec2 outputSize;
+// Unbounded seconds: the noise field is advanced, not wrapped.
 layout(binding = 1) uniform float time;
+layout(binding = 2) uniform float palettePhase01;
+layout(binding = 3) uniform float panPhase;
+layout(binding = 4) uniform float scalePhase;
 
 vec4 render(vec2 pos) {
-    // Palette cycle: 5s per palette, 1s smooth transition to next
-    float cyclePhase = mod(time, 5.0);
-    float palette = floor(mod(time * 0.2, 5.0));
+    // Palette cycle: 5s per palette, 1s smooth transition to next. One 25 s
+    // phasor carries both the palette index and the blend phase.
+    float cyclePhase = mod(palettePhase01 * 25.0, 5.0);
+    float palette = floor(palettePhase01 * 5.0);
     float nextPalette = mod(palette + 1.0, 5.0);
     float blend = smoothstep(4.0, 5.0, cyclePhase);
 
-    float panSpeed = .3;
-    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
+    float pan = mix(1.0, 8.0, 0.5 * (sin(TAU * panPhase) + 1.0));
 
-    float scaleSpeed = .7;
-    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
+    float scale = mix(.04, .06, 0.5 * (sin(TAU * scalePhase) + 1.0));
 
     vec2 center = outputSize * 0.5;
     vec2 dir = pos - center;

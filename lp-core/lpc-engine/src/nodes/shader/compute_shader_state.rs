@@ -164,7 +164,9 @@ pub fn shape_for_shader_slot(
     registry: &SlotShapeRegistry,
 ) -> Result<SlotShape, ComputeStateError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => value_shape_for_slot(slot, registry),
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+            value_shape_for_slot(slot, registry)
+        }
         ShaderSlotKind::Map => {
             let key = slot.key.data.as_ref().ok_or_else(|| {
                 ComputeStateError::Unsupported(String::from("map slot missing key"))
@@ -230,10 +232,12 @@ fn value_shape_for_ref(
 
 fn empty_data_for_slot(slot: &ShaderSlotDef, revision: Revision) -> SlotData {
     match slot.kind.value() {
-        ShaderSlotKind::Value => SlotData::Value(WithRevision::new(
-            revision,
-            default_lp_value_for_ref(slot.value.value()),
-        )),
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+            SlotData::Value(WithRevision::new(
+                revision,
+                default_lp_value_for_ref(slot.value.value()),
+            ))
+        }
         ShaderSlotKind::Map => SlotData::Map(lpc_model::SlotMapDyn::with_revision(
             revision,
             VecMap::new(),

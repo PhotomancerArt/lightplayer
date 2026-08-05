@@ -34,12 +34,16 @@ fn bindings_map() -> ProjectSlotAddress {
     )
 }
 
+/// The story's target slot is a plain `f32` uniform, which is what makes
+/// the product guard visible: `time` and `visual.out` carry HANDLES since
+/// the M2 break, so picking either here would only earn a `Warn`.
 fn authoring(authored: Option<&str>) -> UiBindingAuthoring {
     UiBindingAuthoring {
         key: "time".to_string(),
         direction: UiBindingAuthoringDirection::Source,
         bindings_map: bindings_map(),
         authored: authored.map(UiBindingEndpoint::new),
+        scalar_slot: true,
     }
 }
 
@@ -48,9 +52,10 @@ fn story_choices() -> Vec<UiChannelChoice> {
         UiChannelChoice {
             name: "time".to_string(),
             kind: Some("Instant".to_string()),
-            doc: Some("Project clock in seconds; the clock publishes it by default."),
+            doc: Some("Project time product; query it for seconds, delta, and phasors."),
             well_known: true,
             observed: true,
+            carries_product: true,
         },
         UiChannelChoice {
             name: "trigger".to_string(),
@@ -58,6 +63,7 @@ fn story_choices() -> Vec<UiChannelChoice> {
             doc: Some("Control events; map readers merge by message id."),
             well_known: true,
             observed: true,
+            carries_product: false,
         },
         UiChannelChoice {
             name: "visual.out".to_string(),
@@ -65,6 +71,7 @@ fn story_choices() -> Vec<UiChannelChoice> {
             doc: Some("The project's primary visual output."),
             well_known: true,
             observed: false,
+            carries_product: true,
         },
         UiChannelChoice {
             name: "wobble".to_string(),
@@ -72,6 +79,7 @@ fn story_choices() -> Vec<UiChannelChoice> {
             doc: None,
             well_known: false,
             observed: true,
+            carries_product: false,
         },
     ]
 }

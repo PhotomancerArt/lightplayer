@@ -86,6 +86,24 @@ pub(crate) fn ProductPreview(
     #[props(default)]
     map_view: MapViewOptions,
 ) -> Element {
+    // A time product is metadata-only BY DESIGN (nothing to draw behind the
+    // handle — the phasor listing below is its real face), so it gets a
+    // compact caption band instead of the aspect-framed hero the pictorial
+    // products fill. Keeping the hero frame here rendered a full-width box
+    // of nothing (G2 gate feedback).
+    if kind == UiProductKind::Time && matches!(preview, UiProductPreview::MetadataOnly) {
+        return rsx! {
+            div { class: "ux-produced-product-metadata",
+                strong { class: "tw:text-sm tw:text-strong-foreground",
+                    {metadata_only_title(kind)}
+                }
+                span { class: "tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                    {metadata_only_detail(kind)}
+                }
+            }
+        };
+    }
+
     let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
     let overlay = product_tracking_overlay(kind, tracking);
@@ -142,8 +160,8 @@ pub(crate) fn ProductPreview(
                     ProductSkeleton {
                         kind,
                         tone: ProductSkeletonTone::Quiet,
-                        title: "Metadata only",
-                        detail: "Studio does not render this product type yet.",
+                        title: metadata_only_title(kind),
+                        detail: metadata_only_detail(kind),
                         show_text: true,
                     }
                 },
@@ -157,6 +175,26 @@ pub(crate) fn ProductPreview(
                 }
             }
         }
+    }
+}
+
+/// Metadata-only heading. A **time** product is metadata-only by design, not
+/// by omission: there is nothing to draw behind the handle, and the way to
+/// look at it is the clock face's phasor listing. Saying "Studio does not
+/// render this yet" there would report a gap that is not one.
+fn metadata_only_title(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => UiProductKind::Time.detail_label(),
+        _ => "Metadata only",
+    }
+}
+
+fn metadata_only_detail(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => {
+            "A queryable timebase: seconds, this tick's delta, and the phasors riding it."
+        }
+        _ => "Studio does not render this product type yet.",
     }
 }
 

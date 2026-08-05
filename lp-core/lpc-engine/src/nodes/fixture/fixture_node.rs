@@ -1978,6 +1978,7 @@ mod tests {
     #[cfg(feature = "node-shader")]
     fn sample_point_coords_rewrite_only_when_the_key_changes() {
         struct NoServices;
+        impl crate::node::TimebaseRead for NoServices {}
         impl crate::node::ControlRenderServices for NoServices {
             fn render_texture(
                 &mut self,

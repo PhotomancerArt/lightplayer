@@ -19,6 +19,7 @@ default = [
     "node-clock",
     "node-shader",
     "resolver-payload-cache",
+    "scrub-log",
 ]
 # Panic recovery via catch_unwind (embedded targets)
 naga = ["lp-shader/naga"]
@@ -68,6 +69,29 @@ node-shader = []
 # real memory. `fw-esp32v3` is the one build that leaves it off, because on a
 # 110 KB arena 8,368 B is roughly 90 LEDs of capacity.
 resolver-payload-cache = []
+
+# --- Phasor breakpoint log (removal-only, same contract as the gates above) --
+#
+# On: every phasor on a timebase keeps an event-sparse log of the breakpoints
+# where its effective rate changed, and its phase is evaluated in CLOSED FORM
+# from the segment covering the clock's effective time. That is what makes
+# scrubbing exact — dragging the clock back to a time already seen replays the
+# same `fract(phase + rate·Δt)` from the same breakpoint, bit for bit, instead
+# of re-integrating a different sum of deltas.
+#
+# Off: the store keeps only the forward integrator (`phase += rate · delta`)
+# and allocates nothing per phasor. That is the firmware posture — a device
+# has no transport UI to scrub with, and a `Vec` per phasor per consumer is
+# not something a 110 KB arena should carry for a studio affordance. A
+# backward `scrub_offset` write still moves a device sanely: the clock
+# publishes a negative delta and the integrator wraps downward (parent D6's
+# "monotone-consistent" device behavior).
+#
+# Defaults on, so the studio, `lp-cli` and every host test get it; the
+# firmware crates take `lpc-engine` (or `lpa-server`) with
+# `default-features = false` and simply do not list it. `just build-fw-emu`
+# and the gate-off runs in `just check-lpc-engine-gates` are what pin that.
+scrub-log = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

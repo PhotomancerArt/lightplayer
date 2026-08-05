@@ -24,9 +24,11 @@
           "value": {
             "shape": {
               "editor": "plain",
-              "id": 2605450937,
+              "id": 2685686043,
               "meta": {},
-              "ty": "f32"
+              "ty": {
+                "product": "time"
+              }
             }
           }
         }

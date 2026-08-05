@@ -1,6 +1,7 @@
 use super::PlaylistEntry;
 use crate::{
-    BindingDefs, ControlMessage, MapSlot, PositiveF32, PositiveF32Slot, Slotted, ValueSlot,
+    BindingDefs, ControlMessage, MapSlot, PositiveF32, PositiveF32Slot, Slotted, TimeProductSlot,
+    ValueSlot,
 };
 
 /// Authored playlist visual selector node definition.
@@ -9,9 +10,11 @@ pub struct PlaylistDef {
     /// Authored slot bindings for playlist-level inputs and visual output.
     pub bindings: BindingDefs,
 
-    /// Global graph time in seconds.
+    /// Graph timebase the playlist schedules against — the scope's time
+    /// product, queried for effective seconds. `entry_time`/`entry_progress`
+    /// stay plain f32: they are entry-relative, not the project clock.
     #[slot(consumed)]
-    pub time: ValueSlot<f32>,
+    pub time: TimeProductSlot,
 
     /// Trigger messages that start or restart entries (routed by entry
     /// `trigger_ids`).
@@ -53,8 +56,8 @@ impl PlaylistDef {
     }
 }
 
-fn default_time() -> ValueSlot<f32> {
-    ValueSlot::new(0.0)
+fn default_time() -> TimeProductSlot {
+    TimeProductSlot::default()
 }
 
 fn default_idle_entry() -> ValueSlot<u32> {
@@ -77,7 +80,7 @@ mod tests {
         let NodeDef::Playlist(def) = def else {
             panic!("playlist def");
         };
-        assert_eq!(*def.time.value(), 0.0);
+        assert_eq!(*def.time.value(), crate::TimeProduct::default());
         assert_eq!(*def.idle_entry.value(), 1);
         assert_eq!(def.default_fade.value().0, 0.25);
         assert!(def.entries.is_empty());
