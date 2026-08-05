@@ -472,18 +472,23 @@ impl NodeRuntime for FixtureNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Everything dropped here is rebuilt lazily by its ensure_* seam on
-        // the next render (`ensure_texture_area_mapping`,
-        // `ensure_direct_channels`, `ensure_fixture_sample_points`,
-        // `ensure_fixture_sample_target`, `ensure_fixture_render_target`) —
-        // the memory-pressure contract guarantees nothing beyond that. The
-        // resolved mapping itself (`self.mapping`) is source-of-truth state,
-        // not a cache, and stays.
-        self.precomputed = None;
-        self.direct_channels = None;
-        self.sample_points = None;
-        self.sample_target = None;
-        self.render_target = None;
+        // Nothing droppable here, deliberately. This handler used to clear
+        // `precomputed` / `direct_channels` / `sample_points` /
+        // `sample_target` / `render_target` at `High` (the #303 compile
+        // window). Measurement on 2026-08-04 showed the drop frees nothing at
+        // the moment that matters and makes the peak worse: the compile runs
+        // at RENDER time (`ensure_compiled` from `sample_visual_into` /
+        // `render_texture_into`), while every one of those buffers is rebuilt
+        // EARLIER in the same tick — so net freed at the compile instant is
+        // ~0 B, and clearing the staleness keys forces the mapping-point walk
+        // to re-run inside the window frame. Removed in M6 P4; see
+        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`
+        // and the 2026-08-04 amendment to
+        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+        //
+        // Seam kept on purpose: the broadcast reaches this node at a safe
+        // point, so anything genuinely droppable — state this node's own tick
+        // does NOT rebuild before the compile — belongs here.
         Ok(())
     }
 
@@ -3456,6 +3461,55 @@ mod tests {
         assert!(
             node.display_layout_revision.is_some(),
             "a revision-only def write must not invalidate display_layout_revision"
+        );
+    }
+
+    /// The compile-window broadcast reaches this node at a safe point and
+    /// drops NOTHING (M6 P4). The #303 handler cleared the derived caches
+    /// here; measurement showed the compile runs at render time, after this
+    /// node's own `produce` has already rebuilt every one of them, so the
+    /// drop freed nothing at the compile instant and forced the mapping-point
+    /// walk to re-run inside the window frame. See
+    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+    ///
+    /// Sentinel identity, not mere `is_some()`: this must fail if the drops
+    /// come back without the ordering fact changing first.
+    #[test]
+    fn memory_pressure_does_not_drop_the_fixtures_derived_caches() {
+        let mut node = path_points_fixture_node(2.0);
+        node.mapping_version = Revision::new(7);
+        seed_derived_caches(&mut node, Revision::new(7));
+        let precomputed_before = node.precomputed.clone();
+        let direct_channels_before = node.direct_channels.clone();
+        let display_layout_before = node.display_layout_revision;
+
+        for level in [
+            PressureLevel::Low,
+            PressureLevel::Medium,
+            PressureLevel::High,
+            PressureLevel::Critical,
+        ] {
+            let mut ctx = MemPressureCtx::new(lpc_model::NodeId::new(1), Revision::new(8));
+            node.handle_memory_pressure(level, &mut ctx)
+                .expect("handle pressure");
+        }
+
+        assert_eq!(
+            node.precomputed, precomputed_before,
+            "precomputed must survive a pressure broadcast"
+        );
+        assert_eq!(
+            node.direct_channels, direct_channels_before,
+            "direct_channels must survive a pressure broadcast"
+        );
+        assert_eq!(
+            node.display_layout_revision, display_layout_before,
+            "display_layout_revision must survive a pressure broadcast"
+        );
+        assert_eq!(
+            node.mapping_version,
+            Revision::new(7),
+            "pressure must not touch the mapping version"
         );
     }
 
