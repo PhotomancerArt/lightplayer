@@ -136,7 +136,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
   }
 
-  /* ---- hero strips & fixture canvases ------------------------------ */
+  /* ---- fixture views ------------------------------------------------ */
   .hero { position: relative; width: 100%; overflow: hidden; background: #07080a; }
   .hero.h-raster { height: 44px; }
   .hero.h-fixture { height: 56px; }
@@ -166,7 +166,8 @@
   .fixv.tall { height: 150px; }
   .fixv.mid  { height: 104px; }
   .fixv .offline-veil {
-    position: absolute; inset: 0; display: grid; place-items: center;
+    position: absolute; inset: 0; display: grid; place-items: end center;
+    padding-bottom: 8px;
     color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
     background: rgba(7,8,10,.25); text-transform: uppercase;
   }
@@ -178,7 +179,6 @@
   .meta-row .fps { font-family: var(--mono); font-size: 10.5px; }
   .meta-row .fps.stale { color: var(--attn); }
 
-  /* wire ticker (concept E) */
   .wires { position: relative; width: 100%; background: #07080a; }
   .wires canvas { display: block; width: 100%; height: 100%; }
 
@@ -188,19 +188,27 @@
   .caption { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
              color: var(--dim); margin: 0 0 6px; font-weight: 700; }
   .cardcol { display: grid; gap: 6px; }
+
+  /* rejected strip: smaller, quieter */
+  .rejected { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .rejected .cardcol { transform: scale(.82); transform-origin: top left; }
+  .rejected .caption { color: var(--dim); }
+  .rejected .why { max-width: 230px; font-size: 11px; color: var(--dim);
+                   margin: 4px 0 0; line-height: 1.45; }
+  .rejected .why b { color: var(--muted); }
 </style>
 </head>
 <body>
 
 <h1>Device card — show what's running on the board</h1>
 <p class="hint">
-  G2 ruling: the hero strip's re-simulated raster reads <b>dishonest</b> on a device card
-  ("too smooth to believe that's coming from the actual device"). Thesis: when a device is
-  connected, the card should primarily show <b>the running control product</b> — the fixture's
-  lamps, fed by actual frames off the link — degrading honestly (frame age, stalls) and
-  falling back to a dimmed last-known frame offline. Sim cards may keep re-simulation:
-  they <b>are</b> the simulator. A 3D fixture model may take this slot later; every concept
-  below treats the lamp view as "the best honest thing we can render today".
+  G2 ruling: the hero strip's re-simulated raster reads <b>dishonest</b> on a device card.
+  <b>Converged direction (gate, 2026-08-05):</b> the preview lives on a ▶ <b>play tab</b> —
+  no hero strip anywhere — and ▶ is the <b>default tab</b> on a connected card. It renders the
+  running control product from <b>actual device frames</b>; going quiet flips to a stale
+  treatment only after a <b>~5 s</b> timeout (short hiccups stay calm). Offline = dimmed
+  last-known frame, veiled. Sim cards re-simulate (they ARE the simulator) and say so.
+  A 3D fixture model can inherit this slot later.
 </p>
 
 <div class="controls">
@@ -221,70 +229,49 @@
   </span>
   <span class="group"><b>Reality</b>
     <button class="seg warn" data-ctl="hiccup" data-val="on" aria-pressed="false">device hiccups</button>
+    <button class="seg warn" data-ctl="stall" data-val="on" aria-pressed="false">link stall</button>
   </span>
 </div>
 
-<p class="note"><b>Try "device hiccups"</b>: the board stalls ~700&nbsp;ms every few seconds.
-  Concept A keeps gliding — it can't know. Every honest concept freezes with the board and
-  says how old the frame is. That contrast is the whole argument.</p>
+<p class="note"><b>Reality toggles:</b> "device hiccups" stalls ~700&nbsp;ms every few
+  seconds — the view freezes with the board but the pill stays a calm green (under the
+  5&nbsp;s threshold). "link stall" stops frames entirely: after 5&nbsp;s the pill goes
+  amber and counts up — honest, not alarmed.</p>
 
 <!-- ================================================================ -->
-<h2>1 · Today (baseline) — re-simulated raster hero</h2>
-<p class="hint">Production gallery-rework P05: 44px hero strip under the title bar,
-  re-simulating the project's <i>visual</i> raster in the browser. Smooth, pretty,
-  and unrelated to what the silicon is doing right now.</p>
+<h2>1 · Converged — ▶ play tab, device frames, 5 s stale threshold</h2>
+<p class="hint">The connected card opens on ▶. The tab holds the fixture view (contained,
+  never cropped) and a meta row: project chip · frames-from-device. Status is one tab away
+  and unchanged. Offline cards keep the ▶ tab showing the dimmed last-known frame, veiled.
+  The sim card's ▶ is the same surface, marked SIM — no device pretense.</p>
 <div class="gallery" id="sec1"></div>
 
 <!-- ================================================================ -->
-<h2>2 · Honest hero — fixture strip under the title bar</h2>
-<p class="hint">Same slot, honest content: the strip renders the fixture's lamp layout with
-  frames read back from the device. Keeps the "identity at a glance" role; the LIVE pill
-  carries frame age. Offline = dimmed last-known frame (D12 stays). Sim = smooth, marked SIM.</p>
-<div class="gallery" id="sec2"></div>
-
-<!-- ================================================================ -->
-<h2>3 · Play tab — the preview is a tab, not a banner</h2>
-<p class="hint">G2 direction (1) taken literally: no hero strip at all. A ▶ tab —
-  the connected card's <b>default</b> tab — holds a taller fixture view plus a meta row
-  (project · fps · frame age). Status stays one tab away. The card is shorter when
-  you're on another tab.</p>
-<div class="gallery" id="sec3"></div>
-
-<!-- ================================================================ -->
-<h2>4 · Status-face embed — health and output in one glance</h2>
-<p class="hint">No new tab: the Status face embeds a mid-height fixture view between the
-  status headline and the detail rows. "Is it okay" and "what is it doing" answer together;
-  the Play tab's extra click disappears, but Status gets denser.</p>
-<div class="gallery" id="sec4"></div>
-
-<!-- ================================================================ -->
-<h2>5 · Wire ticker + Play tab — output-space honesty</h2>
-<p class="hint">A skinny per-wire ticker under the title bar: one row per output wire,
-  each LED a pixel column — literally what the wires carry (zook: 5 × 300). Spatial fixture
-  view lives in the ▶ tab. The ticker is cheap at any scale and reads like a VU meter;
-  whether it reads as "the artwork" is the question.</p>
-<div class="gallery" id="sec5"></div>
+<h2>2 · Rejected at the gate (2026-08-05) — kept for contrast</h2>
+<p class="hint">Losing directions, one card each, with the reason they lost.</p>
+<div class="rejected" id="sec2"></div>
 
 <script>
 /* ================= state ================= */
-const ctl = { pattern: 'wave', layout: 'dome', fps: 30, hiccup: false };
-// hash presets, e.g. #hiccup,chase,rings,12 — for sharing a specific state
+const ctl = { pattern: 'wave', layout: 'dome', fps: 30, hiccup: false, stall: false };
+// hash presets, e.g. #stall,chase,rings,12 — for sharing a specific state
 for (const tok of location.hash.slice(1).split(',')) {
   if (tok === 'hiccup') ctl.hiccup = true;
+  else if (tok === 'stall') ctl.stall = true;
   else if (['wave', 'chase', 'sparkle'].includes(tok)) ctl.pattern = tok;
   else if (['dome', 'rings', 'matrix'].includes(tok)) ctl.layout = tok;
   else if (['30', '12', '5'].includes(tok)) ctl.fps = +tok;
 }
-document.querySelectorAll('.controls .seg').forEach(b => {
-  const k = b.dataset.ctl, v = b.dataset.val;
-  b.setAttribute('aria-pressed', String(k === 'hiccup' ? ctl.hiccup : String(ctl[k]) === v));
-});
+let stallStart = ctl.stall ? 0 : null; // wall-clock seconds when the link went quiet
 document.querySelectorAll('.controls .seg').forEach(btn => {
+  const k = btn.dataset.ctl, v = btn.dataset.val;
+  btn.setAttribute('aria-pressed',
+    String(k === 'hiccup' ? ctl.hiccup : k === 'stall' ? ctl.stall : String(ctl[k]) === v));
   btn.addEventListener('click', () => {
-    const k = btn.dataset.ctl, v = btn.dataset.val;
-    if (k === 'hiccup') {
-      ctl.hiccup = !ctl.hiccup;
-      btn.setAttribute('aria-pressed', String(ctl.hiccup));
+    if (k === 'hiccup' || k === 'stall') {
+      ctl[k] = !ctl[k];
+      if (k === 'stall') stallStart = ctl.stall ? nowT() : null;
+      btn.setAttribute('aria-pressed', String(ctl[k]));
       return;
     }
     ctl[k] = (k === 'fps') ? +v : v;
@@ -391,25 +378,28 @@ function sampleColor(i, n, x, y, t) {
   return cold ? [40 * v + 8, 120 * v + 10, 255 * v + 18] : [255 * v + 18, 90 * v + 8, 190 * v + 12];
 }
 
-/* device time: quantized to fps; hiccups stall it */
+/* device time: quantized to fps; hiccups + stalls hold it */
+const STALE_AFTER = 5; // seconds without frames before the UI says anything
 function deviceTime(t) {
+  if (stallStart !== null && t >= stallStart) t = stallStart;
   let dt = t;
   if (ctl.hiccup) {
     const cyc = 3.2, stall = 0.7, k = Math.floor(t / cyc), ph = t - k * cyc;
     dt = k * (cyc - stall) + Math.min(ph, cyc - stall);
-    if (ph > cyc - stall) dt = k * (cyc - stall) + (cyc - stall); // frozen tail
   }
   return Math.floor(dt * ctl.fps) / ctl.fps;
 }
-function frameAge(t) { return t - (ctl.hiccup ? invHiccup(t) : t) + (1 / ctl.fps) / 2; }
-function invHiccup(t) { // wall-clock moment of the frame deviceTime produced
-  const cyc = 3.2, stall = 0.7, k = Math.floor(t / cyc), ph = t - k * cyc;
-  return ph > cyc - stall ? k * cyc + (cyc - stall) : t;
+function frameAge(t) {
+  if (stallStart !== null && t >= stallStart) return t - stallStart;
+  if (!ctl.hiccup) return 0;
+  const cyc = 3.2, stall = 0.7, ph = t - Math.floor(t / cyc) * cyc;
+  return Math.max(0, ph - (cyc - stall));
 }
 
 /* ================= renderers ================= */
 const DPR = Math.min(2, window.devicePixelRatio || 1);
 const painters = [];
+function nowT() { return (performance.now() - t0) / 1000; }
 function fixtureCanvas(el, mode, opts = {}) {
   const cv = document.createElement('canvas');
   el.appendChild(cv);
@@ -422,7 +412,7 @@ function fixtureCanvas(el, mode, opts = {}) {
     ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, w, h);
     const tt = mode === 'sim' ? t : mode === 'frozen' ? 13.7 : deviceTime(t);
     const n = LAYOUT.length;
-    // contain in tab/status views; cover (crop) in the letterboxed hero strip
+    // contain in tab/status views; cover (crop) in a letterboxed hero strip
     const fit = opts.cover ? Math.min(w / 2.3, h / 0.62) : Math.min(w / 2.06, h / 2.06);
     const cx = w / 2, cy = h / 2;
     const r = Math.max(1.3, Math.min(2.6, fit / 34));
@@ -440,7 +430,7 @@ function fixtureCanvas(el, mode, opts = {}) {
     if (opts.pill) updatePill(opts.pill, mode, t);
   });
 }
-function rasterCanvas(el) { // concept A: the re-simulated visual raster
+function rasterCanvas(el) { // rejected baseline: the re-simulated visual raster
   const cv = document.createElement('canvas');
   el.appendChild(cv);
   const ctx = cv.getContext('2d');
@@ -456,7 +446,7 @@ function rasterCanvas(el) { // concept A: the re-simulated visual raster
       g.addColorStop(i / 4, `rgb(${r | 0},${gg | 0},${b | 0})`);
     }
     ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    for (let k = 0; k < 3; k++) { // drifting blobs, visual.out-ish
+    for (let k = 0; k < 3; k++) {
       const bx = w * (0.5 + 0.4 * Math.sin(t * 0.5 + k * 2.1));
       const by = h * (0.5 + 0.4 * Math.cos(t * 0.34 + k * 1.7));
       const rad = ctx.createRadialGradient(bx, by, 0, bx, by, h * 0.9);
@@ -496,14 +486,19 @@ function updatePill(pill, mode, t) {
   if (mode === 'sim') { pill.className = 'livepill simed'; pill.innerHTML = dot() + 'sim'; return; }
   if (mode === 'frozen') { pill.className = 'livepill frozen'; pill.innerHTML = dot() + 'last seen 2 h'; return; }
   const age = frameAge(t);
-  if (age > 0.25) { pill.className = 'livepill stale'; pill.innerHTML = dot() + `live · ${age.toFixed(1)} s ago`; }
-  else { pill.className = 'livepill live'; pill.innerHTML = dot() + `live · ${ctl.fps} fps`; }
+  if (age > STALE_AFTER) {
+    pill.className = 'livepill stale';
+    pill.innerHTML = dot() + `last frame · ${age.toFixed(0)} s ago`;
+  } else {
+    pill.className = 'livepill live';
+    pill.innerHTML = dot() + `live · ${ctl.fps} fps`;
+  }
 }
 function metaFps(el, mode) {
   painters.push(t => {
     if (mode !== 'device') return;
     const age = frameAge(t);
-    if (age > 0.25) { el.textContent = `frame ${age.toFixed(1)} s ago`; el.className = 'fps stale'; }
+    if (age > STALE_AFTER) { el.textContent = `no frames for ${age.toFixed(0)} s`; el.className = 'fps stale'; }
     else { el.textContent = `${ctl.fps} fps from device`; el.className = 'fps'; }
   });
 }
@@ -522,7 +517,7 @@ const ICONS = {
 const SWATCHES = {
   'zook-dome': 'linear-gradient(135deg,#5a3c48,#303a2c)',
   'aurora-drift': 'linear-gradient(135deg,#2c3a58,#583c2c)',
-  '2026-07-09-1421-basic-workbench-rainbow-test': 'linear-gradient(135deg,#3a2c58,#2c584б)'.replace('б','6'),
+  '2026-07-09-1421-basic-workbench-rainbow-test': 'linear-gradient(135deg,#3a2c58,#2c5846)',
 };
 
 function card({ status, name, transport, project, tabs, activeTab, glyph }) {
@@ -561,153 +556,109 @@ function statusBody(el, status, project, extraTop) {
     : 'Last connected 2 hours ago over USB.';
   body.append(line, chip, ex);
 }
+function playBody(el, mode, project) {
+  const body = el.querySelector('.body');
+  const fv = document.createElement('div');
+  fv.className = 'fixv tall' + (mode === 'frozen' ? ' dim-frame' : '');
+  const pill = document.createElement('span'); pill.className = 'livepill';
+  fixtureCanvas(fv, mode, { pill });
+  fv.appendChild(pill);
+  if (mode === 'frozen') fv.insertAdjacentHTML('beforeend', '<div class="offline-veil">offline · last frame</div>');
+  body.appendChild(fv);
+  const meta = document.createElement('div');
+  meta.className = 'meta-row';
+  const fps = document.createElement('span'); fps.className = 'fps';
+  fps.textContent = mode === 'sim' ? 'browser simulation' : mode === 'frozen' ? 'last seen 2 h ago' : '';
+  metaFps(fps, mode === 'device' ? 'device' : 'na');
+  meta.innerHTML = `<span class="projchip"><span class="swatch" style="background:${SWATCHES[project] || SWATCHES['zook-dome']}"></span><span class="pname">${project}</span></span><span class="spring"></span>`;
+  meta.appendChild(fps);
+  body.appendChild(meta);
+}
 
-/* ---------------- section builders ---------------- */
 const TABS_NOPLAY = ['status', 'settings', 'console', 'danger'];
 const TABS_PLAY = ['play', 'status', 'settings', 'console', 'danger'];
 
-function labeled(colTitle, cardEl) {
+function labeled(colTitle, cardEl, why) {
   const col = document.createElement('div');
   col.className = 'cardcol';
   col.innerHTML = `<p class="caption">${colTitle}</p>`;
   col.appendChild(cardEl);
+  if (why) col.insertAdjacentHTML('beforeend', `<p class="why">${why}</p>`);
   return col;
 }
 
-/* --- 1 · today --- */
+/* --- 1 · converged: play tab --- */
 (function () {
   const sec = document.getElementById('sec1');
-  const mk = (status, name, transport, project, mode) => {
-    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
-                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
-    const hero = document.createElement('div');
-    hero.className = 'hero h-raster' + (mode === 'frozen' ? ' dim-frame' : '');
-    if (mode === 'frozen') {
-      // production today: no preview lease offline — the identity gradient
-      hero.style.background = 'linear-gradient(135deg, hsl(210 12% 16%), hsl(80 24% 26%))';
-    } else {
-      rasterCanvas(hero);
-    }
-    hero.insertAdjacentHTML('beforeend', `<span class="namepill">${project}</span>`);
-    c.querySelector('.slot-hero').appendChild(hero);
-    statusBody(c, status, project);
-    return c;
-  };
-  sec.append(
-    labeled('connected — but this is a re-simulation', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
-    labeled('offline — no lease: identity gradient, no art at all', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
-    labeled('simulator — honest here, it IS the sim', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
-  );
-})();
-
-/* --- 2 · honest hero --- */
-(function () {
-  const sec = document.getElementById('sec2');
-  const mk = (status, name, transport, project, mode) => {
-    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
-                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
-    const hero = document.createElement('div');
-    hero.className = 'hero h-fixture' + (mode === 'frozen' ? ' dim-frame' : '');
-    c.querySelector('.slot-hero').appendChild(hero);
-    const pill = document.createElement('span');
-    pill.className = 'livepill';
-    fixtureCanvas(hero, mode, { pill, cover: true });
-    hero.insertAdjacentHTML('beforeend', `<span class="namepill">${project}</span>`);
-    hero.appendChild(pill);
-    statusBody(c, status, project);
-    return c;
-  };
-  sec.append(
-    labeled('connected — device frames, stalls and all', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
-    labeled('offline — dimmed last-known frame, frozen', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
-    labeled('sim — re-simulation, marked', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
-  );
-})();
-
-/* --- 3 · play tab --- */
-(function () {
-  const sec = document.getElementById('sec3');
   const mk = (status, name, transport, project, mode, active) => {
     const c = card({ status, name, transport, project, tabs: TABS_PLAY, activeTab: active,
                      glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
-    const body = c.querySelector('.body');
-    if (active === 'play') {
-      const fv = document.createElement('div');
-      fv.className = 'fixv tall' + (mode === 'frozen' ? ' dim-frame' : '');
-      const pill = document.createElement('span'); pill.className = 'livepill';
-      fixtureCanvas(fv, mode, { pill });
-      fv.appendChild(pill);
-      if (mode === 'frozen') fv.insertAdjacentHTML('beforeend', '<div class="offline-veil">offline · last frame</div>');
-      body.appendChild(fv);
-      const meta = document.createElement('div');
-      meta.className = 'meta-row';
-      const fps = document.createElement('span'); fps.className = 'fps';
-      fps.textContent = mode === 'sim' ? 'browser simulation' : mode === 'frozen' ? 'last seen 2 h ago' : '';
-      metaFps(fps, mode === 'device' ? 'device' : 'na');
-      meta.innerHTML = `<span class="projchip"><span class="swatch" style="background:${SWATCHES[project] || SWATCHES['zook-dome']}"></span><span class="pname">${project}</span></span><span class="spring"></span>`;
-      meta.appendChild(fps);
-      body.appendChild(meta);
-    } else {
-      statusBody(c, status, project);
-    }
+    if (active === 'play') playBody(c, mode, project);
+    else statusBody(c, status, project);
     return c;
   };
   sec.append(
     labeled('connected — ▶ is the default tab', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'play')),
-    labeled('offline — ▶ shows the last frame, veiled', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen', 'play')),
-    labeled('same card on the status tab — no preview at all', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'status')),
+    labeled('same card, status tab — unchanged', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'status')),
+    labeled('offline — last frame, dimmed + veiled', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen', 'play')),
+    labeled('sim — same surface, marked, smooth', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim', 'play')),
   );
 })();
 
-/* --- 4 · status embed --- */
+/* --- 2 · rejected strip --- */
 (function () {
-  const sec = document.getElementById('sec4');
-  const mk = (status, name, transport, project, mode) => {
-    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
-                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
-    const fv = document.createElement('div');
-    fv.className = 'fixv mid' + (mode === 'frozen' ? ' dim-frame' : '');
-    const pill = document.createElement('span'); pill.className = 'livepill';
-    fixtureCanvas(fv, mode, { pill });
-    fv.appendChild(pill);
-    statusBody(c, status, project, fv);
-    return c;
-  };
-  sec.append(
-    labeled('connected — health + output, one face', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
-    labeled('offline — dimmed, then the explain line', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
-    labeled('sim', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
-  );
-})();
+  const sec = document.getElementById('sec2');
 
-/* --- 5 · wire ticker --- */
-(function () {
-  const sec = document.getElementById('sec5');
-  const mk = (status, name, transport, project, mode, active) => {
-    const c = card({ status, name, transport, project, tabs: TABS_PLAY, activeTab: active,
-                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
-    const wr = document.createElement('div');
-    wr.className = 'wires' + (mode === 'frozen' ? ' dim-frame' : '');
-    wr.style.height = '30px';
-    wireCanvas(wr, mode, 5);
-    c.querySelector('.slot-hero').appendChild(wr);
-    const body = c.querySelector('.body');
-    if (active === 'play') {
-      const fv = document.createElement('div');
-      fv.className = 'fixv tall' + (mode === 'frozen' ? ' dim-frame' : '');
-      const pill = document.createElement('span'); pill.className = 'livepill';
-      fixtureCanvas(fv, mode, { pill });
-      fv.appendChild(pill);
-      body.appendChild(fv);
-    } else {
-      statusBody(c, status, project);
-    }
-    return c;
-  };
+  // baseline: re-sim raster hero
+  const a = card({ status: 'running', name: 'DOM-Z-102', transport: 'USB', project: 'zook-dome',
+                   tabs: TABS_NOPLAY, activeTab: 'status', glyph: GLYPH_USB });
+  const heroA = document.createElement('div');
+  heroA.className = 'hero h-raster';
+  rasterCanvas(heroA);
+  heroA.insertAdjacentHTML('beforeend', '<span class="namepill">zook-dome</span>');
+  a.querySelector('.slot-hero').appendChild(heroA);
+  statusBody(a, 'running', 'zook-dome');
+
+  // honest hero strip (letterboxed fixture)
+  const b = card({ status: 'running', name: 'DOM-Z-102', transport: 'USB', project: 'zook-dome',
+                   tabs: TABS_NOPLAY, activeTab: 'status', glyph: GLYPH_USB });
+  const heroB = document.createElement('div');
+  heroB.className = 'hero h-fixture';
+  const pillB = document.createElement('span'); pillB.className = 'livepill';
+  fixtureCanvas(heroB, 'device', { pill: pillB, cover: true });
+  heroB.insertAdjacentHTML('beforeend', '<span class="namepill">zook-dome</span>');
+  heroB.appendChild(pillB);
+  b.querySelector('.slot-hero').appendChild(heroB);
+  statusBody(b, 'running', 'zook-dome');
+
+  // status-face embed
+  const c = card({ status: 'running', name: 'DOM-Z-102', transport: 'USB', project: 'zook-dome',
+                   tabs: TABS_NOPLAY, activeTab: 'status', glyph: GLYPH_USB });
+  const fvC = document.createElement('div');
+  fvC.className = 'fixv mid';
+  const pillC = document.createElement('span'); pillC.className = 'livepill';
+  fixtureCanvas(fvC, 'device', { pill: pillC });
+  fvC.appendChild(pillC);
+  statusBody(c, 'running', 'zook-dome', fvC);
+
+  // wire ticker
+  const d = card({ status: 'running', name: 'DOM-Z-102', transport: 'USB', project: 'zook-dome',
+                   tabs: TABS_PLAY, activeTab: 'status', glyph: GLYPH_USB });
+  const wr = document.createElement('div');
+  wr.className = 'wires'; wr.style.height = '30px';
+  wireCanvas(wr, 'device', 5);
+  d.querySelector('.slot-hero').appendChild(wr);
+  statusBody(d, 'running', 'zook-dome');
+
   sec.append(
-    labeled('connected — ticker + status face', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'status')),
-    labeled('connected — ticker + ▶ tab open', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'play')),
-    labeled('offline — ticker freezes dim', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen', 'status')),
+    labeled('re-sim raster hero (today)', a,
+      '<b>Rejected:</b> the G2 ruling itself — a smooth re-simulation on a device card reads dishonest, and offline it degrades to a bare gradient.'),
+    labeled('honest hero strip', b,
+      '<b>Rejected:</b> the 44–56px letterbox crops the fixture to a band; "I don\'t like the hero / letterbox thing anyways."'),
+    labeled('status-face embed', c,
+      '<b>Rejected:</b> densifies Status; the play tab "didn\'t have enough to show anyways" — the preview gives it a job instead.'),
+    labeled('per-wire ticker', d,
+      '<b>Rejected:</b> needs a legend to read (one row per output wire, LEDs as pixel columns) — instrumentation, not the artwork. Maybe Performance-tab material someday.'),
   );
 })();
 
