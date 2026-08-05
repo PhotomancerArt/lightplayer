@@ -145,6 +145,8 @@ pub struct WireMailbox {
 pub struct WireStats {
     /// Frames the poster has published (the posted sequence number).
     pub posted: u32,
+    /// The pad this wire drives (from the last post; 0 before any).
+    pub gpio: u8,
     /// Frames that reached `tx_end` (truncated or not).
     pub transmitted: u32,
     /// Transmitted frames that ended on a guard word — the per-slot
@@ -201,6 +203,7 @@ impl WireMailbox {
     pub fn wire_stats(&self) -> WireStats {
         WireStats {
             posted: self.posted_seq.load(Relaxed),
+            gpio: self.gpio.load(Relaxed),
             transmitted: self.transmitted.load(Relaxed),
             torn: self.torn.load(Relaxed),
             waved: self.waved.load(Relaxed),

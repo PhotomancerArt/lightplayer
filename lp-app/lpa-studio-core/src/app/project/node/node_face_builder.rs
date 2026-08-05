@@ -910,6 +910,7 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
     resolve_authored_slices(&mut channels);
 
     Some(UiOutputFace {
+        led_budget: None,
         channels,
         channels_address: channels_row.address.clone(),
         input_binding: bound_endpoint_label(&rows, "input"),
@@ -952,6 +953,7 @@ fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
     let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
 
     Some(UiOutputChannelRow {
+        wire_status: None,
         key,
         pin_label: endpoint_pin_label(&endpoint_display),
         endpoint_display,

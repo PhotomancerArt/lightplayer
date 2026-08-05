@@ -703,6 +703,7 @@ fn output_slot_address(path: &str) -> ProjectSlotAddress {
 /// (an absent option has nothing to write to until it is included).
 pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutputChannelRow {
     UiOutputChannelRow {
+        wire_status: None,
         key,
         endpoint_display: format!("ws281x:local:{pin}"),
         pin_label: pin.to_string(),
@@ -786,6 +787,7 @@ pub(crate) fn output_face(
         }
     }
     let mut face = UiOutputFace {
+        led_budget: None,
         channels,
         channels_address: Some(output_slot_address("channels")),
         input_binding: Some("bus:show.control".to_string()),

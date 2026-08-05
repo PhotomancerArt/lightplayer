@@ -125,6 +125,11 @@ pub enum ServerMsgBody {
         /// targets without a recovery region.
         #[serde(default)]
         recovery: Option<crate::server::RecoveryStatus>,
+        /// Per-output-wire transmission counters; absent on targets whose
+        /// output drivers keep no per-wire attribution (host server,
+        /// single-core fallback boots).
+        #[serde(default)]
+        outputs: Option<Vec<crate::server::OutputWireStatus>>,
     },
     /// Error response for any request type
     Error {
