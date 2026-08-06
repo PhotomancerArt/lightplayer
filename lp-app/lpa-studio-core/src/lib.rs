@@ -41,6 +41,7 @@ pub use app::device::{
     DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, DeviceTarget, EndpointChoice,
     ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
+pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
@@ -124,16 +125,14 @@ pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
     ShareFile, ShareHeader, peek_header,
 };
-pub use app::docs_host::DocsSimHost;
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
     LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
     StudioActor, StudioActorOptions, StudioCommand, StudioController, StudioHandle, StudioLogSink,
-    StudioSnapshot,
-    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
-    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
-    UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
-    ViewPublisher, has_unsaved_work, studio_view_channel,
+    StudioSnapshot, StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime,
+    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel,
+    UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
