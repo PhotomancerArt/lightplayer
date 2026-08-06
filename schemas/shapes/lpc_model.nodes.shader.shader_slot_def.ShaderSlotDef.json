@@ -102,56 +102,26 @@
                         {
                           "name": "set",
                           "ty": {
-                            "array": [
-                              {
-                                "struct": {
-                                  "fields": [
-                                    {
-                                      "name": "space",
-                                      "ty": "i32"
-                                    },
-                                    {
-                                      "name": "method",
-                                      "ty": "i32"
-                                    },
-                                    {
-                                      "name": "count",
-                                      "ty": "i32"
-                                    },
-                                    {
-                                      "name": "stops",
-                                      "ty": {
-                                        "array": [
-                                          {
-                                            "struct": {
-                                              "fields": [
-                                                {
-                                                  "name": "at",
-                                                  "ty": "f32"
-                                                },
-                                                {
-                                                  "name": "c",
-                                                  "ty": "vec3"
-                                                }
-                                              ],
-                                              "name": "GradientStop"
-                                            }
-                                          },
-                                          24
-                                        ]
-                                      }
-                                    }
-                                  ],
-                                  "name": "Gradient"
-                                }
-                              },
-                              8
-                            ]
+                            "list": {
+                              "struct": {
+                                "fields": [
+                                  {
+                                    "name": "space",
+                                    "ty": "string"
+                                  },
+                                  {
+                                    "name": "method",
+                                    "ty": "string"
+                                  },
+                                  {
+                                    "name": "stops",
+                                    "ty": "string"
+                                  }
+                                ],
+                                "name": "Gradient"
+                              }
+                            }
                           }
-                        },
-                        {
-                          "name": "count",
-                          "ty": "i32"
                         },
                         {
                           "name": "step_seconds",
