@@ -100,9 +100,41 @@ pub const PROJECT_EDITOR_ACTION_DEADLINE: Duration = Duration::from_secs(6);
 /// still resets it on every frame, so it does not slow the fast path.
 pub const PASSIVE_REFRESH_DEADLINE: Duration = Duration::from_secs(12);
 
+/// The scheduling class of the device card's live frame feed
+/// (honest-device preview P2).
+///
+/// The feed is a pull channel, not an op, so it declares its class here
+/// rather than through `ControllerOp::action_class` — but the pull-loop ADR
+/// still applies: a channel must say how it preempts and what bounds it.
+/// It is [`ActionClass::Passive`], the same standing a refresh tick has: a
+/// frame read never preempts anything (a user gesture must never wait
+/// behind a picture), and it is itself cancelled at the next frame boundary
+/// when one arrives.
+///
+/// It reuses [`PASSIVE_REFRESH_DEADLINE`] rather than inventing a tighter
+/// number. The budget is a quiet GAP — time with no streamed frame — and a
+/// dome frame arrives as many bounded chunks, each resetting it. A feed
+/// pull that trips 12 s of silence is a device that stopped answering, not
+/// a slow one, and that is exactly when the feed should give up.
+pub const DEVICE_CARD_FEED_CLASS: ActionClass = ActionClass::Passive {
+    deadline: PASSIVE_REFRESH_DEADLINE,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_card_feed_never_preempts_and_is_deadline_bounded() {
+        // The feed rides the same passive lane as a refresh tick: a picture
+        // must never jump a user gesture, and a stalled read must end.
+        assert!(!DEVICE_CARD_FEED_CLASS.preempts_passive_refresh());
+        assert!(!DEVICE_CARD_FEED_CLASS.preempts_foreground_action());
+        assert_eq!(
+            DEVICE_CARD_FEED_CLASS.deadline(),
+            Some(PASSIVE_REFRESH_DEADLINE)
+        );
+    }
 
     #[test]
     fn recovery_preempts_everything_and_has_no_deadline() {

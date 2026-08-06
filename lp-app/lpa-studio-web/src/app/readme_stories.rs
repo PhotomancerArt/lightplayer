@@ -199,6 +199,9 @@ fn readme_lens_card() -> UiDeviceCard {
         )
     };
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: None,
@@ -274,6 +277,9 @@ fn readme_home_view() -> UiHomeView {
     ];
     let devices = vec![
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: None,
@@ -293,6 +299,9 @@ fn readme_home_view() -> UiHomeView {
             detected_chip: None,
         },
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),

@@ -25,9 +25,10 @@ use lpa_client::BackoffPolicy;
 use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSession};
 
 use crate::app::places::{DeviceSyncState, HardwareId};
+use crate::app::runtime_pool::card_feed::CardFeedState;
 use crate::app::studio::refresh_cadence::{
-    DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX,
-    REFRESH_DUE_SLACK, RefreshCadence,
+    DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE,
+    PASSIVE_REFRESH_BACKOFF_MAX, REFRESH_DUE_SLACK, RefreshCadence,
 };
 use crate::{
     RuntimeId, ServerFailureKind, ServerState, StudioServerClient, UiError, UiIssue, UiLogDraft,
@@ -253,6 +254,13 @@ pub struct RuntimeSession {
     /// strip + tab render this; it dies with the session (the console is
     /// the session's, not the app's).
     console_tail: VecDeque<UiLogEntry>,
+    /// This session's live frame feed — the ▶ card tab's state
+    /// (honest-device preview P2). Deliberately NOT cleared when the server
+    /// protocol detaches: the last in-session frame is what an offline card
+    /// shows (Q4). Only its connection-scoped half (project handle,
+    /// geometry) is invalidated, in [`Self::disconnect_server`] and at each
+    /// fresh attach.
+    card_feed: CardFeedState,
 }
 
 impl RuntimeSession {
@@ -277,6 +285,7 @@ impl RuntimeSession {
             heartbeat_device_state: None,
             sim_loaded_project: None,
             console_tail: VecDeque::new(),
+            card_feed: CardFeedState::default(),
         }
     }
 
@@ -435,6 +444,40 @@ impl RuntimeSession {
         }
     }
 
+    // -----------------------------------------------------------------
+    // Card feed (honest-device preview P2)
+    // -----------------------------------------------------------------
+
+    /// This session's live frame feed (the ▶ card tab's state).
+    pub fn card_feed(&self) -> &CardFeedState {
+        &self.card_feed
+    }
+
+    pub(crate) fn card_feed_mut(&mut self) -> &mut CardFeedState {
+        &mut self.card_feed
+    }
+
+    /// The completion-gap between this session's frame reads.
+    pub fn card_feed_interval(&self) -> Duration {
+        DEVICE_CARD_FEED_INTERVAL
+    }
+
+    /// The engine fps the latest heartbeat on this session reported — the
+    /// number the card's ▶ meta row shows next to the frame age.
+    pub fn engine_fps(&self) -> Option<f32> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::engine_fps)
+    }
+
+    /// The loaded-project handle the latest heartbeat reported, if one has
+    /// arrived (the feed's free handle acquisition).
+    pub fn heartbeat_project_handle(&self) -> Option<u32> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::loaded_project_handle)
+    }
+
     fn install_client(&mut self, client: StudioServerClient) {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
@@ -442,6 +485,8 @@ impl RuntimeSession {
         // A fresh connection means a fresh server process/boot: its effective
         // log level is back at the init default.
         self.requested_log_level = UiLogLevel::Info;
+        // …and a fresh set of project handles. The last frame survives.
+        self.card_feed.invalidate_connection();
     }
 
     /// The session's wire client, or the `MissingSession` surface every
@@ -633,6 +678,9 @@ impl RuntimeSession {
     pub fn disconnect_server(&mut self) {
         self.client = None;
         self.server_state = ServerState::Disconnected;
+        // The handle and the geometry were claims about the connection that
+        // just ended; the last frame is a fact about the board and stays.
+        self.card_feed.invalidate_connection();
     }
 
     // -----------------------------------------------------------------

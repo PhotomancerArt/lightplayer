@@ -138,6 +138,18 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
+    /// Client-synthesized display layouts for the device card feed, keyed
+    /// by "project uid @ observed content hash" — the geometry a board's
+    /// project has, which changes only when that project changes. A `None`
+    /// value records an attempt that could not synthesize (not a map2d
+    /// fixture, unreadable document), so a card feed cannot re-read the
+    /// whole library package on every 150 ms pull.
+    ///
+    /// Deliberately NOT keyed by frame revision: that advances on every
+    /// publish, which would make every lookup a miss and every frame a
+    /// fresh `Rc` — the one thing the renderer's repaint key must not see.
+    card_layout_cache:
+        std::collections::HashMap<String, Option<Rc<lpc_model::ControlDisplayLayout>>>,
     /// The CARD-OWNED op flows in flight (state-flow model §2), one per
     /// managed SESSION: set at management dispatch, fed by the manage
     /// event sink, and — the point (I1) — NOT cleared when the session
@@ -259,6 +271,7 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
+            card_layout_cache: std::collections::HashMap::new(),
             device_card_ops: std::collections::BTreeMap::new(),
             device_backup: None,
             device_backup_seq: 0,
@@ -673,6 +686,12 @@ impl StudioController {
             };
             delay = Some(delay.map_or(candidate, |current| current.min(candidate)));
         }
+        // A card feeding its ▶ tab pulls far faster than its heartbeat, so
+        // its gap has to reach the UI timer — otherwise the feed would run
+        // at heartbeat pace and the tab would show a 2 s slideshow.
+        if let Some(feed) = self.card_feed_due_in(now) {
+            delay = Some(delay.map_or(feed, |current| current.min(feed)));
+        }
         delay.unwrap_or_else(|| RefreshCadence::default().interval())
     }
 
@@ -790,6 +809,345 @@ impl StudioController {
             changed |= session.note_device_state_change();
         }
         if changed {
+            self.mark_dirty();
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Device card frame feed (honest-device preview P2)
+    // ---------------------------------------------------------------
+
+    /// The tab a card is EFFECTIVELY showing: the persisted choice, else
+    /// the default a fresh card opens on.
+    ///
+    /// The ONE place that answers the question, so the renderer's tab body
+    /// and the frame feed's gate can never disagree about which tab is up —
+    /// a feed running behind a hidden tab would be a wire op nobody asked
+    /// for, and a ▶ tab with no feed would be an empty promise. P3's
+    /// default-when-connected rule belongs here, not in a second table.
+    fn effective_card_tab(&self, card_key: &str) -> crate::DeviceCardTab {
+        self.card_ui
+            .get(card_key)
+            .map(|state| state.tab)
+            .unwrap_or_default()
+    }
+
+    /// The card-identity key a live DEVICE session's card wears, mirroring
+    /// [`crate::UiDeviceCard::identity_key`]'s cascade (uid first, so the
+    /// key survives session replaces; the session id while anonymous).
+    fn card_key_for_device_session(session: &crate::RuntimeSession) -> String {
+        session
+            .device_uid()
+            .or_else(|| {
+                session
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.uid.clone())
+            })
+            .unwrap_or_else(|| session.id().to_string())
+    }
+
+    /// Whether a session's frame feed should be pulling (Q3): a **Ready**
+    /// device — a board that is answering — whose card is showing the ▶
+    /// tab. Nothing else earns a frame read.
+    ///
+    /// Tab selection is the visibility signal, deliberately. A card on
+    /// another tab, a gallery scrolled away, or a backgrounded browser tab
+    /// all stop producing reads either here or through the throttled UI
+    /// timer, and the completion-gap absorbs whatever the throttle does to
+    /// the cadence. There is no separate "surface visible" flag in core to
+    /// consult, and inventing one to gate a picture would be the wrong
+    /// order of work.
+    fn card_feed_active(&self, session: &crate::RuntimeSession) -> bool {
+        if !matches!(session.device_state(), Some(DeviceState::Ready { .. })) {
+            return false;
+        }
+        let key = Self::card_key_for_device_session(session);
+        self.effective_card_tab(&key) == crate::DeviceCardTab::Play
+    }
+
+    /// Time until the earliest due card-feed pull, for the actor's
+    /// min-over-sessions delay. `None` when no session is feeding — the
+    /// common case, where the UI timer keeps its calm heartbeat pace.
+    fn card_feed_due_in(&self, now: f64) -> Option<Duration> {
+        self.pool
+            .device_sessions()
+            .filter(|session| self.card_feed_active(session))
+            .map(|session| {
+                session
+                    .card_feed()
+                    .due_in(now, session.card_feed_interval())
+            })
+            .min()
+    }
+
+    /// Pull one published frame per feeding session whose completion gap
+    /// elapsed (the ▶ tab's cadence).
+    ///
+    /// This is a distinct pull class from the lens refresh: it runs on
+    /// NON-lens device sessions, which otherwise issue no wire op between
+    /// heartbeats, and it declares [`crate::DEVICE_CARD_FEED_CLASS`] — it
+    /// preempts nothing and is cancelled at the next frame boundary when a
+    /// user gesture arrives.
+    pub async fn run_due_card_feeds<MakeTimer, Timer, Cancel>(
+        &mut self,
+        make_timer: MakeTimer,
+        cancel: &Cancel,
+    ) where
+        MakeTimer: FnMut(Duration) -> Timer + Clone,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let now = (self.now_secs)();
+        let due: Vec<crate::RuntimeId> = self
+            .pool
+            .device_sessions()
+            .filter(|session| {
+                self.card_feed_active(session)
+                    && session.card_feed().due(now, session.card_feed_interval())
+            })
+            .map(crate::RuntimeSession::id)
+            .collect();
+        for id in due {
+            if cancel.is_cancelled() {
+                return;
+            }
+            self.run_card_feed(id, make_timer.clone(), cancel).await;
+        }
+    }
+
+    /// One session's feed pull: acquire the project handle, read the
+    /// published frame, fold it into the session's feed state, and fill in
+    /// a refused display layout locally.
+    async fn run_card_feed<MakeTimer, Timer, Cancel>(
+        &mut self,
+        id: crate::RuntimeId,
+        make_timer: MakeTimer,
+        cancel: &Cancel,
+    ) where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        // Record which card this feed feeds BEFORE the wire work: if this
+        // pull is the one that discovers the board is gone, the roster
+        // still needs to know where the last frame belongs.
+        if let Ok(session) = self.pool.device_session_mut(id) {
+            let key = Self::card_key_for_device_session(session);
+            session.card_feed_mut().set_card_key(key);
+        }
+        let Some(handle_id) = self.acquire_card_feed_handle(id).await else {
+            // Nothing loaded (or the handle is unknowable right now): stamp
+            // the attempt so the ask paces itself instead of spinning.
+            let now = (self.now_secs)();
+            if let Ok(session) = self.pool.device_session_mut(id) {
+                session.card_feed_mut().mark_pull_complete(now);
+            }
+            return;
+        };
+        let deadline = ProgressDeadline::new(
+            crate::DEVICE_CARD_FEED_CLASS
+                .deadline()
+                .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
+            make_timer,
+        );
+        let (outcome, request_logs) = {
+            let Ok(session) = self.pool.device_session_mut(id) else {
+                return;
+            };
+            let request = lpc_wire::ProjectReadRequest {
+                since: None,
+                queries: Vec::new(),
+                // The whole request: one probe, no mirror queries. This is
+                // a picture, not a ProjectSync.
+                probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
+                    lpc_wire::OutputFrameProbeRequest {
+                        display_layout: session.card_feed().display_layout_read(),
+                    },
+                )],
+            };
+            let Ok(server) = session.client_mut() else {
+                return;
+            };
+            match server
+                .project_read_gated(handle_id, request, deadline, cancel)
+                .await
+            {
+                Ok(crate::StudioProjectReadOutcome::Completed(read)) => {
+                    (Some(read.events), read.logs)
+                }
+                // Preempted: keep the old completion stamp so the redo is
+                // prompt, exactly like the lens pull.
+                Ok(crate::StudioProjectReadOutcome::Cancelled) => return,
+                Ok(crate::StudioProjectReadOutcome::TimedOut) => (None, Vec::new()),
+                Err(error) => (
+                    None,
+                    vec![UiLogDraft::new(
+                        UiLogLevel::Debug,
+                        UiLogOrigin::Studio,
+                        format!("device card frame read failed: {error}"),
+                    )],
+                ),
+            }
+        };
+        self.record_session_logs(id, request_logs);
+        let now = (self.now_secs)();
+        let mut wants_layout = false;
+        let mut new_frame = false;
+        if let Ok(session) = self.pool.device_session_mut(id) {
+            session.card_feed_mut().mark_pull_complete(now);
+            match outcome {
+                Some(events) => {
+                    let outputs = output_frame_entries(&events);
+                    let feed = session.card_feed_mut();
+                    if let Some(entry) = feed.pick_entry(&outputs).cloned() {
+                        let applied = feed.apply_entry(&entry, now);
+                        wants_layout = applied.wants_layout;
+                        new_frame = applied.new_frame;
+                    }
+                }
+                // A read that timed out or errored says nothing about the
+                // handle staying valid — a device-side reload retires it —
+                // so drop the connection-scoped half and re-acquire next
+                // tick. The last frame stays on screen, aging honestly.
+                None => session.card_feed_mut().invalidate_connection(),
+            }
+        }
+        if new_frame {
+            self.mark_dirty();
+        }
+        if wants_layout {
+            self.synthesize_card_feed_layout(id).await;
+        }
+    }
+
+    /// The device's loaded-project handle for the feed, acquired once per
+    /// connection.
+    ///
+    /// The heartbeat already carries one for every loaded project, so the
+    /// common path costs nothing; a session that has not seen a heartbeat
+    /// yet spends one `ListLoadedProjects` and remembers the answer.
+    async fn acquire_card_feed_handle(&mut self, id: crate::RuntimeId) -> Option<u32> {
+        let session = self.pool.device_session(id)?;
+        if let Some(handle) = session.card_feed().handle_id() {
+            return Some(handle);
+        }
+        if let Some(handle) = session.heartbeat_project_handle() {
+            self.pool
+                .device_session_mut(id)
+                .ok()?
+                .card_feed_mut()
+                .set_handle_id(handle);
+            return Some(handle);
+        }
+        let catalog = self
+            .pool
+            .device_session_mut(id)
+            .ok()?
+            .client_mut()
+            .ok()?
+            .list_loaded_projects()
+            .await
+            .ok()?;
+        self.record_session_logs(id, catalog.logs);
+        let handle = catalog.projects.first()?.handle_id;
+        self.pool
+            .device_session_mut(id)
+            .ok()?
+            .card_feed_mut()
+            .set_handle_id(handle);
+        Some(handle)
+    }
+
+    /// Fill in a display layout the device refused (a dome-scale fixture is
+    /// over the wire budget) by synthesizing it from the library's copy of
+    /// the project the board is running — the same bytes connect-as-pull
+    /// banked (D8), through the same shared generator the engine uses.
+    ///
+    /// Cached per (project uid, observed content hash) — NOT per frame
+    /// revision, which advances on every publish and would make the cache a
+    /// miss every time. A failed attempt is cached too: without that, a
+    /// project the fallback cannot handle would re-read the whole library
+    /// package every 150 ms.
+    async fn synthesize_card_feed_layout(&mut self, id: crate::RuntimeId) {
+        let Some((project_uid, observed, revision)) = self.card_feed_layout_key(id) else {
+            return;
+        };
+        let cache_key = format!("{project_uid}@{observed}");
+        if let Some(cached) = self.card_layout_cache.get(&cache_key) {
+            if let Some(layout) = cached.clone() {
+                self.install_card_feed_layout(id, layout);
+            }
+            return;
+        }
+        let layout = self
+            .package_display_layout(&project_uid, revision)
+            .await
+            .map(|layout| Rc::new(lpc_model::ControlDisplayLayout::Layout2d(layout)));
+        self.card_layout_cache.insert(cache_key, layout.clone());
+        match layout {
+            Some(layout) => self.install_card_feed_layout(id, layout),
+            None => log::debug!(
+                "device card feed: no client-side display layout for project {project_uid}"
+            ),
+        }
+    }
+
+    /// (project uid, observed content hash, current frame revision) for the
+    /// session's feed — the synthesis inputs. `None` unless the board is
+    /// running a project the library knows.
+    fn card_feed_layout_key(
+        &self,
+        id: crate::RuntimeId,
+    ) -> Option<(String, String, lpc_model::Revision)> {
+        let session = self.pool.device_session(id)?;
+        let revision = lpc_model::Revision::new(session.card_feed().frame()?.revision);
+        let (project_uid, observed) = match &session.device_sync()?.content {
+            DeviceContent::Known {
+                project_uid,
+                observed,
+                ..
+            }
+            | DeviceContent::Adopted {
+                project_uid,
+                observed,
+                ..
+            } => (project_uid.clone(), observed.to_string()),
+            _ => return None,
+        };
+        Some((project_uid, observed, revision))
+    }
+
+    /// The layout a library package's own files synthesize to.
+    async fn package_display_layout(
+        &mut self,
+        project_uid: &str,
+        revision: lpc_model::Revision,
+    ) -> Option<lpc_model::ControlLayout2d> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(project_uid).ok()?;
+        let handle = store.open(uid).ok()?;
+        let files = handle.read_all_files().ok()?;
+        crate::app::project::control_display_layout_fallback::synthesized_layout_from_package_files(
+            &files, revision,
+        )
+    }
+
+    fn install_card_feed_layout(
+        &mut self,
+        id: crate::RuntimeId,
+        layout: Rc<lpc_model::ControlDisplayLayout>,
+    ) {
+        let installed = match self.pool.device_session_mut(id) {
+            Ok(session) => {
+                session.card_feed_mut().set_synthesized_layout(layout);
+                true
+            }
+            Err(_) => false,
+        };
+        if installed {
             self.mark_dirty();
         }
     }
@@ -1102,8 +1460,18 @@ impl StudioController {
             },
             None => crate::ConnectEvidence::Idle,
         };
+        let now = (self.now_secs)();
         crate::app::home::HomeDeviceEvidence {
             session_key: Some(session.id().to_string()),
+            // The ▶ tab's live frame, aged at build time. The feed only
+            // runs while that tab is up (see `run_due_card_feeds`), but
+            // what it produced stays on the session — so switching tabs
+            // freezes the picture rather than dropping it, and the age
+            // keeps telling the truth about how old it is.
+            frame: session.card_feed().frame().cloned(),
+            frame_age_secs: session.card_feed().frame_age_secs(now),
+            frame_card_key: session.card_feed().card_key().map(str::to_string),
+            fps: session.engine_fps(),
             // THIS session's card-owned op (M4) — the pin that keeps the
             // card alive through a `Gone` link belongs to the board the
             // op runs on, never to whichever board attached first.
@@ -5825,6 +6193,15 @@ impl StudioController {
         self.device_sync_for(self.ambient_device_id()?)
     }
 
+    /// Test-only: the ONE attached device session's frame feed.
+    pub(crate) fn card_feed_for_test(&self) -> Option<&crate::CardFeedState> {
+        Some(
+            self.pool
+                .device_session(self.ambient_device_id()?)?
+                .card_feed(),
+        )
+    }
+
     /// The connect-flow state, for ladder assertions (M6).
     pub(crate) fn device_flow_state_for_test(&self) -> &ConnectFlowState {
         self.device.flow_state()
@@ -6050,6 +6427,56 @@ fn device_content_for_format(
             class: class.clone(),
         }),
     }
+}
+
+/// The published-frame entries carried by a card-feed read's event stream.
+///
+/// The feed asks for exactly one probe, so this walks the stream for probe
+/// index 0 and reassembles it: a small result arrives whole, and a
+/// dome-scale frame arrives as a header plus bounded chunks the transport
+/// already validated for coverage. Anything else in the stream (the
+/// begin/end revision markers) is not this read's business.
+///
+/// A malformed stream yields no entries rather than an error: the feed's
+/// answer to "no frame this time" is to keep the last one, and there is no
+/// user-facing failure to raise for a picture that did not arrive.
+fn output_frame_entries(events: &[lpc_wire::ProjectReadEvent]) -> Vec<lpc_wire::OutputFrameEntry> {
+    use lpc_wire::{
+        OutputFrameProbeResult, ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent,
+        ProjectReadProbeEvent,
+    };
+
+    let mut pending: Option<(ProjectProbeResultHeader, Vec<u8>)> = None;
+    for event in events {
+        let ProjectReadEvent::Probe { event, .. } = event else {
+            continue;
+        };
+        match event {
+            ProjectReadProbeEvent::Result(ProjectProbeResult::OutputFrame(
+                OutputFrameProbeResult::Frame { outputs },
+            )) => return outputs.clone(),
+            ProjectReadProbeEvent::ResultBegin { header, .. } => {
+                pending = Some((header.clone(), Vec::new()));
+            }
+            ProjectReadProbeEvent::ResultBytes { bytes, .. } => {
+                if let Some((_, buffer)) = pending.as_mut() {
+                    buffer.extend_from_slice(bytes);
+                }
+            }
+            ProjectReadProbeEvent::ResultEnd => {
+                let Some((header, bytes)) = pending.take() else {
+                    continue;
+                };
+                if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) =
+                    header.into_result(bytes)
+                {
+                    return outputs;
+                }
+            }
+            _ => {}
+        }
+    }
+    Vec::new()
 }
 
 /// The grant's short id for display: the trailing `port-N` of a

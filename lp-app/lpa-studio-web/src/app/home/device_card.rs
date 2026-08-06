@@ -1827,6 +1827,10 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
+        // The ▶ tab has no renderer yet (P2 landed the variant so core's
+        // card feed can gate on it); P3 settles the Status-vs-Play icon
+        // pick, which is a G1 gate question.
+        DeviceCardTab::Play => StudioIconName::Play,
         DeviceCardTab::Status => StudioIconName::Play,
         DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
         DeviceCardTab::Settings => StudioIconName::Settings,

@@ -28,6 +28,13 @@ use crate::app::rich_object::{RichObjectView, RichSection, RichWeight};
 /// The card's icon tabs, in their fixed order.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DeviceCardTab {
+    /// ▶ — the running control product, rendered from frames read OFF the
+    /// device (honest-device-preview plan). The variant lands here in P2 so
+    /// core's card feed can gate on it while the tab has no UI yet;
+    /// [`device_card_tabs`] does not emit it, and the default stays
+    /// [`Self::Status`] — P3 owns presence, the icon pick, and the
+    /// default-when-connected rule.
+    Play,
     /// The card's front door — the stable default a fresh card opens on.
     #[default]
     Status,
@@ -42,6 +49,7 @@ impl DeviceCardTab {
     /// Human label (tooltips; the pane mode may show it next to the icon).
     pub fn label(self) -> &'static str {
         match self {
+            Self::Play => "Play",
             Self::Status => "Status",
             Self::Project => "Project",
             Self::Settings => "Settings",

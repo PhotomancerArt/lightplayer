@@ -188,6 +188,16 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   off the due gate as `ProjectRefreshOutcome::NotDue` without a wire op. See
   `refresh_cadence.rs` module docs and
   `docs/adr/2026-07-27-completion-based-refresh-pacing.md`.
+- **The device card's frame feed is the second pull class.** While a card's ▶
+  Play tab is up on a **Ready** device, that session pulls the frame the board
+  has already published (`ProjectProbeRequest::OutputFrame` — a read, never a
+  re-render) at its own `DEVICE_CARD_FEED_INTERVAL` completion gap, held in the
+  session's `CardFeedState` and surfaced on `UiDeviceCard`
+  (`frame_preview` / `frame_age_secs` / `frame_fps`). It runs on **non-lens**
+  sessions, which otherwise issue no wire op between heartbeats, and it declares
+  `DEVICE_CARD_FEED_CLASS` (`Passive`) — it preempts nothing and is cancelled at
+  the next frame boundary. Nothing else gates it: tab selection is the
+  visibility signal, and a card nobody is watching generates no traffic.
 - **Request scoping** stays core-owned and is runtime-tiered: the probe set
   (`node_subscribes_products`) subscribes every non-collapsed node's products
   on the simulator and only the focused node (plus the primary visual) on a
