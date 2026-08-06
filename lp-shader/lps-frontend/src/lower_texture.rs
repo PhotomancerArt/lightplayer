@@ -877,6 +877,39 @@ vec4 render(vec2 pos) {
         );
     }
 
+    /// A palette sampler declared with an explicit binding, lowered end to end.
+    ///
+    /// `lpc-model`'s `generate_compute_shader_header` writes a palette slot as
+    /// `layout(binding = N) uniform sampler2D <name>;` and prepends it to the
+    /// user's source, so for compute shaders this spelling is machine-generated
+    /// and unavoidable. The browser CPU tier pins `ShaderFrontend::Naga`
+    /// (`fw-browser`), where it once failed to parse at all. It must reach the
+    /// same height-one builtin as the bare form the other tests use.
+    #[test]
+    fn generated_palette_header_lowers_to_texture1d_builtin_call() {
+        let glsl = r#"
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform sampler2D palette;
+vec4 render(vec2 pos) {
+    return texture(palette, vec2(pos.x / outputSize.x, 0.0));
+}
+"#;
+        let naga = compile(glsl).expect("compile");
+        let mut specs = VecMap::new();
+        specs.insert(String::from("palette"), rgba16_height_one_spec());
+        let opts = LowerOptions {
+            texture_specs: specs,
+            ..Default::default()
+        };
+        let (ir, _) = lower_with_options(&naga, &opts).expect("lower");
+        validate_module(&ir).expect("validate");
+        let s = print_module(&ir);
+        assert!(
+            s.contains("call @texture::texture1d_rgba16_unorm"),
+            "expected @texture::texture1d_rgba16_unorm in:\n{s}"
+        );
+    }
+
     /// `ivec2(pos)` lowers to naga `As` over a vec2 — the coordinate check must
     /// accept any ivec2-*typed* expression, not just `Compose`/literal shapes.
     #[test]
