@@ -198,14 +198,28 @@ fn rewrite_texture_calls_to_use_sampler2d_ctor(out: &mut String, texture_idents:
     }
 }
 
-/// Parse `layout(set=…, binding=…)` (allows spaces around `=`). Returns `(set, binding)`.
+/// Parse `layout(…)` for the qualifiers the companion sampler needs (allows
+/// spaces around `=`). Returns `(set, binding)`.
+///
+/// Only `binding` is required. `set` is optional in GLSL and means set 0 when
+/// absent — the same default Naga itself applies (`front::glsl::variables`
+/// builds `ResourceBinding { group: set.unwrap_or(0), … }`). Nothing in this
+/// tree writes a `set` on an authored sampler, and `lpc-model`'s
+/// `generate_compute_shader_header` emits
+/// `layout(binding = N) uniform sampler2D <name>;`, so requiring `set` here
+/// declined the rewrite for every qualified palette declaration.
+///
+/// Entries that are not `key = value` (bare qualifiers) are skipped rather
+/// than failing the parse.
 fn parse_glsl_layout_set_binding(layout: &str) -> Option<(u32, u32)> {
     let inner = layout.strip_prefix("layout(")?.strip_suffix(')')?.trim();
     let mut set_v: Option<u32> = None;
     let mut bind_v: Option<u32> = None;
     for part in inner.split(',') {
         let p = part.trim();
-        let (key, val) = p.split_once('=')?;
+        let Some((key, val)) = p.split_once('=') else {
+            continue;
+        };
         let key = key.trim();
         let val = val.trim();
         match key {
@@ -214,7 +228,7 @@ fn parse_glsl_layout_set_binding(layout: &str) -> Option<(u32, u32)> {
             _ => {}
         }
     }
-    Some((set_v?, bind_v?))
+    Some((set_v.unwrap_or(0), bind_v?))
 }
 
 fn parse_ascii_u32(s: &str) -> Option<u32> {
@@ -552,5 +566,65 @@ mod uniform_sampler2d_compat_tests {
         let s = "uniform usampler2D u;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
         assert_eq!(o, s);
+    }
+
+    /// `set` is optional in GLSL (absent means set 0) and nothing in the tree
+    /// writes one: `lpc-model`'s `generate_compute_shader_header` emits
+    /// `layout(binding = N) uniform sampler2D <name>;` for every palette slot.
+    /// Requiring `set` here made the rewrite decline that spelling, so the line
+    /// reached Naga verbatim and died as "variable qualifier".
+    #[test]
+    fn binding_only_layout_is_rewritten() {
+        let s = "layout(binding = 3) uniform sampler2D palette;\n";
+        let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
+        assert_eq!(
+            o,
+            "layout(binding = 3) uniform texture2D palette;\nlayout(set=0, binding=4) uniform sampler __lp_samp_palette;\n"
+        );
+    }
+
+    /// A layout entry with no `=` (a bare qualifier) must not make the whole
+    /// declaration decline the rewrite.
+    #[test]
+    fn bare_layout_qualifier_does_not_defeat_rewrite() {
+        let s = "layout(std140, binding = 2) uniform sampler2D palette;\n";
+        let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
+        assert!(o.contains("uniform texture2D palette;"), "{o}");
+        assert!(
+            o.contains("binding=3) uniform sampler __lp_samp_palette;"),
+            "{o}"
+        );
+    }
+}
+
+/// A palette sampler declared with an explicit binding must reach Naga IR.
+///
+/// `lpc-model`'s `generate_compute_shader_header` emits `layout(binding = N)
+/// uniform sampler2D <name>;` and prepends it to the user's source; the browser
+/// CPU tier pins `ShaderFrontend::Naga` (`fw-browser`), so this is a spelling
+/// that tier has to compile whether or not the author chose it.
+#[cfg(test)]
+mod generated_palette_header_compiles_tests {
+    use super::compile;
+
+    #[test]
+    fn generated_palette_header_compiles_through_naga() {
+        let glsl = "layout(binding = 0) uniform vec2 outputSize;\n\
+             layout(binding = 1) uniform sampler2D palette;\n\
+             vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
+        compile(glsl).expect("generated palette header compiles");
+    }
+
+    /// A palette between two other consumed slots: the synthesized companion
+    /// sampler lands on the next slot's binding number. Binding numbers do not
+    /// drive LP layout (`compute_global_layout` keys on name + address space in
+    /// declaration order), so the overlap must stay inert.
+    #[test]
+    fn palette_between_slots_compiles_despite_companion_binding_overlap() {
+        let glsl = "layout(binding = 0) uniform float speed;\n\
+             layout(binding = 1) uniform sampler2D palette;\n\
+             layout(binding = 2) uniform float bright;\n\
+             vec4 render(vec2 pos) { return texture(palette, vec2(pos.x * speed, 0.0)) * bright; }";
+        compile(glsl).expect("palette between slots compiles");
     }
 }
