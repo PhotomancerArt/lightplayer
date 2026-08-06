@@ -45,6 +45,14 @@ perf.data*
 traces/
 profiles/
 lp-app/lpa-studio-web/public/fw-browser-worker.js
+# The Tailwind bundle dx compiles from lpa-studio-web/tailwind.css on every
+# build. UNLIKE the CodeMirror bundle above, this one is regenerated rather
+# than vendored, so tracking it is actively harmful: git merges a generated
+# bundle by text, and the merge of two branches' bundles is neither branch's
+# — utilities that exist only on one side silently vanish. lpa-studio-web's
+# build.rs writes a placeholder when it is absent, so plain `cargo check`
+# still resolves `asset!()` on a fresh clone.
+lp-app/lpa-studio-web/assets/tailwind.css
 lp-app/lpa-studio-web/dist/
 lp-app/lpa-studio-web/story-images/.new/
 lp-app/lpa-studio-web/story-images/.scratch/

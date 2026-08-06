@@ -675,7 +675,7 @@ jobs:
         run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
 
   # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
-  # both times the signal was a red Deploy Studio Pages run *after* the merge,
+  # both times the signal was a red `Build and deploy Studio` run *after* the merge,
   # because no pre-merge job built the device firmware. This job builds it and
   # fails under 64 KB of headroom; it prints the number either way, so the size
   # is visible on every PR that can move it.
@@ -725,7 +725,7 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match deploy-studio-pages.yml, which packages the image this
+      # Pinned to match main-push.yml's deploy job, which packages the image this
       # job measures. ~/.cargo/bin is restored by rust-cache above, so this is
       # a no-op on a warm cache.
       - name: Install espflash

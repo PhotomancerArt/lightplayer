@@ -130,8 +130,21 @@ files so debug wasm artifacts are easy to spot.
 
 ## Deploy
 
-Production deploys automatically from `main` through the `Deploy Studio Pages`
-workflow.
+Production deploys automatically from `main` through the `Main push` workflow's
+`Build and deploy Studio` job. That job is deliberately `needs:`-ordered behind
+`tag-next-version` in the same workflow, so the commit's version tag exists
+before the deploy checks out — when the deploy was its own workflow on the same
+`push: main` trigger, the two raced and production published `<sha>-dirty-<time>`
+instead of the tag.
+
+The job resolves `APP_VERSION` immediately after checkout, before the build
+runs, and `prepare-pages-artifact.mjs` prefers that over shelling out to
+`print-app-version.sh` itself. The build writes generated files into the
+checkout (dx recompiles `assets/tailwind.css` from `tailwind.css`), so a
+version resolved after the build always reads as dirty.
+
+Re-deploying an already-tagged `main` without a new commit is a
+`workflow_dispatch` on `Main push`; tagging is skipped for that event.
 
 Beta and demo deploy manually through the `Deploy Pages Channel` workflow:
 
