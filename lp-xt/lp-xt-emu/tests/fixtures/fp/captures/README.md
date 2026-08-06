@@ -50,6 +50,58 @@ Counts are pinned as equalities in `tests/fp_silicon_replay.rs`. An
 > (`board::esp32s3::fpu::arm`) is a read-modify-write: a blind store of `1`
 > **does** disable coprocessors 1–7, as this line shows it doing.
 
+## The classic ESP32 (LX6), 2026-08-06
+
+`families-esp32v3.txt` and `tables-esp32v3.txt` are the same two campaigns on
+the **other** Xtensa FPU, run through the same rig (`lp-xt-fp-harness`, shared
+by both firmwares as of this date) and the same corpus fingerprint.
+
+| File | Contents |
+|---|---|
+| `families-esp32v3.txt` | All 5 630 conformance vectors of the six families |
+| `tables-esp32v3.txt` | The same 60 run-length-encoded estimate-ROM sweeps as `tables.txt` |
+
+**Both answered the same way: LX6 and LX7 agree.**
+
+- Families: `5630 compared / 5630 AGREE / 0 DIVERGE` against the predictions in
+  `../` — the ones fitted to and committed for the S3.
+- Estimate ROMs: `tables-esp32v3.txt` is **byte-identical** to `tables.txt` over
+  all 1 570 sweep rows (369 865 bytes each), covering the full 2²³ significand
+  space across 15 `(sign, exponent)` planes for each of `recip0.s` / `rsqrt0.s`
+  / `sqrt0.s` / `div0.s`.
+
+That second result is the load-bearing one, and it is the reason a second chip
+was worth capturing. The estimate ROMs are **implementation-defined** — there is
+no host prediction for them and there cannot be, which is why `tables` mode is
+silicon-first. With one chip they were an unfalsifiable measurement. With two,
+one board's capture becomes the other's oracle, and the answer is that the
+lookup tables are the same silicon behavior on both parts.
+
+The practical consequence: `docs/design/float.md`'s guarantees, and the
+emulator's fitted `divn.s` model, carry from the S3 to the classic without a
+per-chip arm. That was an open question at
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` ("**LX6 (classic ESP32)
+FPU** — untouched"), and it is now measured rather than assumed.
+
+`cpenable before=0x000000ff` on this board too — the classic's boot chain also
+arrives with every coprocessor enabled, same as the S3, and with the same
+unpinned provenance. Same conclusion: arm it anyway, read-modify-write.
+
+### Board identity
+
+- Classic ESP32 (Xtensa LX6), chip revision **v3.1**, MAC **30:76:f5:ec:f6:34**
+- 4 MB flash, 40 MHz crystal, dual core, flashed `--flash-size 4mb`
+- Port at capture time `/dev/cu.wchusbserial1130` — ⚠️ this board's port
+  **renumbered mid-session** (`…1120` → `…1130`); identify by MAC
+- Firmware commit `5bde331becc5` (dirty: the branch's own working tree),
+  feature `test_xt_fp_conformance`, profile `release-esp32v3`
+- Toolchain: espup `esp-14.2.0_20240906` (`xtensa-esp32-elf-gcc` 14.2.0)
+
+> The captures carry the boot ROM's pre-baud bytes ahead of the first
+> `[FPCONF]` line — this chip has no USB-Serial-JTAG, so the ROM talks on the
+> same UART0 wire at its own baud. The committed files are filtered to
+> `[FPCONF]` lines; grep raw captures with `-a`.
+
 ## Rules
 
 - **Never edit a capture.** These are measurements. A replay mismatch
