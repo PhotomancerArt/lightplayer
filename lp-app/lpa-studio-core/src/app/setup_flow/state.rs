@@ -44,6 +44,13 @@ pub enum CloseReason {
     /// deliberately NOT released — "it joins your roster as it is" means
     /// the board is still there, on its own card, when the flow ends.
     Adopted,
+    /// The target was set up while the flow was still asking for a board,
+    /// by a route that is not this flow: an "Open in sim" landed a
+    /// targeted project on the simulator (G1b ruling 6, 2026-08-05).
+    /// Everything the flow existed to produce — a running target, a
+    /// board, a project — is already true, so there is nothing left to
+    /// ask and nothing to release.
+    SetUpElsewhere,
 }
 
 /// BOARD_PICK's data. `probe` is `None` on a target that needs no connect
