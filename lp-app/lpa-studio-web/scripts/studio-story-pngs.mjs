@@ -1195,6 +1195,24 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       if (unpainted.length > 0) {
         return false;
       }
+      // A canvas that sizes its backing store from layout (the clock face's
+      // phasor traces) paints a bitmap for the box it measured. Measure that
+      // box before the app's stylesheet lands and the bitmap is drawn for the
+      // unstyled 300x150 intrinsic size, then squeezed into the real box —
+      // a second stable terminal that alternated baselines run to run
+      // (docs/defects/2026-08-05-clock-face-baselines-oscillate.md). The app
+      // repaints on resize; this refuses to shoot until it has.
+      const dpr = window.devicePixelRatio || 1;
+      const mismatched = [...el.querySelectorAll('canvas.ux-box-sized-canvas')].filter((c) => {
+        const rect = c.getBoundingClientRect();
+        return (
+          c.width !== Math.max(1, Math.round(rect.width * dpr)) ||
+          c.height !== Math.max(1, Math.round(rect.height * dpr))
+        );
+      });
+      if (mismatched.length > 0) {
+        return false;
+      }
       return !document.querySelector('[data-story-wait="1"]');
     })()
   `;
