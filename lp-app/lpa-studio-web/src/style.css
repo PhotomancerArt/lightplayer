@@ -549,28 +549,6 @@ label:has(> input:not(:disabled)) {
     inset: 5%;
 }
 
-/* The sim's re-simulated canvas, revealed after its first presented
-   frame (the gallery thumb's reveal discipline at tab scale). */
-.ux-play-canvas {
-    position: absolute;
-    inset: 0;
-    display: block;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-}
-
-.ux-play-canvas.is-revealed {
-    opacity: 1;
-    transition: opacity 200ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .ux-play-canvas.is-revealed {
-        transition: none;
-    }
-}
-
 /* Liveness pill, top-right INSIDE the view: it belongs to the picture, not
    to the card, because what it qualifies is the picture's age. */
 .ux-play-pill {

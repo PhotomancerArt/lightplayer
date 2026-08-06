@@ -46,7 +46,7 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
 const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
-    description = "Green filled edge: running the local project's tip. The card opens on its ▶ tab in the live app (the default-when-connected rule); this sheet pins the Status tab so the vocabulary stays comparable across states. The hero strip that used to sit under the title bar is GONE — honest-device preview P3."
+    description = "Green filled edge: running the local project's tip. The card opens on its ▶ tab in the live app (the default-when-connected rule); this sheet pins the Settings tab (the folded front door — the Status tab retired at the honest-preview G1) so the vocabulary stays comparable across states. The hero strip that used to sit under the title bar is GONE — honest-device preview P3."
 )]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
@@ -204,7 +204,7 @@ fn holds_old_format_project() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
+    description = "Amber filled edge: blank flash — the Settings front door IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
 )]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
@@ -291,7 +291,7 @@ fn troubleshoot_sheet_open() -> Element {
                 card: UiDeviceCard {
                     port_label: None,
                     session_key: None,
-                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Troubleshoot)),
+                    ui: opened(DeviceCardTab::Settings, Some(CardSheet::Troubleshoot)),
                     ..device_card(RosterCardState::NotResponding, false)
                 },
                 now_secs: Some(STORY_NOW),
@@ -319,7 +319,7 @@ fn bootloader_entry_instructing() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Status,
+                        DeviceCardTab::Settings,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(Some(
                             "fw-esp32c6",
                         )))),
@@ -344,7 +344,7 @@ fn bootloader_entry_generic() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Status,
+                        DeviceCardTab::Settings,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(None))),
                     ),
                     ..device_card(RosterCardState::NotResponding, false)
@@ -367,7 +367,7 @@ fn bootloader_entry_waiting() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Status,
+                        DeviceCardTab::Settings,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6")).begin_waiting(),
                         )),
@@ -392,7 +392,7 @@ fn bootloader_entry_confirmed() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Status,
+                        DeviceCardTab::Settings,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6"))
                                 .begin_waiting()
@@ -419,7 +419,7 @@ fn bootloader_entry_not_yet() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Status,
+                        DeviceCardTab::Settings,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6"))
                                 .begin_waiting()
@@ -441,7 +441,7 @@ fn in_use_elsewhere() -> Element {
 }
 
 #[story(
-    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired). An offline card keeps its ▶ tab — the last frame it saw, dimmed and veiled — but opens on Status, because there is nothing live to open onto."
+    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Settings front door as the state-table affordance (the old click-to-reconnect is retired). An offline card keeps its ▶ tab — the last frame it saw, dimmed and veiled — but opens on Settings, because there is nothing live to open onto."
 )]
 fn offline() -> Element {
     sheet(vec![card(offline_state(), true)])
@@ -460,7 +460,7 @@ fn play_tab_states() -> Element {
 }
 
 #[story(
-    description = "The sim's ▶ tab: the same surface, marked SIM in the bound-violet family and captioned \"browser simulation\". Re-simulating is honest HERE and only here — the sim card IS the simulator — so the pill never borrows the green a device's own frames earn. (The canvas itself is inert under story capture; the chrome is what this story fixes.)"
+    description = "The sim's ▶ tab: the same surface, the same REAL frames — the sim card rides the identical published-frame feed a device does (G1 ruling 3; the browser re-simulation canvas is gone) — wearing the violet SIM pill as identity dress and \"N fps from simulator\" in the meta row. The pill never borrows the green a device's own frames earn."
 )]
 fn play_tab_simulator() -> Element {
     sheet(vec![rsx! {
@@ -468,6 +468,9 @@ fn play_tab_simulator() -> Element {
             DeviceCard {
                 card: UiDeviceCard {
                     ui: opened(DeviceCardTab::Play, None),
+                    frame_preview: Some(story_frame()),
+                    frame_age_secs: Some(0.0),
+                    frame_fps: Some(60.0),
                     ..sim_card(true)
                 },
                 now_secs: Some(STORY_NOW),
@@ -518,7 +521,7 @@ fn project_tab_running_behind() -> Element {
 }
 
 #[story(
-    description = "The Settings tab open on a live Running device: the Technical facts (uid, transport, firmware provenance) with the advisory firmware-update chip — the chip badges the Settings tab, never the Status tab or the edge tint."
+    description = "The Settings tab open on a live Running device: the Technical facts (uid, transport, firmware provenance) with the advisory firmware-update chip — the chip badges the Settings tab (which also carries the health story now that Status folded into it), never the edge tint."
 )]
 fn settings_tab_running() -> Element {
     sheet(vec![rsx! {
@@ -653,7 +656,7 @@ fn name_sheet_open() -> Element {
                 card: UiDeviceCard {
                     port_label: None,
                     session_key: None,
-                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Name)),
+                    ui: opened(DeviceCardTab::Settings, Some(CardSheet::Name)),
                     ..device_card(RosterCardState::NeedsAName, false)
                 },
                 now_secs: Some(STORY_NOW),

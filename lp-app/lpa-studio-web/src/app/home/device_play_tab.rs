@@ -14,14 +14,16 @@
 //! | State | frame | pill | meta |
 //! |---|---|---|---|
 //! | live | device frames | green `live · N fps` | `N fps from device` |
-//! | stale (> 5 s) | the last device frame | amber `last frame · N ago` | amber `no frames for N` |
-//! | offline | the last device frame, dimmed + veiled | neutral `last seen …` | `last seen …` |
-//! | sim | the sim's OWN re-simulation | violet `sim` | `browser simulation` |
+//! | live (sim) | the sim engine's frames | violet `sim · N fps` | `N fps from simulator` |
+//! | stale (> 5 s) | the last frame | amber `last frame · N ago` | amber `no frames for N` |
+//! | offline | the last frame, dimmed + veiled | neutral `last seen …` | `last seen …` |
 //! | no frame | nothing — a sentence | — | the project chip alone |
 //!
-//! Re-simulation is honest on the sim card and nowhere else: the sim card
-//! IS the simulator, so simulating is the thing it does. That is why the
-//! violet SIM pill exists rather than a green one.
+//! The sim card rides the SAME feed as hardware (G1 ruling 3, overturning
+//! the spike's Q5): its ▶ shows the frames the sim engine actually
+//! published, never a browser re-simulation. The violet SIM pill stays —
+//! not as a liveness state but as identity dress: same truth, different
+//! machine.
 //!
 //! The stale threshold is core's
 //! [`FRAME_STALE_AFTER_SECS`](lpa_studio_core::FRAME_STALE_AFTER_SECS) (5 s,
@@ -32,17 +34,22 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::time_ago::time_ago;
 use lpa_studio_core::{
-    FRAME_STALE_AFTER_SECS, PreviewSource, RosterCardState, UiDeviceCard, UiDeviceProjectChip,
+    FRAME_STALE_AFTER_SECS, RosterCardState, UiAction, UiDeviceCard, UiDeviceProjectChip,
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::gallery_preview::use_thumb_preview;
 use crate::app::node::lamp_view::LampView;
+use crate::base::icon::StudioIconName;
+use crate::base::inline_button::InlineButton;
 
 /// What the ▶ tab is showing, and therefore how it is dressed.
+///
+/// There is no Sim variant: the sim card shares every state here (its
+/// frames are as real as a board's) and wears its identity as the violet
+/// pill instead (`sim` threads through the text/family helpers).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PlayLiveness {
-    /// Device frames still arriving (or arrived within the threshold).
+    /// Frames still arriving (or arrived within the threshold).
     Live,
     /// Frames stopped, past [`FRAME_STALE_AFTER_SECS`]. The picture stays;
     /// only its label changes, because the last frame is still the truth
@@ -51,8 +58,6 @@ pub(crate) enum PlayLiveness {
     /// The link is gone (or not answering) and a frame from this session
     /// survives it — dimmed and veiled: last known, not current.
     Offline,
-    /// The sim's own re-simulation, marked as such.
-    Sim,
     /// A project, but no frame to show yet. An empty frame with a sentence
     /// — never a placeholder pattern, which is exactly the lie the hero
     /// strip told.
@@ -62,60 +67,50 @@ pub(crate) enum PlayLiveness {
 /// The ▶ tab body.
 ///
 /// `sim` is the card's own sim flag rather than something derived from the
-/// card, matching every other body in `device_card.rs`.
+/// card, matching every other body in `device_card.rs`. `open_action` is
+/// the SAME editor-attach action the title-bar ⤢ dispatches (G1: the
+/// picture carries its own way into the editor) — `None` renders no
+/// button, mirroring the ⤢'s disabled rule rather than re-deriving it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn PlayTabBody(card: UiDeviceCard, sim: bool, now: f64) -> Element {
+pub(crate) fn PlayTabBody(
+    card: UiDeviceCard,
+    sim: bool,
+    now: f64,
+    open_action: Option<UiAction>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     // Last known, not current — the same pair the card grammar dims for.
     let muted = matches!(
         card.state,
         RosterCardState::Offline { .. } | RosterCardState::NotResponding
     );
-    let liveness = play_liveness(&card, sim, muted);
-
-    // A LEASE, not a device read: only the sim card ever gets one. The hook
-    // runs unconditionally (Dioxus hook order) and is fully inert with a
-    // `None` source — no host, no canvas, no observer.
-    let sim_source = (liveness == PlayLiveness::Sim)
-        .then(|| card.project.as_ref().map(|chip| chip.uid.clone()))
-        .flatten()
-        .map(PreviewSource::ProjectUid);
-    let preview = use_thumb_preview(sim_source);
+    let liveness = play_liveness(&card, muted);
 
     let frame_class = if liveness == PlayLiveness::Offline {
         "ux-play-frame ux-play-frame-dim"
     } else {
         "ux-play-frame"
     };
-    let pill = play_pill_text(&card, liveness, now);
-    let meta = play_meta_text(&card, liveness, now);
+    let pill = play_pill_text(&card, liveness, sim, now);
+    let meta = play_meta_text(&card, liveness, sim, now);
 
     rsx! {
-        div { id: "{preview.frame_id}", class: "{frame_class}",
-            // The device's own frames. `live` stays true even on an offline
-            // card: the neutral-lamp mode is for a layout with no data,
-            // whereas here there IS data — just old, which the dimming and
-            // the veil say out loud.
+        div { class: "{frame_class}",
+            // The session's own frames. `live` stays true even on an
+            // offline card: the neutral-lamp mode is for a layout with no
+            // data, whereas here there IS data — just old, which the
+            // dimming and the veil say out loud.
             if let Some(frame) = card.frame_preview.clone() {
                 div { class: "ux-play-lamps",
                     LampView { preview: frame }
-                }
-            }
-            // The sim's re-simulated canvas, revealed on its first frame.
-            if let Some(canvas) = preview.canvas {
-                canvas {
-                    key: "{canvas.id}",
-                    id: "{canvas.id}",
-                    width: "320",
-                    height: "180",
-                    class: if canvas.revealed { "ux-play-canvas is-revealed" } else { "ux-play-canvas" },
                 }
             }
             if liveness == PlayLiveness::Waiting {
                 p { class: "ux-play-empty", "{waiting_line(muted)}" }
             }
             if let Some(pill) = pill {
-                span { class: "ux-play-pill {pill_family_class(liveness)}",
+                span { class: "ux-play-pill {pill_family_class(liveness, sim)}",
                     span { class: "ux-play-dot" }
                     "{pill}"
                 }
@@ -133,6 +128,14 @@ pub(crate) fn PlayTabBody(card: UiDeviceCard, sim: bool, now: f64) -> Element {
                 span {
                     class: if liveness == PlayLiveness::Stale { "ux-play-fps ux-play-fps-stale" } else { "ux-play-fps" },
                     "{meta}"
+                }
+            }
+            if let Some(action) = open_action {
+                InlineButton {
+                    label: "Open {card.name} in the editor",
+                    icon: Some(StudioIconName::Grow),
+                    text: Some("Editor".to_string()),
+                    on_press: move |_| on_action.call(action.clone()),
                 }
             }
         }
@@ -157,10 +160,7 @@ fn project_chip(chip: &UiDeviceProjectChip) -> Element {
 /// Order is load-bearing: "no frame" outranks "offline", because an offline
 /// card with nothing to show must not wear a veil captioned "last frame"
 /// over an empty box — there is no last frame to veil.
-pub(crate) fn play_liveness(card: &UiDeviceCard, sim: bool, muted: bool) -> PlayLiveness {
-    if sim {
-        return PlayLiveness::Sim;
-    }
+pub(crate) fn play_liveness(card: &UiDeviceCard, muted: bool) -> PlayLiveness {
     if card.frame_preview.is_none() {
         return PlayLiveness::Waiting;
     }
@@ -173,12 +173,15 @@ pub(crate) fn play_liveness(card: &UiDeviceCard, sim: bool, muted: bool) -> Play
     }
 }
 
-fn pill_family_class(liveness: PlayLiveness) -> &'static str {
+/// The pill's tint family. A LIVE sim wears violet — identity, per the
+/// app-wide sim-is-violet dress — but a stale or waiting sim keeps the
+/// state family: "the frames stopped" outranks "this is the simulator".
+fn pill_family_class(liveness: PlayLiveness, sim: bool) -> &'static str {
     match liveness {
+        PlayLiveness::Live if sim => "ux-play-pill-sim",
         PlayLiveness::Live => "ux-play-pill-live",
         PlayLiveness::Stale => "ux-play-pill-stale",
         PlayLiveness::Offline | PlayLiveness::Waiting => "ux-play-pill-offline",
-        PlayLiveness::Sim => "ux-play-pill-sim",
     }
 }
 
@@ -187,10 +190,10 @@ fn pill_family_class(liveness: PlayLiveness) -> &'static str {
 pub(crate) fn play_pill_text(
     card: &UiDeviceCard,
     liveness: PlayLiveness,
+    sim: bool,
     now: f64,
 ) -> Option<String> {
     match liveness {
-        PlayLiveness::Sim => Some("sim".to_string()),
         PlayLiveness::Waiting => None,
         PlayLiveness::Offline => Some(match card.state {
             RosterCardState::Offline {
@@ -202,9 +205,13 @@ pub(crate) fn play_pill_text(
             "last frame · {}",
             frame_age_label(card.frame_age_secs.unwrap_or_default())
         )),
-        // fps is the BOARD's render rate, and real firmware only reports it
-        // every 5 s — so a freshly connected board says "live" and nothing
-        // more rather than inventing a number.
+        // fps is the ENGINE's render rate, and real firmware only reports
+        // it every 5 s — so a freshly connected board says "live" (or the
+        // sim "sim") and nothing more rather than inventing a number.
+        PlayLiveness::Live if sim => Some(match card.frame_fps {
+            Some(fps) => format!("sim · {} fps", fps.round() as i64),
+            None => "sim".to_string(),
+        }),
         PlayLiveness::Live => Some(match card.frame_fps {
             Some(fps) => format!("live · {} fps", fps.round() as i64),
             None => "live".to_string(),
@@ -217,10 +224,10 @@ pub(crate) fn play_pill_text(
 pub(crate) fn play_meta_text(
     card: &UiDeviceCard,
     liveness: PlayLiveness,
+    sim: bool,
     now: f64,
 ) -> Option<String> {
     match liveness {
-        PlayLiveness::Sim => Some("browser simulation".to_string()),
         PlayLiveness::Waiting => None,
         PlayLiveness::Offline => Some(match card.state {
             RosterCardState::Offline {
@@ -232,6 +239,10 @@ pub(crate) fn play_meta_text(
             "no frames for {}",
             frame_age_label(card.frame_age_secs.unwrap_or_default())
         )),
+        PlayLiveness::Live if sim => Some(match card.frame_fps {
+            Some(fps) => format!("{} fps from simulator", fps.round() as i64),
+            None => "frames from simulator".to_string(),
+        }),
         PlayLiveness::Live => Some(match card.frame_fps {
             Some(fps) => format!("{} fps from device", fps.round() as i64),
             None => "frames from device".to_string(),
@@ -319,9 +330,9 @@ mod tests {
     #[test]
     fn frames_stay_live_until_the_stale_threshold() {
         let live = with_frame(card(RosterCardState::RunningUpToDate), 4.0);
-        assert_eq!(play_liveness(&live, false, false), PlayLiveness::Live);
+        assert_eq!(play_liveness(&live, false), PlayLiveness::Live);
         let stale = with_frame(card(RosterCardState::RunningUpToDate), 6.0);
-        assert_eq!(play_liveness(&stale, false, false), PlayLiveness::Stale);
+        assert_eq!(play_liveness(&stale, false), PlayLiveness::Stale);
     }
 
     /// An offline card with no frame must NOT claim a last frame.
@@ -330,28 +341,42 @@ mod tests {
         let offline = card(RosterCardState::Offline {
             last_seen_at: Some(NOW - 7200.0),
         });
-        assert_eq!(play_liveness(&offline, false, true), PlayLiveness::Waiting);
-        assert_eq!(play_pill_text(&offline, PlayLiveness::Waiting, NOW), None);
+        assert_eq!(play_liveness(&offline, true), PlayLiveness::Waiting);
+        assert_eq!(
+            play_pill_text(&offline, PlayLiveness::Waiting, false, NOW),
+            None
+        );
 
         let with_last_frame = with_frame(offline, 7200.0);
+        assert_eq!(play_liveness(&with_last_frame, true), PlayLiveness::Offline);
         assert_eq!(
-            play_liveness(&with_last_frame, false, true),
-            PlayLiveness::Offline
-        );
-        assert_eq!(
-            play_pill_text(&with_last_frame, PlayLiveness::Offline, NOW).as_deref(),
+            play_pill_text(&with_last_frame, PlayLiveness::Offline, false, NOW).as_deref(),
             Some("last seen 2h ago")
         );
     }
 
-    /// The sim never wears a device's clothes, frame or no frame.
+    /// The sim rides the same feed and the same states (G1 ruling 3 —
+    /// its frames are as real as a board's), wearing violet identity
+    /// dress while live and the honest state families otherwise.
     #[test]
-    fn the_sim_says_it_is_a_simulation() {
-        let sim = card(RosterCardState::RunningUpToDate);
-        assert_eq!(play_liveness(&sim, true, false), PlayLiveness::Sim);
+    fn the_sim_shares_the_states_and_says_it_is_the_simulator() {
+        let mut sim = with_frame(card(RosterCardState::RunningUpToDate), 0.0);
+        sim.frame_fps = Some(60.2);
+        assert_eq!(play_liveness(&sim, false), PlayLiveness::Live);
         assert_eq!(
-            play_meta_text(&sim, PlayLiveness::Sim, NOW).as_deref(),
-            Some("browser simulation")
+            play_pill_text(&sim, PlayLiveness::Live, true, NOW).as_deref(),
+            Some("sim · 60 fps")
+        );
+        assert_eq!(
+            play_meta_text(&sim, PlayLiveness::Live, true, NOW).as_deref(),
+            Some("60 fps from simulator")
+        );
+        assert_eq!(pill_family_class(PlayLiveness::Live, true), "ux-play-pill-sim");
+        // Stopped frames outrank identity: a stalled sim goes amber like
+        // any other stalled engine.
+        assert_eq!(
+            pill_family_class(PlayLiveness::Stale, true),
+            "ux-play-pill-stale"
         );
     }
 
@@ -361,12 +386,12 @@ mod tests {
     fn a_rate_appears_only_once_the_board_reports_one() {
         let mut live = with_frame(card(RosterCardState::RunningUpToDate), 0.0);
         assert_eq!(
-            play_pill_text(&live, PlayLiveness::Live, NOW).as_deref(),
+            play_pill_text(&live, PlayLiveness::Live, false, NOW).as_deref(),
             Some("live")
         );
         live.frame_fps = Some(29.9);
         assert_eq!(
-            play_pill_text(&live, PlayLiveness::Live, NOW).as_deref(),
+            play_pill_text(&live, PlayLiveness::Live, false, NOW).as_deref(),
             Some("live · 30 fps")
         );
     }

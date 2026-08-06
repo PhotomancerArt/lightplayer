@@ -872,7 +872,17 @@ impl StudioController {
         if has_picture {
             crate::DeviceCardTab::Play
         } else {
-            crate::DeviceCardTab::Status
+            crate::DeviceCardTab::Settings
+        }
+    }
+
+    /// The card-identity key a session's card wears: the sim card's fixed
+    /// key for the sim session, the device cascade otherwise.
+    fn card_key_for_session(session: &crate::RuntimeSession) -> String {
+        if session.is_sim() {
+            crate::SIM_CARD_KEY.to_string()
+        } else {
+            Self::card_key_for_device_session(session)
         }
     }
 
@@ -891,9 +901,15 @@ impl StudioController {
             .unwrap_or_else(|| session.id().to_string())
     }
 
-    /// Whether a session's frame feed should be pulling (Q3): a **Ready**
-    /// device — a board that is answering — whose card is showing the ▶
-    /// tab. Nothing else earns a frame read.
+    /// Whether a session's frame feed should be pulling (Q3): a session
+    /// that is answering and running a project, whose card is showing the
+    /// ▶ tab. Nothing else earns a frame read.
+    ///
+    /// For a device that means a **Ready** board; for the sim it means a
+    /// loaded project (G1 ruling 3 — the sim ▶ rides this same feed, so
+    /// the card shows the sim engine's OWN published frames, exactly like
+    /// hardware; the in-proc wire makes the bandwidth caveats moot but the
+    /// completion-gap cadence still paces it).
     ///
     /// Tab selection is the visibility signal, deliberately. A card on
     /// another tab, a gallery scrolled away, or a backgrounded browser tab
@@ -903,10 +919,15 @@ impl StudioController {
     /// consult, and inventing one to gate a picture would be the wrong
     /// order of work.
     fn card_feed_active(&self, session: &crate::RuntimeSession) -> bool {
-        if !matches!(session.device_state(), Some(DeviceState::Ready { .. })) {
+        let answering = if session.is_sim() {
+            session.sim_loaded_project().is_some()
+        } else {
+            matches!(session.device_state(), Some(DeviceState::Ready { .. }))
+        };
+        if !answering {
             return false;
         }
-        let key = Self::card_key_for_device_session(session);
+        let key = Self::card_key_for_session(session);
         self.effective_card_tab(&key) == crate::DeviceCardTab::Play
     }
 
@@ -915,7 +936,7 @@ impl StudioController {
     /// common case, where the UI timer keeps its calm heartbeat pace.
     fn card_feed_due_in(&self, now: f64) -> Option<Duration> {
         self.pool
-            .device_sessions()
+            .sessions()
             .filter(|session| self.card_feed_active(session))
             .map(|session| {
                 session
@@ -945,7 +966,7 @@ impl StudioController {
         let now = (self.now_secs)();
         let due: Vec<crate::RuntimeId> = self
             .pool
-            .device_sessions()
+            .sessions()
             .filter(|session| {
                 self.card_feed_active(session)
                     && session.card_feed().due(now, session.card_feed_interval())
@@ -976,15 +997,15 @@ impl StudioController {
         // Record which card this feed feeds BEFORE the wire work: if this
         // pull is the one that discovers the board is gone, the roster
         // still needs to know where the last frame belongs.
-        if let Ok(session) = self.pool.device_session_mut(id) {
-            let key = Self::card_key_for_device_session(session);
+        if let Some(session) = self.pool.session_mut(id) {
+            let key = Self::card_key_for_session(session);
             session.card_feed_mut().set_card_key(key);
         }
         let Some(handle_id) = self.acquire_card_feed_handle(id).await else {
             // Nothing loaded (or the handle is unknowable right now): stamp
             // the attempt so the ask paces itself instead of spinning.
             let now = (self.now_secs)();
-            if let Ok(session) = self.pool.device_session_mut(id) {
+            if let Some(session) = self.pool.session_mut(id) {
                 session.card_feed_mut().mark_pull_complete(now);
             }
             return;
@@ -996,7 +1017,7 @@ impl StudioController {
             make_timer,
         );
         let (outcome, request_logs) = {
-            let Ok(session) = self.pool.device_session_mut(id) else {
+            let Some(session) = self.pool.session_mut(id) else {
                 return;
             };
             let request = lpc_wire::ProjectReadRequest {
@@ -1038,7 +1059,7 @@ impl StudioController {
         let now = (self.now_secs)();
         let mut wants_layout = false;
         let mut new_frame = false;
-        if let Ok(session) = self.pool.device_session_mut(id) {
+        if let Some(session) = self.pool.session_mut(id) {
             session.card_feed_mut().mark_pull_complete(now);
             match outcome {
                 Some(events) => {
@@ -1072,22 +1093,20 @@ impl StudioController {
     /// common path costs nothing; a session that has not seen a heartbeat
     /// yet spends one `ListLoadedProjects` and remembers the answer.
     async fn acquire_card_feed_handle(&mut self, id: crate::RuntimeId) -> Option<u32> {
-        let session = self.pool.device_session(id)?;
+        let session = self.pool.session(id)?;
         if let Some(handle) = session.card_feed().handle_id() {
             return Some(handle);
         }
         if let Some(handle) = session.heartbeat_project_handle() {
             self.pool
-                .device_session_mut(id)
-                .ok()?
+                .session_mut(id)?
                 .card_feed_mut()
                 .set_handle_id(handle);
             return Some(handle);
         }
         let catalog = self
             .pool
-            .device_session_mut(id)
-            .ok()?
+            .session_mut(id)?
             .client_mut()
             .ok()?
             .list_loaded_projects()
@@ -1096,8 +1115,7 @@ impl StudioController {
         self.record_session_logs(id, catalog.logs);
         let handle = catalog.projects.first()?.handle_id;
         self.pool
-            .device_session_mut(id)
-            .ok()?
+            .session_mut(id)?
             .card_feed_mut()
             .set_handle_id(handle);
         Some(handle)
@@ -1144,8 +1162,18 @@ impl StudioController {
         &self,
         id: crate::RuntimeId,
     ) -> Option<(String, String, lpc_model::Revision)> {
-        let session = self.pool.device_session(id)?;
+        let session = self.pool.session(id)?;
         let revision = lpc_model::Revision::new(session.card_feed().frame()?.revision);
+        if session.is_sim() {
+            // The sim runs the library's own copy, so the uid alone finds
+            // the bytes. "sim" as the observed half means a fixture-layout
+            // edit mid-session could serve a stale cached synthesis until
+            // the next studio reload — an accepted edge: sim-scale
+            // projects normally get their layout over the in-proc wire
+            // and never reach the synthesis fallback.
+            let project_uid = session.sim_loaded_project()?.uid.clone();
+            return Some((project_uid, "sim".to_string(), revision));
+        }
         let (project_uid, observed) = match &session.device_sync()?.content {
             DeviceContent::Known {
                 project_uid,
@@ -1184,12 +1212,12 @@ impl StudioController {
         id: crate::RuntimeId,
         layout: Rc<lpc_model::ControlDisplayLayout>,
     ) {
-        let installed = match self.pool.device_session_mut(id) {
-            Ok(session) => {
+        let installed = match self.pool.session_mut(id) {
+            Some(session) => {
                 session.card_feed_mut().set_synthesized_layout(layout);
                 true
             }
-            Err(_) => false,
+            None => false,
         };
         if installed {
             self.mark_dirty();
@@ -1471,6 +1499,7 @@ impl StudioController {
                 });
             }
         }
+        let now = (self.now_secs)();
         let sim = self
             .pool
             .sim_session()
@@ -1481,6 +1510,12 @@ impl StudioController {
                         uid: project.uid.clone(),
                         name: project.name.clone(),
                     }),
+                // The sim ▶ rides the SAME feed as a device card (G1
+                // ruling 3) — these are the sim engine's own published
+                // frames, never a browser re-simulation.
+                frame: session.card_feed().frame().cloned(),
+                frame_age_secs: session.card_feed().frame_age_secs(now),
+                fps: session.engine_fps(),
                 console_tail: session.console_tail().iter().cloned().collect(),
             });
         crate::app::home::HomePoolEvidence { devices, sim }

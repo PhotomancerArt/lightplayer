@@ -76,6 +76,15 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The ▶ tab's live frame — the SIM ENGINE'S published output, read
+    /// through the same feed as a device's (G1 ruling 3: the sim card
+    /// never re-simulates; it shows what the simulated board actually
+    /// output).
+    pub frame: Option<crate::UiControlProductPreview>,
+    /// Seconds since [`Self::frame`] arrived, stamped at build time.
+    pub frame_age_secs: Option<f64>,
+    /// The sim engine's reported fps, when known.
+    pub fps: Option<f32>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
 }
@@ -399,9 +408,9 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         RosterCardState::ConnectedEmpty
     };
     UiDeviceCard {
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
+        frame_preview: sim.frame.clone(),
+        frame_age_secs: sim.frame_age_secs,
+        frame_fps: sim.fps,
         port_label: None,
         session_key: None,
         uid: None,
@@ -939,6 +948,9 @@ mod tests {
             devices: Vec::new(),
             sim: Some(HomeSimEvidence {
                 project,
+                frame: None,
+                frame_age_secs: None,
+                fps: None,
                 console_tail: Vec::new(),
             }),
         }
@@ -1549,6 +1561,9 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                frame: None,
+                frame_age_secs: None,
+                fps: None,
                 console_tail: Vec::new(),
             }),
         };
