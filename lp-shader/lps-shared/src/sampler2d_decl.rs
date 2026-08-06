@@ -372,7 +372,8 @@ mod tests {
 
     #[test]
     fn comments_and_directives_hide_tokens() {
-        let src = "// uniform sampler2D a;\n/* uniform sampler2D b; */\n#define S uniform sampler2D c;\n";
+        let src =
+            "// uniform sampler2D a;\n/* uniform sampler2D b; */\n#define S uniform sampler2D c;\n";
         let scan = scan_uniform_sampler2d_decls(src);
         assert!(scan.sites.is_empty());
         assert_eq!(scan.max_explicit_binding, None);
