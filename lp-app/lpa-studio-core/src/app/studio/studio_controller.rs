@@ -3855,11 +3855,7 @@ impl StudioController {
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info(format!("This device is now \"{name}\""))))
             }
-            HomeOp::ForgetDevice { uid } => {
-                self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
-                    .await?;
-                Ok(UiNotices::new().with_notice(UiNotice::info("Device forgotten")))
-            }
+            HomeOp::ForgetDevice { uid } => self.forget_device(uid).await,
             HomeOp::NameDevice { target, name } => {
                 let name = name.trim().to_string();
                 if name.is_empty() {
@@ -3884,6 +3880,66 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
         }
+    }
+
+    /// Forget a device: revoke the browser's persistent access to the
+    /// board, then delete its registry row.
+    ///
+    /// The revocation is what makes forgetting STICK (G2 walk,
+    /// 2026-08-05). Deleting the row alone was silently undone by the next
+    /// page load: the Web Serial grant outlives the page, so the app
+    /// re-enumerated the granted port, auto-probed it, re-derived the same
+    /// `dev_` uid from its efuse MAC (identity design §3 — the uid is
+    /// silicon, not a stored fact), and the sighting write recreated the
+    /// row the user had just deleted.
+    ///
+    /// A grant can only be revoked through the endpoint that holds it, and
+    /// only a LIVE session names its endpoint — which physical board a
+    /// grant belongs to is unknowable until something connects through it.
+    /// So an offline device is registry-only: its row goes, and any grant
+    /// it may still hold survives (harmless on its own — a grant with no
+    /// row re-registers only if the user reconnects that board). Forgetting
+    /// the board in front of you does the whole job.
+    async fn forget_device(&mut self, uid: String) -> UiResult {
+        // Capture the link BEFORE the disconnect tears the session down.
+        let live = self.device_id_for_card_key(&uid).and_then(|id| {
+            let session = self.pool.device_session(id)?.hardware_session()?;
+            Some((id, session.connector(), session.session().endpoint_id))
+        });
+        let mut notices = UiNotices::new();
+        if let Some((id, connector, endpoint_id)) = live {
+            // Order matters: the grant cannot be revoked out from under an
+            // open port, and `forget()` on a live SerialPort is exactly the
+            // shape that leaves a wedged reader behind.
+            self.disconnect_device(id).await?;
+            // A FAILED revocation keeps the registry row: the row is the
+            // only visible trace of a device the app can still reach, and
+            // deleting it here would stage exactly the disappear-then-
+            // reappear the fix exists to end. The user sees the device
+            // still listed — which is the truth — and can try again.
+            let revoked = connector
+                .forget_endpoint(&endpoint_id)
+                .await
+                .map_err(|error| {
+                    UiError::Link(format!(
+                        "couldn't release this device's port, so it stays in the list: {error}"
+                    ))
+                })?;
+            if !revoked && connector.kind() == LinkProviderKind::BrowserSerialEsp32 {
+                // A browser that will NEVER give the grant back (no
+                // `SerialPort.forget()` before Chrome 103) is different
+                // from a revocation that failed: retrying cannot help, so
+                // the row goes and the warning names the manual way out.
+                notices = notices.with_notice(UiNotice::warning(
+                    "This browser cannot release its serial-port permission — \
+                     revoke it in the browser's site settings, or this device \
+                     reappears when you reload",
+                ));
+            }
+        }
+        self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
+            .await?;
+        Ok(notices.with_notice(UiNotice::info("Device forgotten")))
     }
 
     /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the

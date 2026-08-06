@@ -980,6 +980,129 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     );
 }
 
+/// Row 11b (G2 walk, 2026-08-05): forgetting the board in front of you
+/// revokes the transport's persistent access to it, not just its registry
+/// row. Deleting the row alone was silently undone on the next page load —
+/// the Web Serial grant outlives the page, so the app re-enumerated the
+/// port, re-derived the same uid from the board's silicon, and the sighting
+/// write recreated the row. Here the revocation must REACH the provider
+/// (the seam a defaulted trait method would swallow), the session must be
+/// gone, and an OFFLINE device must stay registry-only — nothing to revoke,
+/// nothing revoked.
+#[test]
+fn forgetting_a_live_device_revokes_its_port_grant_and_its_registry_row() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::app::places::RegisteredDevice;
+
+    let (store, host) = library();
+    seed_registry(
+        &store,
+        RegisteredDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            name: "Shed board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+            board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
+        },
+    );
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    assert!(
+        registry(&store)
+            .iter()
+            .any(|device| device.uid == STAMPED_UID),
+        "the connect sighting registered the live board"
+    );
+
+    // The connector outlives the session the forget tears down, so grab it
+    // while the pool still holds one.
+    let connector = live_device_connector(&studio);
+
+    let outcome = drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        crate::HomeOp::ForgetDevice {
+            uid: STAMPED_UID.to_string(),
+        },
+    )))
+    .expect("forget succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("forgotten")),
+        "the forget reports its result, got {:?}",
+        outcome.notices
+    );
+    assert_eq!(
+        fake_forgotten_endpoints(&connector),
+        vec![endpoint_id.clone()],
+        "the revocation reached the provider, naming the live board's endpoint"
+    );
+    assert_eq!(
+        studio.runtime_pool_for_test().device_sessions().count(),
+        0,
+        "the session was disconnected before its grant was revoked"
+    );
+    assert!(
+        !registry(&store)
+            .iter()
+            .any(|device| device.uid == STAMPED_UID),
+        "the registry row went with it"
+    );
+
+    // The offline board: its row goes, but no grant can be named for it —
+    // a specific offline board cannot be matched to a granted port.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        crate::HomeOp::ForgetDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+        },
+    )))
+    .expect("forgetting an offline device succeeds");
+    assert_eq!(
+        fake_forgotten_endpoints(&connector),
+        vec![endpoint_id],
+        "an offline device revokes nothing"
+    );
+    assert!(
+        registry(&store).is_empty(),
+        "the offline row went too, got {:?}",
+        registry(&store)
+    );
+}
+
+/// The connector behind the one live device session (the forget path drops
+/// the session, so tests capture this first).
+fn live_device_connector(studio: &StudioController) -> Rc<lpa_link::LinkConnector> {
+    studio
+        .runtime_pool_for_test()
+        .device_sessions()
+        .find_map(crate::RuntimeSession::hardware_session)
+        .expect("a live device session")
+        .connector()
+}
+
+fn fake_forgotten_endpoints(connector: &lpa_link::LinkConnector) -> Vec<LinkEndpointId> {
+    #[allow(
+        unreachable_patterns,
+        reason = "providers beyond Fake are feature/target-gated, so the \
+                  wildcard arm is unreachable in some test configurations"
+    )]
+    match connector {
+        lpa_link::LinkConnector::Fake(provider) => provider.forgotten_endpoints(),
+        _ => panic!("the scripted board runs on the fake connector"),
+    }
+}
+
 /// Row 12 (P2 coexistence): a fake device connected through the real link
 /// AND a project opened on the sim — both sessions live in the pool at
 /// once. The old `open_from_home` hardware refusal is gone: the open
