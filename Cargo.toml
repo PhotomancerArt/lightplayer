@@ -25,6 +25,7 @@ members = [
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-browser",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
@@ -50,6 +51,7 @@ members = [
     # lp-cloud workspace members
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -126,6 +128,7 @@ default-members = [
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
@@ -141,6 +144,7 @@ default-members = [
     # lp-cloud workspace members
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
