@@ -17,6 +17,7 @@ use lpc_mapping::{
 
 use crate::editor_core::map_selection::MapSelection;
 use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::shape_path::{ShapePath, structural_child_count};
 
 const UNDO_CAP: usize = 100;
 
@@ -183,12 +184,13 @@ impl MapEditorSession {
     // ---- selection -------------------------------------------------------
 
     pub fn select_all(&mut self) {
-        self.selection.objects = (0..self.doc.objects.len()).collect();
-        self.selection.vertex = None;
+        let len = self.doc.objects.len();
+        self.selection.set_roots(0..len);
     }
 
     /// Select objects whose resolved lamps intersect a doc-space rect
-    /// (`additive` keeps the existing selection).
+    /// (`additive` keeps the existing selection). Marquee selects at the
+    /// top level — root paths.
     pub fn marquee_select(&mut self, min: [f32; 2], max: [f32; 2], additive: bool) {
         let mut hit = BTreeSet::new();
         for lamp in &self.resolved().lamps.clone() {
@@ -201,42 +203,72 @@ impl MapEditorSession {
             }
         }
         if additive {
-            self.selection.objects.extend(hit);
+            self.selection.extend_roots(hit);
         } else {
-            self.selection.objects = hit;
+            self.selection.set_roots(hit);
         }
-        self.selection.vertex = None;
+    }
+
+    // ---- tree navigation (selection/tree ADR) ----------------------------
+
+    /// Descend into the single selected group: select its first structural
+    /// child. Returns whether anything changed. (Double-click's grammar —
+    /// see the selection/tree ADR.)
+    pub fn descend(&mut self) -> bool {
+        let Some(path) = self.selection.single().cloned() else {
+            return false;
+        };
+        let has_child = path
+            .resolve(&self.doc)
+            .is_some_and(|shape| structural_child_count(shape) > 0);
+        if !has_child {
+            return false;
+        }
+        self.selection.select_only_path(path.child(0));
+        true
+    }
+
+    /// Ascend one level: replace descended paths with their parent (they
+    /// share one — sibling invariant). Returns whether anything changed.
+    pub fn ascend(&mut self) -> bool {
+        let Some(parent) = self.selection.scope() else {
+            return false;
+        };
+        self.selection.select_only_path(parent);
+        true
     }
 
     // ---- gesture-driven transforms --------------------------------------
 
     /// Translate the selection by a total delta from the gesture start.
+    /// A descended path translates the AUTHORED shape — write-through; the
+    /// resolver mirrors it to every instance.
     pub fn move_selected_from_gesture(&mut self, dx: f32, dy: f32) {
         let Some(base) = self.gesture_doc() else {
             return;
         };
-        let selected = self.selection.objects.clone();
+        let selected: Vec<ShapePath> = self.selection.paths().cloned().collect();
         self.doc = base;
-        for index in selected {
-            if let Some(object) = self.doc.objects.get_mut(index) {
-                translate_shape(&mut object.shape, dx, dy);
+        for path in selected {
+            if let Some(shape) = path.resolve_mut(&mut self.doc) {
+                translate_shape(shape, dx, dy);
             }
         }
         self.invalidate();
     }
 
     /// Uniformly scale the selection about `anchor` by a total factor from
-    /// the gesture start.
+    /// the gesture start (write-through on descended paths, like move).
     pub fn scale_selected_from_gesture(&mut self, anchor: [f32; 2], factor: f32) {
         let Some(base) = self.gesture_doc() else {
             return;
         };
         let factor = factor.clamp(0.05, 50.0);
-        let selected = self.selection.objects.clone();
+        let selected: Vec<ShapePath> = self.selection.paths().cloned().collect();
         self.doc = base;
-        for index in selected {
-            if let Some(object) = self.doc.objects.get_mut(index) {
-                scale_shape(&mut object.shape, anchor, factor);
+        for path in selected {
+            if let Some(shape) = path.resolve_mut(&mut self.doc) {
+                scale_shape(shape, anchor, factor);
             }
         }
         sanitize_doc(&mut self.doc);
@@ -252,15 +284,13 @@ impl MapEditorSession {
         let Some(base) = self.gesture_doc() else {
             return;
         };
-        let Some(index) = self.selection.single() else {
+        let Some(selected) = self.selection.single().cloned() else {
             return;
         };
         self.doc = base;
-        if let Some(path) = self
-            .doc
-            .objects
-            .get_mut(index)
-            .and_then(|object| editable_path_mut(&mut object.shape))
+        if let Some(path) = selected
+            .resolve_mut(&mut self.doc)
+            .and_then(editable_path_mut)
             && let Some(point) = path.points.get_mut(vertex)
         {
             *point = position;
@@ -289,15 +319,18 @@ impl MapEditorSession {
     }
 
     /// Delete the selected vertex (path keeps ≥ 2 points) or, without a
-    /// vertex selection, all selected objects.
+    /// vertex selection, the selected objects.
+    ///
+    /// Deleting a DESCENDED path deletes its whole object: a repeat cannot
+    /// exist without its inner shape, so delete-at-depth means "delete the
+    /// group" (unwrap is the op that keeps the inner shape).
     pub fn delete_selection(&mut self) {
-        if let (Some(index), Some(vertex)) = (self.selection.single(), self.selection.vertex) {
+        if let (Some(selected), Some(vertex)) =
+            (self.selection.single().cloned(), self.selection.vertex)
+        {
             let mut deleted = false;
             self.edit(|doc| {
-                if let Some(path) = doc
-                    .objects
-                    .get_mut(index)
-                    .and_then(|object| editable_path_mut(&mut object.shape))
+                if let Some(path) = selected.resolve_mut(doc).and_then(editable_path_mut)
                     && path.points.len() > 2
                     && vertex < path.points.len()
                 {
@@ -312,7 +345,7 @@ impl MapEditorSession {
                 return;
             }
         }
-        let selected = self.selection.objects.clone();
+        let selected = self.selection.root_objects();
         if selected.is_empty() {
             return;
         }
@@ -348,7 +381,7 @@ impl MapEditorSession {
                 index
             }
         };
-        self.selection.objects = self.selection.objects.iter().map(|i| remap(*i)).collect();
+        self.selection.remap_objects(|index| Some(remap(index)));
     }
 
     pub fn rename_object(&mut self, index: usize, name: String) {
@@ -361,9 +394,15 @@ impl MapEditorSession {
 
     /// One-undo-step shape edit for property fields; values are sanitized.
     pub fn edit_object_shape(&mut self, index: usize, apply: impl FnOnce(&mut Map2dShape)) {
+        self.edit_shape_at(&ShapePath::root(index), apply);
+    }
+
+    /// One-undo-step shape edit at any tree path (a descended edit is
+    /// write-through: the authored node changes, every instance follows).
+    pub fn edit_shape_at(&mut self, path: &ShapePath, apply: impl FnOnce(&mut Map2dShape)) {
         self.edit(|doc| {
-            if let Some(object) = doc.objects.get_mut(index) {
-                apply(&mut object.shape);
+            if let Some(shape) = path.resolve_mut(doc) {
+                apply(shape);
             }
         });
     }
@@ -466,8 +505,7 @@ impl MapEditorSession {
         self.edit(move |doc| {
             doc.objects.splice(index..=index, objects);
         });
-        self.selection.objects = (index..index + count as usize).collect();
-        self.selection.vertex = None;
+        self.selection.set_roots(index..index + count as usize);
     }
 
     /// Wrap one object's shape in a rotational repeat about the canvas center
@@ -477,31 +515,41 @@ impl MapEditorSession {
     /// was one strand is now `count` strands of the same shape, and the rail
     /// row still names one object.
     pub fn repeat_object(&mut self, index: usize, count: u32) {
+        self.wrap_in_repeat_at(&ShapePath::root(index), count);
+    }
+
+    /// Wrap the node at `path` in a rotational repeat (see
+    /// [`Self::repeat_object`] for the center choice).
+    pub fn wrap_in_repeat_at(&mut self, path: &ShapePath, count: u32) {
         let Some(center) = self.default_repeat_center() else {
             return;
         };
-        self.edit(move |doc| {
-            if let Some(object) = doc.objects.get_mut(index) {
-                let inner = object.shape.clone();
-                object.shape = Map2dShape::Repeat(RepeatShape {
-                    shape: Box::new(inner),
-                    center,
-                    count,
-                });
-            }
+        self.edit_shape_at(path, move |shape| {
+            let inner = shape.clone();
+            *shape = Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(inner),
+                center,
+                count,
+            });
         });
     }
 
     /// Unwrap one level of repeat: the object keeps instance 0's shape and
     /// loses the other instances. The inverse of [`Self::repeat_object`].
     pub fn unwrap_repeat(&mut self, index: usize) {
-        self.edit(|doc| {
-            if let Some(object) = doc.objects.get_mut(index)
-                && let Map2dShape::Repeat(repeat) = &object.shape
-            {
-                object.shape = (*repeat.shape).clone();
+        self.unwrap_repeat_at(&ShapePath::root(index));
+    }
+
+    /// Unwrap the repeat node at `path`. Selection paths through the
+    /// unwrapped level are revalidated by the edit cycle (they dangle and
+    /// drop rather than mis-target).
+    pub fn unwrap_repeat_at(&mut self, path: &ShapePath) {
+        self.edit_shape_at(path, |shape| {
+            if let Map2dShape::Repeat(repeat) = shape {
+                *shape = (*repeat.shape).clone();
             }
         });
+        self.selection.retain_valid(&self.doc);
     }
 
     /// Where a new repeat turns about: the authored canvas rect's center when
@@ -655,8 +703,7 @@ impl MapEditorSession {
             self.doc = doc;
         }
         self.gesture = None;
-        let len = self.doc.objects.len();
-        self.selection.objects.retain(|index| *index < len);
+        self.selection.retain_valid(&self.doc);
         self.selection.vertex = None;
         self.invalidate();
     }
@@ -919,6 +966,79 @@ mod tests {
     use super::*;
     use lpc_mapping::{RepeatShape, corpus};
 
+    // ---- tree navigation + write-through (selection/tree ADR) ------------
+
+    #[test]
+    fn descend_enters_the_repeat_and_ascend_returns() {
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        session.selection.select_only(0);
+        assert!(session.descend(), "a repeat has a structural child");
+        assert_eq!(
+            session.selection.single(),
+            Some(&ShapePath::root(0).child(0))
+        );
+        assert_eq!(session.selection.scope(), Some(ShapePath::root(0)));
+        assert!(!session.descend(), "the inner path is a leaf");
+        assert!(session.ascend());
+        assert_eq!(session.selection.single(), Some(&ShapePath::root(0)));
+        assert!(!session.ascend(), "root selection has nowhere to ascend");
+    }
+
+    /// Moving a DESCENDED selection edits the authored shape, and every
+    /// instance follows — the write-through contract.
+    #[test]
+    fn moving_a_descended_path_moves_every_instance() {
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        let before: Vec<[f32; 2]> = session.resolved().positions();
+        let count = session.resolved().spans.len();
+        assert!(count > 1, "corpus scene is a real repeat");
+        session
+            .selection
+            .select_only_path(ShapePath::root(0).child(0));
+        session.begin_gesture();
+        session.move_selected_from_gesture(10.0, 0.0);
+        session.commit_gesture();
+        let after: Vec<[f32; 2]> = session.resolved().positions();
+        assert_eq!(before.len(), after.len());
+        let moved = after
+            .iter()
+            .zip(&before)
+            .filter(|(a, b)| (a[0] - b[0]).abs() > 1e-3 || (a[1] - b[1]).abs() > 1e-3)
+            .count();
+        assert_eq!(moved, before.len(), "every instance's lamps moved");
+    }
+
+    /// Delete at depth deletes the whole object: a repeat cannot exist
+    /// without its inner shape (unwrap is the keep-the-inner op).
+    #[test]
+    fn deleting_a_descended_selection_deletes_the_object() {
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        let objects_before = session.doc().objects.len();
+        session
+            .selection
+            .select_only_path(ShapePath::root(0).child(0));
+        session.delete_selection();
+        assert_eq!(session.doc().objects.len(), objects_before - 1);
+        assert!(session.selection.is_empty());
+    }
+
+    #[test]
+    fn unwrap_at_depth_drops_the_dangling_selection() {
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        session
+            .selection
+            .select_only_path(ShapePath::root(0).child(0));
+        session.unwrap_repeat_at(&ShapePath::root(0));
+        assert!(
+            matches!(session.doc().objects[0].shape, Map2dShape::Path(_)),
+            "the repeat unwrapped to its inner path"
+        );
+        assert!(
+            session.selection.is_empty(),
+            "the descended path dangled and dropped"
+        );
+    }
+
     #[test]
     fn gesture_move_is_one_undo_step_without_drift() {
         let mut session = session_with_ring();
@@ -979,7 +1099,7 @@ mod tests {
         session.selection.select_only(0);
         session.reorder_object(0, 2);
         assert_eq!(session.doc().objects[2].name, first_name);
-        assert_eq!(session.selection.single(), Some(2));
+        assert_eq!(session.selection.single_root(), Some(2));
     }
 
     #[test]
@@ -987,7 +1107,7 @@ mod tests {
         let mut session = MapEditorSession::new(corpus::cat_ears());
         // The whole doc.
         session.marquee_select([0.0, 0.0], [1000.0, 1000.0], false);
-        assert_eq!(session.selection.objects.len(), 3);
+        assert_eq!(session.selection.len(), 3);
         // Nothing.
         session.marquee_select([-100.0, -100.0], [-50.0, -50.0], false);
         assert!(session.selection.is_empty());
@@ -999,7 +1119,7 @@ mod tests {
         session.tool = MapTool::Grid;
         let index = session.create_default_grid([100.0, 100.0]);
         assert_eq!(index, 0);
-        assert_eq!(session.selection.single(), Some(0));
+        assert_eq!(session.selection.single_root(), Some(0));
         assert!(session.tool.is_select());
         assert_eq!(session.lamp_count(), 64);
         session.tool = MapTool::Ring;
@@ -1361,7 +1481,10 @@ mod tests {
             vec!["sector-1", "sector-2", "sector-3", "sector-4", "sector-5"]
         );
         // Selection lands on the new objects, one undo step behind.
-        assert_eq!(session.selection.objects, (0..5).collect::<BTreeSet<_>>());
+        assert_eq!(
+            session.selection.root_objects(),
+            (0..5).collect::<BTreeSet<_>>()
+        );
         assert!(session.can_undo());
 
         let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();

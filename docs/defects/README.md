@@ -289,6 +289,7 @@ matrix".
 | stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **fixed** (CLI-side; hardware confirmation pending P7) | lp-cli (upload observability) |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | fixed | lpa-studio-web/base/code_editor |
+| stale-measurement | 2026-08-05 | [clock-face-baselines-oscillate](2026-08-05-clock-face-baselines-oscillate.md) | fixed | lpa-studio-web story capture (clock-face stories) |
 | inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
 | untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
 | untested-path | 2026-08-02 | [f32-shader-cannot-render-a-frame](2026-08-02-f32-shader-cannot-render-a-frame.md) | fixed | lpvm hot path (native JIT, wasmtime, browser) |

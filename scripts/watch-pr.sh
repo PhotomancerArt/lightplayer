@@ -5,6 +5,8 @@ set -euo pipefail
 #
 #   scripts/watch-pr.sh [<pr>]            watch checks to completion
 #                                         exit 0 = all green, 1 = a check failed
+#                                         exit 2 = no checks registered in time
+#                                         exit 3 = PR is conflicting (no CI runs)
 #   scripts/watch-pr.sh --merged <pr>     wait until the PR merges
 #                                         exit 0 = merged, 1 = closed unmerged
 #
@@ -87,6 +89,15 @@ EOF
 empty_deadline=""
 while true; do
   if [[ "$(view statusCheckRollup '.statusCheckRollup | length')" == "0" ]]; then
+    # A conflicted PR gets NO pull_request CI at all: no run will ever
+    # register, so waiting out the timeout only delays the news. (mergeable
+    # is UNKNOWN while GitHub recomputes it after a push; only the settled
+    # CONFLICTING verdict short-circuits.)
+    if [[ "$(view mergeable .mergeable)" == "CONFLICTING" ]]; then
+      echo "PR is CONFLICTING — GitHub runs no pull_request CI on a conflicted PR." >&2
+      echo "Merge the base branch into it (resolve, push), then re-watch." >&2
+      exit 3
+    fi
     [[ -n "$empty_deadline" ]] || empty_deadline=$((SECONDS + REGISTER_TIMEOUT))
     if ((SECONDS >= empty_deadline)); then
       no_ci_diagnostic

@@ -957,7 +957,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
         let clock = ArtifactLocation::file("/clock.json");
-        let rate_path = SlotPath::parse("controls.rate").unwrap();
+        let rate_path = SlotPath::parse("transport.rate").unwrap();
         registry
             .mutate(
                 &fs,
@@ -1149,7 +1149,7 @@ mod tests {
             &[],
             &NodeAttachSite::Slot {
                 artifact: ArtifactLocation::file("/clock.json"),
-                path: SlotPath::parse("controls.rate").unwrap(),
+                path: SlotPath::parse("transport.rate").unwrap(),
             },
         )
         .expect_err("non-invocation attach path rejects");
@@ -1361,7 +1361,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/clock.json"),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -1409,7 +1409,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/idle.json"),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(3.0),
                     ),
                 },
@@ -1530,7 +1530,7 @@ mod tests {
             &shapes,
             &NodeAttachSite::Slot {
                 artifact: ArtifactLocation::file("/clock.json"),
-                path: SlotPath::parse("controls.rate").unwrap(),
+                path: SlotPath::parse("transport.rate").unwrap(),
             },
         )
         .expect_err("non-invocation path rejects");
@@ -1600,7 +1600,7 @@ mod tests {
             "/clock.json",
             r#"{
   "kind": "Clock",
-  "controls": { "rate": 1.0 }
+  "transport": { "rate": 1.0 }
 }"#,
         );
         let registry = load_registry(&fs, shapes);
@@ -1742,7 +1742,7 @@ mod tests {
             "/idle.json",
             r#"{
   "kind": "Clock",
-  "controls": { "rate": 1.0 }
+  "transport": { "rate": 1.0 }
 }"#,
         );
         crate::test::fixtures::write_file(
