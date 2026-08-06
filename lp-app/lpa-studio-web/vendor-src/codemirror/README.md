@@ -7,8 +7,11 @@ talks to it through `globalThis.LpCodeMirror` — the façade defined in
 [`entry.mjs`](entry.mjs), consumed by `src/base/code_editor.rs`.
 
 **npm is needed only to regenerate the bundle.** Building and running the
-studio app never touches npm; the committed bundle is the artifact (same
-philosophy as the pre-generated `assets/tailwind.css`).
+studio app never touches npm; the committed bundle is the artifact. That is
+the opposite of `assets/tailwind.css`, which dx regenerates on every build
+and which is therefore gitignored — tracking it made merges produce a
+bundle that was neither branch's. This one is tracked precisely because
+nothing in a normal build regenerates it.
 
 ## Regenerating
 
