@@ -28,7 +28,7 @@ account access.
 1. **Google console** — create the OAuth client and both redirect URIs. See
    "The two manual consoles" below.
 2. **`./infra/bootstrap.sh`** — creates the fly app, the 3 GB volume in
-   `sea`, the Tigris bucket `lightplayer-cloud`, sets the secrets (prompting
+   `sjc` (Seattle was retired by fly for new orgs), the Tigris bucket `lightplayer-cloud`, sets the secrets (prompting
    for the Google values from step 1), allocates a shared IPv4 and an IPv6,
    and requests the TLS certificate for the apex. It prints the DNS rows at
    the end. Run it as many times as you like: every step is create-if-absent.
