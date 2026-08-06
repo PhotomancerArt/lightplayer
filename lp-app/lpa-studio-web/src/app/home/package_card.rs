@@ -83,7 +83,7 @@ pub(crate) fn PackageCard(
             if blocked.is_none() {
                 a {
                     class: "tw:absolute tw:inset-0 tw:z-[1]",
-                    href: "#/sim/{card.slug}",
+                    href: "/sim/{card.slug}",
                     aria_label: "Open {card.slug}",
                     onclick: move |event| {
                         if busy || opening {
@@ -190,7 +190,7 @@ pub(crate) fn PackageCard(
                 if blocked.is_none() {
                     a {
                         class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
-                        href: "#/sim/{card.slug}",
+                        href: "/sim/{card.slug}",
                         title: "Open this project in the simulator.",
                         onclick: move |event| {
                             if busy || opening {

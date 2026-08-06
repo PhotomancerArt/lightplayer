@@ -1,5 +1,5 @@
 //! The in-app docs section: a minimal static surface over the repo's
-//! `docs/user-guide/` articles, rendered at `#/docs[/<slug>]`.
+//! `docs/user-guide/` articles, rendered at `/docs[/<slug>]`.
 //!
 //! Deliberately simple — a compiled-in manifest and a sidebar+article
 //! layout. Adding an article is one file in `docs/user-guide/` plus one
@@ -14,7 +14,7 @@ pub use docs_page::DocsPage;
 /// One compiled-in article.
 #[derive(Debug, PartialEq)]
 pub struct DocPage {
-    /// URL segment: `#/docs/<slug>`. The landing page's slug never appears
+    /// URL segment: `/docs/<slug>`. The landing page's slug never appears
     /// in URLs it emits, but deep links to it still resolve.
     pub slug: &'static str,
     /// Sidebar label.
