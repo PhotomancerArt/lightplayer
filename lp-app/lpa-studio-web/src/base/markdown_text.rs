@@ -7,14 +7,42 @@
 //! lists, links (`target=_blank rel=noopener`, http(s)/mailto only),
 //! blockquotes, hard breaks.
 //!
+//! [`MarkdownDocs`] renders the same tree for docs content: headings keep
+//! their real level (`h1`/`h2`/`h3`, with slugified `id` anchors — see
+//! [`slugify`] and [`heading_anchors`]) instead of the chat demotion, and it
+//! optionally resolves `embed` directive fences (see below) into live
+//! components.
+//!
+//! ## Embed directive fences
+//!
+//! A fenced code block whose info string's first word is `embed` —
+//! ` ```embed knobs sim=disc mode=interactive ``` ` — parses into
+//! [`MdNode::Embed`] instead of [`MdNode::CodeBlock`]. Grammar: `embed
+//! <name> [key=value]...`; the fence body is reserved for future use and is
+//! preserved on the node but never rendered directly. A fence with `embed`
+//! but no name is malformed and parses as an ordinary [`MdNode::CodeBlock`]
+//! (the raw fence text stays visible so the author sees the mistake — it is
+//! never dropped or panicked on). Every other fence (no `embed` prefix)
+//! parses exactly as before.
+//!
 //! Security: raw/inline HTML is rendered as escaped TEXT (Dioxus text
 //! nodes escape by construction), link schemes are allowlisted, and no
 //! `dangerous_inner_html` exists anywhere here. Parsing happens per render
 //! — fine at chat sizes, and it lets streaming text re-render through the
 //! same path.
+//!
+//! Embeds extend that posture rather than loosen it: resolving an `embed`
+//! fence into a live component is opt in and docs-only. [`MarkdownDocs`]
+//! takes an *optional* `embeds` resolver prop; when it is absent, `Embed`
+//! nodes render as plain (inert) code blocks. [`MarkdownText`] — the chat
+//! path, which renders genuinely untrusted model output — has no such prop
+//! at all, so it can never summon a live component no matter what the
+//! model emits; `Embed` nodes always fall back to a plain code block there.
+//! See the `chat_mode_never_resolves_embeds` test.
 
 use dioxus::prelude::*;
-use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
+use std::collections::HashMap;
 
 /// Markdown rendered inline (agent replies). The container is a block
 /// element; inter-block spacing lives on the blocks themselves.
@@ -49,6 +77,16 @@ pub(crate) enum MdNode {
     Strikethrough(Vec<MdNode>),
     CodeInline(String),
     CodeBlock(String),
+    /// A ` ```embed <name> [key=value]... ``` ` fence. Resolution is a
+    /// docs-mode-only concern (see the module doc); parsing and holding
+    /// this node is safe everywhere — it only ever *becomes* a live
+    /// component through [`MarkdownDocs`]'s optional `embeds` resolver.
+    Embed {
+        name: String,
+        args: Vec<(String, String)>,
+        /// Fence body, reserved for future use; never rendered directly.
+        body: String,
+    },
     List {
         ordered: bool,
         items: Vec<Vec<MdNode>>,
@@ -86,7 +124,12 @@ enum FrameKind {
     Strong,
     Emphasis,
     Strikethrough,
-    CodeBlock,
+    /// `info` is the fence's info string (`Some` for fenced blocks, `None`
+    /// for indented ones) — carried through so the closing side can spot
+    /// an `embed` directive.
+    CodeBlock {
+        info: Option<String>,
+    },
     List {
         ordered: bool,
         items: Vec<Vec<MdNode>>,
@@ -153,7 +196,7 @@ impl TreeBuilder {
             FrameKind::Strong => self.push(MdNode::Strong(children)),
             FrameKind::Emphasis => self.push(MdNode::Emphasis(children)),
             FrameKind::Strikethrough => self.push(MdNode::Strikethrough(children)),
-            FrameKind::CodeBlock => {
+            FrameKind::CodeBlock { info } => {
                 let code = children
                     .into_iter()
                     .filter_map(|node| match node {
@@ -161,7 +204,7 @@ impl TreeBuilder {
                         _ => None,
                     })
                     .collect::<String>();
-                self.push(MdNode::CodeBlock(code));
+                self.push(code_block_or_embed(info, code));
             }
             FrameKind::List { ordered, items } => self.push(MdNode::List { ordered, items }),
             FrameKind::Item => {
@@ -221,7 +264,12 @@ fn frame_kind(tag: Tag<'_>) -> FrameKind {
         Tag::Strong => FrameKind::Strong,
         Tag::Emphasis => FrameKind::Emphasis,
         Tag::Strikethrough => FrameKind::Strikethrough,
-        Tag::CodeBlock(_) => FrameKind::CodeBlock,
+        Tag::CodeBlock(kind) => FrameKind::CodeBlock {
+            info: match kind {
+                CodeBlockKind::Fenced(info) => Some(info.into_string()),
+                CodeBlockKind::Indented => None,
+            },
+        },
         Tag::List(start) => FrameKind::List {
             ordered: start.is_some(),
             items: Vec::new(),
@@ -243,37 +291,215 @@ fn safe_href(href: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")
 }
 
+/// Classify a fenced code block's body as a plain code block or an `embed`
+/// directive. The `embed` keyword must be the info string's first
+/// whitespace-delimited word; a bare `embed` with no following name is
+/// malformed and degrades to a plain code block (never dropped, never a
+/// panic) rather than an `Embed` node with an empty name.
+fn code_block_or_embed(info: Option<String>, body: String) -> MdNode {
+    if let Some(info) = info {
+        let mut words = info.split_whitespace();
+        if words.next() == Some("embed") {
+            if let Some(name) = words.next() {
+                let args = words
+                    .filter_map(|word| {
+                        word.split_once('=')
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                    })
+                    .collect();
+                return MdNode::Embed {
+                    name: name.to_string(),
+                    args,
+                    body,
+                };
+            }
+        }
+    }
+    MdNode::CodeBlock(body)
+}
+
+/// Degraded-mode text for an [`MdNode::Embed`] that has no resolver in
+/// scope: reconstruct the directive line so the fence stays visibly
+/// meaningful instead of rendering as an empty block.
+fn embed_fallback_text(name: &str, args: &[(String, String)], body: &str) -> String {
+    let mut text = format!("embed {name}");
+    for (key, value) in args {
+        text.push(' ');
+        text.push_str(key);
+        text.push('=');
+        text.push_str(value);
+    }
+    if !body.is_empty() {
+        text.push('\n');
+        text.push_str(body);
+    }
+    text
+}
+
+/// A parsed `embed` directive, handed to [`MarkdownDocs`]'s optional
+/// `embeds` resolver. Never constructed for [`MarkdownText`] — chat mode
+/// has no resolver prop to hand it to (see the module doc).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MdEmbedRef {
+    pub name: String,
+    pub args: Vec<(String, String)>,
+    pub body: String,
+}
+
+/// Slugify heading text into an anchor id: lowercase, ASCII alphanumerics
+/// kept, any run of other characters collapses to a single `-`, and the
+/// result is trimmed (no leading/trailing `-`).
+///
+/// Kept intentionally tiny and pure: P3's build-time TOC/link-check script
+/// needs bit-identical output but can't depend on this crate from
+/// `build.rs`, so it duplicates this algorithm verbatim — see that crate
+/// for a sample-parity test asserting the two never drift apart. If you
+/// change this function, change both.
+pub(crate) fn slugify(text: &str) -> String {
+    let mut slug = String::with_capacity(text.len());
+    let mut needs_dash = false;
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if needs_dash && !slug.is_empty() {
+                slug.push('-');
+            }
+            needs_dash = false;
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            needs_dash = true;
+        }
+    }
+    slug
+}
+
+/// Flatten a heading's inline children into plain text for slugging.
+/// Headings only ever contain inline content (text, emphasis/strong/code,
+/// links, hard breaks), never block-level children.
+fn heading_plain_text(children: &[MdNode]) -> String {
+    let mut text = String::new();
+    collect_heading_text(children, &mut text);
+    text
+}
+
+fn collect_heading_text(children: &[MdNode], out: &mut String) {
+    for child in children {
+        match child {
+            MdNode::Text(text) | MdNode::CodeInline(text) => out.push_str(text),
+            MdNode::Strong(children)
+            | MdNode::Emphasis(children)
+            | MdNode::Strikethrough(children)
+            | MdNode::Link { children, .. } => collect_heading_text(children, out),
+            MdNode::HardBreak => out.push(' '),
+            // Headings never contain these in practice; ignore rather than
+            // guess at text content.
+            MdNode::Paragraph(_)
+            | MdNode::Heading { .. }
+            | MdNode::CodeBlock(_)
+            | MdNode::Embed { .. }
+            | MdNode::List { .. }
+            | MdNode::BlockQuote(_) => {}
+        }
+    }
+}
+
+/// Per-node anchor slugs: `Some(slug)` for each top-level [`MdNode::Heading`]
+/// (deduped in document order with `-2`, `-3`, ... suffixes), `None` for
+/// every other node. Shared by [`heading_anchors`] and [`MarkdownDocs`] so
+/// the ids assigned in rendering and the ids reported for reuse never
+/// diverge.
+fn heading_anchor_by_node(nodes: &[MdNode]) -> Vec<Option<String>> {
+    let mut seen: HashMap<String, u32> = HashMap::new();
+    nodes
+        .iter()
+        .map(|node| match node {
+            MdNode::Heading { children, .. } => {
+                let slug = slugify(&heading_plain_text(children));
+                let count = seen.entry(slug.clone()).or_insert(0);
+                *count += 1;
+                Some(if *count == 1 {
+                    slug
+                } else {
+                    format!("{slug}-{count}")
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Anchor ids for the top-level `h1`/`h2`/`h3` headings in `text`, in
+/// document order — the same ids [`MarkdownDocs`] assigns as heading `id`
+/// attributes. Host-testable so callers (e.g. a future table of contents)
+/// don't need to re-derive the slugging/dedup rules themselves.
+#[allow(
+    dead_code,
+    reason = "consumed by the generated docs checks (test-only) and a docs TOC in a later phase"
+)]
+pub(crate) fn heading_anchors(text: &str) -> Vec<String> {
+    heading_anchor_by_node(&parse_markdown(text))
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 // -- rendering ------------------------------------------------------------
 
 /// Markdown rendered as a docs article: same parser and hardening as
 /// [`MarkdownText`] (untrusted posture stays — escaped HTML, scheme
 /// allowlist, no `dangerous_inner_html`), but headings keep their levels
-/// with real docs styling instead of the chat demotion.
+/// (with slugified `id` anchors) with real docs styling instead of the chat
+/// demotion, and `embed` fences resolve through the optional `embeds` prop.
+///
+/// `embeds` is the whole resolver seam: pass `None` (or nothing — it
+/// defaults to `None`) for the same inert-code-block fallback
+/// [`MarkdownText`] always uses; pass `Some(callback)` to turn `embed`
+/// fences into live components. Only this component can ever do that.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn MarkdownDocs(text: String) -> Element {
+pub fn MarkdownDocs(
+    text: String,
+    #[props(default)] embeds: Option<Callback<MdEmbedRef, Element>>,
+) -> Element {
     let nodes = parse_markdown(&text);
+    let anchors = heading_anchor_by_node(&nodes);
     rsx! {
         div { class: "tw:min-w-0 tw:max-w-[72ch] tw:break-words tw:text-sm tw:leading-relaxed",
             for (index, node) in nodes.iter().enumerate() {
-                Fragment { key: "{index}", {render_docs_node(node)} }
+                Fragment { key: "{index}", {render_docs_node(node, anchors[index].as_deref(), embeds)} }
             }
         }
     }
 }
 
-/// Docs-mode node rendering: headings get level styles; every other node
-/// shares the chat mapping (headings never nest inside those in practice).
-fn render_docs_node(node: &MdNode) -> Element {
+/// Docs-mode node rendering: headings get level styles + an anchor `id`;
+/// `Embed` nodes resolve through `embeds` when present, else fall back to
+/// the same inert code block chat mode uses; every other node shares the
+/// chat mapping (headings and embeds never nest inside those in practice —
+/// mirroring the pre-existing heading-demotion note above).
+fn render_docs_node(
+    node: &MdNode,
+    anchor: Option<&str>,
+    embeds: Option<Callback<MdEmbedRef, Element>>,
+) -> Element {
     match node {
         MdNode::Heading { level, children } => {
             let class = docs_heading_class(*level);
+            let id = anchor.unwrap_or_default();
             match level {
-                1 => rsx! { h1 { class: "{class}", {render_children(children)} } },
-                2 => rsx! { h2 { class: "{class}", {render_children(children)} } },
-                _ => rsx! { h3 { class: "{class}", {render_children(children)} } },
+                1 => rsx! { h1 { id: "{id}", class: "{class}", {render_children(children)} } },
+                2 => rsx! { h2 { id: "{id}", class: "{class}", {render_children(children)} } },
+                _ => rsx! { h3 { id: "{id}", class: "{class}", {render_children(children)} } },
             }
         }
+        MdNode::Embed { name, args, body } => match embeds {
+            Some(resolve) => resolve.call(MdEmbedRef {
+                name: name.clone(),
+                args: args.clone(),
+                body: body.clone(),
+            }),
+            // No resolver in scope: same inert fallback as chat mode.
+            None => render_node(node),
+        },
         other => render_node(other),
     }
 }
@@ -315,11 +541,13 @@ fn render_node(node: &MdNode) -> Element {
                 "{code}"
             }
         },
-        MdNode::CodeBlock(code) => rsx! {
-            pre { class: "tw:m-0 tw:mb-1.5 tw:last:mb-0 tw:overflow-auto tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1.5 tw:font-mono tw:text-xs tw:leading-snug tw:whitespace-pre-wrap tw:break-words",
-                "{code}"
-            }
-        },
+        MdNode::CodeBlock(code) => render_code_block(code),
+        // Chat mode (and the docs no-resolver fallback) never resolve
+        // embeds: always the same inert code block, reconstructing the
+        // directive line so the fence stays visibly meaningful.
+        MdNode::Embed { name, args, body } => {
+            render_code_block(&embed_fallback_text(name, args, body))
+        }
         MdNode::List { ordered, items } => {
             let item_nodes = items.iter().enumerate().map(|(index, item)| {
                 rsx! {
@@ -360,6 +588,16 @@ fn render_children(children: &[MdNode]) -> Element {
     rsx! {
         for (index, child) in children.iter().enumerate() {
             Fragment { key: "{index}", {render_node(child)} }
+        }
+    }
+}
+
+/// Shared code-block chrome: used for real fenced code and for the inert
+/// `embed` fallback (chat mode always, docs mode when no resolver applies).
+fn render_code_block(code: &str) -> Element {
+    rsx! {
+        pre { class: "tw:m-0 tw:mb-1.5 tw:last:mb-0 tw:overflow-auto tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1.5 tw:font-mono tw:text-xs tw:leading-snug tw:whitespace-pre-wrap tw:break-words",
+            "{code}"
         }
     }
 }
@@ -520,5 +758,132 @@ mod tests {
             panic!("expected paragraph: {nodes:?}");
         };
         assert_eq!(children, &vec![MdNode::Text("alt words".into())]);
+    }
+
+    #[test]
+    fn well_formed_embed_fence_parses_into_embed_node() {
+        let nodes = parse_markdown("```embed knobs sim=disc mode=interactive\n```");
+        assert_eq!(
+            nodes,
+            vec![MdNode::Embed {
+                name: "knobs".into(),
+                args: vec![
+                    ("sim".into(), "disc".into()),
+                    ("mode".into(), "interactive".into()),
+                ],
+                body: String::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn embed_fence_preserves_its_body_unrendered() {
+        let nodes = parse_markdown("```embed knobs\nreserved for later\n```");
+        assert_eq!(
+            nodes,
+            vec![MdNode::Embed {
+                name: "knobs".into(),
+                args: vec![],
+                body: "reserved for later\n".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn malformed_embed_fence_without_a_name_is_a_plain_code_block() {
+        // "embed" alone, no name: never panics, never drops the fence
+        // text — it just degrades to an ordinary code block.
+        let nodes = parse_markdown("```embed\nsome code\n```");
+        assert_eq!(nodes, vec![MdNode::CodeBlock("some code\n".into())]);
+    }
+
+    #[test]
+    fn info_string_must_have_embed_as_its_own_first_word() {
+        // "embedded-note" starts with the substring "embed" but is a
+        // single word, not the `embed <name>` grammar — must stay a
+        // normal fence, not be sniffed as a (malformed) directive.
+        let nodes = parse_markdown("```embedded-note\nx\n```");
+        assert_eq!(nodes, vec![MdNode::CodeBlock("x\n".into())]);
+    }
+
+    #[test]
+    fn non_embed_fences_still_render_exactly_as_before() {
+        // Guards against regressions from threading the info string
+        // through FrameKind::CodeBlock.
+        let nodes = parse_markdown("```glsl\nvec4 render(vec2 p) {\n  return vec4(1.0);\n}\n```");
+        assert_eq!(
+            nodes,
+            vec![MdNode::CodeBlock(
+                "vec4 render(vec2 p) {\n  return vec4(1.0);\n}\n".into()
+            )]
+        );
+        // Indented code blocks (no info string at all) are unaffected too.
+        let nodes = parse_markdown("    indented code\n");
+        assert_eq!(nodes, vec![MdNode::CodeBlock("indented code\n".into())]);
+    }
+
+    #[test]
+    fn embed_fallback_text_reconstructs_the_directive_line() {
+        assert_eq!(
+            embed_fallback_text("knobs", &[("sim".into(), "disc".into())], ""),
+            "embed knobs sim=disc"
+        );
+        assert_eq!(
+            embed_fallback_text("knobs", &[], "body line"),
+            "embed knobs\nbody line"
+        );
+    }
+
+    #[test]
+    fn slugify_lowercases_and_collapses_punctuation_runs() {
+        assert_eq!(slugify("What's a shader?"), "what-s-a-shader");
+        assert_eq!(slugify("  Leading and trailing  "), "leading-and-trailing");
+        assert_eq!(slugify("Already-Slugged"), "already-slugged");
+        assert_eq!(slugify(""), "");
+        assert_eq!(slugify("---"), "");
+    }
+
+    #[test]
+    fn heading_anchors_dedupes_repeated_slugs_in_document_order() {
+        let anchors = heading_anchors("# Notes\n\ntext\n\n## Notes\n\nmore\n\n## Notes\n");
+        assert_eq!(anchors, vec!["notes", "notes-2", "notes-3"]);
+    }
+
+    #[test]
+    fn heading_anchors_only_covers_top_level_headings() {
+        // A heading nested inside a blockquote never gets rendered with an
+        // id (see render_docs_node's doc comment) — heading_anchors must
+        // match what actually gets an id, not every Heading node anywhere
+        // in the tree.
+        let anchors = heading_anchors("# Title\n\n> ## Nested, ignored\n");
+        assert_eq!(anchors, vec!["title"]);
+    }
+
+    #[test]
+    fn chat_mode_never_resolves_embeds() {
+        // `MarkdownText` (chat) has no `embeds` prop at all — the type
+        // signature is the primary guarantee (there is nothing to pass a
+        // resolver through), but this pins the fallback path parsing
+        // produces so a future refactor can't quietly wire chat mode up to
+        // a resolver: an `embed` fence must remain indistinguishable, at
+        // the tree level, from "just some node with no live-component
+        // hook", i.e. it always carries only inert String/Vec data.
+        let nodes = parse_markdown("```embed knobs sim=disc\n```");
+        let [MdNode::Embed { name, args, body }] = nodes.as_slice() else {
+            panic!("expected a single Embed node: {nodes:?}");
+        };
+        assert_eq!(name, "knobs");
+        assert_eq!(args, &vec![("sim".to_string(), "disc".to_string())]);
+        assert_eq!(body, "");
+
+        // MarkdownText's render path (render_node) maps every Embed to the
+        // same inert fallback text CodeBlock rendering uses — never a
+        // distinct "live component" arm. Assert that by construction: the
+        // fallback text for this node is exactly what a plain code block
+        // fence with the same visible content would show.
+        assert_eq!(
+            embed_fallback_text(name, args, body),
+            "embed knobs sim=disc"
+        );
     }
 }

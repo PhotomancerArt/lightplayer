@@ -1,10 +1,10 @@
 //! The [`Gradient`] value: stops in one authoring space, read one way.
 //!
-//! Storage is the ratified fixed-shape recipe from `docs/design/color.md` §5
-//! — `{ space: I32, method: I32, count: I32, stops: Array(GradientStop, 24) }`
-//! — while the serde surface is the friendly authored form (snake-case enum
-//! strings, `stops` exactly as long as authored). See the [module
-//! docs](super) for why the two differ.
+//! Storage is the ratified recipe from `docs/design/color.md` §5 —
+//! `{ space: String token, method: String token, stops: String literal }` —
+//! metadata as structure, the part that scales with content as one compact
+//! [stops literal](super::stops_string). One representation on wire, disk,
+//! and authored JSON (ADR 2026-08-05-gradient-stops-string-storage).
 //!
 //! A discrete swatch list is a [`Gradient`] with [`InterpMethod::Step`]; there
 //! is no separate palette type (D2 of the palette spike, which also raised the
@@ -313,10 +313,12 @@ pub struct GradientStop {
 
 /// A palette: stops in one authoring space, read one way.
 ///
-/// The stop list is authored-length here; [`ToLpValue`] pads it out to
-/// [`MAX_GRADIENT_STOPS`] with zeroed stops and records the authored length
-/// in `count`, which is what shaders iterate.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// The stop list is a plain `Vec` here; every external surface — the
+/// [`ToLpValue`] storage, the serde JSON, and the def codec — carries it as
+/// the canonical [stops literal](super::stops_string), printed and parsed
+/// bit-exact. One representation everywhere (ADR
+/// 2026-08-05-gradient-stops-string-storage).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Gradient {
     /// Space the stops are authored in and interpolated in.
     pub space: Colorspace,
@@ -325,6 +327,51 @@ pub struct Gradient {
     /// Authored stops, [`MIN_GRADIENT_STOPS`]..=[`MAX_GRADIENT_STOPS`] once
     /// [`Gradient::validate`] passes.
     pub stops: Vec<GradientStop>,
+}
+
+// Serde carries the SAME shape as the LpValue storage: tokens plus one
+// stops literal. Hand-written because the literal's printing depends on
+// `space` (hex is confined to the sRGB-shaped spaces), which a per-field
+// derive cannot see.
+
+impl Serialize for Gradient {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct as _;
+        let mut out = serializer.serialize_struct("Gradient", 3)?;
+        out.serialize_field("space", &self.space)?;
+        out.serialize_field("method", &self.method)?;
+        out.serialize_field(
+            "stops",
+            &super::stops_string::print_stops(self.space, &self.stops),
+        )?;
+        out.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Gradient {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Repr {
+            space: Colorspace,
+            method: InterpMethod,
+            stops: String,
+        }
+        let repr = Repr::deserialize(deserializer)?;
+        let stops = super::stops_string::parse_stops(&repr.stops)
+            .map_err(|error| serde::de::Error::custom(alloc::format!("stops: {error}")))?;
+        Ok(Self {
+            space: repr.space,
+            method: repr.method,
+            stops,
+        })
+    }
 }
 
 impl Gradient {
@@ -428,61 +475,22 @@ impl fmt::Display for GradientError {
 
 impl core::error::Error for GradientError {}
 
-// --- Gradient: hand-rolled fixed-shape record.
+// --- Gradient: hand-rolled record over the stops literal.
 //
-// Positional field reads mirror `PhasorConfig` (`time/phasor_config.rs`); the
-// array padding and `count` are the `color.md` §5 recipe.
-
-impl ToLpValue for GradientStop {
-    fn to_lp_value(&self) -> LpValue {
-        LpValue::Struct {
-            name: Some("GradientStop".to_string()),
-            fields: Vec::from([
-                ("at".to_string(), self.at.to_lp_value()),
-                ("c".to_string(), self.c.to_lp_value()),
-            ]),
-        }
-    }
-}
-
-impl FromLpValue for GradientStop {
-    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
-        let LpValue::Struct { name, fields } = value else {
-            return Err(ValueRootError::new("expected GradientStop struct"));
-        };
-        if name.as_deref() != Some("GradientStop") || fields.len() != 2 {
-            return Err(ValueRootError::new("expected GradientStop struct"));
-        }
-        Ok(Self {
-            at: read_field(fields, 0, "GradientStop", "at")?,
-            c: read_field(fields, 1, "GradientStop", "c")?,
-        })
-    }
-}
+// Positional field reads mirror `PhasorConfig` (`time/phasor_config.rs`);
+// the token/literal shapes are the `color.md` §5 recipe.
 
 impl ToLpValue for Gradient {
     fn to_lp_value(&self) -> LpValue {
-        let mut stops = Vec::with_capacity(MAX_GRADIENT_STOPS as usize);
-        stops.extend(
-            self.stops
-                .iter()
-                .take(MAX_GRADIENT_STOPS as usize)
-                .map(ToLpValue::to_lp_value),
-        );
-        // Padding is zeroed and never read: `count` bounds every consumer.
-        let padding = GradientStop::default().to_lp_value();
-        stops.resize(MAX_GRADIENT_STOPS as usize, padding);
-
         LpValue::Struct {
             name: Some("Gradient".to_string()),
             fields: Vec::from([
-                ("space".to_string(), self.space.as_i32().to_lp_value()),
-                ("method".to_string(), self.method.as_i32().to_lp_value()),
+                ("space".to_string(), self.space.to_lp_value()),
+                ("method".to_string(), self.method.to_lp_value()),
                 (
-                    "count".to_string(),
-                    stop_count_tag(self.stops.len()).to_lp_value(),
+                    "stops".to_string(),
+                    LpValue::String(super::stops_string::print_stops(self.space, &self.stops)),
                 ),
-                ("stops".to_string(), LpValue::Array(stops)),
             ]),
         }
     }
@@ -493,14 +501,15 @@ impl FromLpValue for Gradient {
         let LpValue::Struct { name, fields } = value else {
             return Err(ValueRootError::new("expected Gradient struct"));
         };
-        if name.as_deref() != Some("Gradient") || fields.len() != 4 {
+        if name.as_deref() != Some("Gradient") || fields.len() != 3 {
             return Err(ValueRootError::new("expected Gradient struct"));
         }
 
-        let space = colorspace_from_tag(read_field(fields, 0, "Gradient", "space")?)?;
-        let method = interp_method_from_tag(read_field(fields, 1, "Gradient", "method")?)?;
-        let count = stop_count_from_tag(read_field(fields, 2, "Gradient", "count")?)?;
-        let stops = read_stop_array(fields, count)?;
+        let space = read_field(fields, 0, "Gradient", "space")?;
+        let method = read_field(fields, 1, "Gradient", "method")?;
+        let literal: String = read_field(fields, 2, "Gradient", "stops")?;
+        let stops = super::stops_string::parse_stops(&literal)
+            .map_err(|error| ValueRootError::new(alloc::format!("Gradient.stops: {error}")))?;
 
         Ok(Self {
             space,
@@ -528,88 +537,20 @@ pub(crate) fn read_field<T: FromLpValue>(
     }
 }
 
-fn colorspace_from_tag(tag: i32) -> Result<Colorspace, ValueRootError> {
-    Colorspace::from_i32(tag)
-        .ok_or_else(|| ValueRootError::new(alloc::format!("unknown Gradient.space tag {tag}")))
-}
-
-fn interp_method_from_tag(tag: i32) -> Result<InterpMethod, ValueRootError> {
-    InterpMethod::from_i32(tag)
-        .ok_or_else(|| ValueRootError::new(alloc::format!("unknown Gradient.method tag {tag}")))
-}
-
-/// Authored stop count as its `I32` storage tag, saturating at the bound so a
-/// too-long list writes a readable value; [`Gradient::validate`] is what
-/// rejects it.
-fn stop_count_tag(count: usize) -> i32 {
-    count.min(MAX_GRADIENT_STOPS as usize) as i32
-}
-
-fn stop_count_from_tag(tag: i32) -> Result<usize, ValueRootError> {
-    let count = usize::try_from(tag).unwrap_or(usize::MAX);
-    if !(MIN_GRADIENT_STOPS as usize..=MAX_GRADIENT_STOPS as usize).contains(&count) {
-        return Err(ValueRootError::new(alloc::format!(
-            "Gradient.count must be {MIN_GRADIENT_STOPS}..={MAX_GRADIENT_STOPS}, got {tag}"
-        )));
-    }
-    Ok(count)
-}
-
-/// Read the fixed `stops` array and keep only the `count` authored entries.
-fn read_stop_array(
-    fields: &[(String, LpValue)],
-    count: usize,
-) -> Result<Vec<GradientStop>, ValueRootError> {
-    let Some(("stops", LpValue::Array(stops))) =
-        fields.get(3).map(|(name, value)| (name.as_str(), value))
-    else {
-        return Err(ValueRootError::new("expected Gradient.stops"));
-    };
-    if stops.len() != MAX_GRADIENT_STOPS as usize {
-        return Err(ValueRootError::new(alloc::format!(
-            "Gradient.stops must hold {MAX_GRADIENT_STOPS} entries, got {}",
-            stops.len()
-        )));
-    }
-    stops
-        .iter()
-        .take(count)
-        .map(GradientStop::from_lp_value)
-        .collect()
-}
-
-const GRADIENT_STOP_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
-    name: Some("GradientStop"),
-    fields: &[
-        StaticModelStructMember {
-            name: "at",
-            ty: StaticLpType::F32,
-        },
-        StaticModelStructMember {
-            name: "c",
-            ty: StaticLpType::Vec3,
-        },
-    ],
-};
-
 pub(crate) const GRADIENT_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
     name: Some("Gradient"),
     fields: &[
         StaticModelStructMember {
             name: "space",
-            ty: StaticLpType::I32,
+            ty: StaticLpType::String,
         },
         StaticModelStructMember {
             name: "method",
-            ty: StaticLpType::I32,
-        },
-        StaticModelStructMember {
-            name: "count",
-            ty: StaticLpType::I32,
+            ty: StaticLpType::String,
         },
         StaticModelStructMember {
             name: "stops",
-            ty: StaticLpType::Array(&GRADIENT_STOP_STATIC_TYPE, MAX_GRADIENT_STOPS as usize),
+            ty: StaticLpType::String,
         },
     ],
 };
@@ -630,7 +571,7 @@ impl SlotValue for Gradient {
             id: <Gradient as SlotValue>::SHAPE_ID,
             ty: GRADIENT_STATIC_TYPE,
             meta: StaticSlotMeta::EMPTY,
-            editor: StaticValueEditorHint::Plain,
+            editor: StaticValueEditorHint::Gradient,
         });
 
     fn value_shape() -> SlotValueShape {
@@ -638,7 +579,7 @@ impl SlotValue for Gradient {
             id: <Gradient as SlotValue>::SHAPE_ID,
             ty: gradient_lp_type(),
             meta: SlotMeta::empty(),
-            editor: ValueEditorHint::Plain,
+            editor: ValueEditorHint::Gradient,
         }
     }
 }
@@ -651,7 +592,7 @@ impl StaticSlotShape for Gradient {
                 id: <Gradient as SlotValue>::SHAPE_ID,
                 ty: GRADIENT_STATIC_TYPE,
                 meta: StaticSlotMeta::EMPTY,
-                editor: StaticValueEditorHint::Plain,
+                editor: StaticValueEditorHint::Gradient,
             },
         });
 
@@ -667,7 +608,6 @@ impl StaticSlotShape for Gradient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ModelStructMember;
 
     fn ramp(stops: usize) -> Gradient {
         Gradient {
@@ -793,28 +733,35 @@ mod tests {
         );
     }
 
-    /// Storage is the fixed `color.md` §5 recipe: always 24 stops, authored
-    /// length in `count`, integer enum tags.
+    /// Storage is the `color.md` §5 recipe: string tokens for the
+    /// metadata, one compact stops literal for the payload. The Oklch ramp
+    /// prints decimal triplets (hex is confined to the sRGB-shaped spaces).
     #[test]
-    fn gradient_storage_is_the_fixed_recipe() {
+    fn gradient_storage_is_tokens_plus_a_stops_literal() {
         let LpValue::Struct { name, fields } = ramp(3).to_lp_value() else {
             panic!("Gradient storage must be a Struct");
         };
 
         assert_eq!(name.as_deref(), Some("Gradient"));
-        assert_eq!(fields[0], ("space".to_string(), LpValue::I32(5)));
-        assert_eq!(fields[1], ("method".to_string(), LpValue::I32(2)));
-        assert_eq!(fields[2], ("count".to_string(), LpValue::I32(3)));
-
-        let LpValue::Array(stops) = &fields[3].1 else {
-            panic!("stops must be an Array");
-        };
-        assert_eq!(stops.len(), MAX_GRADIENT_STOPS as usize);
-        assert_eq!(stops[23], GradientStop::default().to_lp_value());
+        assert_eq!(
+            fields[0],
+            ("space".to_string(), LpValue::String("oklch".to_string()))
+        );
+        assert_eq!(
+            fields[1],
+            ("method".to_string(), LpValue::String("smooth".to_string()))
+        );
+        assert_eq!(
+            fields[2],
+            (
+                "stops".to_string(),
+                LpValue::String("(0,0.5,0.25) (1,0.5,0.25) (2,0.5,0.25)".to_string())
+            )
+        );
     }
 
     #[test]
-    fn gradient_rejects_foreign_and_out_of_bounds_storage() {
+    fn gradient_rejects_foreign_and_malformed_storage() {
         assert!(Gradient::from_lp_value(&LpValue::F32(1.0)).is_err());
         assert!(
             Gradient::from_lp_value(&LpValue::Struct {
@@ -824,28 +771,42 @@ mod tests {
             .is_err()
         );
 
-        let bad_count = |count: i32| {
+        let with_field = |index: usize, value: LpValue| {
             let LpValue::Struct { name, mut fields } = Gradient::default().to_lp_value() else {
                 unreachable!()
             };
-            fields[2].1 = LpValue::I32(count);
+            fields[index].1 = value;
             LpValue::Struct { name, fields }
         };
-        assert!(Gradient::from_lp_value(&bad_count(1)).is_err());
-        assert!(Gradient::from_lp_value(&bad_count(25)).is_err());
-        assert!(Gradient::from_lp_value(&bad_count(-1)).is_err());
+        // Unknown tokens and unparsable literals are errors, not guesses.
+        assert!(Gradient::from_lp_value(&with_field(0, LpValue::String("rgb".into()))).is_err());
+        assert!(Gradient::from_lp_value(&with_field(1, LpValue::String("cubic".into()))).is_err());
+        assert!(Gradient::from_lp_value(&with_field(2, LpValue::String("#fff".into()))).is_err());
+        assert!(
+            Gradient::from_lp_value(&with_field(2, LpValue::String("not stops".into()))).is_err()
+        );
     }
 
+    /// Serde carries the SAME shape as the storage: tokens + one stops
+    /// literal. This is what catalog files and authored def JSON spell.
     #[test]
-    fn gradient_serde_is_the_friendly_authored_form() {
+    fn gradient_serde_is_the_stops_literal_form() {
         let json = serde_json::to_string(&Gradient::default()).unwrap();
-
-        assert!(json.contains("\"space\":\"srgb\""), "{json}");
-        assert!(json.contains("\"method\":\"linear\""), "{json}");
-        assert!(json.contains("\"at\":0.0"), "{json}");
+        assert_eq!(
+            json,
+            r##"{"space":"srgb","method":"linear","stops":"#000000 #ffffff"}"##
+        );
 
         let parsed: Gradient = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Gradient::default());
+
+        // A bad literal is a serde error, not a guess.
+        assert!(
+            serde_json::from_str::<Gradient>(
+                r#"{"space":"srgb","method":"linear","stops":"nope"}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -883,22 +844,10 @@ mod tests {
         let LpType::Struct { fields, .. } = gradient_lp_type() else {
             panic!("Gradient type must be a Struct");
         };
-        let stop = LpType::Struct {
-            name: Some("GradientStop".to_string()),
-            fields: Vec::from([
-                ModelStructMember {
-                    name: "at".to_string(),
-                    ty: LpType::F32,
-                },
-                ModelStructMember {
-                    name: "c".to_string(),
-                    ty: LpType::Vec3,
-                },
-            ]),
-        };
-        assert_eq!(
-            fields[3].ty,
-            LpType::Array(alloc::boxed::Box::new(stop), MAX_GRADIENT_STOPS as usize)
-        );
+        // Tokens for the metadata, one string literal for the payload.
+        assert_eq!(fields[0].ty, LpType::String);
+        assert_eq!(fields[1].ty, LpType::String);
+        assert_eq!(fields[2].name, "stops");
+        assert_eq!(fields[2].ty, LpType::String);
     }
 }

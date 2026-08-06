@@ -5,8 +5,8 @@ use lpa_studio_core::{UiAction, UiProducedValue};
 
 use crate::app::node::value_display::fixed_decimal_display;
 use crate::app::node::{
-    BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment, SlotUnitDisplay,
-    SlotUnitDisplayMode,
+    BindingChip, BindingChipDirection, GradientValueDisplay, SlotPane, SlotPaneTreatment,
+    SlotUnitDisplay, SlotUnitDisplayMode,
 };
 
 #[component]
@@ -35,10 +35,12 @@ pub fn ProducedValueView(
             treatment,
             on_action,
             authoring: value.authoring.clone(),
-            // Composite (struct) values: a compact type tag plus one row per
-            // field. The scalar stat hero would clip the whole struct string
-            // to its first word.
-            if !value.fields.is_empty() {
+            // A palette reads as the palette: the strip (or the member set,
+            // for a cycle) plus the summary line, never the storage struct
+            // the other composite branch would list field by field (M4 P2).
+            if let Some(config) = value.gradient.clone() {
+                GradientValueDisplay { config }
+            } else if !value.fields.is_empty() {
                 div { class: "ux-produced-struct",
                     span { class: "ux-produced-struct-type", "{value.value}" }
                     for (field_name, field_value) in value.fields.iter() {

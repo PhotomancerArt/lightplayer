@@ -100,7 +100,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     // every gesture (P7 item 5).
     // The def's own "Speed" VALUE uniform holds the plain label, so the
     // phasor knob disambiguates with its uniform name (G2 vocab feedback).
-    let period = control_labeled(face, "Phase speed");
+    let period = control_labeled(face, "Phase period");
     assert_eq!(period.value.kind, UiSlotValueKind::F32(20.0));
     assert_eq!(
         period.emit,
@@ -231,7 +231,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     let knob = shader_knob(&snapshot);
     assert_eq!(knob.value.kind, UiSlotValueKind::F32(2.5));
     assert_eq!(knob.state.dirty, UiNodeDirtyState::Dirty);
-    let period = shader_control(&snapshot, "Phase speed");
+    let period = shader_control(&snapshot, "Phase period");
     assert_eq!(
         period.value.kind,
         UiSlotValueKind::F32(8.0),
@@ -1618,6 +1618,154 @@ fn bound_glow_e2e_server() -> LpServer {
         .expect("load bound-glow-e2e project");
     server.advance_frame(16).expect("tick");
     server
+}
+
+const PALETTE_E2E_DIR: &str = "/projects/palette-e2e";
+
+const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform sampler2D palette;\n\nvec4 render(vec2 pos) {\n    return texture(palette, vec2(pos.x * speed, 0.0));\n}\n";
+
+/// The Palette Plasma shape (M4 D5): a `palette` slot promoted to the panel
+/// by `default_bind: bus:palette` + `panel: "show"` — no authored binding.
+fn palette_e2e_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let project_json = "{\n  \"format\": 5\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "controls": { "running": true, "rate": 1.0 }
+}"#;
+    let shader_json = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {
+    "output": { "target": "bus:visual.out" }
+  },
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "label": "Speed",
+      "description": "Scroll speed"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "default_bind": "bus:palette",
+      "panel": "show",
+      "label": "Palette",
+      "description": "The ramp the strip reads its colors from"
+    }
+  }
+}"#;
+    let fixture_json = r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  }
+}"#;
+    let output_json = r#"{
+  "kind": "Output",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:D10" }
+  },
+  "bindings": {
+    "input": { "source": "bus:control.out" }
+  }
+}"#;
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("shader.json", shader_json),
+        ("fixture.json", fixture_json),
+        ("output.json", output_json),
+        ("shader.glsl", PALETTE_E2E_SHADER),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{PALETTE_E2E_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(PALETTE_E2E_DIR.as_path())
+        .expect("load palette-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+#[test]
+fn a_default_bound_palette_with_panel_show_is_a_panel_write_target() {
+    // D5 promotion end to end: the swatch control over a `default_bind:
+    // bus:palette` + `panel: "show"` slot must carry a panel_target, so a
+    // pick dispatches a PanelWrite on the channel (runtime poke, nothing
+    // authored) rather than editing the authored default through the def.
+    let server = Rc::new(RefCell::new(palette_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let swatch = shader_control(&snapshot, "Palette");
+    assert_eq!(swatch.widget, UiPanelWidget::PaletteSwatch);
+    let target = swatch.panel_target.clone().expect(
+        "the declared `panel = \"show\"` hint promotes the default-bound \
+         palette to a panel-write target (D5)",
+    );
+    assert_eq!(target.channel, "palette");
+
+    // And the module panel presents the promoted channel, brightness-style.
+    let face = module_face(&snapshot);
+    assert!(
+        face.panel
+            .controls
+            .iter()
+            .any(|control| control.channel == "palette"),
+        "the module panel lists the promoted palette channel, got {:?}",
+        face.panel
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>()
+    );
 }
 
 const PLAYLIST_BOUND_GLOW_DIR: &str = "/projects/playlist-bound-glow-e2e";

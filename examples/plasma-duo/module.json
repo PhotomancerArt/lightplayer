@@ -1,0 +1,28 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "disc": {
+      "ref": "./disc.json"
+    },
+    "disc_out": {
+      "ref": "./disc_out.json"
+    },
+    "grid": {
+      "ref": "./grid.json"
+    },
+    "grid_out": {
+      "ref": "./grid_out.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "provenance": {
+    "author": "Photomancer",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

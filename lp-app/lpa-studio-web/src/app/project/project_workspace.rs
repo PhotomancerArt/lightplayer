@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectEditorView, ProjectSyncPhase, UiAction, UiChannelChoice};
 
-use crate::app::node::{NodePane, WorkspaceAddNodeButton};
+use crate::app::node::{NodePane, PaletteCatalog, WorkspaceAddNodeButton, project_palette_choices};
 
 /// The node-body column of the project editor: one `NodePane` per synced
 /// node. The sidebar column is the [`ProjectPane`](super::ProjectPane) —
@@ -14,6 +14,19 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiA
     let mut channel_choices = use_context_provider(|| Signal::new(Vec::<UiChannelChoice>::new()));
     if *channel_choices.peek() != view.channel_choices {
         channel_choices.set(view.channel_choices.clone());
+    }
+    // Palette catalog context (M4 P4): the chooser's "This project" section
+    // is DERIVED from the same node data these cards render, so a palette
+    // authored on one node is one click away on every other. The shipped
+    // catalog rides behind it unchanged (`catalog: None`) — copying a
+    // static list into a signal on every view refresh would buy nothing.
+    let mut palette_catalog = use_context_provider(|| Signal::new(PaletteCatalog::default()));
+    let project_palettes = project_palette_choices(&view.nodes);
+    if palette_catalog.peek().project != project_palettes {
+        palette_catalog.set(PaletteCatalog {
+            project: project_palettes,
+            catalog: None,
+        });
     }
     // An empty node list means "still syncing" only before the first sync
     // completes; afterwards it is a real (and normal) empty project.
