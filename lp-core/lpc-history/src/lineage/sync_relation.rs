@@ -6,10 +6,11 @@
 pub enum SyncRelation {
     /// The observed version is the line's head — up to date.
     AtHead,
-    /// The observed version is in the line's history — a fast-forward
-    /// (push) brings it current.
+    /// The observed version is in the line's history, or was set aside by
+    /// a clobber join — a fast-forward (push) brings it current.
     Behind,
-    /// The observed version is not in the line — a genuine fork.
-    /// Never destructive to resolve: connect-as-pull already banked it.
+    /// The observed version is not known to the history — a genuine
+    /// divergence. Never destructive to resolve: connect-as-pull banks
+    /// device copies, and joins keep both sides reachable.
     Diverged,
 }
