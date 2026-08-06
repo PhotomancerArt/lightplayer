@@ -39,6 +39,21 @@ pub struct StudioServerClient {
     /// The latest heartbeat-reported per-wire output status — same cadence
     /// and freshness caveats as [`Self::last_recovery`].
     last_output_status: Option<Vec<lpc_wire::server::OutputWireStatus>>,
+    /// The latest heartbeat-reported average engine fps — the number the
+    /// device card's ▶ meta row shows. It is the DEVICE's render rate, not
+    /// the rate frames reach the card: those are different facts and the
+    /// card says so (fps · frame age).
+    ///
+    /// Real firmware only: `fw-esp32-common`'s server loop heartbeats every
+    /// 5 s, the host/browser runtimes never do — so this stays `None` on a
+    /// simulator session and for the first seconds of a device one.
+    last_fps: Option<f32>,
+    /// The projects the latest heartbeat said are loaded. The device card's
+    /// frame feed needs a `WireProjectHandle`, and the heartbeat already
+    /// carries one for every loaded project — so a non-lens session
+    /// acquires its handle for free, and re-acquires it after a device-side
+    /// reload, without spending a wire op.
+    last_loaded_projects: Option<Vec<lpc_wire::server::LoadedProject>>,
 }
 
 impl StudioServerClient {
@@ -50,6 +65,8 @@ impl StudioServerClient {
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
             last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         }
     }
 
@@ -69,6 +86,8 @@ impl StudioServerClient {
             pending_logs,
             last_recovery: None,
             last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         })
     }
 
@@ -82,6 +101,8 @@ impl StudioServerClient {
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
             last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         }
     }
 
@@ -143,6 +164,10 @@ impl StudioServerClient {
         if let Some(outputs) = latest_output_status(&events) {
             self.last_output_status = Some(outputs.clone());
         }
+        if let Some((fps, loaded)) = latest_heartbeat_telemetry(&events) {
+            self.last_fps = Some(fps);
+            self.last_loaded_projects = Some(loaded.clone());
+        }
         map_client_events(events)
     }
 
@@ -156,6 +181,25 @@ impl StudioServerClient {
     /// heartbeat carrying one has arrived on this client yet.
     pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
         self.last_output_status.as_deref()
+    }
+
+    /// The latest heartbeat-reported average engine fps (`None` until a
+    /// heartbeat lands on this client).
+    pub fn engine_fps(&self) -> Option<f32> {
+        self.last_fps
+    }
+
+    /// The handle of the project the latest heartbeat reported loaded — the
+    /// device card feed's read target, acquired without a wire op. `None`
+    /// until a heartbeat lands, or when the device has nothing loaded.
+    ///
+    /// The first entry is the answer: firmware loads one project, and a
+    /// host server with several has no card to feed.
+    pub fn loaded_project_handle(&self) -> Option<u32> {
+        self.last_loaded_projects
+            .as_ref()?
+            .first()
+            .map(|project| project.handle.id())
     }
 
     /// Open a library project on the runtime: whole-project replace →
@@ -842,6 +886,22 @@ fn latest_output_status(
             outputs: Some(outputs),
             ..
         } => Some(outputs),
+        _ => None,
+    })
+}
+
+/// The newest heartbeat's fps + loaded-project list in an event batch: the
+/// two telemetry facts the device card reads off a heartbeat rather than
+/// spending a wire op on.
+fn latest_heartbeat_telemetry(
+    events: &[ClientEvent],
+) -> Option<(f32, &Vec<lpc_wire::server::LoadedProject>)> {
+    events.iter().rev().find_map(|event| match event {
+        ClientEvent::Heartbeat {
+            fps,
+            loaded_projects,
+            ..
+        } => Some((fps.avg, loaded_projects)),
         _ => None,
     })
 }

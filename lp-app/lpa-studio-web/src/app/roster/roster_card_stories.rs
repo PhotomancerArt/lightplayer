@@ -923,6 +923,9 @@ fn offline_state() -> RosterCardState {
 
 fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: Some("dev_7pQr5St89uVwXy2C".to_string()),
@@ -948,6 +951,9 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
 /// "nothing loaded".
 fn sim_card(with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: None,
