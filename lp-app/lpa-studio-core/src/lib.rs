@@ -50,19 +50,20 @@ pub use app::home::{
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiConfigSlot, UiConfigSlotBody,
-    UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace,
-    UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin,
-    UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
-    UiPanelTarget, UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
-    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
-    UiTimebaseState, phasor_rate_display, phasor_speed_display,
+    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot,
+    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiFixtureFace,
+    UiFixturePower, UiLedBudget, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
+    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
+    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPhasorReading,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    phasor_speed_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};

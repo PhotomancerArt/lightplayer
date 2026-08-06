@@ -163,7 +163,8 @@ impl ControllerOp for HomeOp {
             .with_icon("edit"),
             Self::ForgetDevice { .. } => ActionMeta::new(
                 "Forget device",
-                "Remove this device from the list; connecting it again re-adds it.",
+                "Disconnect this device, remove it from the list, and give up the \
+                 browser's permission for its port; reconnecting it asks again.",
                 ActionPriority::Tertiary,
             )
             .with_icon("remove")
@@ -218,10 +219,16 @@ impl ControllerOp for HomeOp {
             | Self::ImportZip { .. }
             | Self::ImportJson { .. }
             | Self::RenameDevice { .. }
-            | Self::ForgetDevice { .. }
             | Self::NameDevice { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
+            // A forget takes the live session down and revokes the
+            // transport's access before touching the registry, so it owns
+            // the connection for the duration — the same reason every
+            // `DeviceOp` is recovery-class. Under the local-CRUD budget it
+            // shared with the renames, a slow disconnect would time out
+            // mid-teardown.
+            Self::ForgetDevice { .. } => ActionClass::Recovery,
             // A pure view-state flip — synchronous, no wire; run it
             // inline like any local gesture (the standard budget never
             // engages because the handler never awaits).
@@ -299,9 +306,6 @@ mod tests {
                 uid: "dev_1".to_string(),
                 name: "n".to_string(),
             },
-            HomeOp::ForgetDevice {
-                uid: "dev_1".to_string(),
-            },
         ] {
             assert_eq!(
                 op.action_class(),
@@ -311,6 +315,22 @@ mod tests {
                 "{op:?}"
             );
         }
+    }
+
+    /// Forget is a DEVICE flow, not library CRUD: it takes the live
+    /// session down and revokes the transport's access to the board before
+    /// the registry row goes, so it owns the connection and carries no
+    /// deadline — the local-CRUD budget it used to share could expire
+    /// mid-teardown.
+    #[test]
+    fn forgetting_a_device_owns_the_connection() {
+        assert_eq!(
+            HomeOp::ForgetDevice {
+                uid: "dev_1".to_string(),
+            }
+            .action_class(),
+            ActionClass::Recovery,
+        );
     }
 
     #[test]

@@ -256,12 +256,16 @@ mod tests {
     }
 
     #[test]
-    fn clock_controls_fields_resolve_debug_role() {
+    fn clock_transport_fields_resolve_debug_role() {
         let registry = SlotShapeRegistry::default();
         let shape = registry.get_shape(ClockDef::SHAPE_ID).expect("clock shape");
 
-        let rate = resolve_slot_role(shape, &registry, &SlotPath::parse("controls.rate").unwrap())
-            .expect("controls.rate resolves");
+        let rate = resolve_slot_role(
+            shape,
+            &registry,
+            &SlotPath::parse("transport.rate").unwrap(),
+        )
+        .expect("transport.rate resolves");
 
         assert_eq!(rate.role, SlotRole::Debug);
         assert!(rate.is_writable());

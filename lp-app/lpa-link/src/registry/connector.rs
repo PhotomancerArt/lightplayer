@@ -272,6 +272,25 @@ impl LinkProvider for LinkConnector {
             Self::BrowserSerialEsp32(provider) => provider.close(session_id).await,
         }
     }
+
+    // Delegated EXPLICITLY even though the trait defaults it: a wrapper
+    // that inherits the default silently answers `Ok(false)` for every
+    // provider — the grant would survive a forget while the UI said it
+    // was gone. (The same shape once made a defaulted method a no-op
+    // through this very enum; M4 session-targeted ops.)
+    async fn forget_endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<bool, LinkError> {
+        match self {
+            Self::Fake(provider) => provider.forget_endpoint(endpoint_id).await,
+            #[cfg(feature = "host-process")]
+            Self::HostProcess(provider) => provider.forget_endpoint(endpoint_id).await,
+            #[cfg(feature = "host-serial-esp32")]
+            Self::HostSerialEsp32(provider) => provider.forget_endpoint(endpoint_id).await,
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            Self::BrowserWorker(provider) => provider.forget_endpoint(endpoint_id).await,
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            Self::BrowserSerialEsp32(provider) => provider.forget_endpoint(endpoint_id).await,
+        }
+    }
 }
 
 impl From<crate::providers::fake::FakeProvider> for LinkConnector {

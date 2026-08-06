@@ -56,6 +56,52 @@
 //! **one core services the ISR** — the handler never runs concurrently with
 //! itself.
 //!
+//! # The pusher deployment (three actors)
+//!
+//! fw-esp32v3's dual-core shape adds a third actor: a **pusher thread on the
+//! ISR's own core** that owns every channel verb — `start_frame`, `abort`,
+//! completion observation — while other cores interact with it purely by
+//! message passing (a mailbox of frame descriptors and sequence atomics; the
+//! mailbox itself is the firmware's, not this crate's). The contract that
+//! keeps three actors sound:
+//!
+//! * **All channel verbs on one thread.** The pusher is the only caller of
+//!   `start_frame`/`abort` in steady state, so start-vs-abort interleavings
+//!   on one channel cannot happen by construction. A remote core that wants
+//!   a frame stopped asks the pusher; its only direct call is the defensive
+//!   abort on the "pusher core wedged" path, which is already a reportable
+//!   defect state.
+//! * **Same-core serialization with the ISR.** The pusher runs with
+//!   interrupts enabled on the handler's core, so no service pass is ever
+//!   concurrently in flight while pusher code runs — `abort`'s `isr_seq`
+//!   spin never iterates when called from the pusher, and a pending stale
+//!   cause always preempts the pusher *before* `start_frame` begins, never
+//!   mid-arm.
+//! * **Completion forwards without the teardown handshake.** For a frame
+//!   that ends naturally, [`Self::finish`]'s `Release` of `frame_complete`
+//!   paired with the pusher's `Acquire` ([`Self::is_complete`]) orders every
+//!   ISR access to the frame bytes before the pusher's observation; a
+//!   `Release` store of a forwarding sequence then publishes that to the
+//!   posting core, which may free or reuse the bytes after an `Acquire`
+//!   load of it. This chain is sound even under full concurrency (passes
+//!   are serial in the single ISR instance); only *abort* of an incomplete
+//!   frame needs the `isr_seq` handshake.
+//! * **⚠️ Abort→start recycling.** `start_frame` must not follow `abort` on
+//!   the same channel from any core *other than the ISR's* without an
+//!   interrupt-enabled window on the ISR core in between: a cause raised
+//!   before `stop_tx` can survive as a pending flag, and a pass taking it
+//!   after the successor's `arm` (which clears `frame_complete`) but before
+//!   its prefill would refill a half-armed frame. The pusher deployment
+//!   excludes this by construction — the pending cause preempts the pusher
+//!   before the next `start_frame` begins. The two-actor deployments never
+//!   restart a channel inside that window (starts are at least a frame
+//!   interval apart), but the invariant is now stated rather than lucky.
+//!
+//! The three-actor interleavings are exercised by `tests/cross_core.rs`'s
+//! pusher-topology tests under Miri, which model the pusher and the ISR as
+//! fully concurrent threads — strictly more adversarial than the same-core
+//! deployment.
+//!
 //! Two behaviours here differ deliberately from lp2025:
 //!
 //! * **No guard at start.** lp2025 planted one at word 0 immediately after

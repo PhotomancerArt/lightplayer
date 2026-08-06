@@ -1,0 +1,29 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 30.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Phase",
+      "description": "Master cycle; rings and the lighthouse beam ride whole multiples of it"
+    }
+  }
+}

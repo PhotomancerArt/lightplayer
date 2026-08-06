@@ -97,18 +97,30 @@ fn advanced_open() -> Element {
 }
 
 #[story(
-    description = "Wiring view on a 16×16 snake panel: numbers-in-lamps + direction arrows, live colors off. The physical-wiring helper view."
+    description = "A 16×16 snake panel lit from the live frame: 256 lamps on one canvas, no chrome. What view mode is for — looking at the thing, not at its wiring."
 )]
-fn panel_wiring_view() -> Element {
+fn panel_display_view() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: map2d_fixture_face(&lpc_mapping::corpus::panel_16x16()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The same panel with live colors off: neutral lamps, so the layout still reads with no feed behind it (an untracked output, a story, the gallery)."
+)]
+fn panel_unlit_view() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
                 face: map2d_fixture_face(&lpc_mapping::corpus::panel_16x16()),
                 initial_map_view: MapViewOptions {
-                    numbers: true,
-                    arrows: true,
-                    universes: false,
                     live: false,
+                    ..MapViewOptions::default()
                 },
                 on_action: move |_| {},
             }
@@ -117,39 +129,13 @@ fn panel_wiring_view() -> Element {
 }
 
 #[story(
-    description = "Universe colors on the 16×16 panel: 256 lamps flow across the 170-lamp boundary mid-panel (U1 blue → U2 gold)."
+    description = "The real sign import (SVG-derived paths + canvas framing) under live colors — irregular lamp spacing at the renderer's per-lamp radius."
 )]
-fn panel_universes_view() -> Element {
-    rsx! {
-        FixtureCardCanvas {
-            FixtureFace {
-                face: map2d_fixture_face(&lpc_mapping::corpus::panel_16x16()),
-                initial_map_view: MapViewOptions {
-                    numbers: false,
-                    arrows: false,
-                    universes: true,
-                    live: false,
-                },
-                on_action: move |_| {},
-            }
-        }
-    }
-}
-
-#[story(
-    description = "The real sign import (SVG-derived paths + canvas framing) with inter-path chain arrows over live colors."
-)]
-fn sign_chain_view() -> Element {
+fn sign_display_view() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
                 face: map2d_fixture_face(&fyeah_presentable_doc()),
-                initial_map_view: MapViewOptions {
-                    numbers: false,
-                    arrows: true,
-                    universes: false,
-                    live: true,
-                },
                 on_action: move |_| {},
             }
         }
@@ -157,19 +143,13 @@ fn sign_chain_view() -> Element {
 }
 
 #[story(
-    description = "Multi-ring button (two concentric rings, one parametric object) with wiring numbers over live colors."
+    description = "Multi-ring button (two concentric rings, one parametric object) under live colors: the small-radius end of the renderer, where lamps sit at the 5px floor."
 )]
-fn button_rings_numbered() -> Element {
+fn button_rings_view() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
                 face: map2d_fixture_face(&lpc_mapping::corpus::basic_button()),
-                initial_map_view: MapViewOptions {
-                    numbers: true,
-                    arrows: false,
-                    universes: false,
-                    live: true,
-                },
                 on_action: move |_| {},
             }
         }
