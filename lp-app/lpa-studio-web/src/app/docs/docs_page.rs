@@ -8,8 +8,10 @@
 
 use dioxus::prelude::*;
 
+use super::embeds::render_embed;
 use super::{DocPage, PAGES, page_for};
 use crate::base::MarkdownDocs;
+use crate::base::markdown_text::MdEmbedRef;
 
 /// The docs section body. `page` is the route's article slug; unknown and
 /// missing slugs resolve to the guide's landing article.
@@ -17,6 +19,17 @@ use crate::base::MarkdownDocs;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DocsPage(#[props(default)] page: Option<String>) -> Element {
     let page = page_for(page.as_deref());
+    // The one place `embed` fences become components. Unknown names are an
+    // authoring mistake the generated checks catch before merge; if one ever
+    // reaches a reader, it says so out loud rather than vanishing.
+    let embeds = use_callback(|embed: MdEmbedRef| match render_embed(&embed) {
+        Some(element) => element,
+        None => rsx! {
+            div { class: "tw:mb-1.5 tw:rounded-md tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-4 tw:text-xs tw:text-status-error-foreground tw:last:mb-0",
+                "Unknown docs embed `{embed.name}` — no such directive is registered."
+            }
+        },
+    });
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-start tw:gap-7 tw:max-[720px]:flex-col",
             nav { class: "tw:flex tw:w-[200px] tw:flex-none tw:flex-col tw:gap-0.5 tw:max-[720px]:w-full",
@@ -28,7 +41,7 @@ pub fn DocsPage(#[props(default)] page: Option<String>) -> Element {
                 }
             }
             article { class: "tw:min-w-0 tw:flex-1",
-                MarkdownDocs { text: page.markdown.to_string() }
+                MarkdownDocs { text: page.markdown.to_string(), embeds: Some(embeds) }
             }
         }
     }
