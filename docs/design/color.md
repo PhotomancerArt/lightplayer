@@ -407,6 +407,15 @@ These crates / files implement this contract:
   path above does its own).
 - Per-fixture drivers under `lp-core/lpc-engine/` — fixture-stage
   gamma, white balance, channel synthesis.
+- `lp-app/lpa-palettes/` — the checked-in palette catalog (M3):
+  FastLED/cpt-city conversions isolated behind a license contract,
+  LightPlayer Oklab originals, WLED import, and the display-sRGB
+  sampling the Studio previews share.
+- `lp-app/lpa-studio-web/src/app/node/panel/palette_chooser.rs` (and
+  siblings `palette_swatch_field.rs` / `palette_editor.rs`) — the M4
+  Studio surface: the mode-adaptive swatch, the anchored chooser
+  writing whole `GradientConfig`s, and the copy-on-use gradient
+  editor. Design record: `spikes/palettes/index.html` (§6B/§9).
 
 ## See also
 
