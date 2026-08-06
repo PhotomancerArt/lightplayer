@@ -12,6 +12,7 @@
     --tw-color-white: #fff;
     --tw-spacing: 0.25rem;
     --tw-container-md: 28rem;
+    --tw-container-lg: 32rem;
     --tw-container-xl: 36rem;
     --tw-container-2xl: 42rem;
     --tw-container-4xl: 56rem;
@@ -143,11 +144,17 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
+  .tw\:top-full {
+    top: 100%;
+  }
   .tw\:right-1 {
     right: calc(var(--tw-spacing) * 1);
   }
   .tw\:right-1\.5 {
     right: calc(var(--tw-spacing) * 1.5);
+  }
+  .tw\:bottom-0 {
+    bottom: calc(var(--tw-spacing) * 0);
   }
   .tw\:bottom-1\.5 {
     bottom: calc(var(--tw-spacing) * 1.5);
@@ -383,6 +390,9 @@
   .tw\:h-\[46px\] {
     height: 46px;
   }
+  .tw\:h-\[62px\] {
+    height: 62px;
+  }
   .tw\:h-\[420px\] {
     height: 420px;
   }
@@ -536,6 +546,9 @@
   .tw\:w-8 {
     width: calc(var(--tw-spacing) * 8);
   }
+  .tw\:w-9 {
+    width: calc(var(--tw-spacing) * 9);
+  }
   .tw\:w-10 {
     width: calc(var(--tw-spacing) * 10);
   }
@@ -589,6 +602,9 @@
   }
   .tw\:w-\[128px\] {
     width: 128px;
+  }
+  .tw\:w-\[170px\] {
+    width: 170px;
   }
   .tw\:w-\[184px\] {
     width: 184px;
@@ -701,6 +717,9 @@
   .tw\:max-w-full {
     max-width: 100%;
   }
+  .tw\:max-w-lg {
+    max-width: var(--tw-container-lg);
+  }
   .tw\:max-w-md {
     max-width: var(--tw-container-md);
   }
@@ -727,6 +746,9 @@
   }
   .tw\:min-w-\[4\.5ch\] {
     min-width: 4.5ch;
+  }
+  .tw\:min-w-\[34px\] {
+    min-width: 34px;
   }
   .tw\:min-w-\[52px\] {
     min-width: 52px;
@@ -783,6 +805,12 @@
   }
   .tw\:cursor-default {
     cursor: default;
+  }
+  .tw\:cursor-grab {
+    cursor: grab;
+  }
+  .tw\:cursor-grabbing {
+    cursor: grabbing;
   }
   .tw\:cursor-not-allowed {
     cursor: not-allowed;
@@ -1090,6 +1118,9 @@
   }
   .tw\:rounded-\[3px\] {
     border-radius: 3px;
+  }
+  .tw\:rounded-\[7px\] {
+    border-radius: 7px;
   }
   .tw\:rounded-full {
     border-radius: calc(infinity * 1px);
@@ -1851,6 +1882,10 @@
   .tw\:tracking-\[-0\.015em\] {
     --tw-tracking: -0.015em;
     letter-spacing: -0.015em;
+  }
+  .tw\:tracking-\[0\.01em\] {
+    --tw-tracking: 0.01em;
+    letter-spacing: 0.01em;
   }
   .tw\:tracking-\[0\.1em\] {
     --tw-tracking: 0.1em;

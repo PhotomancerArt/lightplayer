@@ -2,20 +2,22 @@
 //! fader, in the flat section grammar.
 //!
 //! The `output` section is the fixture's "one home" (2D mapping plan D9):
-//! the control product's LED sample points rendered full-bleed with mapping
-//! view toggles (wiring numbers, arrows, universe colors, live output) —
-//! and, when the mapping is a `Map2d` document, an `edit` toggle that flips
-//! the same section into the in-place mapping editor, synced through the
-//! asset pipeline (whole-body apply / project save). No separate pane.
+//! the control product's LED sample points rendered full-bleed on the lamp
+//! canvas — and, when the mapping is a `Map2d` document, an `edit` toggle
+//! that flips the same section into the in-place mapping editor, synced
+//! through the asset pipeline (whole-body apply / project save). No
+//! separate pane.
 //!
 //! The toggle bar is stable across the flip: the pencil keeps its far-left
-//! spot (click again to leave edit mode) and the same view toggles keep
-//! driving whichever renderer is showing — one shared view state feeds the
-//! display and the editor canvas, including live output colors. Edit mode
-//! adds the texture-frame toggle and a full-page expand (fixed-position in
-//! place; the section never leaves the DOM). Toggle + edit-mode state are
-//! view-local for now, same as the drawer open-state (a CardUiState
-//! re-home is an existing follow-up).
+//! spot (click again to leave edit mode) and the shared view state feeds
+//! whichever renderer is showing, including live output colors. What the
+//! bar *offers* is not stable, and should not be: the wiring instruments
+//! (numbers, arrows, universe colors) are authoring tools, so they appear
+//! only in edit mode, and view mode's bar carries the live toggle alone.
+//! Edit mode also adds the texture-frame toggle and a full-page expand
+//! (fixed-position in place; the section never leaves the DOM). Toggle +
+//! edit-mode state are view-local for now, same as the drawer open-state (a
+//! CardUiState re-home is an existing follow-up).
 //!
 //! The `controls` section holds one dominant horizontal fader bound to
 //! `FixtureDef.brightness.some`.
@@ -28,9 +30,10 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::face::node_ui_action;
+use crate::app::node::lamp_view::control_live_lamp_colors;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
-use crate::app::node::produced_product_view::{ProductPreview, control_live_lamp_colors};
+use crate::app::node::produced_product_view::ProductPreview;
 use crate::app::node::{NodeCardSection, PanelControl};
 
 #[component]
@@ -132,6 +135,10 @@ pub fn FixtureFace(
                                     next.apply_to_editor(&mut view.write());
                                 },
                                 bare: true,
+                                // The wiring instruments are authoring tools:
+                                // view mode shows the product, edit mode
+                                // inspects the wiring.
+                                wiring: edit_open,
                             }
                         }
                     }
@@ -154,7 +161,7 @@ pub fn FixtureFace(
                         frame: preview.frame,
                         focus_action: None,
                         on_action,
-                        map_view: view().into(),
+                        live: view().live,
                     }
                 }
             }

@@ -3,7 +3,7 @@ use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
-    clock_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
+    debug_rows_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
     node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
     unsaved_dirty_node_view, unsupported_node_view,
 };
@@ -136,11 +136,11 @@ pub(crate) fn nested_dirty_children() -> Element {
 }
 
 #[story(
-    description = "The live default: a Clock card whose three `controls.*` fields are Debug-role. The section is COLLAPSED — most of the time those controls are not wanted — but its header is always debug territory: hazard-striped, labelled DEBUG, reading \"session only\". Nothing is overridden, so there is no count, no Clear, and no card marking. The persisted rows sit above under `Settings`."
+    description = "The live default: a card with three Debug-role fields (a story-only probe specimen — the clock's transport rows retired into its tape face, and the real in-tree Debug slot, the output's `test_pattern`, has only one row). The section is COLLAPSED — most of the time those controls are not wanted — but its header is always debug territory: hazard-striped, labelled DEBUG, reading \"session only\". Nothing is overridden, so there is no count, no Clear, and no card marking. The persisted rows sit above under `Settings`."
 )]
 pub(crate) fn debug_section_idle() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
+        NodePane { view: debug_rows_node_view(0, false), on_action: move |_| {} }
     }
 }
 
@@ -149,16 +149,16 @@ pub(crate) fn debug_section_idle() -> Element {
 )]
 pub(crate) fn debug_section_collapsed_active() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
+        NodePane { view: debug_rows_node_view(2, false), on_action: move |_| {} }
     }
 }
 
 #[story(
-    description = "Expanded with two active overrides: the flattened Debug rows (Running / Rate / Scrub offset seconds — no nested `Controls` group), the touched ones wearing the hazard row tint with the inline Clear verb. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
+    description = "Expanded with two active overrides: the flattened Debug rows (Enabled / Gain / Window seconds — no nested record group), the touched ones wearing the hazard row tint with the inline Clear verb. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
 )]
 pub(crate) fn debug_section_active() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
+        NodePane { view: debug_rows_node_view(2, true), on_action: move |_| {} }
     }
 }
 
@@ -167,7 +167,7 @@ pub(crate) fn debug_section_active() -> Element {
 )]
 pub(crate) fn debug_section_expanded_idle() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(0, true), on_action: move |_| {} }
+        NodePane { view: debug_rows_node_view(0, true), on_action: move |_| {} }
     }
 }
 
@@ -180,16 +180,16 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
 
     rsx! {
         div { class: "tw:grid tw:gap-4",
-            NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
-            NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
-            NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
+            NodePane { view: debug_rows_node_view(0, false), on_action: move |_| {} }
+            NodePane { view: debug_rows_node_view(2, false), on_action: move |_| {} }
+            NodePane { view: debug_rows_node_view(2, true), on_action: move |_| {} }
             NodePane { view: unsaved, on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:local:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same partition that produces the Clock's (P3)."
+    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:local:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same generic partition — and since the clock's transport rows retired into its tape face, this is the one real in-tree Debug row."
 )]
 pub(crate) fn output_debug_test_pattern_active() -> Element {
     rsx! {
