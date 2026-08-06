@@ -285,12 +285,12 @@ mod tests {
         let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
-            base_display_in_def(&def, &path("controls.rate"), &ctx),
+            base_display_in_def(&def, &path("transport.rate"), &ctx),
             Some("1.0".to_string()),
             "unauthored (and unauthorable) leaves display their shape default"
         );
         assert_eq!(
-            base_display_in_def(&def, &path("controls.running"), &ctx),
+            base_display_in_def(&def, &path("transport.running"), &ctx),
             Some("true".to_string()),
             "unauthored leaves display their shape default"
         );
@@ -329,7 +329,7 @@ mod tests {
             "base-absent map entry has no old value"
         );
         assert_eq!(
-            base_display_in_def(&def, &path("controls.bogus"), &ctx),
+            base_display_in_def(&def, &path("transport.bogus"), &ctx),
             None,
             "unresolvable path degrades to None"
         );
@@ -339,13 +339,13 @@ mod tests {
     fn variant_prefix_resolves_only_against_the_base_variant() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        // `controls.rate` is Debug-role and never authored (D2); this test's
+        // `transport.rate` is Debug-role and never authored (D2); this test's
         // point is the variant-prefix resolution, not the value, so it
         // exercises the shape default.
         let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
-            base_display_in_def(&def, &path("Clock.controls.rate"), &ctx),
+            base_display_in_def(&def, &path("Clock.transport.rate"), &ctx),
             Some("1.0".to_string())
         );
         assert_eq!(
@@ -361,7 +361,7 @@ mod tests {
         ));
         assert!(base_presence_in_def(
             &def,
-            &path("Clock.controls.rate"),
+            &path("Clock.transport.rate"),
             &ctx
         ));
     }
@@ -393,16 +393,16 @@ mod tests {
     fn base_value_resolves_leaves_only() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        // `controls.rate` is Debug-role and never authored (D2); this test's
+        // `transport.rate` is Debug-role and never authored (D2); this test's
         // point is that only leaves resolve to a value (`controls` itself,
         // a structural target, does not), not the specific value.
         let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
-            base_value_in_def(&def, &path("controls.rate"), &ctx),
+            base_value_in_def(&def, &path("transport.rate"), &ctx),
             Some(LpValue::F32(1.0))
         );
-        assert_eq!(base_value_in_def(&def, &path("controls"), &ctx), None);
+        assert_eq!(base_value_in_def(&def, &path("transport"), &ctx), None);
     }
 
     /// D2 (P4, kills W3): an authored Debug-role value in a def file must
@@ -415,20 +415,20 @@ mod tests {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
         let def =
-            clock_def(r#"{ "kind": "Clock", "controls": { "rate": 2.5, "running": false } }"#);
+            clock_def(r#"{ "kind": "Clock", "transport": { "rate": 2.5, "running": false } }"#);
 
         assert_eq!(
-            base_value_in_def(&def, &path("controls.rate"), &ctx),
+            base_value_in_def(&def, &path("transport.rate"), &ctx),
             Some(LpValue::F32(1.0)),
             "authored 2.5 must not become the base; the shape default (1.0) wins"
         );
         assert_eq!(
-            base_display_in_def(&def, &path("controls.running"), &ctx),
+            base_display_in_def(&def, &path("transport.running"), &ctx),
             Some("true".to_string()),
             "authored false must not become the base; the shape default (true) wins"
         );
         assert!(
-            base_presence_in_def(&def, &path("controls.rate"), &ctx),
+            base_presence_in_def(&def, &path("transport.rate"), &ctx),
             "the shape default is still present: EnsurePresent is still a base no-op"
         );
     }
