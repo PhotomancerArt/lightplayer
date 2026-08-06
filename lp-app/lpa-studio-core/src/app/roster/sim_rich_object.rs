@@ -86,12 +86,9 @@ fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> 
         tone: input.state.spec().tone,
         lines,
         chip: None,
-        affordances: input
-            .project_name
-            .is_some()
-            .then_some(SimDetailAffordance::OpenEditor)
-            .into_iter()
-            .collect(),
+        // No editor CTA (G1b ruling 5): the ▶ tab's Editor button and the
+        // title-bar ⤢ carry the entry.
+        affordances: Vec::new(),
         weight: RichWeight::Actionable,
     }
 }
@@ -155,9 +152,9 @@ mod tests {
         let rollup = view.rollup();
         assert_eq!(rollup.tone, UiStatusKind::Good);
         assert_eq!(
-            rollup.affordance,
-            Some(&SimDetailAffordance::OpenEditor),
-            "the loaded sim's face carries the visible editor CTA"
+            rollup.affordance, None,
+            "no front-door editor CTA (G1b ruling 5) — the ▶ tab's Editor \
+             button and the title-bar ⤢ carry the entry"
         );
 
         let danger = view.sections.last().unwrap();

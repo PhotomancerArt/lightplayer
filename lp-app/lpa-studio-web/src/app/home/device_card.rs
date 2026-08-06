@@ -640,9 +640,10 @@ pub(crate) fn DeviceCard(
     #[props(default = false)]
     sim: bool,
     /// D43 pane mode: the SAME card grown into the editor's right-side
-    /// column — tall body, ⇲ shrinks back to the gallery, and the
-    /// console is a permanent bottom region (round 3.5: the Console tab
-    /// and the strip both disappear).
+    /// column — tall body, ⇲ shrinks back to the gallery. The console is
+    /// the Console tab here exactly as at card scale (G1b ruling 7
+    /// retired round 3.5's permanent bottom region and the ambient
+    /// strip).
     #[props(default = false)]
     pane: bool,
     /// Studio's bundled firmware image (packaged manifest), when known —
@@ -784,17 +785,12 @@ pub(crate) fn DeviceCard(
     let card_key = card.identity_key().to_string();
     // a state change may drop the selected tab (e.g. Danger during an
     // operation): fall back to Settings (the front door) rather than a
-    // blank body. Pane mode has no Console tab (round 3.5) — a Console
-    // selection lands on Settings.
+    // blank body. Console is an ordinary tab in BOTH modes (G1b ruling
+    // 7 reversed round 3.5's pane exclusion).
     let active_tab = tabs
         .iter()
         .find(|tab| tab.tab == card.ui.tab)
         .map_or(DeviceCardTab::Settings, |tab| tab.tab);
-    let active_tab = if pane && active_tab == DeviceCardTab::Console {
-        DeviceCardTab::Settings
-    } else {
-        active_tab
-    };
     // The open sheet projected to the render enum (confirm arm rebuilt
     // from its verb). `None` = no sheet.
     let active_sheet = card.ui.sheet.as_ref().map(|s| sheet_to_web(s, &card));
@@ -1009,12 +1005,11 @@ pub(crate) fn DeviceCard(
                 // The card's own body: exactly when no flow has taken it.
                 if !in_setup {
                 div { class: if pane { "tw:relative tw:flex tw:min-h-0 tw:flex-col" } else { "tw:relative tw:flex tw:flex-col" },
-                    // the icon-tab row (below the title bar — spike anatomy;
-                    // pane mode drops the Console tab, round 3.5)
+                    // the icon-tab row (below the title bar — spike anatomy)
                     div {
                         class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
                         role: "tablist",
-                        for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
+                        for tab_view in tabs.iter() {
                             {tab_button(tab_view, active_tab, &card_key, on_action)}
                         }
                     }
@@ -1061,28 +1056,11 @@ pub(crate) fn DeviceCard(
                             },
                         }
                     }
-                    if pane {
-                        // D42 pane mode (round 3.5): the console is a
-                        // permanent expanded bottom region — a normal console;
-                        // no tab, no strip.
-                        div { class: "ux-console-region",
-                            if card.console_tail.is_empty() {
-                                p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
-                                    "No console output yet."
-                                }
-                            } else {
-                                for entry in card.console_tail.iter() {
-                                    div { class: console_line_class(entry.level), "{entry.message}" }
-                                }
-                            }
-                        }
-                    }
-                    // D42's ambient strip: the console's latest line at the
-                    // card's bottom edge; clicking jumps to the Console tab,
-                    // and the strip HIDES while that tab is active.
-                    if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
-                        {console_strip(&card.console_tail, &card_key, on_action)}
-                    }
+                    // No permanent pane console region and no ambient
+                    // strip (G1b ruling 7, amending D42/round 3.5): the
+                    // console is the Console TAB in both modes — the strip
+                    // and the always-open region earned their pixels on
+                    // neither surface.
                 }
                 }
                 if let Some(active_sheet) = active_sheet.as_ref().filter(|_| !in_setup) {
@@ -1214,33 +1192,6 @@ pub(crate) fn card_op_activity(op: &lpa_studio_core::CardOp, tail: &[UiLogEntry]
                     }
                 }
             }
-        }
-    }
-}
-
-/// The D42 strip: one mono line (the tail's newest entry), full width,
-/// quiet; the one expansion mechanism is jumping to the Console tab.
-fn console_strip(
-    tail: &[UiLogEntry],
-    card_key: &str,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let line = tail
-        .last()
-        .map(|entry| entry.message.clone())
-        .unwrap_or_default();
-    let card_key = card_key.to_string();
-    rsx! {
-        button {
-            class: "ux-console-strip",
-            r#type: "button",
-            title: "Open the console tab",
-            onclick: move |event| {
-                event.stop_propagation();
-                on_action.call(select_tab_action(&card_key, DeviceCardTab::Console));
-            },
-            span { class: "ux-console-strip-line", "› {line}" }
-            span { class: "tw:flex-none tw:text-[10px] tw:text-dim-foreground", "▲" }
         }
     }
 }

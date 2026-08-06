@@ -353,7 +353,10 @@ impl RosterCardState {
     /// self-healing states (connecting, operation, in-use-elsewhere).
     pub fn affordance(&self) -> Option<RosterAffordance> {
         match self {
-            Self::RunningUpToDate => Some(RosterAffordance::OpenEditor),
+            // No editor CTA on the running card's front door (G1b ruling
+            // 5): the ▶ tab's Editor button and the title-bar ⤢ carry the
+            // entry now.
+            Self::RunningUpToDate => None,
             Self::RunningBehind { head_version, .. } => Some(RosterAffordance::PushVersion {
                 version: *head_version,
             }),

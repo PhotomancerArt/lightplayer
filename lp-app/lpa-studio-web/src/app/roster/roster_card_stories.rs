@@ -803,22 +803,7 @@ fn op_overlay_indeterminate() -> Element {
 }
 
 #[story(
-    description = "The per-device console strip (D42, card mode): the session's newest line rides the card's bottom edge as an ambient one-liner; clicking it jumps to the Console tab. The strip hides while that tab is active."
-)]
-fn console_strip() -> Element {
-    sheet(vec![rsx! {
-        div { class: "tw:w-64",
-            DeviceCard {
-                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
-                now_secs: Some(STORY_NOW),
-                on_action: |_| {},
-            }
-        }
-    }])
-}
-
-#[story(
-    description = "The Console tab open (D42, card mode): the session's tail read-only, severity as line tint (warn amber, error red), the strip hidden while the tab is active. Display only in P2 — level/filter controls come later."
+    description = "The Console tab open (D42, card mode): the session's tail read-only, severity as line tint (warn amber, error red). The ambient bottom-edge strip retired at G1b (ruling 7) — the tab IS the console, in card and pane mode alike. Display only in P2 — level/filter controls come later."
 )]
 fn console_tab_open() -> Element {
     sheet(vec![rsx! {
