@@ -94,11 +94,14 @@ pub(crate) fn PlayTabBody(
     }
     // The frame wears the LAYOUT's own aspect ratio, so a strip is wide,
     // a dome is square, and nothing is ever squished to fit a fixed box —
-    // the card grows instead (G1b feedback, 2026-08-05). Clamped so a
-    // 60:1 strip stays a readable bar and a tall portrait cannot swallow
-    // the gallery; no layout keeps the CSS default height.
+    // the card grows instead (G1b feedback, 2026-08-05). The ratio is
+    // clamped core-side; the CSS side ALSO caps the absolute size (a
+    // matched max-height + max-width pair, so the cap never re-squishes)
+    // — in a wide container (pane mode, a stretched gallery column) an
+    // uncapped 100%-width square hit viewport scale (G1b follow-up).
+    // No layout keeps the CSS default height.
     let frame_style = play_frame_aspect(&card)
-        .map(|aspect| format!("aspect-ratio: {aspect:.4};"))
+        .map(|aspect| format!("--play-aspect: {aspect:.4};"))
         .unwrap_or_default();
     if !frame_style.is_empty() {
         frame_class.push_str(" ux-play-frame-fit");
