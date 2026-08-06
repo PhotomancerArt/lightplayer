@@ -985,7 +985,9 @@ fn story_frame() -> UiControlProductPreview {
             }],
         },
         display_layout: Some(std::rc::Rc::new(ControlDisplayLayout::Layout2d(
-            ControlLayout2d::new(Revision::new(104), 1, 1, lamps),
+            // 3:2 hints: the frame wears the layout's aspect (G1b), so the
+            // story fixes the aspect-driven height rather than a square.
+            ControlLayout2d::new(Revision::new(104), 3, 2, lamps),
         ))),
         bytes: bytes.into(),
     }
