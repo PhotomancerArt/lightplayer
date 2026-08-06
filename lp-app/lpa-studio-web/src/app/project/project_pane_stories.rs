@@ -3,6 +3,7 @@
 //! node-tree body).
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_lp_value;
 use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu};
 use lpa_studio_core::{
     ControllerId, DirtySummary, LpFeature, ProjectController, ProjectNodeAddress,
@@ -11,7 +12,9 @@ use lpa_studio_core::{
     UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::{GradientConfig, ToLpValue};
 
+use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
 use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::project_editor_fixture;
 
@@ -199,6 +202,40 @@ pub(crate) fn change_list() -> Element {
                         UiPendingEditPhase::Failed {
                             reason: "entries[ghost] does not resolve".to_string(),
                         },
+                    ),
+                ],
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A staged palette edit in the save panel. Pending-edit rows are one dense line by design, so a palette states what it IS (`old → new` over the same summary the strips carry) rather than pasting a 24-stop storage struct across the popup — the strip lives on the slot row this entry reverts."
+)]
+pub(crate) fn gradient_change() -> Element {
+    // Built from the model's own storage through the shared formatter, so
+    // the row shows exactly what a real staged palette edit shows.
+    let assigned = format_lp_value(&palette_cycle().to_lp_value());
+    let previous = format_lp_value(&GradientConfig::Static(sunset_gradient()).to_lp_value());
+    rsx! {
+        div { class: "tw:min-h-[480px]",
+            StoryPane {
+                dirty: DirtySummary {
+                    persisted: 1,
+                    failed: 0,
+                },
+                edits_in_flight: 0,
+                actions: true,
+                initially_open: true,
+                pending_edits: vec![
+                    with_old_value(
+                        assign_edit(
+                            "Orbit shader",
+                            "palette",
+                            &assigned,
+                            UiPendingEditPhase::Persisted,
+                        ),
+                        &previous,
                     ),
                 ],
             }

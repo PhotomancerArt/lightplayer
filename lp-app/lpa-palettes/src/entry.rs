@@ -44,9 +44,9 @@ pub struct PaletteEntry {
 }
 
 /// The on-disk JSON shape for one palette file. `gradient` deserializes
-/// directly as [`Gradient`] — its `space`/`method`/`stops` fields already
-/// match the friendly authored serde form (see `gradient.rs`'s
-/// `gradient_serde_is_the_friendly_authored_form` test upstream).
+/// directly as [`Gradient`] — token metadata plus one stops literal, the
+/// same shape every other surface carries (see `gradient.rs`'s
+/// `gradient_serde_is_the_stops_literal_form` test upstream).
 #[derive(Deserialize)]
 pub(crate) struct PaletteFile {
     pub id: String,

@@ -8,6 +8,8 @@
 //! (R7), writers shadowed by priority (R5/R11), and readers that live in a
 //! child scope but resolve to this channel (R5 inheritance, spike gate 3).
 
+use lpc_model::GradientConfig;
+
 use crate::{
     UiAction, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
     UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
@@ -61,6 +63,10 @@ pub struct UiBusChannelView {
     /// when the value is not a product or its preview is not in the
     /// tracked preview stream.
     pub preview: Option<UiBusChannelPreview>,
+    /// The palette on the channel, when the resolved value is a gradient
+    /// record — the value box shows strips rather than the storage dump,
+    /// the same reason [`Self::preview`] exists for products (M4 P2).
+    pub gradient: Option<GradientConfig>,
     /// Sites publishing to this channel, highest priority first.
     pub writers: Vec<UiBusSiteView>,
     /// Sites consuming from this channel.
@@ -254,6 +260,7 @@ mod tests {
             primary_visual: false,
             contended: false,
             preview: None,
+            gradient: None,
             writers: vec![
                 site("Button", Some("down"), UiBusSiteOrigin::Authored),
                 site("Radio", Some("output"), UiBusSiteOrigin::Authored),

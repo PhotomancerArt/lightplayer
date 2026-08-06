@@ -14,6 +14,8 @@ pub mod studio_controller;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]
+mod studio_docs_e2e_tests;
+#[cfg(test)]
 mod studio_edit_e2e_tests;
 /// End-to-end node-card face tests: controller-derived shader/fixture faces
 /// with live knob/fader edits over the real overlay path (node-card P3).
@@ -49,7 +51,7 @@ pub use refresh_cadence::{
     PASSIVE_REFRESH_BACKOFF_MAX, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
     VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
 };
-pub use studio_actor::{StudioActor, StudioHandle};
+pub use studio_actor::{StudioActor, StudioActorOptions, StudioHandle};
 pub use studio_command::StudioCommand;
 pub use studio_controller::StudioController;
 pub use studio_snapshot::StudioSnapshot;
@@ -57,7 +59,9 @@ pub use studio_view_channel::{
     StudioViewReceiver, StudioViewSender, ViewPublisher, studio_view_channel,
 };
 pub use ui_console_view::UiConsoleView;
-pub use ui_studio_view::{UiLensRuntime, UiStudioView};
+pub use ui_studio_view::{
+    UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiLensRuntime, UiStudioView,
+};
 pub use unsaved_changes::has_unsaved_work;
 pub use ux_update::{UxActivityTarget, UxUpdate};
 pub use ux_update_sink::UxUpdateSink;
