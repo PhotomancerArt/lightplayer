@@ -71,11 +71,11 @@ login testable in development:
 
 ```
 https://lightplayer.app/auth/google/callback
-http://localhost:8080/auth/google/callback
+http://localhost:2812/auth/google/callback
 ```
 
 Google matches these character for character, port included. The localhost
-port is pinned to 8080 for this purpose (dev-port.sh hands out a different one
+port is pinned to 2812 for this purpose (the WS2812 pixel; 8080 is overloaded) (dev-port.sh hands out a different one
 per worktree, and Google will not have seen it) — see the server README for
 the exact `just cloud-serve` invocation.
 
