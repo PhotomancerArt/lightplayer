@@ -15,6 +15,13 @@
 
 use lp_cloud_domain::{CloudService, MetaStore};
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
+use lpc_cloud_api::request::{
+    AddMember, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
+    RemoveMember, SetVisibility,
+};
+use lpc_cloud_api::response::{
+    Events, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
+};
 use lpc_cloud_api::{
     Actor, CloudError, CloudRequest, CloudResponse, PushOutcome, SidecarMeta, Visibility,
 };
@@ -64,9 +71,11 @@ fn write_access_matrix() {
         // Restates the visibility it already has: the point is who may
         // write, and the matrix must not move the project out from under
         // the row being tested.
-        let request = || CloudRequest::SetVisibility {
-            uid: world.project,
-            visibility,
+        let request = || {
+            CloudRequest::SetVisibility(SetVisibility {
+                uid: world.project,
+                visibility,
+            })
         };
 
         for actor in [world.owner, world.member] {
@@ -92,11 +101,11 @@ fn heads_and_events_follow_the_read_rule() {
     let mut svc = service();
     let world = World::publish(&mut svc, Visibility::Private);
     for request in [
-        CloudRequest::GetHeads { uid: world.project },
-        CloudRequest::GetEvents {
+        CloudRequest::GetHeads(GetHeads { uid: world.project }),
+        CloudRequest::GetEvents(GetEvents {
             uid: world.project,
             since: 0,
-        },
+        }),
     ] {
         assert_eq!(
             svc.handle(Actor::Anonymous, request.clone()),
@@ -235,13 +244,13 @@ fn push_refuses_hashes_the_blob_index_lacks() {
     // Deliberately does NOT record the blob first.
     let answer = svc.handle(
         world.owner,
-        CloudRequest::PushCommit {
+        CloudRequest::PushCommit(PushCommit {
             uid: world.project,
             parents: vec![],
             tree: v(1),
             events: origin_batch(1),
             sidecar: sidecar(),
-        },
+        }),
     );
     assert_eq!(answer, Err(CloudError::MissingBlobs { hashes: vec![v(1)] }));
 }
@@ -287,7 +296,7 @@ fn push_replaces_the_sidecar_verbatim() {
         v(1),
         origin_batch(1),
     );
-    let CloudResponse::ProjectInfo { sidecar, .. } =
+    let CloudResponse::ProjectInfo(ProjectInfo { sidecar, .. }) =
         svc.handle(world.owner, get_project(world.project)).unwrap()
     else {
         panic!("expected ProjectInfo");
@@ -310,13 +319,13 @@ fn get_events_reads_forward_without_gap_or_overlap() {
         origin_batch(1),
     );
 
-    let CloudResponse::Events { events, next_since } = svc
+    let CloudResponse::Events(Events { events, next_since }) = svc
         .handle(
             world.owner,
-            CloudRequest::GetEvents {
+            CloudRequest::GetEvents(GetEvents {
                 uid: world.project,
                 since: 0,
-            },
+            }),
         )
         .unwrap()
     else {
@@ -333,13 +342,13 @@ fn get_events_reads_forward_without_gap_or_overlap() {
         v(2),
         vec![saved(2, 3.0)],
     );
-    let CloudResponse::Events { events, next_since } = svc
+    let CloudResponse::Events(Events { events, next_since }) = svc
         .handle(
             world.owner,
-            CloudRequest::GetEvents {
+            CloudRequest::GetEvents(GetEvents {
                 uid: world.project,
                 since: next_since,
-            },
+            }),
         )
         .unwrap()
     else {
@@ -349,13 +358,13 @@ fn get_events_reads_forward_without_gap_or_overlap() {
     assert_eq!(next_since, 3);
 
     // Nothing new: the cursor stands still rather than rewinding.
-    let CloudResponse::Events { events, next_since } = svc
+    let CloudResponse::Events(Events { events, next_since }) = svc
         .handle(
             world.owner,
-            CloudRequest::GetEvents {
+            CloudRequest::GetEvents(GetEvents {
                 uid: world.project,
                 since: next_since,
-            },
+            }),
         )
         .unwrap()
     else {
@@ -373,11 +382,11 @@ fn publishing_someone_elses_uid_answers_not_found() {
     let world = World::publish(&mut svc, Visibility::Private);
     let answer = svc.handle(
         world.stranger,
-        CloudRequest::PublishProject {
+        CloudRequest::PublishProject(PublishProject {
             uid: world.project,
             visibility: Visibility::Link,
             slug: "stolen".into(),
-        },
+        }),
     );
     assert_eq!(answer, Err(CloudError::NotFound));
 }
@@ -389,14 +398,14 @@ fn republishing_restates_slug_and_visibility() {
     let answer = svc
         .handle(
             world.owner,
-            CloudRequest::PublishProject {
+            CloudRequest::PublishProject(PublishProject {
                 uid: world.project,
                 visibility: Visibility::Link,
                 slug: "renamed".into(),
-            },
+            }),
         )
         .unwrap();
-    let CloudResponse::ProjectInfo { meta, .. } = answer else {
+    let CloudResponse::ProjectInfo(ProjectInfo { meta, .. }) = answer else {
         panic!("expected ProjectInfo");
     };
     assert_eq!(meta.slug, "renamed");
@@ -411,11 +420,11 @@ fn publish_validates_uid_prefix_and_slug() {
 
     let wrong_prefix = svc.handle(
         actor,
-        CloudRequest::PublishProject {
+        CloudRequest::PublishProject(PublishProject {
             uid: PrefixedUid::mint(UidPrefix::Device, &[7u8; 16]),
             visibility: Visibility::Link,
             slug: "fine".into(),
-        },
+        }),
     );
     assert!(matches!(
         wrong_prefix,
@@ -424,11 +433,11 @@ fn publish_validates_uid_prefix_and_slug() {
 
     let bad_slug = svc.handle(
         actor,
-        CloudRequest::PublishProject {
+        CloudRequest::PublishProject(PublishProject {
             uid: project_uid(),
             visibility: Visibility::Link,
             slug: "not/a/slug".into(),
-        },
+        }),
     );
     assert!(matches!(bad_slug, Err(CloudError::InvalidRequest { .. })));
 }
@@ -438,11 +447,11 @@ fn anonymous_cannot_publish() {
     let mut svc = service();
     let answer = svc.handle(
         Actor::Anonymous,
-        CloudRequest::PublishProject {
+        CloudRequest::PublishProject(PublishProject {
             uid: project_uid(),
             visibility: Visibility::Link,
             slug: "mine".into(),
-        },
+        }),
     );
     assert_eq!(answer, Err(CloudError::NotAuthenticated));
 }
@@ -456,10 +465,10 @@ fn membership_invited_by_email_resolves_at_first_login() {
 
     svc.handle(
         world.owner,
-        CloudRequest::AddMember {
+        CloudRequest::AddMember(AddMember {
             uid: world.project,
             email: "Later@Example.com".into(),
-        },
+        }),
     )
     .unwrap();
 
@@ -483,10 +492,10 @@ fn removing_a_member_revokes_their_access() {
     let world = World::publish(&mut svc, Visibility::Private);
     svc.handle(
         world.owner,
-        CloudRequest::RemoveMember {
+        CloudRequest::RemoveMember(RemoveMember {
             uid: world.project,
             email: "member@example.com".into(),
-        },
+        }),
     )
     .unwrap();
     assert_eq!(
@@ -501,10 +510,10 @@ fn the_owner_cannot_be_removed() {
     let world = World::publish(&mut svc, Visibility::Private);
     let answer = svc.handle(
         world.member,
-        CloudRequest::RemoveMember {
+        CloudRequest::RemoveMember(RemoveMember {
             uid: world.project,
             email: "owner@example.com".into(),
-        },
+        }),
     );
     assert!(matches!(answer, Err(CloudError::InvalidRequest { .. })));
     assert!(svc.handle(world.owner, get_project(world.project)).is_ok());
@@ -516,10 +525,10 @@ fn add_member_validates_the_email() {
     let world = World::publish(&mut svc, Visibility::Private);
     let answer = svc.handle(
         world.owner,
-        CloudRequest::AddMember {
+        CloudRequest::AddMember(AddMember {
             uid: world.project,
             email: "not-an-email".into(),
-        },
+        }),
     );
     assert!(matches!(answer, Err(CloudError::InvalidRequest { .. })));
 }
@@ -531,16 +540,16 @@ fn who_am_i_reports_the_caller_without_failing() {
     let mut svc = service();
     assert_eq!(
         svc.handle(Actor::Anonymous, CloudRequest::WhoAmI),
-        Ok(CloudResponse::UserInfo {
+        Ok(CloudResponse::UserInfo(UserInfo {
             actor: Actor::Anonymous
-        })
+        }))
     );
     let user = svc.upsert_user("g-user", "user@example.com", "User");
     assert_eq!(
         svc.handle(Actor::User(user.uid), CloudRequest::WhoAmI),
-        Ok(CloudResponse::UserInfo {
+        Ok(CloudResponse::UserInfo(UserInfo {
             actor: Actor::User(user.uid)
-        })
+        }))
     );
 }
 
@@ -559,7 +568,7 @@ fn list_my_projects_covers_owner_and_member_and_nobody_else() {
     let mut svc = service();
     let world = World::publish(&mut svc, Visibility::Private);
     for actor in [world.owner, world.member] {
-        let CloudResponse::ProjectList { projects } =
+        let CloudResponse::ProjectList(ProjectList { projects }) =
             svc.handle(actor, CloudRequest::ListMyProjects).unwrap()
         else {
             panic!("expected ProjectList");
@@ -568,7 +577,7 @@ fn list_my_projects_covers_owner_and_member_and_nobody_else() {
         assert_eq!(projects[0].uid, world.project);
     }
     for actor in [Actor::Anonymous, world.stranger] {
-        let CloudResponse::ProjectList { projects } =
+        let CloudResponse::ProjectList(ProjectList { projects }) =
             svc.handle(actor, CloudRequest::ListMyProjects).unwrap()
         else {
             panic!("expected ProjectList");
@@ -582,12 +591,12 @@ fn have_blobs_reports_only_what_is_missing() {
     let mut svc = service();
     let world = World::publish(&mut svc, Visibility::Private);
     svc.store_mut().record_blob(v(1), 10);
-    let CloudResponse::MissingBlobs { hashes } = svc
+    let CloudResponse::MissingBlobs(MissingBlobs { hashes }) = svc
         .handle(
             world.owner,
-            CloudRequest::HaveBlobs {
+            CloudRequest::HaveBlobs(HaveBlobs {
                 hashes: vec![v(1), v(2), v(2)],
-            },
+            }),
         )
         .unwrap()
     else {
@@ -596,7 +605,10 @@ fn have_blobs_reports_only_what_is_missing() {
     assert_eq!(hashes, vec![v(2)]);
 
     assert_eq!(
-        svc.handle(Actor::Anonymous, CloudRequest::HaveBlobs { hashes: vec![] }),
+        svc.handle(
+            Actor::Anonymous,
+            CloudRequest::HaveBlobs(HaveBlobs { hashes: vec![] })
+        ),
         Err(CloudError::NotAuthenticated)
     );
 }
@@ -643,19 +655,19 @@ impl World {
 
         svc.handle(
             Actor::User(owner.uid),
-            CloudRequest::PublishProject {
+            CloudRequest::PublishProject(PublishProject {
                 uid: project,
                 visibility,
                 slug: "zook-dome".into(),
-            },
+            }),
         )
         .expect("publish");
         svc.handle(
             Actor::User(owner.uid),
-            CloudRequest::AddMember {
+            CloudRequest::AddMember(AddMember {
                 uid: project,
                 email: "member@example.com".into(),
-            },
+            }),
         )
         .expect("add member");
 
@@ -712,7 +724,7 @@ fn sidecar() -> SidecarMeta {
 }
 
 fn get_project(uid: PrefixedUid) -> CloudRequest {
-    CloudRequest::GetProject { uid }
+    CloudRequest::GetProject(GetProject { uid })
 }
 
 /// Push, having first told the blob index the tree is stored (the edge's
@@ -739,26 +751,28 @@ fn try_push(
     svc.store_mut().record_blob(tree, 32);
     svc.handle(
         actor,
-        CloudRequest::PushCommit {
+        CloudRequest::PushCommit(PushCommit {
             uid: project,
             parents: parents.to_vec(),
             tree,
             events,
             sidecar: sidecar(),
-        },
+        }),
     )
 }
 
 fn outcome_of(response: &CloudResponse) -> PushOutcome {
     match response {
-        CloudResponse::PushResult { outcome, .. } => *outcome,
+        CloudResponse::PushResult(PushResult { outcome, .. }) => *outcome,
         other => panic!("expected PushResult, got {other:?}"),
     }
 }
 
 fn heads_of(response: &CloudResponse) -> Vec<ContentHash> {
     match response {
-        CloudResponse::PushResult { heads, .. } => heads.iter().map(|head| head.tree).collect(),
+        CloudResponse::PushResult(PushResult { heads, .. }) => {
+            heads.iter().map(|head| head.tree).collect()
+        }
         other => panic!("expected PushResult, got {other:?}"),
     }
 }

@@ -4,6 +4,7 @@ mod edge_harness;
 
 use axum::http::{StatusCode, header};
 use edge_harness::{TestServer, header_value};
+use lpc_cloud_api::response::UserInfo;
 use lpc_cloud_api::{Actor, CloudRequest, CloudResponse};
 
 /// The happy path: a cookie is set, and the next request is somebody.
@@ -18,7 +19,7 @@ async fn signing_in_sets_a_session_cookie_that_names_a_user() {
     assert!(session.set_cookie.contains("Path=/"));
 
     let reply = server.call(CloudRequest::WhoAmI, Some(&session)).await;
-    let Ok(CloudResponse::UserInfo { actor }) = reply.result else {
+    let Ok(CloudResponse::UserInfo(UserInfo { actor })) = reply.result else {
         panic!("expected UserInfo");
     };
     assert!(matches!(actor, Actor::User(_)));
@@ -93,7 +94,7 @@ async fn signing_in_twice_is_one_account() {
 async fn actor(server: &TestServer, session: &edge_harness::Session) -> Actor {
     let reply = server.call(CloudRequest::WhoAmI, Some(session)).await;
     match reply.result {
-        Ok(CloudResponse::UserInfo { actor }) => actor,
+        Ok(CloudResponse::UserInfo(UserInfo { actor })) => actor,
         other => panic!("expected UserInfo, got {other:?}"),
     }
 }

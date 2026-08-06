@@ -10,6 +10,8 @@ mod edge_harness;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use edge_harness::TestServer;
+use lpc_cloud_api::request::{GetProject, PublishProject};
+use lpc_cloud_api::response::{ProjectInfo, UserInfo};
 use lpc_cloud_api::{
     Actor, CLOUD_API_VERSION, CloudError, CloudRequest, CloudResponse, Visibility,
 };
@@ -72,9 +74,9 @@ async fn no_cookie_resolves_to_the_anonymous_actor() {
 
     assert_eq!(
         reply.result,
-        Ok(CloudResponse::UserInfo {
+        Ok(CloudResponse::UserInfo(UserInfo {
             actor: Actor::Anonymous
-        })
+        }))
     );
 }
 
@@ -88,15 +90,15 @@ async fn the_session_cookie_becomes_the_calling_actor() {
     let signed_in = server.call(CloudRequest::WhoAmI, Some(&session)).await;
     let anonymous = server.call(CloudRequest::WhoAmI, None).await;
 
-    let Ok(CloudResponse::UserInfo { actor }) = signed_in.result else {
+    let Ok(CloudResponse::UserInfo(UserInfo { actor })) = signed_in.result else {
         panic!("expected a UserInfo answer");
     };
     assert!(matches!(actor, Actor::User(_)));
     assert_eq!(
         anonymous.result,
-        Ok(CloudResponse::UserInfo {
+        Ok(CloudResponse::UserInfo(UserInfo {
             actor: Actor::Anonymous
-        })
+        }))
     );
 }
 
@@ -127,9 +129,9 @@ async fn an_unknown_cookie_is_anonymous_rather_than_an_error() {
         serde_json::from_slice(&edge_harness::body_bytes(response).await).unwrap();
     assert_eq!(
         reply.result,
-        Ok(CloudResponse::UserInfo {
+        Ok(CloudResponse::UserInfo(UserInfo {
             actor: Actor::Anonymous
-        })
+        }))
     );
 }
 
@@ -161,18 +163,20 @@ async fn a_published_project_is_readable_through_the_plane() {
 
     let published = server
         .call(
-            CloudRequest::PublishProject {
+            CloudRequest::PublishProject(PublishProject {
                 uid,
                 visibility: Visibility::Link,
                 slug: "zook-dome".into(),
-            },
+            }),
             Some(&session),
         )
         .await;
     assert!(published.result.is_ok(), "{:?}", published.result);
 
-    let read = server.call(CloudRequest::GetProject { uid }, None).await;
-    let Ok(CloudResponse::ProjectInfo { meta, .. }) = read.result else {
+    let read = server
+        .call(CloudRequest::GetProject(GetProject { uid }), None)
+        .await;
+    let Ok(CloudResponse::ProjectInfo(ProjectInfo { meta, .. })) = read.result else {
         panic!("expected ProjectInfo");
     };
     assert_eq!(meta.uid, uid);

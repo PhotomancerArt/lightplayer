@@ -5,6 +5,8 @@ mod edge_harness;
 
 use axum::http::{StatusCode, header};
 use edge_harness::{TestServer, body_bytes, body_text, header_value};
+use lpc_cloud_api::request::HaveBlobs;
+use lpc_cloud_api::response::MissingBlobs;
 use lpc_cloud_api::{CloudRequest, CloudResponse};
 use lpc_history::{ContentHash, TreeEntry, TreeManifest};
 use lpfs::LpPathBuf;
@@ -196,18 +198,18 @@ async fn an_uploaded_tree_is_in_the_blob_index() {
 
     let reply = server
         .call(
-            CloudRequest::HaveBlobs {
+            CloudRequest::HaveBlobs(HaveBlobs {
                 hashes: vec![package, ContentHash::of(b"absent")],
-            },
+            }),
             Some(&session),
         )
         .await;
 
     assert_eq!(
         reply.result,
-        Ok(CloudResponse::MissingBlobs {
+        Ok(CloudResponse::MissingBlobs(MissingBlobs {
             hashes: vec![ContentHash::of(b"absent")],
-        })
+        }))
     );
 }
 

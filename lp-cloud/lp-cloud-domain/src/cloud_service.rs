@@ -2,10 +2,17 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use lpc_cloud_api::request::{
+    AddMember, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
+    RemoveMember, SetVisibility,
+};
+use lpc_cloud_api::response::{
+    Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
+};
 use lpc_cloud_api::{
     Actor, CloudError, CloudRequest, CloudResponse, HeadInfo, SidecarMeta, Visibility,
 };
-use lpc_history::{ContentHash, HistoryEvent, PrefixedUid, UidPrefix};
+use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
 
 use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
@@ -52,35 +59,36 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     /// `actor` is already resolved (the edge turned a session cookie into it
     /// via [`resolve_session`](Self::resolve_session)); this method never
     /// second-guesses it beyond checking that the account still exists.
+    ///
+    /// This match is the *only* place in the service that speaks in
+    /// `CloudRequest`/`CloudResponse` terms. Every arm hands its payload
+    /// straight to a handler that takes the request struct and returns the one
+    /// response struct that answers it — the pairing
+    /// [`CloudCallSpec`](lpc_cloud_api::CloudCallSpec) declares, enforced here
+    /// by the return types rather than by a comment.
     pub fn handle(
         &mut self,
         actor: Actor,
         request: CloudRequest,
     ) -> Result<CloudResponse, CloudError> {
         match request {
-            CloudRequest::WhoAmI => self.who_am_i(actor),
-            CloudRequest::ListMyProjects => self.list_my_projects(actor),
-            CloudRequest::PublishProject {
-                uid,
-                visibility,
-                slug,
-            } => self.publish_project(actor, uid, visibility, slug),
-            CloudRequest::SetVisibility { uid, visibility } => {
-                self.set_visibility(actor, uid, visibility)
+            CloudRequest::WhoAmI => self.who_am_i(actor).map(Into::into),
+            CloudRequest::ListMyProjects => self.list_my_projects(actor).map(Into::into),
+            CloudRequest::PublishProject(request) => {
+                self.publish_project(actor, request).map(Into::into)
             }
-            CloudRequest::AddMember { uid, email } => self.add_member(actor, uid, email),
-            CloudRequest::RemoveMember { uid, email } => self.remove_member(actor, uid, email),
-            CloudRequest::GetProject { uid } => self.get_project(actor, uid),
-            CloudRequest::GetHeads { uid } => self.get_heads(actor, uid),
-            CloudRequest::HaveBlobs { hashes } => self.have_blobs(actor, hashes),
-            CloudRequest::PushCommit {
-                uid,
-                parents,
-                tree,
-                events,
-                sidecar,
-            } => self.push_commit(actor, uid, parents, tree, events, sidecar),
-            CloudRequest::GetEvents { uid, since } => self.get_events(actor, uid, since),
+            CloudRequest::SetVisibility(request) => {
+                self.set_visibility(actor, request).map(Into::into)
+            }
+            CloudRequest::AddMember(request) => self.add_member(actor, request).map(Into::into),
+            CloudRequest::RemoveMember(request) => {
+                self.remove_member(actor, request).map(Into::into)
+            }
+            CloudRequest::GetProject(request) => self.get_project(actor, request).map(Into::into),
+            CloudRequest::GetHeads(request) => self.get_heads(actor, request).map(Into::into),
+            CloudRequest::HaveBlobs(request) => self.have_blobs(actor, request).map(Into::into),
+            CloudRequest::PushCommit(request) => self.push_commit(actor, request).map(Into::into),
+            CloudRequest::GetEvents(request) => self.get_events(actor, request).map(Into::into),
         }
     }
 
@@ -157,15 +165,20 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     }
 
     // ---- per-request handlers ----------------------------------------
+    //
+    // One per `CloudRequest` variant, each taking that request's struct (the
+    // two payload-free requests take nothing) and returning the response
+    // struct that answers it. Wrapping back into `CloudResponse` is `handle`'s
+    // job and happens nowhere else.
 
-    fn who_am_i(&self, actor: Actor) -> Result<CloudResponse, CloudError> {
-        Ok(CloudResponse::UserInfo { actor })
+    fn who_am_i(&self, actor: Actor) -> Result<UserInfo, CloudError> {
+        Ok(UserInfo { actor })
     }
 
     /// Projects the caller is a resolved member of. An anonymous caller is a
     /// member of nothing, which is an answer rather than an error — the
     /// homepage asks this before it knows whether anyone is logged in.
-    fn list_my_projects(&self, actor: Actor) -> Result<CloudResponse, CloudError> {
+    fn list_my_projects(&self, actor: Actor) -> Result<ProjectList, CloudError> {
         let projects = match actor {
             Actor::Anonymous => Vec::new(),
             Actor::User(uid) => self
@@ -175,7 +188,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                 .map(CloudProject::to_meta)
                 .collect(),
         };
-        Ok(CloudResponse::ProjectList { projects })
+        Ok(ProjectList { projects })
     }
 
     /// Publish a project the client already minted a uid for (D21).
@@ -187,10 +200,12 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn publish_project(
         &mut self,
         actor: Actor,
-        uid: PrefixedUid,
-        visibility: Visibility,
-        slug: String,
-    ) -> Result<CloudResponse, CloudError> {
+        PublishProject {
+            uid,
+            visibility,
+            slug,
+        }: PublishProject,
+    ) -> Result<ProjectInfo, CloudError> {
         let user = self.require_user(actor)?;
         if uid.prefix() != UidPrefix::Project {
             return Err(invalid("project uid must be a prj_ uid"));
@@ -234,9 +249,8 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn set_visibility(
         &mut self,
         actor: Actor,
-        uid: PrefixedUid,
-        visibility: Visibility,
-    ) -> Result<CloudResponse, CloudError> {
+        SetVisibility { uid, visibility }: SetVisibility,
+    ) -> Result<ProjectInfo, CloudError> {
         let (project, _) = self.require_write_access(actor, uid)?;
         self.store.put_project(CloudProject {
             visibility,
@@ -251,9 +265,8 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn add_member(
         &mut self,
         actor: Actor,
-        uid: PrefixedUid,
-        email: String,
-    ) -> Result<CloudResponse, CloudError> {
+        AddMember { uid, email }: AddMember,
+    ) -> Result<ProjectInfo, CloudError> {
         self.require_write_access(actor, uid)?;
         let email = validate_email(&email)?;
         let invited = self.store.user_by_email(&email).map(|user| user.uid);
@@ -277,9 +290,8 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn remove_member(
         &mut self,
         actor: Actor,
-        uid: PrefixedUid,
-        email: String,
-    ) -> Result<CloudResponse, CloudError> {
+        RemoveMember { uid, email }: RemoveMember,
+    ) -> Result<ProjectInfo, CloudError> {
         self.require_write_access(actor, uid)?;
         let email = validate_email(&email)?;
         let owns_the_row = self
@@ -294,14 +306,18 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         self.project_info(uid)
     }
 
-    fn get_project(&self, actor: Actor, uid: PrefixedUid) -> Result<CloudResponse, CloudError> {
+    fn get_project(
+        &self,
+        actor: Actor,
+        GetProject { uid }: GetProject,
+    ) -> Result<ProjectInfo, CloudError> {
         self.require_read_access(actor, uid)?;
         self.project_info(uid)
     }
 
-    fn get_heads(&self, actor: Actor, uid: PrefixedUid) -> Result<CloudResponse, CloudError> {
+    fn get_heads(&self, actor: Actor, GetHeads { uid }: GetHeads) -> Result<Heads, CloudError> {
         self.require_read_access(actor, uid)?;
-        Ok(CloudResponse::Heads {
+        Ok(Heads {
             heads: self.store.refs(uid).to_head_infos(),
         })
     }
@@ -311,8 +327,8 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn have_blobs(
         &self,
         actor: Actor,
-        hashes: Vec<ContentHash>,
-    ) -> Result<CloudResponse, CloudError> {
+        HaveBlobs { hashes }: HaveBlobs,
+    ) -> Result<MissingBlobs, CloudError> {
         self.require_user(actor)?;
         let mut missing: Vec<ContentHash> = Vec::new();
         for hash in hashes {
@@ -320,7 +336,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                 missing.push(hash);
             }
         }
-        Ok(CloudResponse::MissingBlobs { hashes: missing })
+        Ok(MissingBlobs { hashes: missing })
     }
 
     /// Accept a commit.
@@ -334,12 +350,14 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn push_commit(
         &mut self,
         actor: Actor,
-        uid: PrefixedUid,
-        parents: Vec<ContentHash>,
-        tree: ContentHash,
-        events: Vec<HistoryEvent>,
-        sidecar: SidecarMeta,
-    ) -> Result<CloudResponse, CloudError> {
+        PushCommit {
+            uid,
+            parents,
+            tree,
+            events,
+            sidecar,
+        }: PushCommit,
+    ) -> Result<PushResult, CloudError> {
         self.require_write_access(actor, uid)?;
 
         // Content-opacity (D3) bounds this check: the server cannot open the
@@ -369,7 +387,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         self.store.put_refs(uid, refs);
         self.store.put_sidecar(uid, sidecar);
 
-        Ok(CloudResponse::PushResult { outcome, heads })
+        Ok(PushResult { outcome, heads })
     }
 
     /// Read the log forward. `next_since` is the last sequence number handed
@@ -378,13 +396,12 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     fn get_events(
         &self,
         actor: Actor,
-        uid: PrefixedUid,
-        since: u64,
-    ) -> Result<CloudResponse, CloudError> {
+        GetEvents { uid, since }: GetEvents,
+    ) -> Result<Events, CloudError> {
         self.require_read_access(actor, uid)?;
         let stored = self.store.events_since(uid, since);
         let next_since = stored.last().map(|entry| entry.seq).unwrap_or(since);
-        Ok(CloudResponse::Events {
+        Ok(Events {
             events: stored.into_iter().map(|entry| entry.event).collect(),
             next_since,
         })
@@ -453,13 +470,13 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         }
     }
 
-    fn project_info(&self, uid: PrefixedUid) -> Result<CloudResponse, CloudError> {
+    fn project_info(&self, uid: PrefixedUid) -> Result<ProjectInfo, CloudError> {
         let project = self.store.project(uid).ok_or(CloudError::NotFound)?;
         let sidecar = self
             .store
             .sidecar(uid)
             .unwrap_or_else(|| placeholder_sidecar(&project.slug));
-        Ok(CloudResponse::ProjectInfo {
+        Ok(ProjectInfo {
             meta: project.to_meta(),
             heads: self.store.refs(uid).to_head_infos(),
             sidecar,

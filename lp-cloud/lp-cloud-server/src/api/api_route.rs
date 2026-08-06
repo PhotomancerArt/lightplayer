@@ -6,7 +6,10 @@
 //! [`Actor`](lpc_cloud_api::Actor). Every rule about *what the answer is* —
 //! visibility, membership, push validation — belongs to
 //! [`CloudService::handle`](lp_cloud_domain::CloudService::handle) and is not
-//! duplicated, second-guessed, or re-tested at this layer.
+//! duplicated, second-guessed, or re-tested at this layer. This route never
+//! looks inside the request or the response: dispatch to a typed handler is
+//! `handle`'s exhaustive match, and the reply goes back out as whatever that
+//! match produced.
 //!
 //! # Why a refusal is still `200 OK`
 //!

@@ -22,7 +22,9 @@
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use lpc_cloud_api::{Actor, CloudRequest, CloudResponse};
+use lpc_cloud_api::request::GetProject;
+use lpc_cloud_api::response::ProjectInfo;
+use lpc_cloud_api::{Actor, CloudCallSpec};
 
 use crate::app_state::AppState;
 use crate::page::og_inject::{self, OgTags};
@@ -84,14 +86,15 @@ async fn share_card(state: &AppState, uid: lpc_history::PrefixedUid) -> Option<O
     let answer = state
         .with_service(move |core| {
             core.service
-                .handle(Actor::Anonymous, CloudRequest::GetProject { uid })
+                .handle(Actor::Anonymous, GetProject { uid }.into())
         })
         .await
         .ok()?;
 
-    let CloudResponse::ProjectInfo { meta, sidecar, .. } = answer else {
-        return None;
-    };
+    // `GetProject` names its own answer (`CloudCallSpec`), so this is the
+    // pairing table's `extract` rather than a second, hand-written match on
+    // `CloudResponse` that could drift from it.
+    let ProjectInfo { meta, sidecar, .. } = GetProject::extract(answer)?;
     let config = state.config();
     Some(OgTags {
         title: sidecar.name.clone(),

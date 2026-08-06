@@ -10,12 +10,13 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_cloud_api::{CloudRequest, SidecarMeta, Visibility};
+use lpc_cloud_api::request::{AddMember, SetVisibility};
+use lpc_cloud_api::{SidecarMeta, Visibility};
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 use lpfs::{FsError, LpFs, LpFsMemory, LpPath};
 
 use crate::block_on::block_on;
-use crate::cloud_port::request;
+use crate::cloud_port::call;
 use crate::in_process_cloud::{InProcessCloud, InProcessServer};
 use crate::local_project::LocalProject;
 use crate::sync::open_shared::open_shared;
@@ -63,9 +64,9 @@ impl TestWorld {
         name: &str,
     ) -> InProcessCloud {
         let client = self.user(name);
-        block_on(request(
+        block_on(call(
             owner,
-            CloudRequest::AddMember {
+            AddMember {
                 uid: project,
                 email: email(name),
             },
@@ -80,9 +81,9 @@ impl TestWorld {
         project: PrefixedUid,
         visibility: Visibility,
     ) {
-        block_on(request(
+        block_on(call(
             owner,
-            CloudRequest::SetVisibility {
+            SetVisibility {
                 uid: project,
                 visibility,
             },

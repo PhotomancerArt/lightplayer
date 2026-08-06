@@ -49,7 +49,7 @@ pub(crate) mod test_support;
 
 pub use block_on::block_on;
 pub use cloud_binding::{CLOUD_BINDING_PATH, CloudBinding};
-pub use cloud_port::{CloudPort, TransportError, request};
+pub use cloud_port::{CloudPort, TransportError, call, request};
 pub use in_process_cloud::{InProcessCloud, InProcessServer, SignedIn};
 pub use local_project::LocalProject;
 pub use project_link::{ProjectLink, ProjectLinkParseError};

@@ -8,6 +8,12 @@
 //! fw-graph-clean rule (nothing in `lp-fw` may ever depend on this crate).
 //!
 //! Concept-per-file: each module below owns one vocabulary concept.
+//!
+//! Every request and response is a **struct**; [`CloudRequest`] and
+//! [`CloudResponse`] are the closed sets of them, and [`CloudCallSpec`] is the
+//! request→response pairing table. The per-message structs stay in
+//! [`request`] and [`response`] rather than being re-exported here — `Events`
+//! and `Heads` only read unambiguously with their module in front of them.
 
 #![no_std]
 extern crate alloc;
@@ -15,6 +21,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod actor;
+pub mod call_spec;
 pub mod envelope;
 pub mod error;
 pub mod head_info;
@@ -26,6 +33,7 @@ pub mod version;
 pub mod visibility;
 
 pub use actor::Actor;
+pub use call_spec::CloudCallSpec;
 pub use envelope::{CloudCall, CloudReply};
 pub use error::CloudError;
 pub use head_info::{HeadInfo, PushOutcome};

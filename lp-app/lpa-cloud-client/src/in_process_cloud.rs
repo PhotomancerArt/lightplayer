@@ -274,9 +274,10 @@ impl CloudPort for InProcessCloud {
 mod tests {
     use super::*;
     use crate::block_on::block_on;
-    use crate::cloud_port::request;
+    use crate::cloud_port::call;
     use crate::sync_error::SyncError;
-    use lpc_cloud_api::{CloudError, CloudRequest, CloudResponse, Visibility};
+    use lpc_cloud_api::request::{GetProject, HaveBlobs, PublishProject, WhoAmI};
+    use lpc_cloud_api::{CloudError, CloudRequest, Visibility};
     use lpc_history::{TreeEntry, UidPrefix};
     use lpfs::LpPathBuf;
 
@@ -289,13 +290,8 @@ mod tests {
         assert_eq!(yona.actor(), Actor::User(signed_in.user));
         assert_eq!(stranger.actor(), Actor::Anonymous);
 
-        let who = block_on(request(&yona, CloudRequest::WhoAmI)).unwrap();
-        assert_eq!(
-            who,
-            CloudResponse::UserInfo {
-                actor: Actor::User(signed_in.user),
-            }
-        );
+        let who = block_on(call(&yona, WhoAmI)).unwrap();
+        assert_eq!(who.actor, Actor::User(signed_in.user));
     }
 
     /// The service is not a mock: an anonymous caller hits the real access
@@ -307,9 +303,9 @@ mod tests {
         let stranger = InProcessCloud::anonymous(server.clone());
         let uid = PrefixedUid::mint(UidPrefix::Project, &[3u8; 16]);
 
-        block_on(request(
+        block_on(call(
             &yona,
-            CloudRequest::PublishProject {
+            PublishProject {
                 uid,
                 visibility: Visibility::Private,
                 slug: "zook-dome".into(),
@@ -317,7 +313,7 @@ mod tests {
         ))
         .unwrap();
 
-        let refused = block_on(request(&stranger, CloudRequest::GetProject { uid })).unwrap_err();
+        let refused = block_on(call(&stranger, GetProject { uid })).unwrap_err();
         assert!(matches!(refused, SyncError::Cloud(CloudError::NotFound)));
     }
 
@@ -330,7 +326,7 @@ mod tests {
         yona.go_offline();
 
         assert!(matches!(
-            block_on(request(&yona, CloudRequest::WhoAmI)),
+            block_on(call(&yona, WhoAmI)),
             Err(SyncError::Transport(TransportError::Offline))
         ));
         assert_eq!(
@@ -373,19 +369,14 @@ mod tests {
         let (yona, _) = InProcessCloud::sign_in(server.clone(), "sub-1", "y@x.dev", "Yona");
         let hash = block_on(yona.put_blob(b"content")).unwrap();
 
-        let missing = block_on(request(
+        let missing = block_on(call(
             &yona,
-            CloudRequest::HaveBlobs {
+            HaveBlobs {
                 hashes: alloc::vec![hash, ContentHash::of(b"absent")],
             },
         ))
         .unwrap();
-        assert_eq!(
-            missing,
-            CloudResponse::MissingBlobs {
-                hashes: alloc::vec![ContentHash::of(b"absent")],
-            }
-        );
+        assert_eq!(missing.hashes, alloc::vec![ContentHash::of(b"absent")]);
     }
 
     #[test]

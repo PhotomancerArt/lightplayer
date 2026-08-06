@@ -8,6 +8,16 @@ executor, no clock, and no randomness — which is what makes the whole
 service testable as plain function calls, and what keeps the axum edge
 (P07) free to be the only crate that knows what HTTP is.
 
+`handle` is an exhaustive match and nothing else: every arm hands its payload
+to a private handler that takes that request's struct and returns the one
+response struct that answers it — `fn get_project(&self, actor, GetProject)
+-> Result<ProjectInfo, CloudError>` — and only wraps the result back. So the
+match is the single place in the crate that speaks in
+`CloudRequest`/`CloudResponse` terms, and a handler that answered with the
+wrong shape would not compile rather than reaching a client. The pairing it
+honors is `lpc_cloud_api::CloudCallSpec`, which the client side reads from the
+other direction.
+
 ## Ports
 
 | Port | What it is |
