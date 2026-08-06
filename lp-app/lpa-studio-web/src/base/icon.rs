@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
-    CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
-    Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off,
-    ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil,
-    Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
-    TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
+    CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet,
+    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers,
+    Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay,
+    MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
+    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
 #[component]

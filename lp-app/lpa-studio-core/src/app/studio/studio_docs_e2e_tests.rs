@@ -187,7 +187,10 @@ fn docs_sim_host_boots_deploys_and_shutdown_completes_the_actor() {
         latest = Some(view);
     }
     let view = latest.expect("the actor published a change-gated view");
-    assert!(!view.panes.is_empty(), "the published view carries the mirror");
+    assert!(
+        !view.panes.is_empty(),
+        "the published view carries the mirror"
+    );
 
     host.shutdown();
     host.shutdown(); // idempotent
