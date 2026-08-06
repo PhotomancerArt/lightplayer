@@ -9,9 +9,9 @@ browser serial assets are currently resolved from root paths such as
 
 | Channel | URL | Source |
 |---|---|---|
-| Production Studio | `https://lightplayer.app/` | `light-player/lightplayer`, GitHub Pages from Actions |
-| Beta Studio | `https://beta.lightplayer.app/` | `light-player/lightplayer-beta-pages`, branch Pages |
-| Web demo | `https://demo.lightplayer.app/` | `light-player/lightplayer-demo-pages`, branch Pages |
+| Production Studio | `https://lightplayer.app/` | `PhotomancerArt/lightplayer`, GitHub Pages from Actions |
+| Beta Studio | `https://beta.lightplayer.app/` | `PhotomancerArt/lightplayer-beta-pages`, branch Pages |
+| Web demo | `https://demo.lightplayer.app/` | `PhotomancerArt/lightplayer-demo-pages`, branch Pages |
 
 ## Automated Setup
 
@@ -29,11 +29,11 @@ human when token scopes or organization settings block automation.
 The source repo needs GitHub App credentials for manual beta/demo deployments.
 The app should be installed only on:
 
-- `light-player/lightplayer-beta-pages`
-- `light-player/lightplayer-demo-pages`
+- `PhotomancerArt/lightplayer-beta-pages`
+- `PhotomancerArt/lightplayer-demo-pages`
 
 The app needs only repository **Contents: Read and write** permission. Store the
-credentials in `light-player/lightplayer` as Actions secrets:
+credentials in `PhotomancerArt/lightplayer` as Actions secrets:
 
 ```text
 LIGHTPLAYER_PAGES_APP_ID
@@ -66,10 +66,16 @@ AAAA  @     2606:50c0:8003::153
 Subdomain records:
 
 ```text
-CNAME www   light-player.github.io
-CNAME beta  light-player.github.io
-CNAME demo  light-player.github.io
+CNAME www   photomancerart.github.io
+CNAME beta  photomancerart.github.io
+CNAME demo  photomancerart.github.io
 ```
+
+> **Pending:** live DNS for `beta` and `demo` still targets the pre-rename
+> `light-player.github.io`. This keeps working — GitHub Pages routes custom
+> domains by the repo's `CNAME` file, and every `*.github.io` name resolves to
+> the same Pages anycast addresses — but the records should be re-pointed at
+> `photomancerart.github.io` so they do not depend on the old org name.
 
 Remove parking, forwarding, or old apex `A`/`AAAA`/`ALIAS`/`ANAME` records.
 Extra apex records can prevent GitHub from provisioning the Pages certificate.
@@ -78,7 +84,7 @@ Extra apex records can prevent GitHub from provisioning the Pages certificate.
 
 Production:
 
-1. Open `https://github.com/light-player/lightplayer/settings/pages`.
+1. Open `https://github.com/PhotomancerArt/lightplayer/settings/pages`.
 2. Set the Pages source to GitHub Actions.
 3. Set the custom domain to `lightplayer.app`.
 4. Wait for the DNS check and TLS certificate.

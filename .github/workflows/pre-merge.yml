@@ -252,7 +252,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
@@ -512,7 +512,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Two toolchains, both needed: the pinned nightly builds the host test
@@ -788,7 +788,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
@@ -884,7 +884,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
@@ -959,7 +959,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
@@ -1077,7 +1077,7 @@ jobs:
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
         with:
-          repository: photomancerart/lp-regalloc2
+          repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
