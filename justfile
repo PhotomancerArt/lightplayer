@@ -774,6 +774,15 @@ clippy-fw-esp32v3:
     # mismatch — precisely the moment a rotted diagnostic costs the most.
     echo "clippy: --features frame-dump"
     cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
+    # Every harness, individually — the same loop fw-esp32s3 carries, and for
+    # the same reason: a `test_*` feature sets `fw_harness`, which cfg's the
+    # whole app path out, so linting the defaults leaves harness code completely
+    # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
+    # uncompiled. Add new `test_*` features to this list.
+    for feat in test_xt_fp_conformance; do
+      echo "clippy: --features $feat"
+      cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
+    done
 
 
 # `features` is a comma-separated list added to the defaults — for the app path
@@ -1095,6 +1104,103 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
       just fp-diff "$out"
     else
       echo "$mode capture done; P6 turns it into fp_policy data + replay fixtures"
+    fi
+
+# Run the FP conformance corpus on a connected CLASSIC ESP32 and capture it.
+#
+#   just fwtest-xt-fp-esp32v3 /dev/cu.wchusbserialXXXX                 # everything
+#   just fwtest-xt-fp-esp32v3 /dev/cu.wchusbserialXXXX signed_zero 50  # a smoke run
+#   just fwtest-xt-fp-esp32v3 /dev/cu.wchusbserialXXXX tables          # estimate ROMs
+#
+# Same corpus, same rig (`lp-xt-fp-harness`) and same ORDERING RULE as the S3
+# recipe: host predictions are committed FIRST by `cargo test -p lp-xt-emu
+# --test fp_conformance`, which needs no board. A device disagreement is a
+# finding to triage — never a reason to edit a golden.
+#
+# THREE DIFFERENCES FROM THE S3 RECIPE, all of them this chip's, all measured:
+#
+# 1. The flash write runs in the FOREGROUND. Backgrounded `espflash flash` died
+#    mid-write 3 of 6 times on the desk classic — twice hung at chunk 1/1019,
+#    once exited SILENTLY at 796/1019 leaving the app partition ~78% written.
+#    A partial write either fails to boot or, far worse, boots something that
+#    is not the code you think you flashed. Only the sentinel watcher below is
+#    backgrounded, and it never touches the write.
+# 2. A stalled flash here is a KILL-AND-RERUN, not a replug. The same flash
+#    that hung twice at 1/1019 went straight through on retry with no replug —
+#    the opposite of the S3's wedge rule. Do not ask for a physical replug on
+#    this board until a retry has failed too.
+# 3. `--monitor-baud 921600`: this chip has no USB-Serial-JTAG, so the host
+#    link, the logs and the capture all share one real UART0 wire.
+#
+# The captured build commit is checked against HEAD, because the failure this
+# recipe most needs to catch is a stale image: if the write silently died, the
+# board keeps running the PREVIOUS harness build, which prints a perfectly
+# well-formed capture with the wrong firmware in it.
+fwtest-xt-fp-esp32v3 port="" family="" limit="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mode=families
+    family="{{ family }}"
+    if [[ "$family" == "tables" || "$family" == "helpers" ]]; then
+      mode="$family"
+      family=""
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/fpconf-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && \
+      LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
+      cargo build --profile release-esp32v3 --features test_xt_fp_conformance)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    # The watcher, not the flasher, is what gets backgrounded. It waits for the
+    # harness's own sentinel and then interrupts espflash the way Ctrl-C would —
+    # espflash releases the port cleanly on SIGINT. Scoped to `--chip esp32` so
+    # it can never reach for a concurrent S3 run.
+    (
+      for _ in $(seq 1 900); do
+        if grep -q 'END-ALL' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f 'espflash flash --chip esp32 ' 2>/dev/null || true
+    ) &
+    watcher=$!
+    # `</dev/null` is load-bearing for the same reason as the S3 recipe: `script`
+    # hands its child the terminal, and espflash reading this shell's stdin eats
+    # keystrokes. The harness never reads anything.
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} </dev/null || true
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    # espflash's monitor SURVIVES ITS PARENT and keeps the port — a leftover one
+    # is why the next run fails with "Device or resource busy".
+    pkill -INT -f 'espflash flash --chip esp32 ' 2>/dev/null || true
+    echo "captured $(wc -l < "$out") lines to $out"
+    if ! grep -aq 'END-ALL' "$out"; then
+      echo "FAIL: no END-ALL sentinel — the capture is truncated, not a partial pass." >&2
+      echo "      Check the last flash progress line: a write that did not reach" >&2
+      echo "      1019/1019 means the board is running the PREVIOUS image." >&2
+      exit 1
+    fi
+    head_commit="$(git rev-parse --short=12 HEAD)"
+    # `-a`: the capture also holds the boot ROM's pre-baud bytes, so grep sees a
+    # binary file and prints "Binary file ... matches" instead of the match.
+    cap_commit="$(grep -am1 -o 'commit=[0-9a-f]*' "$out" | cut -d= -f2 || true)"
+    if [[ -n "$cap_commit" && "$head_commit" != "$cap_commit"* ]]; then
+      echo "WARNING: capture reports commit=$cap_commit but HEAD is $head_commit." >&2
+      echo "         A silent partial write leaves the previous image running." >&2
+    fi
+    if [[ "$mode" == "families" ]]; then
+      just fp-diff "$out"
+    else
+      echo "$mode capture done; compare it against the S3's committed capture in"
+      echo "lp-xt/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
