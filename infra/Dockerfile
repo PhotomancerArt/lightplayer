@@ -100,6 +100,11 @@ COPY target/pages/studio /app/web
 # Container-shape defaults only. Everything deployment-shaped — base URL,
 # bucket, endpoint — lives in infra/fly.toml's [env] so it can be read and
 # changed without rebuilding the image. Secrets are never here.
+# The git sha this image was built from — CI passes it so /healthz can
+# answer "what version is deployed" (and the cutover smoke can assert
+# deployed == pushed). Defaults to "dev" for hand builds.
+ARG GIT_SHA=dev
+ENV LP_CLOUD_BUILD_SHA=${GIT_SHA}
 ENV LP_CLOUD_BIND=0.0.0.0 \
     LP_CLOUD_PORT=8080 \
     LP_CLOUD_STORE=sqlite \

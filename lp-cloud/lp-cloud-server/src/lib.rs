@@ -49,6 +49,7 @@ pub mod config;
 pub mod content;
 pub mod page;
 pub mod ports;
+pub mod request_log;
 pub mod router;
 
 pub use app_state::{AppState, ServiceCore};

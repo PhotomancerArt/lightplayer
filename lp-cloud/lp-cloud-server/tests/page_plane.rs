@@ -179,7 +179,15 @@ async fn healthz_answers_without_touching_the_store() {
     let server = TestServer::new();
     let response = server.get("/healthz").await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(body_text(response).await, "ok\n");
+    let body = body_text(response).await;
+    // "dev" build (no LP_CLOUD_BUILD_SHA in tests) + the vocabulary version.
+    assert_eq!(
+        body,
+        format!(
+            "{{\"status\":\"ok\",\"build\":\"dev\",\"cloud_api_version\":{}}}\n",
+            lpc_cloud_api::CLOUD_API_VERSION
+        )
+    );
 }
 
 /// Publish a project and, optionally, give it a pushed preview PNG.

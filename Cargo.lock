@@ -1350,7 +1350,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "cranelift-entity 0.127.0",
 ]
@@ -1367,7 +1367,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 
 [[package]]
 name = "cranelift-bitset"
@@ -1383,7 +1383,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "bumpalo",
  "cranelift-bforest 0.127.0",
@@ -1436,7 +1436,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "cranelift-codegen-shared 0.127.0",
  "cranelift-srcgen 0.127.0",
@@ -1459,7 +1459,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 
 [[package]]
 name = "cranelift-codegen-shared"
@@ -1470,7 +1470,7 @@ checksum = "20c07c6c440bd1bf920ff7597a1e743ede1f68dcd400730bd6d389effa7662af"
 [[package]]
 name = "cranelift-control"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 
 [[package]]
 name = "cranelift-control"
@@ -1484,7 +1484,7 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "cranelift-bitset 0.127.0",
 ]
@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "cranelift-codegen 0.127.0",
  "hashbrown 0.15.5",
@@ -1528,7 +1528,7 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 
 [[package]]
 name = "cranelift-isle"
@@ -1539,7 +1539,7 @@ checksum = "524d804c1ebd8c542e6f64e71aa36934cec17c5da4a9ae3799796220317f5d23"
 [[package]]
 name = "cranelift-module"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "anyhow",
  "cranelift-codegen 0.127.0",
@@ -1561,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "cranelift-object"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "anyhow",
  "cranelift-codegen 0.127.0",
@@ -1575,7 +1575,7 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 
 [[package]]
 name = "cranelift-srcgen"
@@ -4384,6 +4384,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glsl"
+version = "7.0.0"
+source = "git+https://github.com/photomancerart/glsl-parser.git?branch=feature%2Fspans#0c5505aadd2ceee3dc62f290a03991f8d6466b63"
+dependencies = [
+ "nom",
+ "nom_locate",
+]
+
+[[package]]
 name = "glutin"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6335,7 +6344,7 @@ dependencies = [
 name = "lps-builtins-gen-app"
 version = "40.0.0"
 dependencies = [
- "glsl",
+ "glsl 7.0.0 (git+https://github.com/photomancerart/glsl-parser.git?branch=feature%2Fspans)",
  "lps-glsl",
  "proc-macro2",
  "quote",
@@ -6357,7 +6366,7 @@ version = "40.0.0"
 dependencies = [
  "anyhow",
  "glob",
- "glsl",
+ "glsl 7.0.0 (git+https://github.com/light-player/glsl-parser.git?branch=feature%2Fspans)",
  "libm",
  "lp-collection 1.0.0",
  "lp-emu-core",
@@ -10815,7 +10824,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-math"
 version = "40.0.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
+source = "git+https://github.com/photomancerart/lp-cranelift?branch=main#57c9ddbb774ca5a7f659cc1dddd45937977eaf22"
 dependencies = [
  "libm",
 ]

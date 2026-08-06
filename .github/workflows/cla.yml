@@ -29,18 +29,18 @@ jobs:
         with:
           path-to-signatures: 'signatures/v1/cla.json'
           branch: 'cla-signatures'
-          path-to-document: 'https://github.com/light-player/lightplayer/blob/main/docs/cla/individual-cla.md'
+          path-to-document: 'https://github.com/photomancerart/lightplayer/blob/main/docs/cla/individual-cla.md'
           allowlist: 'Yona-Appletree,dependabot[bot],github-actions[bot]'
           custom-notsigned-prcomment: >
             Thank you for your contribution to LightPlayer! Before we can merge
             it, you need to sign the
-            [LightPlayer Individual Contributor License Agreement](https://github.com/light-player/lightplayer/blob/main/docs/cla/individual-cla.md).
+            [LightPlayer Individual Contributor License Agreement](https://github.com/photomancerart/lightplayer/blob/main/docs/cla/individual-cla.md).
             LightPlayer is dual-licensed (AGPL-3.0-or-later plus commercial
             terms), and the CLA is what lets your contribution be part of both —
             you keep ownership of your work, and it will always remain available
             under an OSI-approved open-source license. If you are contributing
             on behalf of your employer, please have them execute the
-            [Corporate CLA](https://github.com/light-player/lightplayer/blob/main/docs/cla/corporate-cla.md)
+            [Corporate CLA](https://github.com/photomancerart/lightplayer/blob/main/docs/cla/corporate-cla.md)
             instead. To sign, post the comment below.
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
           custom-allsigned-prcomment: 'All contributors have signed the LightPlayer CLA. ✅'
