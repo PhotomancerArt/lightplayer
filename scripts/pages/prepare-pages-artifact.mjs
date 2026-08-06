@@ -34,10 +34,21 @@ const configs = {
       "firmware",
       "serial-debug.html",
       "vendor",
+      // The embedded stylesheet @font-faces /fonts/*.woff2 (style.css) —
+      // invisible to dx's asset graph, and silently absent from every
+      // deployed artifact until 2026-08-06 (system-font fallback hid it).
+      "fonts",
     ],
     required: [
       "index.html",
-      { prefix: "assets/tailwind-", suffix: ".css" },
+      "fonts/Inter-Regular.woff2",
+      // `minBytes` is the guard against shipping the Tailwind PLACEHOLDER.
+      // `assets/tailwind.css` is gitignored and written by dx on every build;
+      // lpa-studio-web's build.rs drops a ~130-byte stub in its place so plain
+      // `cargo check` resolves `asset!()` on a fresh clone. A real bundle runs
+      // ~68 KiB, so anything under this floor means dx did not regenerate and
+      // the deploy would be unstyled.
+      { prefix: "assets/tailwind-", suffix: ".css", minBytes: 8 * 1024 },
       { prefix: "assets/lpa-studio-web-", suffix: ".js" },
       { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
@@ -79,6 +90,16 @@ for (const required of config.required) {
   if (!existsSync(file)) {
     throw new Error(`missing required deploy asset: ${formatRequiredAsset(required)}`);
   }
+  const minBytes = typeof required === "object" ? required.minBytes : undefined;
+  if (minBytes !== undefined) {
+    const { size } = await stat(file);
+    if (size < minBytes) {
+      throw new Error(
+        `required deploy asset ${formatRequiredAsset(required)} is ${size} bytes, below the ` +
+          `${minBytes}-byte floor — this is a build-time placeholder, not a real bundle`,
+      );
+    }
+  }
 }
 
 await writeFile(path.join(outDir, ".nojekyll"), "");
@@ -104,9 +125,14 @@ function versionInfo(app) {
     schemaVersion: 1,
     app,
     channel,
-    version: commandOrUnknown("scripts/print-app-version.sh"),
+    // Prefer a version resolved BEFORE the build. `print-app-version.sh`
+    // falls back to `<sha>-dirty-<time>` when `git status` is not clean, and
+    // by the time this script runs, dx has rewritten `assets/tailwind.css` in
+    // the checkout — so reading it here reports every CI build as dirty. The
+    // deploy workflows export APP_VERSION straight after checkout instead.
+    version: process.env.APP_VERSION?.trim() || commandOrUnknown("scripts/print-app-version.sh"),
     source: {
-      repository: process.env.GITHUB_REPOSITORY ?? "light-player/lightplayer",
+      repository: process.env.GITHUB_REPOSITORY ?? "PhotomancerArt/lightplayer",
       ref: process.env.GITHUB_REF_NAME ?? commandOrUnknown("git", ["branch", "--show-current"]),
       sha: process.env.GITHUB_SHA ?? commandOrUnknown("git", ["rev-parse", "HEAD"]),
       dirty: isDirty(),

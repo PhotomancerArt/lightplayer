@@ -9,7 +9,7 @@
 //!   things) sits by the brand at full weight; the secondary family
 //!   (Explore, Boards, Docs — the world's things) rides the right
 //!   cluster, lighter, with no divider between the families.
-//! - **The brand lockup is the way to Home.** The logo links to `#/home`
+//! - **The brand lockup is the way to Home.** The logo links to `/home`
 //!   — there is deliberately no Home tab, and no Studio tab either (the
 //!   sections replaced it).
 //! - **One overflow menu** (G3 ruling, 2026-08-05: a row of separate
@@ -89,18 +89,18 @@ pub fn SiteChrome(
             // IS Home's tab, so it marks the place like one).
             span {
                 class: if section == SiteSection::Home { LOGO_HOME_ACTIVE_WRAP } else { "tw:flex tw:flex-none" },
-                LogoLockup { href: "#/home".to_string() }
+                LogoLockup { href: "/home".to_string() }
             }
             // Primary family: your things, by the brand, full weight.
             nav { class: "tw:flex tw:items-center tw:gap-1",
                 NavTab {
                     label: "Devices",
-                    href: "#/",
+                    href: "/",
                     active: section == SiteSection::Devices,
                 }
                 NavTab {
                     label: "Projects",
-                    href: "#/projects",
+                    href: "/projects",
                     active: section == SiteSection::Projects,
                 }
             }
@@ -119,19 +119,19 @@ pub fn SiteChrome(
                 nav { class: "tw:hidden tw:items-center tw:gap-1 tw:@min-[680px]:flex",
                     NavTab {
                         label: "Explore",
-                        href: "#/explore",
+                        href: "/explore",
                         active: section == SiteSection::Explore,
                         secondary: true,
                     }
                     NavTab {
                         label: "Boards",
-                        href: "#/boards",
+                        href: "/boards",
                         active: section == SiteSection::Boards,
                         secondary: true,
                     }
                     NavTab {
                         label: "Docs",
-                        href: "#/docs",
+                        href: "/docs",
                         active: section == SiteSection::Docs,
                     secondary: true,
                     }
@@ -193,9 +193,9 @@ fn ChromeOverflowMenu(
             div { class: "tw:grid tw:gap-1",
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
-                    NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
-                    NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
-                    NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
+                    NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
+                    NavMenuItem { label: "Boards", href: "/boards", active: section == SiteSection::Boards }
+                    NavMenuItem { label: "Docs", href: "/docs", active: section == SiteSection::Docs }
                 }
                 if !sessions.is_empty() {
                     span { class: GROUP_HEADER_CLASS, "Sessions" }
@@ -208,13 +208,13 @@ fn ChromeOverflowMenu(
                     icon: StudioIconName::MapArrows,
                     title: "Mapping editor",
                     detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
-                    href: "#/mapping",
+                    href: "/mapping",
                 }
                 ToolCard {
                     icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
                     title: "Board editor",
                     detail: "Draw and edit the board diagrams behind the catalog.",
-                    href: "#/boards/edit",
+                    href: "/boards/edit",
                 }
             }
         }
@@ -285,7 +285,7 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
 /// detach anymore — navigation to a gallery route detaches through the
 /// route listener, the same path as the back button, and returning to
 /// the editor is the active session chip's job. (The old Studio-tab
-/// direct dispatch existed for the URL-less D29 device editor at `#/`;
+/// direct dispatch existed for the URL-less D29 device editor at `/`;
 /// identity-at-probe made device lenses addressable, closing that gap.)
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -366,8 +366,8 @@ fn SessionChip(session: UiChromeSession, on_editor: bool) -> Element {
     }
 }
 
-/// The chip's route (D37 keys): `#/sim/<project-uid>` for the sim,
-/// `#/device/<dev-uid>` for hardware; `None` while no honest address
+/// The chip's route (D37 keys): `/sim/<project-uid>` for the sim,
+/// `/device/<dev-uid>` for hardware; `None` while no honest address
 /// exists.
 fn session_href(session: &UiChromeSession) -> Option<String> {
     match &session.target {
@@ -376,14 +376,14 @@ fn session_href(session: &UiChromeSession) -> Option<String> {
                 key: key.clone(),
                 play: false,
             }
-            .hash()
+            .path()
         }),
         UiChromeSessionTarget::Device { uid } => uid.as_ref().map(|uid| {
             StudioRoute::Device {
                 uid: uid.clone(),
                 play: false,
             }
-            .hash()
+            .path()
         }),
     }
 }

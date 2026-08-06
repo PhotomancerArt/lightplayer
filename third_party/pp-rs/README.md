@@ -1,6 +1,6 @@
 # (glsl)pp-rs
 
-**light-player fork (v0.2.2):** `#![no_std]` + `alloc`, `hashbrown` maps/sets, for **naga** `glsl-in` on bare-metal. Upstream: [Kangz/glslpp-rs](https://github.com/Kangz/glslpp-rs). Intended mirror: `github.com/light-player/pp-rs`.
+**PhotomancerArt fork (v0.2.2):** `#![no_std]` + `alloc`, `hashbrown` maps/sets, for **naga** `glsl-in` on bare-metal. Upstream: [Kangz/glslpp-rs](https://github.com/Kangz/glslpp-rs). Intended mirror: `github.com/PhotomancerArt/pp-rs`.
 
 <!-- Some Matrix channel, like Naga's? -->
 [![Crates.io](https://img.shields.io/crates/v/pp-rs.svg?label=pp-rs)](https://crates.io/crates/pp-rs)

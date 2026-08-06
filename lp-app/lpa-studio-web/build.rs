@@ -12,6 +12,7 @@ fn main() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     emit_git_facts(&manifest_dir);
+    ensure_tailwind_placeholder(&manifest_dir);
     let src_dir = manifest_dir.join("src");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
     generate_docs_checks(&manifest_dir, &src_dir, &out_dir);
@@ -36,6 +37,43 @@ fn main() {
     validate_default_story_id(&src_dir, &story_modules);
     fs::write(generated_path, generate_registry(&story_modules))
         .expect("write generated story registry");
+}
+
+/// Guarantee `assets/tailwind.css` exists so `asset!("/assets/tailwind.css")`
+/// resolves — it is checked at compile time, and rustc runs before anything
+/// else can create the file.
+///
+/// Its CONTENT is dx's to produce: every `dx build`/`dx serve` installs the
+/// Tailwind CLI and overwrites this file from `tailwind.css`. That is why the
+/// file is gitignored rather than tracked. A tracked generated bundle merges
+/// by text, and the merge of two branches' bundles is neither branch's — the
+/// correct answer is a regeneration over the merged `src/`, which git cannot
+/// perform. Tracking it produced silently-wrong CSS on merge commits and a
+/// recurring "regenerate tailwind.css post-merge" chore.
+///
+/// Only the plain-cargo paths (`cargo check`, clippy, rust-analyzer) ever see
+/// this placeholder, and only on a fresh clone. It must never reach a deploy:
+/// `scripts/pages/prepare-pages-artifact.mjs` enforces a byte floor on the
+/// emitted stylesheet for exactly that reason.
+///
+/// Deliberately NOT paired with a `rerun-if-changed` on the file: dx rewrites
+/// it on every build, so watching it would re-run this script every time
+/// (docs/defects — never watch files you write).
+fn ensure_tailwind_placeholder(manifest_dir: &Path) {
+    const PLACEHOLDER: &str = "/*! tailwindcss v4.1.5 | MIT License | https://tailwindcss.com */\n\
+                               @layer theme, base, components, utilities;\n\
+                               @layer utilities;\n";
+
+    let asset_path = manifest_dir.join("assets/tailwind.css");
+    if asset_path.exists() {
+        return;
+    }
+    if let Some(assets_dir) = asset_path.parent() {
+        fs::create_dir_all(assets_dir)
+            .unwrap_or_else(|error| panic!("create {}: {error}", assets_dir.display()));
+    }
+    fs::write(&asset_path, PLACEHOLDER)
+        .unwrap_or_else(|error| panic!("write {}: {error}", asset_path.display()));
 }
 
 /// Bake git facts into the build so the header's version chip can show the

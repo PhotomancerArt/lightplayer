@@ -100,6 +100,6 @@ fn SidebarLink(entry: &'static DocPage, active: bool) -> Element {
         "tw:rounded-sm tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:hover:bg-background-wash tw:hover:text-strong-foreground"
     };
     rsx! {
-        a { class: "{class}", href: "#/docs/{entry.slug}", "{entry.title}" }
+        a { class: "{class}", href: "/docs/{entry.slug}", "{entry.title}" }
     }
 }

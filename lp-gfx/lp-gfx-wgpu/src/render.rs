@@ -8,7 +8,6 @@ use lp_shader::TextureBindingSpecs;
 use lps_shared::{LpsValueF32, TextureShapeHint, TextureStorageFormat};
 
 use crate::gpu_graphics::GpuShared;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::sample_pass::SamplePass;
 use crate::texture_backing::{gpu_format, gpu_texture_mut};
 use crate::uniform_layout::{TextureGlobal, UniformTable, reflect_textures, reflect_uniforms};
@@ -40,15 +39,12 @@ pub struct GpuShader {
     shared: Arc<GpuShared>,
     /// Authored GLSL, kept for the lazily-built sample pipeline (the sample
     /// unit re-assembles from source with a different wrapper `main`).
-    #[cfg(not(target_arch = "wasm32"))]
     authored: String,
     /// Compile-time texture specs, kept so the sample unit lowers texture
     /// call sites identically to the render unit.
-    #[cfg(not(target_arch = "wasm32"))]
     texture_specs: TextureBindingSpecs,
-    /// Sample-point pass (native LED-output path), built on the first
+    /// Sample-point pass (the LED-output path), built on the first
     /// `sample_rgba16` call — render-only consumers never pay for it.
-    #[cfg(not(target_arch = "wasm32"))]
     sample_pass: Option<SamplePass>,
     /// Validated naga module (drives uniform encoding offsets).
     module: naga::Module,
@@ -219,16 +215,13 @@ impl GpuShader {
 
         Ok(Self {
             shared,
-            #[cfg(not(target_arch = "wasm32"))]
             authored: String::from(authored),
             module: compiled.module,
             table,
             textures: texture_globals,
             pipeline,
             bindings,
-            #[cfg(not(target_arch = "wasm32"))]
             texture_specs: textures.clone(),
-            #[cfg(not(target_arch = "wasm32"))]
             sample_pass: None,
         })
     }
@@ -237,7 +230,6 @@ impl GpuShader {
     /// wrapper unit, check its uniform interface matches the render unit's
     /// (same authored declarations — a mismatch means the assembler broke),
     /// and build the point-list pipeline over the shared bind group layout.
-    #[cfg(not(target_arch = "wasm32"))]
     fn ensure_sample_pass(&mut self) -> Result<(), GfxError> {
         if self.sample_pass.is_none() {
             let compiled =
@@ -510,9 +502,10 @@ impl LpShader for GpuShader {
 
     /// Evaluate the shader at the caller's Q16.16 points via the point-list
     /// sample pass (see [`crate::sample_pass`]) and quantize into `out` with
-    /// the CPU packing rule. Native only — the LED-output path of the
-    /// non-embedded lp-server.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// the CPU packing rule. Native results are same-frame (blocking
+    /// readback); the browser tier serves them with one frame of latency
+    /// via `map_async` (black on the very first frame) — see the sample-pass
+    /// module docs.
     fn sample_rgba16(
         &mut self,
         points: &mut SamplePointsHandle,
@@ -571,22 +564,6 @@ impl LpShader for GpuShader {
             .as_mut()
             .expect("sample pass was ensured above")
             .run(shared, point_coords, bind_group, out_channels)
-    }
-
-    /// Browser GPU tier: LED output is not a browser product path and the
-    /// blocking readback the sample pass needs is unavailable on wasm32
-    /// (fidelity-tiers ADR) — explicit error, never a silent CPU substitute.
-    #[cfg(target_arch = "wasm32")]
-    fn sample_rgba16(
-        &mut self,
-        _points: &mut SamplePointsHandle,
-        _out: &mut SampleOutHandle,
-        _uniforms: &LpsValueF32,
-    ) -> Result<(), GfxError> {
-        Err(GfxError::Render(String::from(
-            "sample_rgba16 is unavailable on the browser GPU tier (blocking readback is \
-             native-only; LED-output sampling runs on native servers or the CPU tier)",
-        )))
     }
 }
 

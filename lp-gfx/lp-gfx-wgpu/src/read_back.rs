@@ -8,9 +8,9 @@
 //!   `device.poll(wait)` — bounded and synchronous; the native server host
 //!   can afford it (LED output path).
 //! - **wasm32**: explicit `GfxError::Backend` — the browser cannot block on
-//!   a map, the gallery never reads back, and probes/wire run on the CPU
-//!   tier. A deferred/async readback API will be designed when a real
-//!   browser consumer appears.
+//!   a map. Fixture sampling — the one browser consumer that needs bytes —
+//!   does not come through here: the sample pass keeps its own
+//!   one-frame-latency `map_async` pipeline (see [`crate::sample_pass`]).
 
 use lp_gfx::{GfxError, TextureData};
 use lps_shared::TextureStorageFormat;
