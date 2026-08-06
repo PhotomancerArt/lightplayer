@@ -561,6 +561,8 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -573,9 +575,11 @@ dependencies = [
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -594,6 +598,7 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4712,6 +4717,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -5564,6 +5570,29 @@ dependencies = [
  "lp-cloud-store-mem",
  "lpc-cloud-api",
  "lpc-history",
+]
+
+[[package]]
+name = "lp-cloud-server"
+version = "40.0.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "env_logger 0.11.9",
+ "getrandom 0.3.4",
+ "http-body-util",
+ "log",
+ "lp-cloud-domain",
+ "lp-cloud-store-mem",
+ "lp-cloud-store-sqlite",
+ "lpc-cloud-api",
+ "lpc-history",
+ "lpfs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -9936,6 +9965,7 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
