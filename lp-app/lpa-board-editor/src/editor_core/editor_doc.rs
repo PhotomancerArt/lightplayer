@@ -109,6 +109,10 @@ impl EditorDoc {
             purchase_urls: vec![],
             usb_bridge: None,
             notes: vec![],
+            // A new board states no default LED wire until someone knows
+            // which pin the pixels go on (boards/README.md: omit what you
+            // cannot verify).
+            default_led_wires: Vec::new(),
             hw: lpa_boards::BoardDrawing {
                 width: 100.0,
                 module: DrawnModule {

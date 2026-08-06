@@ -14,10 +14,12 @@ use lpc_mapping::{Map2dDoc, bounds_of_points, resolve};
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
 use crate::view::object_list::ObjectList;
 use crate::view::properties_popover::PropertiesPopover;
+use crate::view::reference::ReferenceImage;
 
 /// Host-provided file operations (the header renders new/open/save when
 /// present; save is a data-URL download built from the live document).
@@ -25,6 +27,18 @@ use crate::view::properties_popover::PropertiesPopover;
 pub struct EditorFileOps {
     pub on_new: EventHandler<()>,
     pub on_open: EventHandler<()>,
+}
+
+/// Host-provided reference-image operations (page host only, like
+/// [`EditorFileOps`]): the header renders "ref" pick/clear/opacity controls
+/// when present. The host owns loading and persistence; the editor only
+/// reports what the user asked for.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ReferenceOps {
+    /// Open the host's file dialog.
+    pub on_pick: EventHandler<()>,
+    /// Opacity change or clear (`None`).
+    pub on_change: EventHandler<Option<ReferenceImage>>,
 }
 
 /// Canvas view toggles (editor defaults: wiring view on — this is the
@@ -38,6 +52,9 @@ pub struct EditorViewOptions {
     /// without a feed this falls back to the object palette.
     pub live: bool,
     pub fit_preview: bool,
+    /// Show the host-supplied reference image (`reference` prop); moot
+    /// without one.
+    pub reference: bool,
 }
 
 impl Default for EditorViewOptions {
@@ -48,6 +65,7 @@ impl Default for EditorViewOptions {
             universes: false,
             live: false,
             fit_preview: false,
+            reference: true,
         }
     }
 }
@@ -67,6 +85,10 @@ pub fn MapEditor(
     #[props(default)]
     initial_camera: Option<[f32; 3]>,
     #[props(default)] initial_selection: Vec<usize>,
+    /// Stories: descend into the (single) initial selection after seeding,
+    /// so scoped-state captures are deterministic.
+    #[props(default = false)]
+    initial_descend: bool,
     #[props(default)] initial_draft: Vec<[f32; 2]>,
     #[props(default)] initial_view: Option<EditorViewOptions>,
     /// Host-owned view options (the fixture face's toggle bar drives the
@@ -83,11 +105,22 @@ pub fn MapEditor(
     /// and the user expects a re-fit).
     #[props(default)]
     refit_epoch: u64,
+    /// Host-owned reference image for tracing, rendered under the authored
+    /// geometry. Editor-side state only — never part of the document.
+    #[props(default)]
+    reference: Option<ReferenceImage>,
+    /// Reference pick/clear/opacity controls render when present (page
+    /// host); the fixture face omits it and loses nothing.
+    #[props(default)]
+    reference_ops: Option<ReferenceOps>,
 ) -> Element {
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
         for index in &initial_selection {
-            session.selection.objects.insert(*index);
+            session.selection.insert_path(ShapePath::root(*index));
+        }
+        if initial_descend {
+            session.descend();
         }
         if !initial_draft.is_empty() {
             session.tool = MapTool::Path {
@@ -113,6 +146,17 @@ pub fn MapEditor(
     // docked as a right-side pane that shrinks the view rather than
     // floating over it (M5 gate direction).
     let mut rail_open = use_signal(|| false);
+
+    // The live feed crosses into the canvas as a SIGNAL so a 60Hz color
+    // frame re-renders only this thin component, never the 1500-node lamp
+    // tree (P2 of the view/edit-split plan; the canvas applies colors as
+    // direct DOM writes). Keep-last-good lives here: an apply round-trip
+    // empties the host feed for a frame or two, and falling back to the
+    // palette would read as live mode dropping out.
+    let mut live_feed = use_signal(Vec::<[u8; 3]>::new);
+    if !live_colors.is_empty() && *live_feed.peek() != live_colors {
+        live_feed.set(live_colors.clone());
+    }
 
     // Re-seed when the host bumps the epoch (render-time guarded write).
     let mut seen_epoch = use_signal(|| doc_epoch);
@@ -181,14 +225,38 @@ pub fn MapEditor(
         });
     }
 
-    let tool_hint = match session.read().tool {
-        MapTool::Select => {
-            "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
-        }
-        MapTool::Grid => "click to drop a default grid — size it in the properties popover",
-        MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
-        MapTool::Path { .. } => {
-            "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+    // The hint teaches the group grammar exactly when it applies (G1
+    // feedback: double-click descend is undiscoverable without a prompt):
+    // a selected group invites entering; a descended selection explains
+    // write-through and the way out. Tool hints otherwise.
+    let tool_hint = {
+        let session_read = session.read();
+        let selected_group = matches!(session_read.tool, MapTool::Select)
+            && session_read.selection.single().is_some_and(|path| {
+                path.resolve(session_read.doc()).is_some_and(|shape| {
+                    crate::editor_core::shape_path::structural_child_count(shape) > 0
+                })
+            });
+        let descended = matches!(session_read.tool, MapTool::Select)
+            && session_read
+                .selection
+                .single()
+                .is_some_and(|path| !path.is_root());
+        match session_read.tool {
+            MapTool::Select if selected_group => {
+                "double-click enters the group — edit its sub-object with every instance live · esc leaves"
+            }
+            MapTool::Select if descended => {
+                "editing the sub-object — every instance follows · esc leaves the group"
+            }
+            MapTool::Select => {
+                "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
+            }
+            MapTool::Grid => "click to drop a default grid — size it in the properties popover",
+            MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
+            MapTool::Path { .. } => {
+                "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+            }
         }
     };
 
@@ -207,6 +275,8 @@ pub fn MapEditor(
                 file_ops,
                 scene_menu,
                 on_doc_change,
+                reference: reference.clone(),
+                reference_ops,
             }
             div { class: "lpme-body",
                 div { class: "lpme-canvas-wrap",
@@ -216,8 +286,9 @@ pub fn MapEditor(
                         view_opts,
                         viewport,
                         drag,
-                        live_colors,
+                        live_feed,
                         on_committed,
+                        reference,
                     }
                     PropertiesPopover { session, camera, viewport, drag, on_committed }
                     div { class: "lpme-hint", "{tool_hint}" }
@@ -329,6 +400,7 @@ fn HelpFloat() -> Element {
                     ("V / G / R / P", "select · grid · ring · path tool"),
                     ("N / A / U / L", "numbers · arrows · universes · live"),
                     ("F", "texture-frame preview"),
+                    ("B", "reference image"),
                     ("0", "zoom to fit"),
                     ("⌘ + scroll", "zoom at cursor"),
                     ("right-drag / scroll", "pan"),
@@ -336,7 +408,8 @@ fn HelpFloat() -> Element {
                     ("⌘A", "select all"),
                     ("⌫", "delete selection"),
                     ("⏎", "finish path"),
-                    ("esc", "back out · clear · select tool"),
+                    ("dbl-click", "enter a group (edit its sub-object)"),
+                    ("esc", "back out · leave group · clear · select tool"),
                 ] {
                     div { class: "lpme-help-row",
                         span { class: "lpme-help-keys", "{keys}" }
@@ -447,18 +520,30 @@ fn handle_key(
                     let current = view_opts.peek().fit_preview;
                     view_opts.write().fit_preview = !current;
                 }
+                "b" => {
+                    let current = view_opts.peek().reference;
+                    view_opts.write().reference = !current;
+                }
                 "0" => fit_pending.set(true),
                 _ => {}
             }
         }
         Key::Escape => {
             let mut s = session.write();
-            // D6: never discard work wholesale — back out one path vertex,
-            // then clear selection, then fall back to the select tool.
+            // The ladder (D6 + the selection/tree ADR): back out one path
+            // vertex, then drop a vertex sub-selection, then ASCEND out of
+            // a descended group, then clear selection, then select tool.
             if s.path_backout() {
                 return;
             }
-            if !s.selection.is_empty() || s.selection.vertex.is_some() {
+            if s.selection.vertex.is_some() {
+                s.selection.vertex = None;
+                return;
+            }
+            if s.ascend() {
+                return;
+            }
+            if !s.selection.is_empty() {
                 s.selection.clear();
             } else {
                 s.tool = MapTool::Select;

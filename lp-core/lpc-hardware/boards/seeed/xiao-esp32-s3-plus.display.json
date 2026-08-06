@@ -24,6 +24,9 @@
     }
   ],
   "usb_bridge": "native-usb-jtag",
+  "default_led_wires": [
+    "D10"
+  ],
   "hw": {
     "width": 76,
     "module": {

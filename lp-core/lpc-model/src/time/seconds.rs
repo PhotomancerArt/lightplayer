@@ -4,7 +4,7 @@
 //! `Phasor` shape (a wrapped `[0,1)` cycle position), `Seconds` is a plain,
 //! explicit, unbounded elapsed-time scalar: no wrapping, no freeze semantics.
 //! It has no dedicated Rust newtype — like `lp::clock::Rate`
-//! (`nodes/clock/clock_controls.rs`), it is a named shape laid over a plain
+//! (`nodes/clock/clock_transport.rs`), it is a named shape laid over a plain
 //! `f32` field so a `ValueSlot<f32>` can opt into this shape and editor hint
 //! without introducing a wrapper type.
 

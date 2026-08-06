@@ -5821,6 +5821,7 @@ dependencies = [
  "lpc-mapping",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5864,6 +5865,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "js-sys",
+ "jsonschema",
  "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
@@ -5873,7 +5875,9 @@ dependencies = [
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
+ "lpc-engine",
  "lpc-history",
+ "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",

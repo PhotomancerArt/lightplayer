@@ -164,6 +164,12 @@ pub fn App() -> Element {
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
         controller.set_random(crate::library_host_opfs::random_bytes);
+        // The LOCAL slug stamp the library dates packages with — the same
+        // one the setup flow derives a device name's date from, so a board
+        // named at provision and the project generated beside it agree
+        // about what day it is.
+        #[cfg(target_arch = "wasm32")]
+        controller.set_local_stamp(crate::library_host_opfs::local_slug_stamp);
         // Layered settings (P4): the persisted user layer loads
         // synchronously before the actor spawns (settings are effective
         // before panes render), and user mutations write back through the
