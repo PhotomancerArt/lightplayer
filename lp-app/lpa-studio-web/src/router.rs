@@ -643,7 +643,10 @@ mod tests {
             StudioRoute::parse("#/project/2026-07-09-1421-basic"),
             StudioRoute::Devices
         );
-        assert_eq!(StudioRoute::parse("#/project/prj_abc"), StudioRoute::Devices);
+        assert_eq!(
+            StudioRoute::parse("#/project/prj_abc"),
+            StudioRoute::Devices
+        );
     }
 
     #[test]

@@ -122,7 +122,10 @@ pub fn SiteChrome(
 /// [`ToolsMenu`] (sections navigate this tab; tools open new ones).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NavOverflowMenu(section: SiteSection, #[props(default = false)] initially_open: bool) -> Element {
+fn NavOverflowMenu(
+    section: SiteSection,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
     rsx! {
         IconMenuButton {
             icon: StudioIconName::More,
