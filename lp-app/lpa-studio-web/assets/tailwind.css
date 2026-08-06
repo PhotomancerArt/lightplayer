@@ -352,6 +352,9 @@
   .tw\:h-8 {
     height: calc(var(--tw-spacing) * 8);
   }
+  .tw\:h-9 {
+    height: calc(var(--tw-spacing) * 9);
+  }
   .tw\:h-11 {
     height: calc(var(--tw-spacing) * 11);
   }
@@ -648,6 +651,9 @@
   }
   .tw\:w-\[min\(340px\,calc\(100vw-24px\)\)\] {
     width: min(340px, calc(100vw - 24px));
+  }
+  .tw\:w-\[min\(680px\,100\%\)\] {
+    width: min(680px, 100%);
   }
   .tw\:w-\[min\(1520px\,100\%\)\] {
     width: min(1520px, 100%);
@@ -2841,6 +2847,11 @@
   .tw\:max-\[640px\]\:hidden {
     @media (width < 640px) {
       display: none;
+    }
+  }
+  .tw\:max-\[640px\]\:grid-cols-1 {
+    @media (width < 640px) {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
     }
   }
   .tw\:max-\[640px\]\:gap-0 {
