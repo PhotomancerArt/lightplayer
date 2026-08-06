@@ -46,6 +46,7 @@
     --tw-radius-md: var(--studio-radius-md);
     --tw-radius-lg: 0.5rem;
     --tw-animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    --tw-aspect-video: 16 / 9;
     --tw-default-transition-duration: 150ms;
     --tw-default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --tw-color-background: var(--studio-color-bg);
@@ -123,6 +124,9 @@
   }
   .tw\:relative {
     position: relative;
+  }
+  .tw\:sticky {
+    position: sticky;
   }
   .tw\:inset-0 {
     inset: calc(var(--tw-spacing) * 0);
@@ -319,6 +323,9 @@
   .tw\:aspect-\[9\/5\] {
     aspect-ratio: 9/5;
   }
+  .tw\:aspect-video {
+    aspect-ratio: var(--tw-aspect-video);
+  }
   .tw\:h-1 {
     height: calc(var(--tw-spacing) * 1);
   }
@@ -435,6 +442,9 @@
   }
   .tw\:max-h-80 {
     max-height: calc(var(--tw-spacing) * 80);
+  }
+  .tw\:max-h-96 {
+    max-height: calc(var(--tw-spacing) * 96);
   }
   .tw\:min-h-0 {
     min-height: calc(var(--tw-spacing) * 0);
@@ -637,6 +647,15 @@
   .tw\:w-\[430px\] {
     width: 430px;
   }
+  .tw\:w-\[520px\] {
+    width: 520px;
+  }
+  .tw\:w-\[560px\] {
+    width: 560px;
+  }
+  .tw\:w-\[640px\] {
+    width: 640px;
+  }
   .tw\:w-\[720px\] {
     width: 720px;
   }
@@ -780,6 +799,9 @@
   }
   .tw\:min-w-\[76px\] {
     min-width: 76px;
+  }
+  .tw\:min-w-full {
+    min-width: 100%;
   }
   .tw\:flex-1 {
     flex: 1;
@@ -1418,6 +1440,12 @@
   .tw\:bg-background-wash {
     background-color: var(--tw-color-background-wash);
   }
+  .tw\:bg-background\/60 {
+    background-color: var(--tw-color-background);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--tw-color-background) 60%, transparent);
+    }
+  }
   .tw\:bg-background\/70 {
     background-color: var(--tw-color-background);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1766,6 +1794,9 @@
   .tw\:pr-1\.5 {
     padding-right: calc(var(--tw-spacing) * 1.5);
   }
+  .tw\:pr-3 {
+    padding-right: calc(var(--tw-spacing) * 3);
+  }
   .tw\:pr-8 {
     padding-right: calc(var(--tw-spacing) * 8);
   }
@@ -2014,6 +2045,9 @@
   .tw\:whitespace-nowrap {
     white-space: nowrap;
   }
+  .tw\:whitespace-pre {
+    white-space: pre;
+  }
   .tw\:whitespace-pre-wrap {
     white-space: pre-wrap;
   }
@@ -2037,6 +2071,9 @@
   }
   .tw\:text-dim-foreground {
     color: var(--tw-color-dim-foreground);
+  }
+  .tw\:text-foreground {
+    color: var(--tw-color-foreground);
   }
   .tw\:text-heading {
     color: var(--tw-color-heading);
