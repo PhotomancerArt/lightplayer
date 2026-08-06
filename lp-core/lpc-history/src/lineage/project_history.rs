@@ -447,7 +447,9 @@ mod tests {
     fn join_keep_mine() {
         let mut history = ProjectHistory::new(created()).unwrap();
         history.record_save(hash(b"mine"), 2.0);
-        let event = history.record_join(hash(b"mine"), hash(b"theirs"), 3.0).unwrap();
+        let event = history
+            .record_join(hash(b"mine"), hash(b"theirs"), 3.0)
+            .unwrap();
         assert!(matches!(event.kind, EventKind::Joined { .. }));
         assert_eq!(history.head(), Some(hash(b"mine")));
         // the losing side is Behind, not Diverged — peers fast-forward
@@ -461,7 +463,9 @@ mod tests {
     fn join_use_theirs() {
         let mut history = ProjectHistory::new(created()).unwrap();
         history.record_save(hash(b"mine"), 2.0);
-        history.record_join(hash(b"theirs"), hash(b"mine"), 3.0).unwrap();
+        history
+            .record_join(hash(b"theirs"), hash(b"mine"), 3.0)
+            .unwrap();
         assert_eq!(history.head(), Some(hash(b"theirs")));
         // old local head stays reachable via the line
         assert_eq!(history.classify(hash(b"mine")), SyncRelation::Behind);
@@ -502,9 +506,13 @@ mod tests {
     fn join_after_join_continues_the_line() {
         let mut history = ProjectHistory::new(created()).unwrap();
         history.record_save(hash(b"v1"), 2.0);
-        history.record_join(hash(b"remote1"), hash(b"v1"), 3.0).unwrap();
+        history
+            .record_join(hash(b"remote1"), hash(b"v1"), 3.0)
+            .unwrap();
         history.record_save(hash(b"v2"), 4.0);
-        history.record_join(hash(b"v2"), hash(b"remote2"), 5.0).unwrap();
+        history
+            .record_join(hash(b"v2"), hash(b"remote2"), 5.0)
+            .unwrap();
         assert_eq!(history.head(), Some(hash(b"v2")));
         for known in [b"v1" as &[u8], b"remote1", b"remote2"] {
             assert_eq!(history.classify(hash(known)), SyncRelation::Behind);
@@ -516,7 +524,9 @@ mod tests {
     fn join_replay_round_trip() {
         let mut history = ProjectHistory::new(created()).unwrap();
         history.record_save(hash(b"mine"), 2.0);
-        history.record_join(hash(b"theirs"), hash(b"mine"), 3.0).unwrap();
+        history
+            .record_join(hash(b"theirs"), hash(b"mine"), 3.0)
+            .unwrap();
         history.record_save(hash(b"v3"), 4.0);
         let replayed = ProjectHistory::from_events(history.events().to_vec()).unwrap();
         assert_eq!(replayed, history);
@@ -529,7 +539,9 @@ mod tests {
             created(),
             HistoryEvent {
                 at: 2.0,
-                kind: EventKind::Saved { version: hash(b"v1") },
+                kind: EventKind::Saved {
+                    version: hash(b"v1")
+                },
             },
             HistoryEvent {
                 at: 3.0,
@@ -546,7 +558,9 @@ mod tests {
     fn superseded_version_is_valid_fork_parent() {
         let mut parent = ProjectHistory::new(created()).unwrap();
         parent.record_save(hash(b"mine"), 2.0);
-        parent.record_join(hash(b"mine"), hash(b"theirs"), 3.0).unwrap();
+        parent
+            .record_join(hash(b"mine"), hash(b"theirs"), 3.0)
+            .unwrap();
         let parent_uid = PrefixedUid::mint(UidPrefix::Project, &[2u8; 16]);
         assert!(ProjectHistory::fork_from(&parent, parent_uid, hash(b"theirs"), 4.0).is_ok());
     }
