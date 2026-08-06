@@ -13,9 +13,9 @@ use crate::app::layout::site_chrome::{SiteChrome, SiteSection};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::base::{LogoLockup, LogoMark};
 
-#[story(description = "Studio section active, dev-branch chip on the right.")]
+#[story(description = "Devices section active, dev-branch chip on the right.")]
 pub(crate) fn studio_active() -> Element {
-    frame(1000, SiteSection::Studio, branch_chip())
+    frame(1000, SiteSection::Devices, branch_chip())
 }
 
 #[story(description = "Boards section active.")]
@@ -39,7 +39,7 @@ pub(crate) fn docs_active() -> Element {
 pub(crate) fn narrow() -> Element {
     frame(
         390,
-        SiteSection::Studio,
+        SiteSection::Devices,
         BuildChip::Branch {
             name: "claude/settings-provenance-rework-b6680f".to_string(),
             dirty: true,

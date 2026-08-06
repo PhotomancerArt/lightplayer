@@ -92,13 +92,16 @@ fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
 /// the wordmark; the mark — triangle included — stays quiet `currentColor`.
 /// `compact` drops the wordmark and switches to the icon-only rule (the
 /// triangle cycles instead). `mono` is the one-color form for print/light
-/// contexts — set `color` on a parent.
+/// contexts — set `color` on a parent. `href` renders the lockup as a
+/// link (the app chrome points it home); without it the lockup stays an
+/// inert span for print/story surfaces.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoLockup(
     #[props(default = 22)] size: u32,
     #[props(default = false)] compact: bool,
     #[props(default = false)] mono: bool,
+    #[props(default)] href: Option<String>,
 ) -> Element {
     // Optical norm: mark→word gap ≈ 0.5× wordmark cap height measured from
     // the mark's visual edge; the viewBox carries ~9% right-side air (pad
@@ -106,18 +109,32 @@ pub fn LogoLockup(
     let gap = ((size as f32) * 0.12).round().max(2.0) as u32;
     let word_px = ((size as f32) * 0.61).round() as u32;
     let tone = if mono { "" } else { "tw:text-strong" };
-    rsx! {
-        span {
-            class: "tw:flex tw:flex-none tw:cursor-default tw:items-center {tone}",
-            style: "gap:{gap}px",
-            title: "LightPlayer",
-            LogoMark { size, animated: compact && !mono }
-            if !compact {
-                span { class: "tw:max-[560px]:hidden tw:flex",
-                    BrandWord { word_px, mono }
-                }
+    let body = rsx! {
+        LogoMark { size, animated: compact && !mono }
+        if !compact {
+            span { class: "tw:max-[560px]:hidden tw:flex",
+                BrandWord { word_px, mono }
             }
         }
+    };
+    match href {
+        Some(href) => rsx! {
+            a {
+                class: "tw:flex tw:flex-none tw:items-center tw:no-underline {tone}",
+                style: "gap:{gap}px",
+                href: "{href}",
+                title: "LightPlayer — home",
+                {body}
+            }
+        },
+        None => rsx! {
+            span {
+                class: "tw:flex tw:flex-none tw:cursor-default tw:items-center {tone}",
+                style: "gap:{gap}px",
+                title: "LightPlayer",
+                {body}
+            }
+        },
     }
 }
 
