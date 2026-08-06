@@ -312,7 +312,8 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
     }
 }
 
-/// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
+/// The blank board's SETUP FORM (state-flow model §1-A): the Settings
+/// front door
 /// IS the form — the board picker (M5), a prefilled date-default name,
 /// and ONE Install button; no confirm, no separate naming dialog. The
 /// name rides the provision op and stamps at first post-flash contact;
@@ -580,9 +581,10 @@ fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
 }
 
 /// One roster card: the device (or live sim session) as a tabbed control
-/// panel. The grow control is the editor entry; the tabs carry status,
-/// project, settings, console (P2), and the danger zone; body clicks are
-/// quiet (drop targets stay live).
+/// panel. The grow control is the editor entry; the tabs carry the ▶
+/// picture, the Settings front door (health + technical — the Status tab
+/// folded into it at the honest-preview G1), project, console (P2), and
+/// the danger zone; body clicks are quiet (drop targets stay live).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -659,7 +661,7 @@ pub(crate) fn DeviceCard(
     // The ▶ tab exists exactly when the card holds a project: that is the
     // one condition under which there is something honest to draw (the
     // device's frames, or the sim's own re-simulation). A board with
-    // nothing on it gets no picture tab — its Status body says so instead.
+    // nothing on it gets no picture tab — its front-door body says so instead.
     let mut tabs = device_card_tabs(view, card.project.is_some());
     // M8′: the Connected-empty device offers the Project-tab PICKER —
     // the tab exists exactly when there is something honest to offer
@@ -669,15 +671,15 @@ pub(crate) fn DeviceCard(
         && !project_choices.is_empty()
         && !tabs.iter().any(|tab| tab.tab == DeviceCardTab::Project);
     if picker_mode {
-        // Straight after Status, wherever Status sits — the ▶ tab now
-        // leads the row on cards that have one, so index 1 is no longer a
-        // synonym for "after the front door".
-        let after_status = tabs
+        // Straight after the front door (Settings), wherever it sits —
+        // the ▶ tab now leads the row on cards that have one, so index 1
+        // is no longer a synonym for "after the front door".
+        let after_front_door = tabs
             .iter()
-            .position(|tab| tab.tab == DeviceCardTab::Status)
+            .position(|tab| tab.tab == DeviceCardTab::Settings)
             .map_or(0, |index| index + 1);
         tabs.insert(
-            after_status,
+            after_front_door,
             CardTabView {
                 tab: DeviceCardTab::Project,
                 sections: Vec::new(),
@@ -708,15 +710,15 @@ pub(crate) fn DeviceCard(
     // interaction back to core via `HomeOp::CardUi`.
     let card_key = card.identity_key().to_string();
     // a state change may drop the selected tab (e.g. Danger during an
-    // operation): fall back to Status rather than a blank body. Pane
-    // mode has no Console tab (round 3.5) — a Console selection lands
-    // on Status.
+    // operation): fall back to Settings (the front door) rather than a
+    // blank body. Pane mode has no Console tab (round 3.5) — a Console
+    // selection lands on Settings.
     let active_tab = tabs
         .iter()
         .find(|tab| tab.tab == card.ui.tab)
-        .map_or(DeviceCardTab::Status, |tab| tab.tab);
+        .map_or(DeviceCardTab::Settings, |tab| tab.tab);
     let active_tab = if pane && active_tab == DeviceCardTab::Console {
-        DeviceCardTab::Status
+        DeviceCardTab::Settings
     } else {
         active_tab
     };
@@ -950,10 +952,19 @@ pub(crate) fn DeviceCard(
                     div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                         match active_tab {
                             DeviceCardTab::Play => rsx! {
-                                PlayTabBody { card: card.clone(), sim, now }
+                                PlayTabBody {
+                                    card: card.clone(),
+                                    sim,
+                                    now,
+                                    // The same editor entry the title-bar ⤢
+                                    // dispatches (G1: the picture carries its
+                                    // own way in).
+                                    open_action: grow_action.clone(),
+                                    on_action,
+                                }
                             },
-                            DeviceCardTab::Status => rsx! {
-                                {status_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
+                            DeviceCardTab::Settings => rsx! {
+                                {settings_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
                             },
                             DeviceCardTab::Console => rsx! {
                                 {console_tab_body(&card.console_tail)}
@@ -1223,36 +1234,42 @@ fn tab_button<A>(
     }
 }
 
-/// The Status tab: the Health section with the status line up front, and
+/// The Settings front door: the Health section with the status line up front, and
 /// the state-table affordance — today's card body, re-homed. The project's
 /// identity rides the ▶ tab's meta row (honest-device preview P3) rather
 /// than a row here.
-fn status_tab_body(
+fn settings_tab_body(
     card: &UiDeviceCard,
     tabs: &[CardTabView<CardRowAction>],
     on_action: EventHandler<UiAction>,
     card_key: &str,
     now_secs: Option<f64>,
 ) -> Element {
-    let health = tabs
+    // The folded front door (G1: Status retired into Settings): health
+    // sections keep their narrative treatment and the forms; Technical
+    // sections follow as plain fact rows.
+    let sections = tabs
         .iter()
-        .find(|tab| tab.tab == DeviceCardTab::Status)
+        .find(|tab| tab.tab == DeviceCardTab::Settings)
         .map(|tab| tab.sections.as_slice())
         .unwrap_or_default();
-    // The blank board's Status tab IS the setup form (model §1-A): the
+    let (technical, health): (Vec<_>, Vec<_>) = sections
+        .iter()
+        .partition(|section| section.title == "Technical");
+    // The blank board's front door IS the setup form (model §1-A): the
     // form replaces the affordance rows (SetUp came through them).
     let setup_form = !card.sim
         && matches!(
             card.state,
             RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware
         );
-    // Recovery mode's Status tab carries the exit verbs DIRECTLY (bench
+    // Recovery mode's front door carries the exit verbs DIRECTLY (bench
     // feedback 2026-07-31): a user here has already done the hard part,
     // and routing them through Troubleshoot — a sheet that mostly explains
     // how to get INTO this state — was backwards.
     let recovery_face = !card.sim && card.state == RosterCardState::RecoveryMode;
     rsx! {
-        for section in health {
+        for section in health.iter() {
             for line in section.lines.iter() {
                 if line.label == "status" {
                     // the headline: tinted like the edge (the spike's
@@ -1305,7 +1322,7 @@ fn status_tab_body(
         } else if recovery_face {
             RecoveryFace { card_key: card_key.to_string(), on_action }
         } else {
-            for section in health {
+            for section in health.iter() {
                 for row in section.affordances.iter() {
                     div { class: "tw:mt-1",
                         {row_button(row, ActionButtonVariant::Quiet, on_action, card_key)}
@@ -1313,10 +1330,15 @@ fn status_tab_body(
                 }
             }
         }
+        // Technical facts follow the health story — the same rows the
+        // standalone Settings tab always drew.
+        for section in technical.iter() {
+            {fact_section(section, false, on_action, card_key)}
+        }
     }
 }
 
-/// A non-Status tab's body: the tab's sections as compact fact rows +
+/// A plain tab's body: the tab's sections as compact fact rows +
 /// advisory chip + affordances. Danger rows render as destructive menu
 /// rows (inspector-row convention); other affordances as quiet chips.
 fn sections_tab_body(
@@ -1333,32 +1355,46 @@ fn sections_tab_body(
     let menu_rows = active_tab == DeviceCardTab::Danger;
     rsx! {
         for section in sections {
-            if !section.lines.is_empty() {
-                dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-1 tw:text-xs",
-                    for line in section.lines.iter() {
-                        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[72px_minmax(0,1fr)] tw:gap-2",
-                            dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                                "{line.label}"
-                            }
-                            dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
-                                "{line.value}"
-                            }
+            {fact_section(section, menu_rows, on_action, card_key)}
+        }
+    }
+}
+
+/// One section as compact fact rows + advisory chip + affordance rows —
+/// the plain-tab treatment, also reused for the Technical facts at the
+/// bottom of the folded Settings front door.
+fn fact_section(
+    section: &RichSection<CardRowAction>,
+    menu_rows: bool,
+    on_action: EventHandler<UiAction>,
+    card_key: &str,
+) -> Element {
+    rsx! {
+        if !section.lines.is_empty() {
+            dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-1 tw:text-xs",
+                for line in section.lines.iter() {
+                    div { class: "tw:grid tw:min-w-0 tw:grid-cols-[72px_minmax(0,1fr)] tw:gap-2",
+                        dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                            "{line.label}"
+                        }
+                        dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
+                            "{line.value}"
                         }
                     }
                 }
             }
-            if let Some(chip) = section.chip.as_ref() {
-                div { StatusChip { status: chip_status(chip) } }
-            }
-            for row in section.affordances.iter() {
-                div {
-                    {row_button(
-                        row,
-                        if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
-                        on_action,
-                        card_key,
-                    )}
-                }
+        }
+        if let Some(chip) = section.chip.as_ref() {
+            div { StatusChip { status: chip_status(chip) } }
+        }
+        for row in section.affordances.iter() {
+            div {
+                {row_button(
+                    row,
+                    if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
+                    on_action,
+                    card_key,
+                )}
             }
         }
     }
@@ -1752,7 +1788,7 @@ fn NameForm(
 
 /// The name-stamping sheet (retained for the title-bar naming path;
 /// the NeedsAName FACE now names inline via [`NameForm`]): input +
-/// Enter-to-save; naming stamps the uid and the card returns to Status.
+/// Enter-to-save; naming stamps the uid and the card returns to the front door.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Element {
@@ -1814,7 +1850,7 @@ fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Eleme
 /// The name sheet's save: a non-empty name dispatches the stamp op and
 /// closes the sheet. Naming mints the device's uid, so its identity (and
 /// thus its `CardUiState` key) changes — the newly-stamped card comes up
-/// fresh on Status; no explicit tab reset needed.
+/// fresh on the front door; no explicit tab reset needed.
 fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandler<UiAction>) {
     let value = name.read().trim().to_string();
     if value.is_empty() {
@@ -1830,12 +1866,11 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
-        // ▶ goes to the tab that actually plays something. Status inherits
-        // the activity waveform (lucide Activity) — the heartbeat glyph the
-        // converged spike drew for it, and a better fit for "how is this
-        // board doing" than a play triangle ever was.
+        // ▶ goes to the tab that actually plays something. The gear keeps
+        // Settings even now that health folded into it (G1: the Status tab
+        // retired) — the gear is the "about this device" glyph users
+        // already track.
         DeviceCardTab::Play => StudioIconName::Play,
-        DeviceCardTab::Status => StudioIconName::MapLive,
         DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
         DeviceCardTab::Settings => StudioIconName::Settings,
         DeviceCardTab::Performance => StudioIconName::Performance,

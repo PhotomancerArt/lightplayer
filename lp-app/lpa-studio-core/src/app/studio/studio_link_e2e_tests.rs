@@ -1864,7 +1864,11 @@ fn card_tab_and_sheet_drive_through_core_ops() {
             .iter()
             .find(|card| !card.sim)
             .expect("the connected device card");
-        assert_eq!(card.ui.tab, DeviceCardTab::Status, "fresh card = Status");
+        assert_eq!(
+            card.ui.tab,
+            DeviceCardTab::Settings,
+            "fresh card = Settings front door"
+        );
         card.identity_key().to_string()
     };
 
@@ -2959,6 +2963,26 @@ fn coexisting_sim_and_device_running() -> (StudioController, FakeEsp32Device, cr
 fn coexisting_fixture(
     device_project_loaded: bool,
 ) -> (StudioController, FakeEsp32Device, crate::RuntimeId) {
+    let (studio, device, sim_id, _server, _lamps) =
+        coexisting_fixture_with_sim_server(device_project_loaded);
+    (studio, device, sim_id)
+}
+
+/// [`coexisting_fixture`], also handing back the in-process sim SERVER
+/// (so a test can drive its render frames — the sim feed needs the engine
+/// to actually publish) and the uid of an installed "Lamps" package whose
+/// demand chain reaches an Output node with real mapped lamps (the
+/// embedded Plasma example; Sign stops at the fixture, so its engine
+/// never publishes a non-empty frame).
+fn coexisting_fixture_with_sim_server(
+    device_project_loaded: bool,
+) -> (
+    StudioController,
+    FakeEsp32Device,
+    crate::RuntimeId,
+    Rc<RefCell<lpa_server::LpServer>>,
+    String,
+) {
     use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, StudioServerClient};
@@ -2985,6 +3009,11 @@ fn coexisting_fixture(
             1.0,
         )
         .unwrap();
+    let plasma = crate::app::home::embedded_example("examples/plasma")
+        .expect("the plasma example is embedded");
+    let lamps = store
+        .install_package("Lamps", &plasma.files(), PackageProvenance::Created, 1.0)
+        .unwrap();
 
     let mut device_state = FakeLightPlayerState::new()
         .with_project_files(porch_files)
@@ -3000,8 +3029,9 @@ fn coexisting_fixture(
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
 
+    let sim_server = Rc::new(RefCell::new(edit_e2e_server()));
     let sim_io = InProcessServerIo {
-        server: Rc::new(RefCell::new(edit_e2e_server())),
+        server: Rc::clone(&sim_server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
         sent: Rc::new(RefCell::new(Vec::new())),
     };
@@ -3015,7 +3045,7 @@ fn coexisting_fixture(
         },
     )))
     .expect("open on the sim succeeds");
-    (studio, device, sim_id)
+    (studio, device, sim_id, sim_server, lamps.uid.to_string())
 }
 
 /// A studio whose link registry holds one fake provider with one scripted
@@ -4019,11 +4049,11 @@ fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
     );
 
     // And an explicit choice outranks the default, permanently: moving to
-    // Status must not snap back to ▶ on the next view build.
-    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Status);
+    // Settings must not snap back to ▶ on the next view build.
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Settings);
     assert_eq!(
         device_card(&studio, &card_key).ui.tab,
-        crate::DeviceCardTab::Status,
+        crate::DeviceCardTab::Settings,
         "the user's tab choice is sticky"
     );
 }
@@ -4138,6 +4168,71 @@ fn the_feed_paces_itself_from_each_pulls_completion() {
             > Some(first),
         "once the gap elapsed the next frame is pulled"
     );
+}
+
+/// G1 ruling 3 (Q5 overturned), end to end: the SIM session rides the same
+/// published-frame feed a device does. Its card defaults to ▶, the feed
+/// pulls the sim engine's OWN published frame over the in-proc wire, and
+/// the home view's sim card carries it — no browser re-simulation anywhere.
+#[test]
+fn the_sim_card_feeds_real_frames_like_a_device() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp};
+
+    let (mut studio, _device, _sim_id, sim_server, lamps_uid) =
+        coexisting_fixture_with_sim_server(false);
+
+    // Swap the sim onto the project whose chain reaches an Output node —
+    // only a publishing engine has a frame for the feed to read.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage { key: lamps_uid },
+    )))
+    .expect("open the output-chain project on the sim");
+
+    // The engine publishes on render ticks; give it a few so the chain
+    // settles — compile, render, publish (the wasm sim's rAF loop does
+    // this continuously).
+    for _ in 0..5 {
+        sim_server.borrow_mut().advance_frame(16).expect("tick");
+    }
+
+    run_card_feeds(&mut studio);
+    let frame_revision = {
+        let pool = studio.runtime_pool_for_test();
+        let session = pool.sim_session().expect("the sim session");
+        assert!(
+            session.sim_loaded_project().is_some(),
+            "the sim knows its loaded project"
+        );
+        let feed = session.card_feed();
+        assert!(feed.pull_completed_at().is_some(), "the feed pull ran");
+        assert!(feed.handle_id().is_some(), "the feed acquired a handle");
+        let frame = feed.frame().expect("the sim engine's published frame");
+        assert!(!frame.bytes.is_empty(), "the published buffer arrived");
+        frame.revision
+    };
+
+    // The gallery's sim card carries the frame the feed banked — the same
+    // view wiring a device card uses, through HomeSimEvidence.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+    let view = studio.view();
+    let home = view.home.as_ref().expect("detached editor = gallery");
+    let sim_card = home.devices.iter().find(|card| card.sim).expect("sim card");
+    assert_eq!(
+        sim_card.ui.tab,
+        crate::DeviceCardTab::Play,
+        "a loaded sim opens on its picture, same default rule as hardware"
+    );
+    let frame = sim_card
+        .frame_preview
+        .as_ref()
+        .expect("the sim card wears the fed frame");
+    assert_eq!(frame.revision, frame_revision, "the same frame, not a copy");
 }
 
 /// A connected board running the demo project, with its card's ▶ tab
