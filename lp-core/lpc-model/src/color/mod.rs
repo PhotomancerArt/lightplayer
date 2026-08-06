@@ -37,6 +37,7 @@
 
 pub mod gradient;
 pub mod gradient_config;
+pub mod stops_string;
 
 pub use gradient::{
     COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_SHAPE_NAME, Gradient, GradientError, GradientStop,
@@ -47,3 +48,4 @@ pub use gradient_config::{
     GRADIENT_CONFIG_SHAPE_NAME, GradientConfig, MAX_CYCLE_SET, MIN_CYCLE_SET,
     gradient_config_lp_type,
 };
+pub use stops_string::{StopsParseError, parse_stops, print_stops};
