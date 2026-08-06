@@ -367,6 +367,80 @@ fn assemble_roster(
     (connections, devices)
 }
 
+/// The chrome session strip (vision D15/D16): every LIVE runtime
+/// session, in roster order (sim pinned first). Registry rows without a
+/// live session never appear (D36: chip existence = session existence).
+///
+/// Reuses [`assemble_roster`]'s card derivation — the strip and the
+/// gallery must never disagree on a session's status — then projects
+/// each live card down to wayfinding facts (D43: name and status only,
+/// no controls, no thumbnails).
+pub fn chrome_sessions(
+    registry_cards: &[UiDeviceCard],
+    pool: &HomePoolEvidence,
+    lens: Option<&crate::UiLensRuntime>,
+) -> Vec<crate::UiChromeSession> {
+    let (_, devices) = assemble_roster(registry_cards, pool);
+    devices
+        .into_iter()
+        // Live = the sim (its card exists only while the session does)
+        // or a device with pool-session evidence; registry-only rows
+        // have no session_key.
+        .filter(|card| card.sim || card.session_key.is_some())
+        .map(|card| {
+            let target = if card.sim {
+                crate::UiChromeSessionTarget::Sim {
+                    project_key: card.project.as_ref().map(|chip| chip.uid.clone()),
+                }
+            } else {
+                crate::UiChromeSessionTarget::Device {
+                    uid: card.uid.clone(),
+                }
+            };
+            let lensed = match (lens, card.sim) {
+                (Some(crate::UiLensRuntime::Sim { .. }), true) => true,
+                (Some(crate::UiLensRuntime::Device { uid }), false) => {
+                    // An unidentified lens device matches the (single)
+                    // live card that has no uid yet — same no-honest-
+                    // address window as the URL rule.
+                    match uid {
+                        Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
+                        None => card.uid.is_none(),
+                    }
+                }
+                _ => false,
+            };
+            crate::UiChromeSession {
+                key: card.identity_key().to_string(),
+                name: card.name.clone(),
+                sim: card.sim,
+                transport: if card.sim {
+                    String::new()
+                } else {
+                    card.transport.clone()
+                },
+                status: chip_status(&card.state),
+                lensed,
+                target,
+            }
+        })
+        .collect()
+}
+
+/// Collapse the roster's honest vocabulary to the strip's three dots
+/// (D16). Offline never reaches here (live-filtered above); everything
+/// that is neither running-clean nor connected-empty reads as attention
+/// — the chip only flags it, the card tells the story.
+fn chip_status(state: &RosterCardState) -> crate::UiChromeSessionStatus {
+    match state {
+        RosterCardState::RunningUpToDate => crate::UiChromeSessionStatus::Run,
+        RosterCardState::ConnectedEmpty | RosterCardState::ReadyToSetUp => {
+            crate::UiChromeSessionStatus::Empty
+        }
+        _ => crate::UiChromeSessionStatus::Attention,
+    }
+}
+
 /// Give the card an open setup flow is bound to the roster's LEADING
 /// position and report its [`UiDeviceCard::identity_key`] — the key the
 /// wizard's body takeover rides (G2 ruling, 2026-08-05: the wizard is a
