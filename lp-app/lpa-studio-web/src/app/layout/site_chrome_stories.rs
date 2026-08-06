@@ -53,7 +53,7 @@ pub(crate) fn docs_active() -> Element {
 
 #[story(
     label = "Narrow (390px)",
-    description = "Phone width: brand word hidden, secondary family folded into the ⋯ menu, long dirty branch left-ellipsized."
+    description = "Phone width: brand word hidden, secondary family folded into the ⋯ menu, dirty build icon in warning tone."
 )]
 pub(crate) fn narrow() -> Element {
     frame(
