@@ -78,7 +78,7 @@ mod tests {
     use crate::app::setup_flow::event::SetupEventKind;
 
     /// The events NO gesture may produce: things the world reports.
-    const OUTCOMES: [SetupEventKind; 9] = [
+    const OUTCOMES: [SetupEventKind; 10] = [
         SetupEventKind::PortGranted,
         SetupEventKind::PortPickerCancelled,
         SetupEventKind::PortPickerEmpty,
@@ -88,6 +88,7 @@ mod tests {
         SetupEventKind::FlashFailed,
         SetupEventKind::ProjectGenerated,
         SetupEventKind::PushCompleted,
+        SetupEventKind::SetUpElsewhere,
     ];
 
     fn every_gesture() -> Vec<SetupGesture> {

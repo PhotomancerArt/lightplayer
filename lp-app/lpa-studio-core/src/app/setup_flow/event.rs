@@ -68,6 +68,16 @@ pub enum SetupEvent {
     KeepFlashing,
     /// ABANDON_GUARD's and FLASH_FAILED's "Abandon".
     Abandon,
+    /// The target was set up by a route that is not this flow, while the
+    /// flow was still asking for a board: an "Open in sim" landed a
+    /// project on the simulator, and that project's advisory manifest
+    /// `target` is the board it implies (honest-device-preview vision D4).
+    ///
+    /// `board_id: None` means nothing could be inferred — the untargeted
+    /// project — and the picker is still the only way to answer.
+    SetUpElsewhere {
+        board_id: Option<String>,
+    },
 }
 
 impl SetupEvent {
@@ -97,6 +107,7 @@ impl SetupEvent {
             Self::CloseRequested => SetupEventKind::CloseRequested,
             Self::KeepFlashing => SetupEventKind::KeepFlashing,
             Self::Abandon => SetupEventKind::Abandon,
+            Self::SetUpElsewhere { .. } => SetupEventKind::SetUpElsewhere,
         }
     }
 }
@@ -128,12 +139,13 @@ pub enum SetupEventKind {
     CloseRequested,
     KeepFlashing,
     Abandon,
+    SetUpElsewhere,
 }
 
 impl SetupEventKind {
     /// Every event, for the exhaustive transition table. Kept honest the
     /// same way [`SetupStateKind::ALL`](super::SetupStateKind::ALL) is.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::ItsConnected,
         Self::PickBoardFirst,
         Self::ItsPluggedIn,
@@ -158,6 +170,7 @@ impl SetupEventKind {
         Self::CloseRequested,
         Self::KeepFlashing,
         Self::Abandon,
+        Self::SetUpElsewhere,
     ];
 
     pub fn ordinal(self) -> usize {
@@ -186,6 +199,7 @@ impl SetupEventKind {
             Self::CloseRequested => 21,
             Self::KeepFlashing => 22,
             Self::Abandon => 23,
+            Self::SetUpElsewhere => 24,
         }
     }
 
@@ -216,6 +230,7 @@ impl SetupEventKind {
             Self::CloseRequested => "close-requested",
             Self::KeepFlashing => "keep-flashing",
             Self::Abandon => "abandon",
+            Self::SetUpElsewhere => "set-up-elsewhere",
         }
     }
 }
