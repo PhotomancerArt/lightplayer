@@ -178,7 +178,7 @@ pub fn NestedPanelGroup(
     let target = group.target;
     let label = group.label.clone();
     let heading_class = if held > 0 {
-        "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-attention-foreground"
+        "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-engaged-foreground"
     } else {
         "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-subtle-foreground"
     };
@@ -256,7 +256,7 @@ pub fn NestedPanelGroup(
 }
 
 /// The per-scope clear (P2), as a small icon button: the revert glyph
-/// alone, amber to match the state it removes, with the count as a tiny
+/// alone, engaged gold to match the state it removes, with the count as a tiny
 /// superscript. It appears only when there is a writer to remove, so the
 /// glyph's mere presence is part of the state signal — and the tooltip
 /// carries the whole sentence, so the chrome does not have to.
@@ -276,7 +276,7 @@ fn PanelResetButton(
     );
     rsx! {
         button {
-            class: "tw:inline-flex tw:h-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-start tw:gap-px tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
+            class: "tw:inline-flex tw:h-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-start tw:gap-px tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",
             r#type: "button",
             title: "{label}",
             aria_label: "{label}",

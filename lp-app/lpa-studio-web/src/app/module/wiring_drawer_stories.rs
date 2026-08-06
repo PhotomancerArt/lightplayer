@@ -14,14 +14,18 @@
 //! workspace card is `studio/module/module-face/wiring-drawer-open`.
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_gradient_summary;
 use lpa_studio_core::{
     ControllerId, ProjectEditorOp, UiAction, UiBusChannelPreview, UiBusChannelView,
     UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace, UiPanelGroup, UiProductKind,
     UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::GradientConfig;
 
-use crate::app::node::node_story_fixtures::{control_preview_product, visual_preview_bytes};
+use crate::app::node::node_story_fixtures::{
+    control_preview_product, palette_cycle, sunset_gradient, visual_preview_bytes,
+};
 use crate::app::wiring::wiring_drawer::FlowChannelRow;
 
 use super::ModuleFace;
@@ -53,6 +57,7 @@ fn channel(name: &str, kind: &str) -> UiBusChannelView {
         primary_visual: false,
         contended: false,
         preview: None,
+        gradient: None,
         writers: Vec::new(),
         readers: Vec::new(),
     }
@@ -252,6 +257,32 @@ pub(crate) fn states() -> Element {
 pub(crate) fn product_channels() -> Element {
     rsx! {
         DrawerCard { face: drawer_only_face(output_bus_view()) }
+    }
+}
+
+#[story(
+    description = "Palette channels in the flow view: a held palette and a cycle's member set draw in their value boxes, for the same reason product channels draw their pixels — the value box shows what is on the channel. The summary line under each strip carries the words the box has no room to spell."
+)]
+pub(crate) fn gradient_channels() -> Element {
+    rsx! {
+        DrawerCard { face: drawer_only_face(gradient_bus_view()) }
+    }
+}
+
+/// A palette-carrying scope: one held palette, one cycle.
+fn gradient_bus_view() -> UiBusView {
+    let palette_channel = |name: &str, config: GradientConfig| UiBusChannelView {
+        value: Some(format_gradient_summary(&config)),
+        gradient: Some(config),
+        writers: vec![site("Palette", Some("output"), UiBusSiteOrigin::Authored)],
+        readers: vec![site("Plasma", Some("palette"), UiBusSiteOrigin::Authored)],
+        ..channel(name, "Color")
+    };
+    UiBusView {
+        channels: vec![
+            palette_channel("palette", GradientConfig::Static(sunset_gradient())),
+            palette_channel("palette.cycle", palette_cycle()),
+        ],
     }
 }
 

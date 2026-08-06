@@ -61,6 +61,11 @@ impl PanelEmit {
                     phase_offset,
                 },
             )),
+            // A palette does not gesture in `f32` at all: the chooser hands
+            // back a whole `GradientConfig`, so there is no number for the
+            // numeric ladder to type. The write goes out through
+            // `palette_write_action` instead (M4 P3).
+            UiPanelEmit::Gradient => None,
         }
     }
 

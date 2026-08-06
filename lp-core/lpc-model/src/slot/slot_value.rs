@@ -88,6 +88,8 @@ pub enum ValueEditorHint {
     Affine2d,
     /// Lamp type + supply budget pair (`FixturePower`-shaped struct).
     Power,
+    /// A [`crate::Gradient`] or [`crate::GradientConfig`] palette value.
+    Gradient,
     Resource,
     RuntimeBufferResource,
     VisualProduct,
