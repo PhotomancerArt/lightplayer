@@ -131,6 +131,47 @@ pub static PLASMA_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/plasma-grid` — the SAME plasma shader and knobs on a 16×16
+/// grid mapping. Exists for the "one effect, any shape" beat of the
+/// interactive docs ("What's a shader?"): a docs page runs `plasma` and
+/// `plasma-grid` side by side off shared knobs, so the two must stay
+/// byte-identical except `project.json` (the name) and
+/// `fixture.map2d.json` (the shape).
+pub static PLASMA_GRID_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/plasma-grid/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/plasma-grid/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/plasma-grid/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/plasma-grid/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/plasma-grid/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/plasma-grid/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/plasma-grid/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/plasma-grid/fixture.map2d.json"),
+    ),
+];
+
 /// `examples/meteor` — a compute/render pair: `sim` integrates meteor heads
 /// into a persistent map, `render` draws their tails from it over a
 /// node-to-node binding. Publishes `speed`, `count` (a stepped knob) and
@@ -179,7 +220,7 @@ pub static METEOR_FILES: &[ExampleFile] = &[
 ];
 
 /// The gallery's *Examples* section, in order — the demo first, then the
-/// two single-effect modules.
+/// single-effect modules.
 static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
     EmbeddedExample {
         id: crate::STUDIO_DEMO_PROJECT_ID,
@@ -198,6 +239,12 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Meteor",
         kind: "Module",
         files: METEOR_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/plasma-grid",
+        name: "Plasma Grid",
+        kind: "Module",
+        files: PLASMA_GRID_FILES,
     },
 ];
 
@@ -235,6 +282,32 @@ mod tests {
     #[test]
     fn unknown_example_is_none() {
         assert!(embedded_example("examples/unknown").is_none());
+    }
+
+    /// The "one effect, any shape" contract (interactive docs): the grid
+    /// variant is byte-identical to plasma except its name and mapping,
+    /// so the docs page's shared knobs honestly drive one shader on two
+    /// shapes. A drift here (e.g. a plasma shader tweak not copied over)
+    /// silently breaks that story.
+    #[test]
+    fn plasma_grid_differs_from_plasma_only_in_name_and_mapping() {
+        let plasma = embedded_example("examples/plasma").expect("plasma is embedded");
+        let grid = embedded_example("examples/plasma-grid").expect("plasma-grid is embedded");
+        let plasma_files: std::collections::BTreeMap<_, _> = plasma.files().into_iter().collect();
+        let grid_files: std::collections::BTreeMap<_, _> = grid.files().into_iter().collect();
+        assert_eq!(
+            plasma_files.keys().collect::<Vec<_>>(),
+            grid_files.keys().collect::<Vec<_>>(),
+            "the two variants ship the same file set"
+        );
+        for (path, bytes) in &plasma_files {
+            let grid_bytes = &grid_files[path];
+            if path == "project.json" || path == "fixture.map2d.json" {
+                assert_ne!(bytes, grid_bytes, "{path} is the deliberate difference");
+            } else {
+                assert_eq!(bytes, grid_bytes, "{path} must stay byte-identical");
+            }
+        }
     }
 
     #[test]
