@@ -81,10 +81,14 @@ embedded nodes as the teaching strategy — both point at in-app.
   the direct lens-detach dispatch (the D29 device editor lives at `#/` and
   never fires `hashchange`). *(Amended: the Devices tab carries this now,
   for the same reason — it IS `#/`.)*
-- *(Amended)* Two overflow menus can coexist at narrow widths (the nav ⋯
-  and the tools ⋯). Kept distinct on purpose — sections navigate this
-  tab, tools open new ones — with a standing note to merge them if they
-  read confusingly at the G3 gate.
+- *(Amended, revised at G3 2026-08-05)* The chrome has **one ⋯ menu**,
+  at every width. Two separate overflow menus (nav ⋯ + tools ⋯) shipped
+  first with a merge-at-G3 note; G3 ruled the row of separate menus
+  clutter — "merge ALL the menus." The single ⋯ holds grouped Sections
+  (narrow widths only — they are inline tabs while they fit), the full
+  Sessions list (the narrow count chip died with this), and Tools. Rows
+  keep their own grammars: sections/sessions navigate in place and close
+  the menu, tool cards open a new tab.
 
 ## Alternatives Considered
 

@@ -12,21 +12,23 @@
 //! - **The brand lockup is the way to Home.** The logo links to `#/home`
 //!   — there is deliberately no Home tab, and no Studio tab either (the
 //!   sections replaced it).
-//! - **Narrow widths collapse the secondary family** into a ⋯ menu (the
-//!   bar is a container; the cut is where three secondary tabs stop
-//!   fitting, not a viewport magic number). The brand word yields too —
-//!   the mark stays.
-//! - **The editors are tools, not sections.** The mapping editor and board
-//!   editor stay outside the tab row, reachable from the tools overflow
-//!   menu — which stays distinct from the nav ⋯ menu (merge candidate if
-//!   the two read confusingly at G3).
+//! - **One overflow menu** (G3 ruling, 2026-08-05: a row of separate
+//!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
+//!   end always holds the tools and the full session list, and grows the
+//!   secondary sections at narrow widths when the inline tabs collapse
+//!   (the bar is a container; the cut is where three secondary tabs stop
+//!   fitting, not a viewport magic number). The brand word yields at
+//!   narrow too — the mark stays.
 //! - **Running sessions are places** (vision D15/D16): the session strip
 //!   docks one chip per live runtime session behind a hairline divider
-//!   after the primary family. Chips are wayfinding only — name, glyph,
+//!   after the primary family (wide bars — narrow bars list sessions in
+//!   the ⋯ menu instead). Chips are wayfinding only — name, glyph,
 //!   status dot — never controls or thumbnails (D43). The active chip is
 //!   the editor's representation in the nav; no nav tab detaches the
 //!   lens (navigation does, through the route listener, same as the back
 //!   button).
+//! - **The editors are tools, not sections.** The mapping editor and
+//!   board editor stay outside the tab row, in the ⋯ menu's Tools group.
 //!
 //! The chrome is presentational. Nav tabs are plain hash links: `web_app`
 //! owns the route signal and swaps only the body beneath this bar, so
@@ -37,8 +39,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
 use crate::base::{
-    IconMenuButton, IconMenuTone, LogoLockup, PopoverButton, PopoverCloseHandle, PopoverPlacement,
-    StudioIcon, StudioIconName,
+    IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
 use crate::router::StudioRoute;
 
@@ -76,10 +77,7 @@ pub fn SiteChrome(
     on_editor: bool,
     /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
     #[props(default = false)]
-    nav_menu_open: bool,
-    /// Stories only: mount the session flyout open.
-    #[props(default = false)]
-    session_flyout_open: bool,
+    overflow_menu_open: bool,
     children: Element,
 ) -> Element {
     rsx! {
@@ -102,13 +100,17 @@ pub fn SiteChrome(
                 }
             }
             if !sessions.is_empty() {
-                // Hairline divider, then the strip (concept A dock).
-                span { class: "tw:h-5 tw:w-px tw:flex-none tw:self-center tw:bg-border-subtle" }
-                SessionStrip { sessions: sessions.clone(), on_editor, flyout_open: session_flyout_open }
+                // Hairline divider + the strip (concept A dock) — wide
+                // bars only; narrow bars carry sessions in the ⋯ menu.
+                div { class: "tw:hidden tw:min-w-0 tw:items-center tw:gap-4 tw:@min-[680px]:flex",
+                    span { class: "tw:h-5 tw:w-px tw:flex-none tw:self-center tw:bg-border-subtle" }
+                    SessionStrip { sessions: sessions.clone(), on_editor }
+                }
             }
             div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 // Secondary family: lighter, right cluster, no divider —
-                // inline while three tabs fit the bar…
+                // inline while three tabs fit the bar; in the ⋯ below
+                // when they don't.
                 nav { class: "tw:hidden tw:items-center tw:gap-1 tw:@min-[680px]:flex",
                     NavTab {
                         label: "Explore",
@@ -126,48 +128,92 @@ pub fn SiteChrome(
                         label: "Docs",
                         href: "#/docs",
                         active: section == SiteSection::Docs,
-                        secondary: true,
+                    secondary: true,
                     }
                 }
-                // …and folded into the ⋯ menu when they don't.
-                div { class: "tw:@min-[680px]:hidden",
-                    NavOverflowMenu { section, initially_open: nav_menu_open }
-                }
                 {children}
-                ToolsMenu {}
+                // THE overflow menu — one ⋯ at every width (G3 ruling).
+                // Two mounts because a top-layer popup cannot answer the
+                // header's container query: the wide form (no section
+                // rows) and the narrow form (sections included) swap by
+                // the same breakpoint as the tabs they mirror.
+                div { class: "tw:hidden tw:@min-[680px]:block",
+                    ChromeOverflowMenu {
+                        section,
+                        sessions: sessions.clone(),
+                        on_editor,
+                        include_sections: false,
+                    }
+                }
+                div { class: "tw:@min-[680px]:hidden",
+                    ChromeOverflowMenu {
+                        section,
+                        sessions,
+                        on_editor,
+                        include_sections: true,
+                        initially_open: overflow_menu_open,
+                    }
+                }
             }
         }
     }
 }
 
-/// The narrow-width ⋯ menu holding the secondary nav family. Same items,
-/// same active state, menu grammar — deliberately separate from
-/// [`ToolsMenu`] (sections navigate this tab; tools open new ones).
+/// THE ⋯ menu (G3 ruling, 2026-08-05): sections (narrow only — they are
+/// inline tabs while they fit), the full session list, and the tools, in
+/// one place. Groups wear mini-headers; rows keep their own grammars —
+/// section/session rows navigate this tab and close the menu, tool cards
+/// open a new one.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NavOverflowMenu(
+fn ChromeOverflowMenu(
     section: SiteSection,
+    sessions: Vec<UiChromeSession>,
+    on_editor: bool,
+    include_sections: bool,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
     rsx! {
         IconMenuButton {
             icon: StudioIconName::More,
             icon_size: 15,
-            label: "More sections".to_string(),
-            title: "More sections".to_string(),
+            label: "More".to_string(),
+            title: "Sections, sessions, and tools".to_string(),
             tone: IconMenuTone::Quiet,
             initially_open,
-            popup_class: NAV_POPUP_CLASS.to_string(),
-            NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
-            NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
-            NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
+            popup_class: OVERFLOW_POPUP_CLASS.to_string(),
+            if include_sections {
+                span { class: GROUP_HEADER_CLASS, "Sections" }
+                NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
+                NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
+                NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
+            }
+            if !sessions.is_empty() {
+                span { class: GROUP_HEADER_CLASS, "Sessions" }
+                for session in sessions.iter() {
+                    SessionMenuRow { key: "{session.key}", session: session.clone(), on_editor }
+                }
+            }
+            span { class: GROUP_HEADER_CLASS, "Tools" }
+            ToolCard {
+                icon: StudioIconName::MapArrows,
+                title: "Mapping editor",
+                detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
+                href: "#/mapping",
+            }
+            ToolCard {
+                icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
+                title: "Board editor",
+                detail: "Draw and edit the board diagrams behind the catalog.",
+                href: "#/boards/edit",
+            }
         }
     }
 }
 
-/// One row of the nav ⋯ menu: a plain hash link that closes the menu as
-/// it navigates (sections swap in place — without the close the popover
-/// would linger over the new body).
+/// One section row of the ⋯ menu: a plain hash link that closes the menu
+/// as it navigates (sections swap in place — without the close the
+/// popover would linger over the new body).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavMenuItem(label: &'static str, href: &'static str, active: bool) -> Element {
@@ -255,67 +301,23 @@ fn NavTab(
     }
 }
 
-/// The session strip (D15/D16): squared tab-chips for live sessions,
-/// responsive in the D11 grammar — all chips (cap 4) while the bar is
-/// wide, two on middling bars, and a single count chip at phone widths;
-/// the `+n` and count chips open the same flyout listing every session.
+/// The session strip (D15/D16): squared tab-chips for live sessions on
+/// wide bars — up to four inline (two on middling bars); the rest, and
+/// every session at narrow widths, live in the ⋯ menu's Sessions group.
 /// All width variants render and container queries pick, so the strip
 /// needs no measurement code.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionStrip(
-    sessions: Vec<UiChromeSession>,
-    on_editor: bool,
-    #[props(default = false)] flyout_open: bool,
-) -> Element {
-    let total = sessions.len();
-    let any_lensed = sessions.iter().any(|session| session.lensed);
+fn SessionStrip(sessions: Vec<UiChromeSession>, on_editor: bool) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
             for (index , session) in sessions.iter().take(4).enumerate() {
                 span {
                     key: "{session.key}",
-                    // Chips 0-1 appear on md bars, 2-3 only on wide ones;
-                    // everything past 4 lives in the flyout alone.
-                    class: if index < 2 { "tw:hidden tw:min-w-0 tw:@min-[680px]:flex" } else { "tw:hidden tw:min-w-0 tw:@min-[900px]:flex" },
+                    // Chips 0-1 appear whenever the strip does; 2-3 need
+                    // a wide bar. Everything else is ⋯-menu material.
+                    class: if index < 2 { "tw:flex tw:min-w-0" } else { "tw:hidden tw:min-w-0 tw:@min-[900px]:flex" },
                     SessionChip { session: session.clone(), on_editor }
-                }
-            }
-            // md: +n past the first two…
-            if total > 2 {
-                span { class: "tw:hidden tw:@min-[680px]:flex tw:@min-[900px]:hidden",
-                    SessionFlyoutChip {
-                        sessions: sessions.clone(),
-                        on_editor,
-                        label: format!("+{}", total - 2),
-                        any_lensed,
-                        count_form: false,
-                        initially_open: false,
-                    }
-                }
-            }
-            // …wide: +n past the cap of four…
-            if total > 4 {
-                span { class: "tw:hidden tw:@min-[900px]:flex",
-                    SessionFlyoutChip {
-                        sessions: sessions.clone(),
-                        on_editor,
-                        label: format!("+{}", total - 4),
-                        any_lensed,
-                        count_form: false,
-                        initially_open: false,
-                    }
-                }
-            }
-            // …narrow: the one count chip (stacked dots + count).
-            span { class: "tw:flex tw:@min-[680px]:hidden",
-                SessionFlyoutChip {
-                    sessions: sessions.clone(),
-                    on_editor,
-                    label: format!("{total}"),
-                    any_lensed,
-                    count_form: true,
-                    initially_open: flyout_open,
                 }
             }
         }
@@ -425,62 +427,11 @@ fn SessionDot(status: UiChromeSessionStatus) -> Element {
     }
 }
 
-/// The strip's overflow trigger — the md/wide `+n` chip and the narrow
-/// count chip are the SAME flyout with different faces. The count form
-/// stacks the first three status dots and rings accent when the lens is
-/// inside. The flyout lists every session in the ⋯-menu grammar.
+/// One session row of the ⋯ menu: the chip anatomy at menu width,
+/// closing the menu as it navigates. *Here* rows read heading-bold.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionFlyoutChip(
-    sessions: Vec<UiChromeSession>,
-    on_editor: bool,
-    label: String,
-    any_lensed: bool,
-    count_form: bool,
-    #[props(default = false)] initially_open: bool,
-) -> Element {
-    let trigger_class = if count_form && any_lensed && on_editor {
-        SESSION_CHIP_COUNT_RINGED
-    } else {
-        SESSION_CHIP_IDLE
-    };
-    let trigger = rsx! {
-        if count_form {
-            span { class: "tw:flex tw:flex-none tw:items-center tw:gap-0.5",
-                for (index , session) in sessions.iter().take(3).enumerate() {
-                    span { key: "{index}", SessionDot { status: session.status } }
-                }
-            }
-        }
-        span { "{label}" }
-    };
-    rsx! {
-        PopoverButton {
-            class: trigger_class.to_string(),
-            open_class: SESSION_CHIP_OPEN.to_string(),
-            trigger,
-            label: "Sessions".to_string(),
-            title: "Running sessions".to_string(),
-            popup_class: NAV_POPUP_CLASS.to_string(),
-            chrome_class: "ux-popover-chrome-neutral".to_string(),
-            placement: PopoverPlacement::BottomStart,
-            initially_open,
-            layer_keeps_layout: true,
-            span { class: "tw:px-1.5 tw:pt-0.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                "Sessions"
-            }
-            for session in sessions.iter() {
-                SessionFlyoutRow { key: "{session.key}", session: session.clone(), on_editor }
-            }
-        }
-    }
-}
-
-/// One flyout row: the chip anatomy at menu width, closing the flyout as
-/// it navigates. *Here* rows read heading-bold; *open* rows muted-bold.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionFlyoutRow(session: UiChromeSession, on_editor: bool) -> Element {
+fn SessionMenuRow(session: UiChromeSession, on_editor: bool) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     let class = match (session.lensed, on_editor) {
         (true, true) => NAV_MENU_ITEM_ACTIVE,
@@ -512,43 +463,9 @@ fn SessionFlyoutRow(session: UiChromeSession, on_editor: bool) -> Element {
     }
 }
 
-/// Overflow menu for the standalone authoring tools — deliberately not nav
-/// tabs (they are project-free editors, not destinations). Each entry is a
-/// card: what the tool is, not just its name, since these are surfaces
-/// most people meet rarely. They open in a new tab so the studio session
-/// behind them keeps running.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ToolsMenu() -> Element {
-    rsx! {
-        IconMenuButton {
-            icon: StudioIconName::More,
-            icon_size: 15,
-            label: "Tools".to_string(),
-            title: "Tools".to_string(),
-            tone: IconMenuTone::Quiet,
-            popup_class: TOOLS_POPUP_CLASS.to_string(),
-            span { class: "tw:px-1.5 tw:pt-0.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                "Tools"
-            }
-            ToolCard {
-                icon: StudioIconName::MapArrows,
-                title: "Mapping editor",
-                detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
-                href: "#/mapping",
-            }
-            ToolCard {
-                icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
-                title: "Board editor",
-                detail: "Draw and edit the board diagrams behind the catalog.",
-                href: "#/boards/edit",
-            }
-        }
-    }
-}
-
 /// One tool card: glyph, name, one line of what it is, and the
-/// opens-in-a-new-tab marker.
+/// opens-in-a-new-tab marker. Tools open in a new tab so the studio
+/// session behind them keeps running.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ToolCard(
@@ -589,11 +506,9 @@ const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:p
 /// hover.
 const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 
-/// The nav ⋯ menu popup: compact text rows, not tool cards.
-const NAV_POPUP_CLASS: &str = "tw:grid tw:w-[164px] tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-/// Nav ⋯ menu row, idle.
+/// ⋯ menu section/session row, idle.
 const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-/// Nav ⋯ menu row, current section.
+/// ⋯ menu section/session row, current place.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
 
 // Session chips (D16): squared tab-chips in the entity grammar — never
@@ -605,11 +520,12 @@ const SESSION_CHIP_HERE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:i
 const SESSION_CHIP_OPEN: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border tw:bg-background-wash tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground";
 /// Idle: a live session the lens is not on.
 const SESSION_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
-/// The narrow count chip when the lens is inside AND fronted: the idle
-/// face with an accent ring standing in for the hidden *here* chip.
-const SESSION_CHIP_COUNT_RINGED: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-heading tw:no-underline";
 
-const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// The one ⋯ menu popup: wide enough for tool cards; section and session
+/// rows ride the same width.
+const OVERFLOW_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Mini-header labelling each group of the ⋯ menu.
+const GROUP_HEADER_CLASS: &str = "tw:px-1.5 tw:pt-1.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground tw:first:pt-0.5";
 /// Rows are cards, not text links: fixed three-column grid so the title and
 /// detail wrap inside their own column instead of around the glyphs.
 const TOOL_CARD_CLASS: &str = "tw:grid tw:grid-cols-[auto_minmax(0,1fr)_auto] tw:items-start tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:px-2 tw:py-2 tw:no-underline tw:transition-colors tw:hover:border-border tw:hover:bg-card-raised";
