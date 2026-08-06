@@ -22,7 +22,7 @@ pub(crate) fn loaded() -> Element {
 }
 
 #[story(
-    description = "The header chip across its states: branch, dirty, deployed tag, no-git fallback."
+    description = "The icon-only build chip across its states: branch, dirty (warning tone), deployed tag, no-git fallback, loading. Identity lives in the hover title and popover."
 )]
 pub(crate) fn chip_states() -> Element {
     rsx! {
