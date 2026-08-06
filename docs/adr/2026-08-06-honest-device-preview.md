@@ -134,8 +134,9 @@ re-squishes).
 - Browser GPU tier control-product rendering — the debt entry above;
   async readback preferred, and the per-tick retry storm must become a
   classified one-time failure.
-- Open-in-sim auto-selects the inherited board (G1b ruling split to
-  its own task; `note_sim_loaded_project` already inherits
-  `sim_board_id` from the project's manifest `target`).
+- ~~Open-in-sim auto-selects the inherited board~~ — **landed
+  2026-08-06** (PR #369): `SetupEvent::SetUpElsewhere` closes a sim
+  BOARD_PICK when the landed project implies a board (both landing
+  shapes, load-as-push and the D37 re-attach); design doc §7.14.
 - The ▶ meta row's project chip truncates hard beside the Editor
   button at card width; revisit if it grates.

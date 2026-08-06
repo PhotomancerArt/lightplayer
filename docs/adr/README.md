@@ -125,7 +125,7 @@ holds the full context.
 | Browser CPU tier converges onto `LpsGlsl` (`fw-browser/src/runtime.rs` reserves this; would shrink the combined-sampler bridge to the GPU tier's copy) | `2026-08-05-sampler2d-authored-surface` | Frontend convergence becomes a product priority |
 | Persistent last-frame snapshots for offline device cards (in-session only today; the ▶ box falls back to board + Reconnect) | `2026-08-06-honest-device-preview` | The M6 project-thumb `<img>` seam / LibraryStore metadata lands |
 | Browser GPU tier cannot render control products (debt `browser-gpu-tier-cannot-render-control-products`; async readback preferred; per-tick retry must become a classified failure) | `2026-08-06-honest-device-preview` | The active fix task lands, or a second surface hits it |
-| Open-in-sim auto-selects the inherited board (BoardPick stands down when a project lands; `sim_board_id` inheritance already in place) | `2026-08-06-honest-device-preview` | The split task lands |
+| ~~Open-in-sim auto-selects the inherited board~~ — **closed 2026-08-06**: landed as `SetupEvent::SetUpElsewhere` (PR #369, both landing shapes incl. the D37 re-attach) | `2026-08-06-honest-device-preview` | Closed |
 | ▶ meta-row project chip truncates hard beside the Editor button at card width | `2026-08-06-honest-device-preview` | It grates at a walk |
 | Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
 | Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
