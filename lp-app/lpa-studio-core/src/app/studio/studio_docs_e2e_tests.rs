@@ -205,6 +205,68 @@ fn docs_sim_host_boots_deploys_and_shutdown_completes_the_actor() {
     assert!(completed, "shutdown alone ends the actor loop");
 }
 
+/// The docs "editor" embed's whole loop, host-proven (G1 round 2, R3):
+/// a docs-deployed sim's view carries a shader face's editor data, its
+/// fetch action resolves the source text, and an applied edit
+/// round-trips Ok and marks the content dirty — the exact actions the
+/// web embed dispatches, against the real in-process server.
+#[test]
+fn docs_sim_shader_editor_fetches_and_applies() {
+    let (mut studio, _sent) = docs_studio_with_stub_sim();
+    drive(studio.dispatch(docs_open_action(DOCS_EXAMPLE))).expect("the docs open succeeds");
+
+    let editor = first_shader_editor(&studio.view())
+        .expect("the docs view carries a shader face with editor data");
+    drive(studio.dispatch(editor.fetch_action())).expect("the content fetch succeeds");
+
+    let editor = first_shader_editor(&studio.view()).expect("editor data survives the fetch");
+    let content = editor
+        .content
+        .as_ref()
+        .expect("the fetched content resolved");
+    let text = content.text().expect("a GLSL body is text").to_string();
+    assert!(
+        text.contains("render"),
+        "the resolved body is the shader source, got: {text:.60}"
+    );
+
+    let modified = format!("{text}\n// docs e2e applied edit\n");
+    drive(studio.dispatch(editor.apply_action(&modified))).expect("the apply succeeds");
+
+    let editor = first_shader_editor(&studio.view()).expect("editor data survives the apply");
+    let content = editor.content.as_ref().expect("content stays resolved");
+    assert!(content.dirty, "an applied edit reads back dirty");
+    assert!(
+        content
+            .text()
+            .is_some_and(|text| text.contains("docs e2e applied edit")),
+        "the effective content is the applied body"
+    );
+}
+
+/// First shader face's editor data anywhere in the view — the same walk
+/// the web `editor` embed does.
+fn first_shader_editor(view: &crate::UiStudioView) -> Option<crate::UiAssetEditor> {
+    fn from_node(node: &crate::UiNodeView) -> Option<crate::UiAssetEditor> {
+        from_face(node.face.as_ref()).or_else(|| node.children.iter().find_map(from_child))
+    }
+    fn from_child(child: &crate::UiNodeChild) -> Option<crate::UiAssetEditor> {
+        from_face(child.face.as_ref()).or_else(|| child.children.iter().find_map(from_child))
+    }
+    fn from_face(face: Option<&crate::UiNodeFace>) -> Option<crate::UiAssetEditor> {
+        match face? {
+            crate::UiNodeFace::Shader(face) => face.code_drawer.clone(),
+            _ => None,
+        }
+    }
+    view.panes.iter().find_map(|pane| {
+        let crate::UiViewContent::ProjectEditor(editor) = &pane.body else {
+            return None;
+        };
+        editor.nodes.iter().find_map(from_node)
+    })
+}
+
 /// The log-theft hazard, pinned: a `drain_logs: false` actor leaves the
 /// global sink's pending records for the main actor.
 #[test]

@@ -17,10 +17,15 @@
 //! | directive | arguments | renders |
 //! |---|---|---|
 //! | `hero-preview` | `example=<id>` | a `PreviewHost` lease, article-wide, 16:9 |
-//! | `sim-canvas` | `sim=<name>`, `view=map\|product` (default `map`) | the real `ProductPreview` over that sim's output |
+//! | `sim-canvas` | `sim=<name>`, `view=map\|product` (default `map`), `fixture=<node>` | the real `ProductPreview` over that sim's output |
 //! | `panel` | `sim=<name>[,<name>…]`, `mode=interactive\|readonly` (default `interactive`) | the real `ModulePanel`, fanning gestures out to every named sim |
+//! | `editor` | `sim=<name>` | the real `AssetEditor` over that sim's shader source, auto-applying |
 //! | `code-figure` | `src=<figure id>` | the registered listing from `super::code_figures` |
 //! | `open-in-studio` | `example=<id>`, `label=<text>` | the main app's real open flow |
+//!
+//! `fixture=` picks *which* node's product a `sim-canvas` draws, for the
+//! projects that have more than one of a family (see [`sim_canvas`]); no
+//! `fixture=` means first-of-family, which is what the hero wants.
 //!
 //! # Where the live state comes from
 //!
@@ -48,6 +53,7 @@ use dioxus::prelude::*;
 use crate::base::markdown_text::MdEmbedRef;
 
 pub(crate) mod docs_sims;
+mod editor_embed;
 mod embed_frame;
 mod hero_preview;
 mod open_in_studio;
@@ -55,6 +61,8 @@ mod panel_embed;
 mod sim_canvas;
 
 pub(crate) use docs_sims::{DocsSimProvider, DocsStudioActions};
+#[cfg(feature = "stories")]
+pub(crate) use editor_embed::DocsEditorSurface;
 pub(crate) use open_in_studio::OpenInStudioButton;
 #[cfg(feature = "stories")]
 pub(crate) use panel_embed::DocsPanelSurface;
@@ -63,6 +71,7 @@ pub(crate) use panel_embed::PanelMode;
 pub(crate) use sim_canvas::DocsSimCanvas;
 pub(crate) use sim_canvas::SimCanvasView;
 
+use editor_embed::EditorEmbed;
 use embed_frame::EmbedProblem;
 use hero_preview::DocsHeroPreview;
 use panel_embed::PanelEmbed;
@@ -97,13 +106,9 @@ pub(crate) fn render_embed(embed: &MdEmbedRef) -> Option<Element> {
             None => problem("`hero-preview` needs an `example=<id>` argument."),
         }),
         "sim-canvas" => Some(render_sim_canvas(embed)),
-        // G1-round-2 (R3): the editable GLSL editor against the docs sim.
-        // Placeholder until the embed component lands in this round.
         "editor" => Some(match arg(embed, "sim") {
             Some(name) => rsx! {
-                div { class: "tw:mb-1.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4 tw:text-xs tw:text-muted-foreground tw:last:mb-0",
-                    "editor embed (sim={name}) — landing in this revision"
-                }
+                EditorEmbed { sim: name.to_string() }
             },
             None => problem("`editor` needs a `sim=<name>` argument."),
         }),
@@ -141,8 +146,9 @@ fn render_sim_canvas(embed: &MdEmbedRef) -> Element {
             }
         },
     };
+    let fixture = arg(embed, "fixture").map(str::to_string);
     rsx! {
-        SimCanvasEmbed { sim: name.to_string(), view }
+        SimCanvasEmbed { sim: name.to_string(), view, fixture }
     }
 }
 
@@ -213,7 +219,7 @@ mod tests {
         MdEmbedRef {
             name: name.to_string(),
             args: vec![
-                ("sim".to_string(), "disc".to_string()),
+                ("sim".to_string(), "main".to_string()),
                 ("example".to_string(), "examples/plasma".to_string()),
                 ("src".to_string(), "plasma-shader".to_string()),
             ],
@@ -250,7 +256,7 @@ mod tests {
     #[test]
     fn arguments_resolve_by_key() {
         let embed = embed("panel");
-        assert_eq!(arg(&embed, "sim"), Some("disc"));
+        assert_eq!(arg(&embed, "sim"), Some("main"));
         assert_eq!(arg(&embed, "mode"), None);
     }
 
@@ -276,12 +282,19 @@ mod tests {
     #[test]
     fn the_articles_own_fences_all_resolve() {
         let fences = [
-            ("hero-preview", vec![("example", "examples/plasma")]),
-            ("panel", vec![("sim", "disc,grid"), ("mode", "interactive")]),
+            ("sim-canvas", vec![("sim", "main"), ("view", "product")]),
+            ("panel", vec![("sim", "main"), ("mode", "interactive")]),
+            (
+                "sim-canvas",
+                vec![("sim", "main"), ("view", "map"), ("fixture", "disc")],
+            ),
+            (
+                "sim-canvas",
+                vec![("sim", "main"), ("view", "map"), ("fixture", "grid")],
+            ),
+            ("editor", vec![("sim", "main")]),
+            ("open-in-studio", vec![("example", "examples/plasma-duo")]),
             ("code-figure", vec![("src", "plasma-shader")]),
-            ("sim-canvas", vec![("sim", "disc"), ("view", "map")]),
-            ("sim-canvas", vec![("sim", "grid"), ("view", "map")]),
-            ("open-in-studio", vec![("example", "examples/plasma")]),
         ];
         for (name, args) in fences {
             let embed = MdEmbedRef {

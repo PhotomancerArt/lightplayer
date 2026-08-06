@@ -168,12 +168,12 @@ pub static PLASMA_DUO_FILES: &[ExampleFile] = &[
         include_bytes!("../../../../../examples/plasma-duo/grid.json"),
     ),
     (
-        "disc-out.json",
-        include_bytes!("../../../../../examples/plasma-duo/disc-out.json"),
+        "disc_out.json",
+        include_bytes!("../../../../../examples/plasma-duo/disc_out.json"),
     ),
     (
-        "grid-out.json",
-        include_bytes!("../../../../../examples/plasma-duo/grid-out.json"),
+        "grid_out.json",
+        include_bytes!("../../../../../examples/plasma-duo/grid_out.json"),
     ),
     (
         "disc.map2d.json",
