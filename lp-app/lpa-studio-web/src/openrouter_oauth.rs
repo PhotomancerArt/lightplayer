@@ -7,11 +7,17 @@
 //! tested; the browser glue (storage, redirect, fetch) is wasm-only.
 //!
 //! Redirect round-trip: [`start_connect`] stashes the verifier and the
-//! current route hash in sessionStorage and navigates away;
+//! current route PATH (with its query) in sessionStorage and navigates away;
 //! [`take_pending_callback`] runs synchronously at boot BEFORE the router
 //! parses the URL — it consumes the stash, scrubs `?code=…` from the address
-//! bar, and restores the stashed hash so boot routing sees the pre-redirect
+//! bar, and restores the stashed path so boot routing sees the pre-redirect
 //! location.
+//!
+//! The callback URL we hand OpenRouter is the site ROOT, never the deep
+//! route we happen to be on: the return leg then needs nothing of the host
+//! but the page it would serve anyway, and the deep path comes back out of
+//! the stash. (Before P09 this was the same thing by accident — every route
+//! lived in the fragment, and fragments do not survive a redirect.)
 
 #![cfg_attr(
     not(target_arch = "wasm32"),
@@ -127,10 +133,10 @@ mod glue {
         Some(bytes)
     }
 
-    /// Kick off the connect: stash verifier + current hash, then leave for
-    /// OpenRouter's approval page. Returns an error string only when the
-    /// browser refused us (no crypto/storage) — there is no async here, the
-    /// page navigates away.
+    /// Kick off the connect: stash verifier + the route we are leaving from,
+    /// then head for OpenRouter's approval page. Returns an error string
+    /// only when the browser refused us (no crypto/storage) — there is no
+    /// async here, the page navigates away.
     pub fn start_connect() -> Result<(), String> {
         let window = web_sys::window().ok_or("no window")?;
         let location = window.location();
@@ -138,23 +144,26 @@ mod glue {
         let verifier = verifier_from_bytes(&bytes);
         let challenge = challenge_for(&verifier);
         let storage = session_storage().ok_or("sessionStorage unavailable")?;
-        let hash = location.hash().unwrap_or_default();
+        let return_route = format!(
+            "{}{}",
+            location.pathname().unwrap_or_else(|_| "/".to_string()),
+            location.search().unwrap_or_default()
+        );
         storage
             .set_item(VERIFIER_SLOT, &verifier)
             .map_err(|_| "sessionStorage write failed")?;
-        let _ = storage.set_item(RETURN_ROUTE_SLOT, &hash);
+        let _ = storage.set_item(RETURN_ROUTE_SLOT, &return_route);
         let origin = location.origin().map_err(|_| "no origin")?;
-        let pathname = location.pathname().unwrap_or_else(|_| "/".to_string());
-        let url = auth_url(&format!("{origin}{pathname}"), &challenge);
+        let url = auth_url(&format!("{origin}/"), &challenge);
         location.assign(&url).map_err(|_| "navigation failed")?;
         Ok(())
     }
 
     /// Boot-time interception: if the URL carries `?code=` AND we hold a
     /// stashed verifier, consume both, scrub the query from the address bar,
-    /// and restore the stashed hash — synchronously, before the router reads
+    /// and restore the stashed path — synchronously, before the router reads
     /// the URL. A code without a stash (foreign/stale redirect) is scrubbed
-    /// and dropped.
+    /// and dropped, landing on the root.
     pub fn take_pending_callback() -> Option<PendingCallback> {
         let window = web_sys::window()?;
         let location = window.location();
@@ -163,22 +172,22 @@ mod glue {
         let verifier = storage
             .as_ref()
             .and_then(|s| s.get_item(VERIFIER_SLOT).ok().flatten());
-        let return_hash = storage
+        let return_route = storage
             .as_ref()
             .and_then(|s| s.get_item(RETURN_ROUTE_SLOT).ok().flatten())
-            .unwrap_or_default();
+            .filter(|route| route.starts_with('/'))
+            .unwrap_or_else(|| "/".to_string());
         if let Some(storage) = &storage {
             let _ = storage.remove_item(VERIFIER_SLOT);
             let _ = storage.remove_item(RETURN_ROUTE_SLOT);
         }
-        // Scrub: path + restored hash, no query. The router's own
+        // Scrub: the restored route, `?code=` gone. The router's own
         // canonicalization runs right after and keeps this shape.
-        let pathname = location.pathname().unwrap_or_else(|_| "/".to_string());
         if let Ok(history) = window.history() {
             let _ = history.replace_state_with_url(
                 &wasm_bindgen::JsValue::NULL,
                 "",
-                Some(&format!("{pathname}{return_hash}")),
+                Some(&return_route),
             );
         }
         let verifier = verifier?;

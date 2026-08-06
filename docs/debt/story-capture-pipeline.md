@@ -560,3 +560,55 @@ hours), and neither is an exit path on its own.
   Generous on purpose: the goal is to convert a wedge into a fast red, not to
   make a slow-but-healthy run flaky. **This bounds the damage; it does not
   explain the hang.** The entry stays open on the root cause.
+
+- 2026-08-05 — **`exploration/node-ui/status-indicators` @ sm: DIAGNOSED, and
+  the pixels overturned the settling-race prior again.** Run 31024986361
+  captured it byte-identically; run 31026385720, minutes later on the same
+  branch with no app change touching the story, reported 304/352560 px (0.086%)
+  over Δ64, max Δ223 — over the ratio limit, so the auto-commit refreshed it as
+  75e931304 (pre-refresh bytes in parent 6e694f210). Diffing the two committed
+  variants **first**, as this entry keeps insisting: the whole 390×904 frame is
+  byte-identical except an 11-row band, and that band is **one line** of the
+  five-line rustc-style error block in the error node's status popover, moved
+  down **exactly one device pixel**. The other four lines diff at **residual
+  zero** under alignment; the moved line's glyphs are bit-identical (pure
+  integer translation, residual 3px of AA). Nothing reflowed — the gap above it
+  shrank 1px and the gap below grew 1px.
+  **Root cause, reproduced not argued.** Two things compose.
+  (a) `.ux-node-ui-status-popup-error-detail` sets `font-size: 0.68rem` /
+  `line-height: 1.45` → a used pitch of **15.765625px**, so consecutive
+  baselines differ in fractional part by 0.765625 and the five lines never
+  share a rounding phase. Chrome snaps text baselines to whole device pixels,
+  so a sub-pixel move of the block flips only whichever line sits within that
+  move of a `.5` boundary — and with five lines spaced 0.766 apart there is
+  nearly always one. Measured on the real story the five fractional tops are
+  `[.1875, .9531, .7188, .4844, .25]`: one of them is **1/64 px** from the tie.
+  (b) `PopoverPosition::style()` emits `top: {:.1}px` — the panel position is
+  quantized to **one tenth of a pixel**, which is exactly the step that flips a
+  parked line. Reproduced directly with the same font and CSS: moving a
+  container top from `100.7px` to `100.8px` moves line 1 from 127.4531 to
+  127.5625 (row 127 → 128) and leaves every other line byte-identical —
+  **644 any-diff / 368 over Δ64 / max Δ231**, the same shape and amplitude as
+  CI's 513 / 304 / Δ223. And the position does wobble: **10 consecutive loads
+  of the real story in one headless Chrome emitted `921.2px` nine times and
+  `920.2px` once**, same build, same browser, same machine.
+  **Ruled out by measurement:** the stale-canvas-backing mechanism just fixed
+  for the clock face (this story mounts no canvas at all); webfont/fallback
+  metrics (those change glyph shapes — these are bit-identical); AA/raster
+  jitter (the version-badge/shader-face class tops out at Δ2–6, this is Δ223);
+  mid-flight CSS colour transitions (wide and faint, not narrow and geometric).
+  **Filed as** [popover-line-parked-on-a-rounding-tie](../defects/2026-08-05-popover-line-parked-on-a-rounding-tie.md),
+  with the fix ranked there (whole-pixel popover positions first — it collapses
+  the class for every popover story; integral line box on the error block
+  second). **Not fixed**, and thresholds were **not** touched: per (5b),
+  raising them is not an exit path. Also still unidentified: *why* the trigger
+  measurement varies between loads — the 1px wobble above is larger than the
+  sub-pixel one CI captured, and neither proposed fix explains it, they only
+  make the render insensitive to it.
+  **New lore for this entry's workaround list:** this story's ready gate does
+  not converge on macOS Chrome 142 — three `[data-story-wait="1"]` elements
+  never clear and `studio-story-pngs.mjs` times out at 30s and retries on a
+  fresh page, every attempt. CI's pinned Chrome 151 captures it fine. So the
+  flip could not be reproduced end-to-end through the real harness locally; the
+  mechanism was proven with a direct CDP probe instead. Worth knowing before
+  the next local reproduction attempt on a popover story.

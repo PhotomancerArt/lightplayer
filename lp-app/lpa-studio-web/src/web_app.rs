@@ -98,7 +98,7 @@ pub fn App() -> Element {
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
     // BEFORE the router reads the URL — it scrubs the query and restores the
-    // pre-redirect hash. The exchange itself runs async once the actor is up.
+    // pre-redirect path. The exchange itself runs async once the actor is up.
     #[cfg(target_arch = "wasm32")]
     let openrouter_callback = use_hook(|| {
         Rc::new(RefCell::new(
@@ -115,9 +115,30 @@ pub fn App() -> Element {
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
-    // browser-navigation listener dispatches actions for back/forward.
-    let mut route = use_signal(router::boot_route);
-    use_hook(move || router::replace(&route.peek().clone()));
+    // browser-navigation listener dispatches actions for back/forward and
+    // in-app link clicks.
+    //
+    // A share link (`/p/<slug>-prj_x`) is the one route that does NOT become
+    // the app's route: it lands on Home holding a pending intent (D24), and
+    // the URL is left exactly as the sender wrote it — the open/pull flow
+    // and its canonicalization are the post-chrome round.
+    let boot_route = use_hook(router::boot_route);
+    let shared_project = use_context_provider(|| {
+        Signal::new(router::PendingSharedProject(match &boot_route {
+            StudioRoute::SharedProject { uid } => Some(uid.clone()),
+            _ => None,
+        }))
+    });
+    let boot_is_share = matches!(boot_route, StudioRoute::SharedProject { .. });
+    let mut route = use_signal(move || match boot_route {
+        StudioRoute::SharedProject { .. } => StudioRoute::Home,
+        other => other,
+    });
+    use_hook(move || {
+        if !boot_is_share {
+            router::replace(&route.peek().clone());
+        }
+    });
     // What the view currently shows, for the navigation listener: the
     // open project's (uid, slug), whether the editor is showing, and the
     // route the lens binds. `saw_opening` guards the go-home fallback (the
@@ -268,7 +289,7 @@ pub fn App() -> Element {
 
                 // view → route: the URL follows the LENS (SDI — the URL is
                 // the focused document): lens on the sim + open project →
-                // #/sim/<slug>; lens on a device → #/device/<uid>.
+                // /sim/<slug>; lens on a device → /device/<uid>.
                 let current = route.peek().clone();
                 // A STEADY lens follows the URL only while a shell route
                 // is what's rendered (the gallery routes, where a card
@@ -290,7 +311,7 @@ pub fn App() -> Element {
                     // `same_session`, not `!=`: play is a lens ZOOM on the
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
-                    // user straight back out of `#/…/play`.
+                    // user straight back out of `/…/play`.
                     if let Some(target) = bound
                         && !target.same_session(&current)
                     {
@@ -381,19 +402,30 @@ pub fn App() -> Element {
         }
     });
 
-    // route → actor: back/forward and manual hash edits dispatch the
-    // matching action. Programmatic navigate/replace calls fire no browser
-    // events, so everything arriving here is real user navigation.
+    // route → actor: back/forward, in-app link clicks and manual URL edits
+    // dispatch the matching action. Programmatic navigate/replace calls fire
+    // no browser event, so everything arriving here is real user navigation.
     let nav_bridge = bridge.clone();
     let nav_open_ids = Rc::clone(&open_ids_now);
     let nav_editor_open = Rc::clone(&editor_open_now);
     let nav_bound_route = Rc::clone(&bound_route_now);
     let nav_pending_route_open = Rc::clone(&pending_route_open);
+    let mut nav_shared_project = shared_project;
     let _route_listener = use_hook(move || {
         router::install_route_listener(move || {
             let new_route = router::current_route();
             let old = route.peek().clone();
             if new_route == old {
+                return;
+            }
+            // A share link navigated to mid-session is an intent, not a
+            // destination (D24): record the uid and change nothing else —
+            // the app keeps showing what it was showing, and the URL keeps
+            // the sender's pretty link for the open flow (a later round) to
+            // canonicalize. Deliberately NOT a lens detach: nothing has
+            // asked to leave the editor yet.
+            if let StudioRoute::SharedProject { uid } = &new_route {
+                nav_shared_project.set(router::PendingSharedProject(Some(uid.clone())));
                 return;
             }
             route.set(new_route.clone());
@@ -458,6 +490,8 @@ pub fn App() -> Element {
                         )));
                     }
                 }
+                // Handled above, before the route signal moved.
+                StudioRoute::SharedProject { .. } => {}
                 StudioRoute::Home
                 | StudioRoute::Explore
                 | StudioRoute::Boards { .. }
@@ -539,6 +573,7 @@ pub fn App() -> Element {
                         )));
                 }
                 StudioRoute::Home
+                | StudioRoute::SharedProject { .. }
                 | StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Explore
@@ -549,7 +584,7 @@ pub fn App() -> Element {
                 | StudioRoute::Docs { .. } => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
-            // AFTER the route dispatch, so a `#/device/<uid>` reload's own
+            // AFTER the route dispatch, so a `/device/<uid>` reload's own
             // connect runs first and the sweep no-ops on the live session
             // (the core guard makes it idempotent). Attach + pull + show,
             // nothing else; failures land softly on card evidence.
@@ -629,7 +664,7 @@ pub fn App() -> Element {
     let play = current_route.is_play();
     let play_toggle = current_route
         .is_lens()
-        .then(|| current_route.with_play(!play).hash());
+        .then(|| current_route.with_play(!play).path());
 
     // One shell for every section: the chrome renders at the same offset
     // whatever is below it, and switching sections swaps only the body —

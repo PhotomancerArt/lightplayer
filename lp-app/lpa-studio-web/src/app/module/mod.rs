@@ -10,7 +10,7 @@
 //! One face at three zoom levels, all shipped: the effect author works
 //! inside the module (children expanded as sibling cards), the artist sees
 //! the module face as a card in the workspace, and the end user sees the
-//! root module's face alone (play mode, `#/sim|device/<key>/play`). The
+//! root module's face alone (play mode, `/sim|device/<key>/play`). The
 //! sidebar bus pane is gone: bus-as-controls lives on the face, and
 //! bus-as-writers/readers in the wiring drawer.
 //!

@@ -1,0 +1,27 @@
+[package]
+name = "lpa-cloud-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Client side of the cloud: the CloudPort transport trait, an in-process transport, and the sync engine"
+
+[dependencies]
+# The message vocabulary both sides speak.
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+# The library primitives the sync engine is written over: snapshots, blobs,
+# the event log, and the history DAG. Deliberately NOT lpa-studio-core — the
+# engine is usable without the studio, and the studio wires it up later.
+lpc-history = { path = "../../lp-core/lpc-history" }
+lpfs = { path = "../../lp-base/lpfs" }
+# The in-process transport is the real service, not a mock of it (D13): the
+# same domain logic and the same in-memory adapters the server edge runs.
+lp-cloud-domain = { path = "../../lp-cloud/lp-cloud-domain" }
+lp-cloud-store-mem = { path = "../../lp-cloud/lp-cloud-store-mem" }
+log = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
