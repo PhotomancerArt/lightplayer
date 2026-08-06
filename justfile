@@ -1503,8 +1503,15 @@ fmt-check:
 # lp-gfx-wgpu, fw-browser, and naga-wasm-poc are excluded here: they pull the
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
+#
+# ⚠️ `--workspace` means every member, and `default-members` does NOT narrow it.
+# A device-target crate therefore needs an explicit `--exclude` here even when it
+# is already absent from `default-members` — which is why every fw-* crate is
+# named below, and why `lp-xt-fp-harness` (esp-println, bare-metal target) joins
+# them. It is covered by `clippy-fw-esp32s3` and `clippy-fw-esp32v3`, which
+# compile it for its real target.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
