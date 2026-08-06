@@ -968,6 +968,73 @@ mod tests {
     }
 
     #[test]
+    fn chrome_sessions_project_live_sessions_only() {
+        // One live identified device, one registry-only (offline) row, and
+        // the sim: the strip shows sim (pinned first) + the live device;
+        // the registry row never appears (D36: chip = session).
+        let mut evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "Desk C6".to_string(),
+            }),
+            content: DeviceContent::Empty,
+        });
+        evidence.session_key = Some("session-1".to_string());
+        let mut offline_card = device_card_from_live_evidence(&HomeDeviceEvidence::default());
+        offline_card.uid = Some("dev_bbbbbbbbbbbbbbbb".to_string());
+        offline_card.name = "Shelf sign".to_string();
+        let pool = HomePoolEvidence {
+            devices: vec![evidence],
+            sim: Some(HomeSimEvidence {
+                project: Some(UiDeviceProjectChip {
+                    uid: "prj_cccccccccccccccc".to_string(),
+                    name: "zook-dome".to_string(),
+                }),
+                ..HomeSimEvidence::default()
+            }),
+        };
+
+        let sessions = chrome_sessions(
+            std::slice::from_ref(&offline_card),
+            &pool,
+            Some(&crate::UiLensRuntime::Device {
+                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            }),
+        );
+
+        assert_eq!(
+            sessions.len(),
+            2,
+            "sim + live device, never the registry row"
+        );
+        assert!(sessions[0].sim, "the sim is pinned first");
+        assert_eq!(
+            sessions[0].target,
+            crate::UiChromeSessionTarget::Sim {
+                project_key: Some("prj_cccccccccccccccc".to_string())
+            }
+        );
+        assert!(!sessions[0].lensed);
+        // a project-less sim would read Empty; loaded = running clean
+        assert_eq!(sessions[0].status, crate::UiChromeSessionStatus::Run);
+        let device = &sessions[1];
+        assert_eq!(device.name, "Desk C6");
+        assert!(device.lensed, "the lens uid matches the live device");
+        assert_eq!(device.transport, "USB");
+        assert_eq!(
+            device.status,
+            crate::UiChromeSessionStatus::Empty,
+            "connected with nothing running reads hollow"
+        );
+        assert_eq!(
+            device.target,
+            crate::UiChromeSessionTarget::Device {
+                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string())
+            }
+        );
+    }
+
+    #[test]
     fn a_live_heartbeat_clamp_reaches_the_card_and_a_dead_link_drops_it() {
         let clamped_recovery = lpc_wire::server::RecoveryStatus {
             level: lpc_wire::server::RecoveryLevelWire::Green,
