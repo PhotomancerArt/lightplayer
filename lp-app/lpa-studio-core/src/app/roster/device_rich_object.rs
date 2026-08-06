@@ -117,21 +117,12 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
     if let Some(sub_line) = input.state.sub_line(input.now_secs) {
         lines.push(RichLine::new("note", sub_line));
     }
-    // The running family also offers the editor entry as a visible CTA
-    // on the card face (2026-07-26 walk: the grow ⤢ alone was too easy
-    // to miss — it stays, but the Status tab now says it out loud).
-    // Running-up-to-date's STATE affordance already is the open — only
-    // the drifted states need it added beside their Push/Review.
+    // No standalone editor CTA here (G1b ruling 5): the 2026-07-26
+    // "⤢ is too easy to miss" fix moved onto the ▶ tab's Editor button,
+    // so the front door carries only the state-table verbs.
     let state_affordance = input.state.affordance();
-    let open_editor = (matches!(
-        input.state,
-        RosterCardState::RunningUpToDate
-            | RosterCardState::RunningBehind { .. }
-            | RosterCardState::EditedOnDevice { .. }
-    ) && state_affordance != Some(RosterAffordance::OpenEditor))
-    .then_some(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
     // §3c-2: the diverged face carries BOTH verbs — Keep-both rides
-    // beside the state's Use-board-copy, then the editor CTA.
+    // beside the state's Use-board-copy.
     let keep_both = matches!(input.state, RosterCardState::EditedOnDevice { .. })
         .then_some(DeviceDetailAffordance::Roster(RosterAffordance::KeepBoth));
     RichSection {
@@ -140,13 +131,11 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         lines,
         chip: None,
         // The state-table affordance stays FIRST (it is the rollup's
-        // primary — Push/Review must not be demoted); the editor CTA
-        // rides second.
+        // primary — Push/Review must not be demoted).
         affordances: state_affordance
             .map(DeviceDetailAffordance::Roster)
             .into_iter()
             .chain(keep_both)
-            .chain(open_editor)
             .collect(),
         weight: RichWeight::Actionable,
     }
