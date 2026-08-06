@@ -94,6 +94,8 @@
     --tw-color-status-attention-bg: var(--studio-status-attention-bg);
     --tw-color-status-attention-border: var(--studio-status-attention-border);
     --tw-color-status-attention-foreground: var(--studio-status-attention-text);
+    --tw-color-status-engaged-border: var(--studio-status-engaged-border);
+    --tw-color-status-engaged-foreground: var(--studio-status-engaged-text);
     --tw-color-status-error-bg: var(--studio-status-error-bg);
     --tw-color-status-error-border: var(--studio-status-error-border);
     --tw-color-status-error-foreground: var(--studio-status-error-text);
@@ -1227,11 +1229,11 @@
   .tw\:border-\[var\(--studio-color-text-strong\)\] {
     border-color: var(--studio-color-text-strong);
   }
-  .tw\:border-\[var\(--studio-status-attention-border\)\] {
-    border-color: var(--studio-status-attention-border);
-  }
   .tw\:border-\[var\(--studio-status-bound-border\)\] {
     border-color: var(--studio-status-bound-border);
+  }
+  .tw\:border-\[var\(--studio-status-engaged-border\)\] {
+    border-color: var(--studio-status-engaged-border);
   }
   .tw\:border-\[var\(--studio-status-error-border\)\] {
     border-color: var(--studio-status-error-border);
@@ -1341,16 +1343,16 @@
       background-color: color-mix(in oklab,var(--studio-color-accent) 45%,var(--studio-color-surface-muted));
     }
   }
-  .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-attention-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {
-    background-color: var(--studio-status-attention-text);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab,var(--studio-status-attention-text) 45%,var(--studio-color-surface-muted));
-    }
-  }
   .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-bound-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {
     background-color: var(--studio-status-bound-text);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab,var(--studio-status-bound-text) 45%,var(--studio-color-surface-muted));
+    }
+  }
+  .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-engaged-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {
+    background-color: var(--studio-status-engaged-text);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab,var(--studio-status-engaged-text) 45%,var(--studio-color-surface-muted));
     }
   }
   .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-error-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {
@@ -1919,10 +1921,6 @@
     --tw-tracking: 0.1em;
     letter-spacing: 0.1em;
   }
-  .tw\:tracking-\[0\.06em\] {
-    --tw-tracking: 0.06em;
-    letter-spacing: 0.06em;
-  }
   .tw\:tracking-\[0\.08em\] {
     --tw-tracking: 0.08em;
     letter-spacing: 0.08em;
@@ -2002,6 +2000,9 @@
   }
   .tw\:text-status-bound-foreground {
     color: var(--tw-color-status-bound-foreground);
+  }
+  .tw\:text-status-engaged-foreground {
+    color: var(--tw-color-status-engaged-foreground);
   }
   .tw\:text-status-error-foreground {
     color: var(--tw-color-status-error-foreground);
@@ -2119,11 +2120,11 @@
     --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
-  .tw\:ring-status-attention-border {
-    --tw-ring-color: var(--tw-color-status-attention-border);
-  }
   .tw\:ring-status-bound-border {
     --tw-ring-color: var(--tw-color-status-bound-border);
+  }
+  .tw\:ring-status-engaged-border {
+    --tw-ring-color: var(--tw-color-status-engaged-border);
   }
   .tw\:ring-status-live-border {
     --tw-ring-color: var(--tw-color-status-live-border);

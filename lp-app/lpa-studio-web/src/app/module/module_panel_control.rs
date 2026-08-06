@@ -14,18 +14,18 @@
 //! |---|---|---|
 //! | Read, at default | accent arc at the authored default, subtle label | absent |
 //! | Read, following | **violet** arc at the LIVE value, violet label | absent |
-//! | Engaged (Latch) | **amber** arc + body ring at the HELD value, amber label | present |
+//! | Engaged (Latch) | **gold** arc + body ring at the HELD value, gold label | present |
 //!
 //! In every state the face carries exactly ONE number
 //! ([`UiPanelControl::shown_display`]): the live reading when the channel
 //! has one, the authored value when it does not. The authored value it
 //! displaces is a row in the detail popup, not a parenthetical beside it.
 //!
-//! Amber (the `status-attention` family) is the engaged treatment:
-//! it is the one warm family Studio already owns, it is not violet (bound
-//! means *wired*, engaged means *captured* — P6), not green (valid only),
-//! and not the blue live family (transient edits). A dedicated
-//! `status-engaged` token family is the eventual home.
+//! Gold (the `status-engaged` family, minted at the M4 P6 gate) is the
+//! engaged treatment: laddered like every status family, it is not violet
+//! (bound means *wired*, engaged means *captured* — P6), not green (valid
+//! only), not the blue live family (transient edits), and deliberately not
+//! attention-orange — that stays device/roster health.
 //!
 //! The **label is the detail trigger**, reusing the node face's
 //! [`SlotDetailButton`] machinery verbatim: the whole control is the
@@ -144,7 +144,7 @@ pub fn ModulePanelControl(
     let reset = rsx! {
         if engaged && let Some(target) = reset_target && let Some(handler) = on_panel {
             button {
-                class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
+                class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",
                 r#type: "button",
                 title: "Reset {reset_label} — drop the held value and follow the project again",
                 aria_label: "Reset {reset_label}",
@@ -231,12 +231,12 @@ fn ModulePanelControlBody(
         control.emit,
         lpa_studio_core::UiPanelEmit::PhasorPeriod { .. }
     );
-    // A palette reads as its compact chip (`5 stops`, `↻ 4 · 3/min`) — the
+    // A palette reads as its compact chip (`5 stops`, `↻ 4 · 20 s`) — the
     // strips below say WHICH palette; the full summary stays on hover and
     // in the label's detail popup.
     let palette = control.swatch_palette();
     let shown_value = if phasor {
-        crate::app::node::phasor_speed_display(control.shown_display())
+        format!("{} s", control.shown_display())
     } else if let Some(config) = &palette {
         format_gradient_chip(config)
     } else {
@@ -373,17 +373,17 @@ fn panel_state_label_class(state: UiPanelControlState) -> &'static str {
     match state {
         UiPanelControlState::ReadDefault => "tw:text-subtle-foreground",
         UiPanelControlState::ReadFollowing => "tw:text-status-bound-foreground",
-        UiPanelControlState::Engaged => "tw:text-status-attention-foreground",
+        UiPanelControlState::Engaged => "tw:text-status-engaged-foreground",
     }
 }
 
-/// Readout color per panel state: the held value leads in amber, a followed
+/// Readout color per panel state: the held value leads in engaged gold, a followed
 /// value in violet, an untouched default stays quiet.
 fn panel_state_readout_class(state: UiPanelControlState) -> &'static str {
     match state {
         UiPanelControlState::ReadDefault => "tw:text-dim-foreground",
         UiPanelControlState::ReadFollowing => "tw:text-status-bound-foreground",
-        UiPanelControlState::Engaged => "tw:text-status-attention-foreground",
+        UiPanelControlState::Engaged => "tw:text-status-engaged-foreground",
     }
 }
 
@@ -452,7 +452,7 @@ mod tests {
         // Engaged must NOT reuse the bound-violet family (P6).
         assert!(families[1].contains("bound"));
         assert!(!families[2].contains("bound"));
-        assert!(families[2].contains("attention"));
+        assert!(families[2].contains("engaged"));
         // And green stays valid-only, everywhere.
         for family in families.iter().chain(
             [

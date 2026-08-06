@@ -517,17 +517,16 @@ fn phasor_period_control(
     let min = option_f32_field(fields, "min").unwrap_or(0.0);
     let max = option_f32_field(fields, "max").unwrap_or(PHASOR_PERIOD_MAX_SECONDS);
     let mut control = UiPanelControl {
-        // The knob's LABEL is plain vocabulary (G2 feedback): "Speed" when
-        // the def has one phasor; the uniform's name joins only to
-        // disambiguate several. The web layer renders the value as the
-        // reciprocal ("1/100 s") and flips the drag so up = faster —
-        // PROVISIONAL pending the clock-face UX spike; the slot itself
-        // still stores period_seconds.
+        // The knob's LABEL: "Period" when the def has one phasor; the
+        // uniform's name joins only to disambiguate several. The M4 P6
+        // gate picked the plain-seconds voice (retiring the PROVISIONAL
+        // reciprocal Speed readout), so the knob speaks the seconds the
+        // slot actually stores — the clock face's own vocabulary.
         label: if lone_phasor {
-            "Speed".to_string()
+            "Period".to_string()
         } else {
             format!(
-                "{} speed",
+                "{} period",
                 string_field(fields, "label")
                     .filter(|label| !label.is_empty())
                     .unwrap_or_else(|| entry.label.clone())
@@ -542,8 +541,8 @@ fn phasor_period_control(
         },
         // The knob turns the PERIOD, so its value is that one number even
         // though the slot it writes is the whole record. The FACE readout
-        // presents it as an auto-denominated rate ("3/min") whose unit is
-        // part of the string, so the control carries no unit suffix.
+        // presents it in plain seconds ("100 s") with the unit riding the
+        // string, so the control carries no unit suffix.
         value: UiSlotValue::f32(period).with_unit(crate::UiSlotUnit::seconds()),
         emit: crate::UiPanelEmit::PhasorPeriod {
             waveform: struct_waveform(config),
@@ -2094,7 +2093,7 @@ mod tests {
         assert_eq!(face.controls.len(), 1, "one control per phasor slot");
         let control = &face.controls[0];
         assert_eq!(
-            control.label, "Speed",
+            control.label, "Period",
             "a lone phasor knob wears the plain label"
         );
         assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
@@ -2411,7 +2410,7 @@ mod tests {
         );
         assert_eq!(
             control.live_value.as_deref(),
-            Some("cycle \u{b7} 2 palettes \u{b7} 3/min \u{b7} 0.5 s fade"),
+            Some("cycle \u{b7} 2 palettes \u{b7} every 20 s \u{b7} 0.5 s fade"),
             "a driven palette reads back as words; the strip keeps the authored config"
         );
     }

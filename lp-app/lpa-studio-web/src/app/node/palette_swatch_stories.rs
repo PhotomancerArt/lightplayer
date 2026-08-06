@@ -54,7 +54,7 @@ fn held() -> Element {
 }
 
 #[story(
-    description = "A cycling palette: the member SET as equal segments of one band, so the control says `these, in turn` at a glance, and the rate rides the readout as `↻ 4 · 3/min` — the same auto-denominated units the phasor speed knob uses. No live member ring: a panel control has no phase reading in hand (the timebase φ lives on the clock face's probe), so highlighting which member is showing right now would be a guess."
+    description = "A cycling palette: the member SET as equal segments of one band, so the control says `these, in turn` at a glance, and the step rides the readout as `↻ 4 · 20 s` — the P6 gate's plain-seconds Step voice. No live member ring: a panel control has no phase reading in hand (the timebase φ lives on the clock face's probe), so highlighting which member is showing right now would be a guess."
 )]
 fn cycle() -> Element {
     rsx! {
@@ -160,37 +160,19 @@ fn engaged_swatch(label: &str) -> lpa_studio_core::UiPanelControl {
     control
 }
 
-const CANDIDATE_LABEL_CLASS: &str =
-    "tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
-
 #[story(
-    description = "GATE DECISION — the engaged color family, three candidates on the same engaged swatch (a panel writer holds the channel). A: the shipped stand-in, the existing amber `status-attention` family. B: the spike's gold (#e4c065), raw — border and text both wear the bright value, as the spike drew it. C: a minted `status-engaged` family — the same gold hue laddered like every other status family (dark tinted bg, mid border, bright text), which is what a real token family would ship as. The vars are overridden story-locally; the app is NOT restyled."
+    description = "ENGAGED: a panel writer holds the channel, so the frame and readout wear the gold `status-engaged` family — laddered like every status family, minted at the M4 P6 gate (candidate C of the decision render; not attention-orange, which stays device health)."
 )]
-fn engaged_family_candidates() -> Element {
+fn engaged() -> Element {
     rsx! {
         SwatchStoryCard {
-            div { class: "tw:grid tw:gap-1.5",
-                span { class: CANDIDATE_LABEL_CLASS, "A — amber status-attention (shipped stand-in)" }
-                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
-            }
-            div {
-                class: "tw:grid tw:gap-1.5",
-                style: "--studio-status-attention-bg: rgba(228,192,101,.10); --studio-status-attention-border: #e4c065; --studio-status-attention-text: #e4c065;",
-                span { class: CANDIDATE_LABEL_CLASS, "B — the spike's gold, raw (#e4c065)" }
-                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
-            }
-            div {
-                class: "tw:grid tw:gap-1.5",
-                style: "--studio-status-attention-bg: #292213; --studio-status-attention-border: #8a6f35; --studio-status-attention-text: #e8c56b;",
-                span { class: CANDIDATE_LABEL_CLASS, "C — minted status-engaged (gold, laddered)" }
-                PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
-            }
+            PanelControl { control: engaged_swatch("Palette"), on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "Detail pinned open via the LABEL trigger — the same slot-row popover every other panel control opens, with the palette's authored value stated as its summary line rather than the 24-entry padded storage."
+    description = "Detail pinned open via the LABEL trigger — the same slot-row popover every other panel control opens, with the palette's authored value stated as its summary line rather than a raw storage dump."
 )]
 fn detail_open() -> Element {
     rsx! {

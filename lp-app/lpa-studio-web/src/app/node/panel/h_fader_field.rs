@@ -36,7 +36,7 @@ pub fn HFaderField(
     /// Violet bound treatment on the fill, slot border, and grip ring.
     #[props(default = false)]
     bound: bool,
-    /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Outranks the violet
     /// bound family — bound means "wired", engaged means "captured".
     #[props(default = false)]
@@ -235,7 +235,7 @@ pub(crate) fn fader_fill_class(
     engaged: bool,
 ) -> &'static str {
     if engaged {
-        "tw:bg-[color-mix(in_oklab,var(--studio-status-attention-text)_45%,var(--studio-color-surface-muted))]"
+        "tw:bg-[color-mix(in_oklab,var(--studio-status-engaged-text)_45%,var(--studio-color-surface-muted))]"
     } else if bound {
         "tw:bg-[color-mix(in_oklab,var(--studio-status-bound-text)_45%,var(--studio-color-surface-muted))]"
     } else if state.invalid.is_some() {
@@ -252,7 +252,7 @@ pub(crate) fn fader_slot_class(
     engaged: bool,
 ) -> &'static str {
     if engaged {
-        "tw:border-[var(--studio-status-attention-border)]"
+        "tw:border-[var(--studio-status-engaged-border)]"
     } else if bound {
         "tw:border-[var(--studio-status-bound-border)]"
     } else if state.invalid.is_some() {
@@ -299,7 +299,7 @@ mod tests {
         // binding, so the engaged family wins (panel.md P-Q2) — and the
         // amber rides a STATIC class, never a compound inline style.
         let fill = fader_fill_class(&UiSlotFieldState::editable(), true, true);
-        assert!(fill.contains("--studio-status-attention-text"));
+        assert!(fill.contains("--studio-status-engaged-text"));
         assert!(!fill.contains("bound"));
         assert!(fader_input_class(true, true).contains("is-engaged"));
     }

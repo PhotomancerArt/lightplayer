@@ -25,7 +25,7 @@ pub fn ToggleField(
     /// Violet bound treatment on the pill ring.
     #[props(default = false)]
     bound: bool,
-    /// Amber ENGAGED ring (`docs/design/panel.md` P2/P6): a panel writer
+    /// Gold ENGAGED ring (`docs/design/panel.md` P2/P6): a panel writer
     /// has captured this channel and holds it. Outranks the bound violet.
     #[props(default = false)]
     engaged: bool,
@@ -78,7 +78,7 @@ fn toggle_pill_class(on: bool, bound: bool, engaged: bool, disabled: bool) -> St
         "tw:border-border-strong tw:bg-page"
     };
     let ring = if engaged {
-        " tw:ring-1 tw:ring-status-attention-border"
+        " tw:ring-1 tw:ring-status-engaged-border"
     } else if bound {
         " tw:ring-1 tw:ring-status-bound-border"
     } else {
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn engaged_ring_replaces_the_bound_ring() {
         let engaged = toggle_pill_class(false, true, true, false);
-        assert!(engaged.contains("status-attention"));
+        assert!(engaged.contains("status-engaged"));
         assert!(!engaged.contains("status-bound"));
     }
 }

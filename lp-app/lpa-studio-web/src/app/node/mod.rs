@@ -102,7 +102,6 @@ pub use face::{
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
-pub(crate) use panel::phasor_speed_display;
 pub use panel::{
     HFaderField, KnobField, PaletteCatalog, PaletteChoice, PaletteChooser, PaletteChooserTab,
     PaletteEditTarget, PaletteEditor, PaletteGroup, PaletteOrigin, PaletteSwatchField,
