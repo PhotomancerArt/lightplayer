@@ -25,6 +25,7 @@ members = [
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-browser",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
@@ -46,6 +47,12 @@ members = [
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -122,6 +129,7 @@ default-members = [
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
@@ -133,6 +141,12 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -401,7 +415,7 @@ ser-write-json = { path = "third_party/ser-write-json" }
 #[patch.crates-io]
 #pp-rs = { path = "../pp-rs" }
 
-#[patch."https://github.com/light-player/lp-regalloc2"]
+#[patch."https://github.com/PhotomancerArt/lp-regalloc2"]
 #regalloc2 = { path = "../lp-regalloc2" }
 #
 #[patch."https://github.com/PhotomancerArt/lp-cranelift"]
@@ -413,6 +427,6 @@ ser-write-json = { path = "third_party/ser-write-json" }
 #cranelift-control = { path = "../lp-cranelift/cranelift/control" }
 #cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
 #
-#[patch."https://github.com/light-player/lp-common"]
+#[patch."https://github.com/PhotomancerArt/lp-common"]
 #lp-collection = { path = "../lp-common/lp-collection" }
 #

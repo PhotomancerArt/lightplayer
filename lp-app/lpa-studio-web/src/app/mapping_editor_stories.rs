@@ -1,4 +1,4 @@
-//! Stories for the standalone mapping editor (`#/mapping`,
+//! Stories for the standalone mapping editor (`/mapping`,
 //! `lpa-mapping-editor`). Mount states are pinned via the editor's
 //! deterministic story props — no animation, no measured viewport.
 

@@ -8,23 +8,31 @@
 //!
 //! # Invariants
 //!
-//! **History is linear per project.** A project's history is a single line
-//! of versions; there is no DAG and no in-project branching. Forks mint a
-//! *new project uid* whose history begins with a
+//! **History is an append-only event log whose ancestry forms a DAG.** The
+//! only non-linear node is the **clobber join**
+//! ([`EventKind::Joined`](event::history_event::EventKind)): two parents,
+//! content equal to the chosen one. A join resolves a divergence between
+//! the local head and one foreign version; the losing side is *set aside*,
+//! never destroyed — it stays reachable and classifies as
+//! [`SyncRelation::Behind`](lineage::sync_relation::SyncRelation) so peers
+//! still carrying it fast-forward. There is **no computed content merge**
+//! yet; a future merge is a join whose content is derived rather than
+//! picked — the model does not change again. (The pre-cloud linear
+//! invariant — "no DAG, no merge, ever" — was retired deliberately for
+//! multi-user collaboration; see
+//! `docs/adr/2026-08-05-project-history-dag-joins.md`.)
+//!
+//! **Forks are still new projects.** Forks mint a *new project uid* whose
+//! history begins with a
 //! [`EventKind::ForkedFrom`](event::history_event::EventKind) origin event
-//! pointing at the parent project and version. "Diverged" therefore simply
-//! means "a hash not present in my line".
+//! pointing at the parent project and version.
 //!
-//! **The head rule.** Editing the head of a line advances the line; editing
-//! anything else forks — lazily, on first save. This crate does not enforce
-//! the rule at edit surfaces (that wiring lives in the studio layers); it
+//! **The head rule.** Editing the head advances the line; editing anything
+//! else forks — lazily, on first save. This crate does not enforce the
+//! rule at edit surfaces (that wiring lives in the studio layers); it
 //! provides the primitives — [`lineage::project_history::ProjectHistory`]
-//! recording saves at the head, and fork constructors for everything else —
-//! that make the rule the only expressible behavior.
-//!
-//! There is no merge, by design, ever. Fast-forward detection
-//! ([`lineage::sync_relation::SyncRelation`]) plus fork-as-new-project is
-//! the entire model.
+//! recording saves and joins at the head, and fork constructors for
+//! everything else — that make the rule the only expressible behavior.
 
 #![no_std]
 extern crate alloc;

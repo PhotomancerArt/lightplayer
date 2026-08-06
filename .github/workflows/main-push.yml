@@ -1,9 +1,17 @@
 # Everything that happens when main moves, in ONE workflow so the ordering is
-# a `needs:` edge rather than a race. The Studio deploy used to live in its own
-# `deploy-studio-pages.yml` on the same `push: main` trigger; the two started
-# within a second of each other and the deploy's checkout lost to the tag push
-# by 0.56s, so production published `<sha>-dirty-<time>` instead of the version
-# tag that its own commit had been given.
+# a `needs:` edge rather than a race: mint the version tag, then cut the
+# release.
+#
+# The version tag must exist BEFORE anything that stamps a build checks out,
+# or `print-app-version.sh` falls through to a bare sha — that race (lost by
+# 0.56s) is why tagging and deploying were merged into one workflow.
+# Production deployment is no longer here: `deploy-cloud.yml` deploys
+# lightplayer.app to fly.io, triggered by a GREEN run of THIS workflow, so it
+# inherits the same ordering guarantee (its checkout fetches tags, and the tag
+# is already pushed by then). The GitHub Pages deploy this workflow used to
+# carry retired with the 2026-08-06 DNS cutover — Pages no longer serves
+# lightplayer.app. `deploy-pages-channel.yml` still publishes the beta/demo
+# channels.
 name: Main push
 
 on:
@@ -72,129 +80,3 @@ jobs:
           echo "" >> release_notes.md
           echo "${NOTES}" >> release_notes.md
           gh release create "${TAG}" --title "Release ${APP_VERSION}" --notes-file release_notes.md --latest
-
-  # Moved here from deploy-studio-pages.yml. `needs:` is the whole point: the
-  # tag must exist on this commit BEFORE the checkout below fetches refs, or
-  # `print-app-version.sh` cannot see it and falls through to the bare sha.
-  deploy-studio-pages:
-    name: Build and deploy Studio
-    needs: [tag-next-version]
-    # `always()` so a workflow_dispatch re-deploy still runs with the tag job
-    # skipped; a tag job that actually FAILED must still block the deploy.
-    if: always() && needs.tag-next-version.result != 'failure' && needs.tag-next-version.result != 'cancelled'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    # Kept from the old workflow: Pages deployments serialize against the
-    # beta/demo channel jobs, independent of this workflow's own group.
-    concurrency:
-      group: pages-production
-      cancel-in-progress: false
-    env:
-      RUST_BACKTRACE: 1
-      RISC_V_TARGET: riscv32imac-unknown-none-elf
-      RUSTUP_PERMIT_COPY_RENAME: 1
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Resolved HERE, before the build touches the checkout. The build writes
-      # generated files into the tree (dx rewrites assets/tailwind.css), and
-      # `print-app-version.sh` reads `git status --porcelain` — so resolving it
-      # after the build reports every CI run as dirty and stamps the artifact
-      # `<sha>-dirty-<build-time>`. On push the tag job hands us the version
-      # directly; a dispatch re-deploy reads the tag off the commit and fails
-      # loudly if it has none.
-      - name: Resolve app version
-        env:
-          TAGGED_VERSION: ${{ needs.tag-next-version.outputs.app_version }}
-        run: |
-          set -euo pipefail
-          version="${TAGGED_VERSION:-$(scripts/print-app-version.sh --require-tag)}"
-          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
-          echo "Deploying app version: ${version}"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly-2026-04-27
-          components: rust-src
-
-      - name: Install Rust targets
-        run: |
-          rustup target add wasm32-unknown-unknown
-          rustup target add ${{ env.RISC_V_TARGET }}
-
-      # The site serves an image per chip (lp-fw/builds/served.json), and two
-      # of the three are Xtensa — the S3 and the classic ESP32. Both build
-      # only on Espressif's Rust fork, and their Rust target specs link
-      # through the fork's GNU binutils rather than rust-lld, so the action's
-      # `buildtargets` must name both.
-      #
-      # `default: false`, UNLIKE pre-merge's firmware jobs: this job also
-      # builds host tooling and the wasm bundle on the pinned nightly above,
-      # and making `esp` the default toolchain would break them. The firmware
-      # crates select the fork themselves via their rust-toolchain.toml, and
-      # `lp-cli firmware package` runs cargo in the crate directory.
-      #
-      # Keep the version pin in sync with pre-merge.yml's three copies.
-      - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
-        with:
-          version: 1.95.0.0
-          buildtargets: esp32s3,esp32
-          default: false
-          ldproxy: false
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ runner.arch }}-pages-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
-
-      - name: Install just
-        uses: extractions/setup-just@v3
-
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked --force
-
-      - name: Install dioxus-cli
-        run: cargo install dioxus-cli --version 0.7.9 --locked --force
-
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked --force
-
-      - name: Build Pages artifact
-        run: just studio-web-deploy-dir production target/pages/studio lightplayer.app
-
-      - name: Smoke-check Pages artifact
-        run: just studio-web-smoke target/pages/studio
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: target/pages/studio
-
-      - name: Deploy Pages
-        id: deployment
-        uses: actions/deploy-pages@v4

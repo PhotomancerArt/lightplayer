@@ -5,7 +5,7 @@
 //! Web Worker, driven at a throttled tick rate with a binary pixel path
 //! (transferable `ArrayBuffer`s) and instrumented per-card frame costs.
 //!
-//! Reached at `#/preview-lab` in `stories`-feature builds; not part of the
+//! Reached at `/preview-lab` in `stories`-feature builds; not part of the
 //! product UI. Pure config/stats helpers live in
 //! [`crate::exploration::preview_lab_config`] and
 //! [`crate::exploration::preview_lab_stats`] so they stay host-testable.

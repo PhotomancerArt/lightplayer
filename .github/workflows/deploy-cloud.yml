@@ -1,0 +1,204 @@
+name: Deploy Cloud Service
+
+# The lightplayer.app origin: one fly.io machine running lp-cloud-server,
+# which serves the API, the blob planes, the share pages, AND the Studio
+# bundle (D26 — one origin, real 200s, per-URL OG tags).
+#
+# The Studio web artifact is built HERE and shipped into the image as bytes;
+# infra/Dockerfile deliberately does not run `dx`. The build steps were
+# inherited from the retired deploy-studio-pages.yml (GH Pages hosting died
+# with the 2026-08-06 DNS cutover; the last-deployed Pages site remains as
+# the DNS-rollback target — see docs/runbooks/godaddy-dns-cutover.md §5).
+
+# Deploys ride CI, not raw pushes: "Main push" green on main is the
+# trigger, so a red main never ships. workflow_dispatch remains the manual
+# override for re-deploys and incident response.
+on:
+  workflow_run:
+    workflows: ["Main push"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  # Never two deploys at once: the machine is single-writer by design and an
+  # overlapping `flyctl deploy` would race the volume handoff.
+  group: deploy-cloud
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  RISC_V_TARGET: riscv32imac-unknown-none-elf
+  RUSTUP_PERMIT_COPY_RENAME: 1
+
+jobs:
+  # A 20-minute wasm+firmware build that then discovers it has no deploy
+  # token is a bad way to learn that. This job costs seconds.
+  gate:
+    name: Deploy token present?
+    # On the CI-ride path, only a GREEN "Main push" run on main proceeds;
+    # a manual dispatch always may.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.token.outputs.ready }}
+    steps:
+      - name: Check FLY_API_TOKEN
+        id: token
+        # Via env, not interpolated into the script: a secret in a shell
+        # command line is a secret in a process listing.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "${FLY_API_TOKEN}" ]; then
+            echo "FLY_API_TOKEN is not set — skipping the cloud deploy."
+            echo "Set it (fly tokens create deploy) once the app exists: infra/bootstrap.sh"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Build artifact and deploy to fly.io
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Deploy exactly the commit CI validated (empty on manual
+          # dispatch, which then checks out the default branch head).
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # Full history AND tags: the version below is read from the tag
+          # `main-push.yml` pushed for this very commit.
+          fetch-depth: 0
+          fetch-tags: true
+
+      # BEFORE the build, and this ordering is the whole point:
+      # `print-app-version.sh` reads `git status --porcelain`, and the build
+      # writes generated files into the checkout — resolve after it and
+      # production stamps `<sha>-dirty-<time>` instead of the version. That
+      # exact bug is why tagging and deploying were merged into main-push.yml;
+      # this deploy rides that workflow's success, so the tag already exists.
+      # `--require-tag` fails loudly rather than shipping a sha-stamped
+      # production build.
+      - name: Resolve app version
+        run: |
+          set -euo pipefail
+          version="$(scripts/print-app-version.sh --require-tag)"
+          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Deploying app version: ${version}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install Rust targets
+        run: |
+          rustup target add wasm32-unknown-unknown
+          rustup target add ${{ env.RISC_V_TARGET }}
+
+      # The bundle ships a firmware image per chip (lp-fw/builds/served.json)
+      # and two of the three are Xtensa, so both build targets are named
+      # here exactly as in deploy-studio-pages.yml. `default: false` for the
+      # same reason: the wasm bundle and host tooling build on the pinned
+      # nightly above. Keep the version in sync with the other workflows.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3,esp32
+          default: false
+          ldproxy: false
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-cloud-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # Falls back to the Pages workflow's cache: the two build the same
+          # artifact from the same tree, so a warm pages cache is a warm
+          # cloud cache. Saved under our own key so the two never fight.
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cloud-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked --force
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --version 0.7.9 --locked --force
+
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked --force
+
+      # `production` + the domain are what put the canonical origin into the
+      # artifact. The output path is contractual: infra/Dockerfile COPYs
+      # exactly target/pages/studio.
+      - name: Build web artifact
+        run: just studio-web-deploy-dir production target/pages/studio lightplayer.app
+
+      - name: Smoke-check web artifact
+        run: just studio-web-smoke target/pages/studio
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Docker only reads `.dockerignore` from the context root, and the
+      # context is the repo root. Without this the upload to fly's builder
+      # includes a multi-gigabyte warm `target/`. See infra/dockerignore.
+      - name: Stage .dockerignore
+        run: cp infra/dockerignore .dockerignore
+
+      # `--remote-only` IS the docker build: flyctl uploads the context and
+      # builds the image on fly's builder, which has the layer cache from the
+      # previous deploy. Building locally first and pushing would duplicate
+      # the work on a runner that starts cold every time.
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy . \
+            --config infra/fly.toml \
+            --dockerfile infra/Dockerfile \
+            --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+            --remote-only \
+            --wait-timeout 600
+
+      - name: Verify the deployed machine answers
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Against fly.dev, not the apex: this must pass identically before
+          # and after the DNS cutover.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 https://lightplayer.fly.dev/healthz; then
+              exit 0
+            fi
+            echo "healthz not ready yet (attempt ${attempt})"
+            sleep 10
+          done
+          echo "healthz never answered — check: flyctl logs --app lightplayer"
+          exit 1

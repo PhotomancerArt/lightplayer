@@ -1,6 +1,4 @@
 use dioxus::prelude::*;
-use std::rc::Rc;
-use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::stories::story::StoryDescriptor;
 use crate::stories::story_registry::{
@@ -12,10 +10,11 @@ pub fn StoryBook() -> Element {
     // Stories render thumbs statically: no PreviewHost boot, no live
     // badges racing capture (see `StaticThumbPreviews`).
     use_context_provider(|| crate::app::home::gallery_preview::StaticThumbPreviews);
-    let initial_route = selected_story_route_from_hash();
+    let initial_route = selected_story_route_from_url();
     let mut selected_story_id = use_signal(move || initial_route.story_id);
     let mut viewport = use_signal(move || initial_route.viewport);
-    let _hash_listener = use_hook(move || install_story_hash_listener(selected_story_id, viewport));
+    let _route_listener =
+        use_hook(move || install_story_route_listener(selected_story_id, viewport));
     let stories = all_stories();
     let story_groups = story_groups(&stories);
     let selected = selected_story_id.read().clone();
@@ -60,7 +59,7 @@ pub fn StoryBook() -> Element {
                         for category in family.categories.iter() {
                             for component in category.components.iter() {
                                 {
-                                    let overview_href = story_hash(&component.overview_id, selected_viewport);
+                                    let overview_href = story_href(&component.overview_id, selected_viewport);
                                     rsx! {
                                         a {
                                             href: "{overview_href}",
@@ -71,13 +70,13 @@ pub fn StoryBook() -> Element {
                                 }
                                 for story in component.stories.iter() {
                                     {
-                                        let story_href = story_hash(story.id, selected_viewport);
+                                        let story_link = story_href(story.id, selected_viewport);
                                         // The capture script scrapes these links to
                                         // discover stories; the flag rides along so it
                                         // can capture screenshot stories at lg only.
                                         rsx! {
                                             a {
-                                                href: "{story_href}",
+                                                href: "{story_link}",
                                                 tabindex: "-1",
                                                 "data-story-screenshot": if story.screenshot { "1" } else { "0" },
                                                 "{story.label}"
@@ -109,7 +108,7 @@ pub fn StoryBook() -> Element {
                                                                 .iter()
                                                                 .any(|story| story.id == selected);
                                                             let component_class = story_nav_component_class(expanded);
-                                                            let component_href = story_hash(&component.overview_id, selected_viewport);
+                                                            let component_href = story_href(&component.overview_id, selected_viewport);
                                                             let overview_id_for_component = component.overview_id.clone();
                                                             rsx! {
                                                                 div { class: "tw:grid tw:min-w-0",
@@ -137,7 +136,7 @@ pub fn StoryBook() -> Element {
                                                                                         } else {
                                                                                             story_nav_link_class(true, false)
                                                                                         };
-                                                                                        let overview_href = story_hash(&component.overview_id, selected_viewport);
+                                                                                        let overview_href = story_href(&component.overview_id, selected_viewport);
                                                                                         let overview_id_for_link = component.overview_id.clone();
                                                                                         rsx! {
                                                                                             a {
@@ -157,11 +156,11 @@ pub fn StoryBook() -> Element {
                                                                                             } else {
                                                                                                 story_nav_link_class(false, false)
                                                                                             };
-                                                                                            let story_href = story_hash(story_id, selected_viewport);
+                                                                                            let story_link = story_href(story_id, selected_viewport);
                                                                                             rsx! {
                                                                                                 a {
                                                                                                     class: "{link_class}",
-                                                                                                    href: "{story_href}",
+                                                                                                    href: "{story_link}",
                                                                                                     tabindex: if expanded { "0" } else { "-1" },
                                                                                                     onclick: move |_| selected_story_id.set(story_id.to_string()),
                                                                                                     "{story.label}"
@@ -206,7 +205,7 @@ pub fn StoryBook() -> Element {
                                         active: selected_viewport == target_viewport,
                                         onclick: move |_| {
                                             viewport.set(target_viewport);
-                                            set_story_hash(&selected_for_button, target_viewport);
+                                            set_story_url(&selected_for_button, target_viewport);
                                         },
                                     }
                                 }
@@ -712,25 +711,23 @@ impl StoryViewport {
     }
 }
 
-fn selected_story_route_from_hash() -> StoryRoute {
+fn selected_story_route_from_url() -> StoryRoute {
     // route identity comes from the shared router vocabulary; the
-    // hash-internal `?viewport=` query stays this module's concern
+    // `?viewport=` query stays this module's concern
     let story_id = match crate::router::current_route() {
         crate::router::StudioRoute::Stories { story_id: Some(id) } if story_route_exists(&id) => id,
         _ => DEFAULT_STORY_ID.to_string(),
     };
     StoryRoute {
         story_id,
-        viewport: viewport_from_hash_query(),
+        viewport: viewport_from_query(),
     }
 }
 
-fn viewport_from_hash_query() -> StoryViewport {
-    location_hash()
-        .as_deref()
-        .and_then(|hash| hash.split_once('?'))
-        .map(|(_, query)| query)
-        .unwrap_or("")
+fn viewport_from_query() -> StoryViewport {
+    location_search()
+        .unwrap_or_default()
+        .trim_start_matches('?')
         .split('&')
         .filter_map(|part| part.split_once('='))
         .find_map(|(key, value)| {
@@ -741,49 +738,39 @@ fn viewport_from_hash_query() -> StoryViewport {
         .unwrap_or(StoryViewport::Lg)
 }
 
-fn story_hash(story_id: &str, viewport: StoryViewport) -> String {
-    let route = crate::router::StudioRoute::Stories {
-        story_id: Some(story_id.to_string()),
-    };
-    format!("{}?viewport={}", route.hash(), viewport.slug())
+/// One story's address: the shared `/stories/<id>` path plus this module's
+/// own `?viewport=` param.
+fn story_href(story_id: &str, viewport: StoryViewport) -> String {
+    let route = story_route(story_id);
+    format!("{}?viewport={}", route.path(), viewport.slug())
 }
 
-fn set_story_hash(story_id: &str, viewport: StoryViewport) {
-    if let Some(location) = web_sys::window().map(|window| window.location()) {
-        let _ = location.set_hash(&story_hash(story_id, viewport));
+fn story_route(story_id: &str) -> crate::router::StudioRoute {
+    crate::router::StudioRoute::Stories {
+        story_id: Some(story_id.to_string()),
     }
 }
 
-fn install_story_hash_listener(
+/// The viewport buttons set their signal themselves, so the URL write is a
+/// silent `replaceState` (a zoom on the story you are already reading is not
+/// a new history entry) that keeps every other param — the capture harness's
+/// `?story-png=` included.
+fn set_story_url(story_id: &str, viewport: StoryViewport) {
+    crate::router::replace_with_query_param(&story_route(story_id), "viewport", viewport.slug());
+}
+
+/// Browser navigation inside the book: back/forward and the sidebar's plain
+/// `<a href="/stories/…">` links, both through the shared router listener
+/// (the book mounts before the app's hooks, so it installs its own).
+fn install_story_route_listener(
     mut selected_story_id: Signal<String>,
     mut viewport: Signal<StoryViewport>,
-) -> Option<Rc<StoryHashListener>> {
-    let window = web_sys::window()?;
-    let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
-        let route = selected_story_route_from_hash();
+) -> Option<std::rc::Rc<crate::router::RouteListener>> {
+    crate::router::install_route_listener(move || {
+        let route = selected_story_route_from_url();
         selected_story_id.set(route.story_id);
         viewport.set(route.viewport);
-    }));
-
-    window
-        .add_event_listener_with_callback("hashchange", callback.as_ref().unchecked_ref())
-        .ok()?;
-
-    Some(Rc::new(StoryHashListener { window, callback }))
-}
-
-struct StoryHashListener {
-    window: web_sys::Window,
-    callback: Closure<dyn FnMut(web_sys::Event)>,
-}
-
-impl Drop for StoryHashListener {
-    fn drop(&mut self) {
-        let _ = self.window.remove_event_listener_with_callback(
-            "hashchange",
-            self.callback.as_ref().unchecked_ref(),
-        );
-    }
+    })
 }
 
 fn story_png_viewport() -> StoryViewport {
@@ -820,10 +807,10 @@ fn is_story_png_mode() -> bool {
         })
 }
 
-fn location_hash() -> Option<String> {
+fn location_search() -> Option<String> {
     web_sys::window()
         .map(|window| window.location())
-        .and_then(|location| location.hash().ok())
+        .and_then(|location| location.search().ok())
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //! Coverage per the M4 milestone: the form sections, the live preview with
 //! its mode/anatomy controls, and the lint panel — clean on a checked-in def
 //! and loud on a seeded-broken one. The full-page story is the feel-gate
-//! surface (`#/boards/edit`).
+//! surface (`/boards/edit`).
 
 use dioxus::prelude::*;
 use lpa_board_editor::view::lint_panel::LintPanel;
@@ -41,7 +41,7 @@ fn broken_doc() -> EditorDoc {
 }
 
 #[story(
-    description = "The whole editor on a checked-in def (XIAO ESP32-C6): identity + drawing + pin tables on the left, live preview and lint on the right. The feel-gate surface at #/boards/edit."
+    description = "The whole editor on a checked-in def (XIAO ESP32-C6): identity + drawing + pin tables on the left, live preview and lint on the right. The feel-gate surface at /boards/edit."
 )]
 pub(crate) fn editor_loaded_xiao() -> Element {
     let doc = use_signal(|| checked_in_doc("seeed/xiao-esp32-c6"));
