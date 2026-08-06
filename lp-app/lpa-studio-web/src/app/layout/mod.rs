@@ -23,5 +23,5 @@ pub use rich_object_pane::RichObjectPane;
 pub use site_chrome::{PlayToggle, SiteChrome, SiteSection};
 pub use studio_pane::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
 pub use studio_settings_popover::StudioSettingsPopover;
-pub use studio_shell::StudioShell;
+pub use studio_shell::{ShellGallery, StudioShell};
 pub use version_badge::VersionBadge;
