@@ -12,7 +12,7 @@ mock, no sleeps, no wall clock.
 
 | | what it is |
 | --- | --- |
-| `Td::new()` | the world: one service, and the counters that name everything in it |
+| `TestWorld::new()` | the world: one service, and the counters that name everything in it |
 | `td.user()` | somebody with an account, signed in — `user-1`, then `user-2` |
 | `td.visitor()` | somebody who followed a link without signing in |
 | `td.invitee()` | an email address with no account behind it yet |
@@ -76,5 +76,5 @@ identical uids, identical timestamps, and identical content hashes.
 Write the story with the vocabulary above. If the test needs a comment to be
 followed, the fix is a better builder verb, not the comment.
 
-Fixtures are never shared between tests: each one starts at `Td::new()` and
+Fixtures are never shared between tests: each one starts at `TestWorld::new()` and
 builds exactly the world its story needs.
