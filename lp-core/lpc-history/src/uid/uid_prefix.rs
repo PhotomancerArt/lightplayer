@@ -14,11 +14,18 @@ pub enum UidPrefix {
     Module,
     /// A physical or virtual device (`dev_…`).
     Device,
+    /// A cloud user account (`usr_…`).
+    User,
 }
 
 impl UidPrefix {
     /// All known prefixes.
-    pub const ALL: [UidPrefix; 3] = [UidPrefix::Project, UidPrefix::Module, UidPrefix::Device];
+    pub const ALL: [UidPrefix; 4] = [
+        UidPrefix::Project,
+        UidPrefix::Module,
+        UidPrefix::Device,
+        UidPrefix::User,
+    ];
 
     /// The canonical three-letter prefix string (without the `_` separator).
     pub fn as_str(&self) -> &'static str {
@@ -26,6 +33,7 @@ impl UidPrefix {
             UidPrefix::Project => "prj",
             UidPrefix::Module => "mod",
             UidPrefix::Device => "dev",
+            UidPrefix::User => "usr",
         }
     }
 }
@@ -44,6 +52,7 @@ impl FromStr for UidPrefix {
             "prj" => Ok(UidPrefix::Project),
             "mod" => Ok(UidPrefix::Module),
             "dev" => Ok(UidPrefix::Device),
+            "usr" => Ok(UidPrefix::User),
             _ => Err(UidParseError::UnknownPrefix),
         }
     }
