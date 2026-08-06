@@ -56,5 +56,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(page_route::get_healthz))
         .fallback(get(page_route::get_page_or_asset))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
+        .layer(axum::middleware::from_fn(crate::request_log::log_request))
         .with_state(state)
 }

@@ -177,3 +177,63 @@ CNAME www  light-player.github.io
 
 …and delete the two fly records (`A @` and `AAAA @`). Step-by-step, with
 verification commands, is §5 of the runbook.
+
+## Operations
+
+The basics, each one command:
+
+**What version is deployed?**
+
+```bash
+curl -s https://lightplayer.app/healthz
+# {"status":"ok","build":"<git sha>","cloud_api_version":1}
+```
+
+The `build` sha comes from the image's `GIT_SHA` build arg (CI passes the
+commit it validated); `dev` means a hand build. The Studio bundle shows its
+own tag in the app chrome — the two should come from the same commit.
+
+**Logs** (one line per request: method, path, status, ms — no query
+strings, no cookies, no `/healthz` noise):
+
+```bash
+fly logs -a lightplayer
+```
+
+`fly logs` is live + recent only. There is deliberately no log shipping,
+metrics stack, or APM yet — see the debt register before adding one.
+
+**Deploys** ride CI: a green "Main push" run on `main` triggers
+`deploy-cloud.yml`, which deploys exactly the sha CI validated. A red main
+never ships. Manual redeploy (incident override):
+
+```bash
+gh workflow run deploy-cloud.yml
+```
+
+**Rollback** — fly keeps the image history:
+
+```bash
+fly releases -a lightplayer          # find the last good version's image
+fly deploy -a lightplayer --image <registry.fly.io/lightplayer:...>
+```
+
+DB schema note: rolling back past a migration is NOT covered by image
+rollback — that's what the Litestream point-in-time restore is for (§Backup
+and restore). Migrations are additive so far; keep them that way.
+
+**Restore drill** — a backup you have never restored is a hope, not a
+backup. Quarterly, or after any storage change:
+
+```bash
+set -a; source ~/.lightplayer/tigris-lightplayer.env; set +a
+litestream restore -config infra/litestream.yml -o /tmp/drill.sqlite /data/cloud.sqlite
+sqlite3 /tmp/drill.sqlite "select count(*) from users; select count(*) from projects;"
+```
+
+Sane counts = the drill passes. Retention is 30 days of point-in-time
+(24h snapshots), configured in `infra/litestream.yml`.
+
+**Uptime**: fly's health check restarts a wedged machine, but nothing
+external notices fly itself being down. Recommended (2 minutes, free): a
+healthchecks.io or UptimeRobot ping on `https://lightplayer.app/healthz`.

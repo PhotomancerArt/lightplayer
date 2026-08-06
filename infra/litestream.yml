@@ -36,6 +36,10 @@ dbs:
         # to rotate them. Deliberately not written here: a config file in the
         # image is a config file in a registry.
 
-        # sync-interval is left at its default (1s). Retention likewise
-        # (24h snapshots, 72h WAL). The whole database is small; there is no
-        # tuning to do until there is a measurement to justify it.
+        # sync-interval is left at its default (1s) — no tuning without a
+        # measurement. Retention is NOT default: the database is kilobytes,
+        # so 30 days of point-in-time restore is free insurance against
+        # slow-discovery corruption (a bad migration noticed a week later),
+        # where the 72h default would have aged the good state out.
+        snapshot-interval: 24h
+        retention: 720h

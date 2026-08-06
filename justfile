@@ -182,7 +182,7 @@ web-demo-deploy: web-demo-build
     # Commit and push
     cd "$tmp_dir/wt"
     git add -A
-    url="https://light-player.github.io/lightplayer/"
+    url="https://photomancerart.github.io/lightplayer/"
     if git diff --cached --quiet; then
         echo "No changes to deploy. $url"
     else

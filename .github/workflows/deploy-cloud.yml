@@ -13,10 +13,13 @@ name: Deploy Cloud Service
 # It retires in P12, AFTER the DNS cutover, so a rollback to Pages remains a
 # working path for as long as the old DNS records can be re-entered.
 
+# Deploys ride CI, not raw pushes: "Main push" green on main is the
+# trigger, so a red main never ships. workflow_dispatch remains the manual
+# override for re-deploys and incident response.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["Main push"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +41,12 @@ jobs:
   # token is a bad way to learn that. This job costs seconds.
   gate:
     name: Deploy token present?
+    # On the CI-ride path, only a GREEN "Main push" run on main proceeds;
+    # a manual dispatch always may.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -71,6 +80,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # Deploy exactly the commit CI validated (empty on manual
+          # dispatch, which then checks out the default branch head).
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
@@ -155,6 +167,7 @@ jobs:
           flyctl deploy . \
             --config infra/fly.toml \
             --dockerfile infra/Dockerfile \
+            --build-arg GIT_SHA="$(git rev-parse HEAD)" \
             --remote-only \
             --wait-timeout 600
 

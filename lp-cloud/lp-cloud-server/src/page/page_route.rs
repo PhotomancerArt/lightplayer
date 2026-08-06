@@ -72,8 +72,23 @@ pub async fn get_page_or_asset(State(state): State<AppState>, uri: Uri) -> Respo
 /// Deliberately does not touch the store: a health check that takes the
 /// service lock reports "unhealthy" for a slow request, and a rolling deploy
 /// then kills a machine that was merely busy.
-pub async fn get_healthz() -> Response {
-    (StatusCode::OK, "ok\n").into_response()
+/// Liveness plus the two version facts an operator actually asks for:
+/// which build is running (git sha, from the image build arg) and which
+/// cloud API vocabulary it speaks. Never takes the store lock — a wedged
+/// store must read as unhealthy via timeouts, not hang the health check.
+pub async fn get_healthz(State(state): State<AppState>) -> Response {
+    let build = state.config().build_sha.as_deref().unwrap_or("dev");
+    let body = format!(
+        "{{\"status\":\"ok\",\"build\":\"{}\",\"cloud_api_version\":{}}}\n",
+        build,
+        lpc_cloud_api::CLOUD_API_VERSION
+    );
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response()
 }
 
 /// The OG tags for a project, or `None` if an anonymous caller cannot see

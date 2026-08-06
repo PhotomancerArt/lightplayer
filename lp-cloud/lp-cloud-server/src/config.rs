@@ -55,6 +55,11 @@ pub struct ServerConfig {
     pub base_url: String,
     /// Whether `GET /auth/dev` exists. See [`dev_auth_allowed`].
     pub dev_auth: bool,
+    /// The git sha this image was built from (`LP_CLOUD_BUILD_SHA`, set by
+    /// the Dockerfile's build arg). `None` in local/dev runs. Reported by
+    /// `/healthz` so "what version is deployed" is one curl, and the
+    /// cutover smoke can assert deployed == pushed.
+    pub build_sha: Option<String>,
     /// What it takes to sign somebody in with Google.
     pub google: GoogleSettings,
     /// How long a minted session lasts, in seconds.
@@ -121,6 +126,7 @@ impl ServerConfig {
                 .map(PathBuf::from),
             base_url,
             dev_auth,
+            build_sha: nonempty(get("LP_CLOUD_BUILD_SHA")),
             google: GoogleSettings {
                 client_id: nonempty(get("LP_CLOUD_GOOGLE_CLIENT_ID")),
                 client_secret: nonempty(get("LP_CLOUD_GOOGLE_CLIENT_SECRET")),
