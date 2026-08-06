@@ -12,9 +12,10 @@
 //! path, so each of these is a loadable, linkable address):
 //!
 //! ```text
-//! /                     the Devices section — the returning-user landing
-//!                       (vision Q2 lean); also the empty/unknown path
-//! /home                 the Home landing (via the logo, not a nav tab)
+//! /                     the Home landing (via the logo, not a nav tab);
+//!                       also the empty/unknown path. `/home` still parses
+//!                       as an alias, and is never emitted.
+//! /devices              the devices section
 //! /projects             the projects library section
 //! /explore              the explore section (placeholder until modpacks)
 //! /sim/<project-key>    the editor as a lens on THE sim session running
@@ -74,15 +75,17 @@
 //! Reconciliation rules (implemented in `web_app.rs`):
 //! - the editor is showing → the route follows the LENS via
 //!   [`lens_route`]: lens on the sim + open project → `Sim(slug)` (a
-//!   **push** when coming from `Home` — a gallery open, a new history
-//!   entry — a **replace** otherwise); lens on the device → `Device(uid)`.
+//!   **push** when coming from a page — a gallery open, a new history
+//!   entry — a **replace** when already on a lens route); lens on the
+//!   device → `Device(uid)`.
 //!   A not-yet-identified device has no honest address; the URL stays put.
-//! - the editor went away → `replace(Home)` once an open had actually
-//!   started (`saw_opening`); the boot-time home flash never rewrites the
-//!   URL, or a startup reopen would erase the very route that requested
-//!   it.
+//! - the editor went away → `replace(Devices)` — the gallery the cards
+//!   live on, not the `/` landing — once an open had actually started
+//!   (`saw_opening`); the boot-time home flash never rewrites the URL, or
+//!   a startup reopen would erase the very route that requested it.
 //! - browser navigation (back/forward/in-app link/manual URL edit) →
-//!   dispatch: to `Home` while the editor is open = lens detach
+//!   dispatch: to a gallery route (`Devices`/`Projects`, the sections
+//!   that render the shell) while the editor is open = lens detach
 //!   (runtime-pool P3: the editor closes, every runtime session keeps
 //!   running); to `Sim` = the open-on-sim path (create/reuse the sim
 //!   session and push the head — D19 — or re-attach when that project is
@@ -121,15 +124,18 @@ use lpc_history::{PrefixedUid, UidPrefix};
     )
 )]
 pub(crate) enum StudioRoute {
-    /// The landing page (`/home`). Reached through the logo, not a nav
-    /// tab (vision D1/D11); `/` deliberately does NOT land here — see
-    /// [`StudioRoute::Devices`]. Placeholder content until M3.
+    /// The landing page — the `/` (root) landing. Reached through the
+    /// logo, not a nav tab (vision D1/D11). `/home` still parses as an
+    /// alias so old links keep working, but only `/` is ever emitted.
+    /// Unknown/malformed paths land here too — the URL is user input.
+    /// Placeholder content until M3.
+    ///
+    /// The root used to be [`StudioRoute::Devices`] (vision Q2's lean:
+    /// "are my devices up?" is a returning user's first question), marked
+    /// revisit-when-Home-is-real; Yona ruled for Home at the root
+    /// 2026-08-06.
     Home,
-    /// The devices section — and the `/` (root) landing. A returning user's
-    /// first question is "are my devices up?", so the root path maps
-    /// here rather than to Home (vision Q2 lean; revisit when Home gets
-    /// its real content in M3). Unknown/malformed paths also land here
-    /// — the URL is user input.
+    /// The devices section (`/devices`).
     Devices,
     /// The projects library section (`/projects`). Renders the same
     /// gallery as Devices until the P09 page split.
@@ -185,11 +191,10 @@ pub(crate) enum StudioRoute {
 )]
 impl StudioRoute {
     /// Parse a `location.pathname`. Unknown or malformed paths read as
-    /// `Devices` — the root landing (vision Q2 lean); the URL is user
-    /// input (this is also where the deleted `/project/<key>` lands: as
-    /// `Devices`, no redirect). A query (the story book's `?viewport=`)
-    /// is not part of the route and is stripped; its owner parses it from
-    /// `location.search`.
+    /// `Home` — the root landing; the URL is user input (this is also
+    /// where the deleted `/project/<key>` lands: as `Home`, no redirect).
+    /// A query (the story book's `?viewport=`) is not part of the route
+    /// and is stripped; its owner parses it from `location.search`.
     ///
     /// A legacy `#/…` string parses identically, so the shim and its tests
     /// can speak either dialect — but the shim still rewrites the address
@@ -214,7 +219,7 @@ impl StudioRoute {
                     key: key.to_string(),
                     play: true,
                 },
-                _ => StudioRoute::Devices,
+                _ => StudioRoute::Home,
             },
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => StudioRoute::Device {
@@ -225,7 +230,7 @@ impl StudioRoute {
                     uid: uid.to_string(),
                     play: true,
                 },
-                _ => StudioRoute::Devices,
+                _ => StudioRoute::Home,
             },
             // A share link: only the LAST segment is examined, so
             // `/p/<slug>-prj_x` and `/p/anything/else/prj_x` both resolve
@@ -235,9 +240,9 @@ impl StudioRoute {
             Some("p") => segments
                 .next_back()
                 .and_then(share_uid_from_segment)
-                .map_or(StudioRoute::Devices, |uid| StudioRoute::SharedProject {
-                    uid,
-                }),
+                .map_or(StudioRoute::Home, |uid| StudioRoute::SharedProject { uid }),
+            // `/home` is a kept alias for the root — old links stay
+            // loadable; `path()` only ever emits `/`.
             Some("home") if segments.next().is_none() => StudioRoute::Home,
             Some("devices") if segments.next().is_none() => StudioRoute::Devices,
             Some("projects") if segments.next().is_none() => StudioRoute::Projects,
@@ -287,23 +292,23 @@ impl StudioRoute {
                     story_id: (!rest.is_empty()).then(|| rest.join("/")),
                 }
             }
-            None => StudioRoute::Devices,
-            Some(_) => StudioRoute::Devices,
+            None => StudioRoute::Home,
+            Some(_) => StudioRoute::Home,
         }
     }
 
     /// The canonical path for this route (always `/`-prefixed).
     ///
-    /// `/` IS the Devices path — the root landing is the devices section
-    /// (see the variant docs); `/devices` parses in as an alias but is
-    /// never emitted. A `SharedProject` renders as the bare `/p/<uid>`:
+    /// `/` IS the Home path — the root landing is Home (see the variant
+    /// docs); `/home` parses in as an alias but is never emitted. A
+    /// `SharedProject` renders as the bare `/p/<uid>`:
     /// the pretty slug is decoration the router does not know, and is put
     /// back by [`canonical_share_path`] once the project's meta is in
     /// hand.
     pub(crate) fn path(&self) -> String {
         match self {
-            StudioRoute::Home => "/home".to_string(),
-            StudioRoute::Devices => "/".to_string(),
+            StudioRoute::Home => "/".to_string(),
+            StudioRoute::Devices => "/devices".to_string(),
             StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
             StudioRoute::Sim { key, play: false } => format!("/sim/{key}"),
@@ -526,7 +531,7 @@ pub(crate) fn boot_route() -> StudioRoute {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn boot_route() -> StudioRoute {
-    StudioRoute::Devices
+    StudioRoute::Home
 }
 
 /// Push a new history entry for `route` and update the URL. Fires no
@@ -685,7 +690,7 @@ pub(crate) fn current_route() -> StudioRoute {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn current_route() -> StudioRoute {
-    StudioRoute::Devices
+    StudioRoute::Home
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -980,21 +985,31 @@ mod tests {
             "#/home/extra",
             "#/explore/extra",
         ] {
-            assert_eq!(StudioRoute::parse(path), StudioRoute::Devices, "{path:?}");
+            assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
     }
 
-    /// `/` and the `/devices` alias both land on Devices — the root is
-    /// the returning-user landing (vision Q2 lean), and only `/` is ever
-    /// emitted back. The legacy `#/` dialect parses the same way.
+    /// `/` and the kept `/home` alias both land on Home — the root IS the
+    /// landing (Yona 2026-08-06, reversing vision Q2's devices-at-the-root
+    /// lean), and only `/` is ever emitted back. The legacy `#/` dialect
+    /// parses the same way, so an old `#/` bookmark follows the root's new
+    /// meaning.
     #[test]
-    fn the_root_path_is_the_devices_section() {
-        assert_eq!(StudioRoute::parse("/"), StudioRoute::Devices);
-        assert_eq!(StudioRoute::parse(""), StudioRoute::Devices);
+    fn the_root_path_is_the_home_landing() {
+        assert_eq!(StudioRoute::parse("/"), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse(""), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse("/home"), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse("#/"), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse("#/home"), StudioRoute::Home);
+        assert_eq!(StudioRoute::Home.path(), "/");
+    }
+
+    /// Devices is its own section now, at its own slug.
+    #[test]
+    fn the_devices_section_has_its_own_slug() {
         assert_eq!(StudioRoute::parse("/devices"), StudioRoute::Devices);
-        assert_eq!(StudioRoute::parse("#/"), StudioRoute::Devices);
         assert_eq!(StudioRoute::parse("#/devices"), StudioRoute::Devices);
-        assert_eq!(StudioRoute::Devices.path(), "/");
+        assert_eq!(StudioRoute::Devices.path(), "/devices");
     }
 
     #[test]
@@ -1066,7 +1081,7 @@ mod tests {
             "/p/dev_h7Kq9xY2mQ4tB8Wz",
             "/p/usr_h7Kq9xY2mQ4tB8Wz",
         ] {
-            assert_eq!(StudioRoute::parse(path), StudioRoute::Devices, "{path:?}");
+            assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
     }
 
@@ -1159,9 +1174,9 @@ mod tests {
         // redirect) — it parses as any other unknown path.
         assert_eq!(
             StudioRoute::parse("/project/2026-07-09-1421-basic"),
-            StudioRoute::Devices
+            StudioRoute::Home
         );
-        assert_eq!(StudioRoute::parse("/project/prj_abc"), StudioRoute::Devices);
+        assert_eq!(StudioRoute::parse("/project/prj_abc"), StudioRoute::Home);
     }
 
     #[test]
