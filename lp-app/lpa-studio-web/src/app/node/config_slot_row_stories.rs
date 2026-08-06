@@ -8,9 +8,12 @@ use lpa_studio_core::{
     UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::GradientConfig;
 
 use crate::app::node::ConfigSlotRow;
-use crate::app::node::node_story_fixtures::config_row_states_fixture;
+use crate::app::node::node_story_fixtures::{
+    config_row_states_fixture, gradient_slot_value, palette_cycle, sunset_gradient,
+};
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
@@ -95,6 +98,34 @@ pub(crate) fn published_value() -> Element {
             .with_publish(UiBindingEndpoint::new("bus:visual.out")),
             depth: 0,
             index: 0,
+        }
+    }
+}
+
+#[story(
+    description = "Palette rows in real row chrome: a held palette and a cycle, each drawing its strip(s) in the value cell with the summary line under them. Same row grammar as every other slot — label cell, value cell, trailing affordances — with the strip stretching the value cell instead of a struct string overflowing it."
+)]
+pub(crate) fn gradient_slot() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "palette",
+                    "Palette",
+                    gradient_slot_value(&GradientConfig::Static(sunset_gradient())),
+                )
+                .with_address(story_slot_address("palette")),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("cycle", "Cycle", gradient_slot_value(&palette_cycle()))
+                    .with_address(story_slot_address("cycle")),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
         }
     }
 }

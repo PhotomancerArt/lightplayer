@@ -9,11 +9,11 @@ use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
 };
 use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
-use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
     SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
 };
+use crate::app::project::{format_lp_value, gradient_config_value};
 use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
 use crate::core::notice::UiNotices;
 use crate::{
@@ -572,6 +572,13 @@ impl ProjectController {
                     primary_visual: channel.primary_visual,
                     contended,
                     preview,
+                    // Palettes get the same treatment products do: the value
+                    // box draws the thing, not a description of it.
+                    gradient: channel
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.value.as_ref())
+                        .and_then(gradient_config_value),
                     writers,
                     readers,
                 }
