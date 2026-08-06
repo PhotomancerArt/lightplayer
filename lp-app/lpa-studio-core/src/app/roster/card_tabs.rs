@@ -7,6 +7,7 @@
 //!
 //! | Tab | sections | present when |
 //! |---|---|---|
+//! | Play | — (the device's own frames) | the card has a project |
 //! | Status | Health | always |
 //! | Project | Project + Backup | either section exists |
 //! | Settings | Technical | the section exists |
@@ -29,11 +30,18 @@ use crate::app::rich_object::{RichObjectView, RichSection, RichWeight};
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DeviceCardTab {
     /// ▶ — the running control product, rendered from frames read OFF the
-    /// device (honest-device-preview plan). The variant lands here in P2 so
-    /// core's card feed can gate on it while the tab has no UI yet;
-    /// [`device_card_tabs`] does not emit it, and the default stays
-    /// [`Self::Status`] — P3 owns presence, the icon pick, and the
-    /// default-when-connected rule.
+    /// device (honest-device-preview plan, converged spike section 1). It
+    /// leads the row: on a connected card it is what you came to look at,
+    /// and the controller opens a fresh connected card on it
+    /// (`effective_card_tab`'s default rule).
+    ///
+    /// Presence is the caller's `has_play` — the card has a project whose
+    /// running shape there is something honest to draw. A board with
+    /// nothing on it gets no ▶: an empty frame promising a picture is the
+    /// dishonesty the G2 hero-strip ruling threw out.
+    ///
+    /// It stays OUT of [`Default`] on purpose: the default is what a card
+    /// with no live evidence at all opens on, and that is the front door.
     Play,
     /// The card's front door — the stable default a fresh card opens on.
     #[default]
@@ -72,7 +80,14 @@ pub struct CardTabView<A> {
 /// Group a rich-object view's sections onto the card's tabs. Tab presence
 /// is data-adaptive (a tab with nothing honest to show is absent), except
 /// Status and Console — the stable core every card carries.
-pub fn device_card_tabs<A>(view: RichObjectView<A>) -> Vec<CardTabView<A>> {
+///
+/// `has_play` decides the ▶ tab, which no section feeds: its content is the
+/// device's own published frames, not rich-object evidence. It is an
+/// argument rather than something derived here so the ONE rule — a card
+/// with a project has a picture to show — is stated once by the caller that
+/// knows the card, and so the tab set stays core-owned and core-tested
+/// instead of being spliced in renderer-side.
+pub fn device_card_tabs<A>(view: RichObjectView<A>, has_play: bool) -> Vec<CardTabView<A>> {
     let mut status = Vec::new();
     let mut project = Vec::new();
     let mut settings = Vec::new();
@@ -89,7 +104,14 @@ pub fn device_card_tabs<A>(view: RichObjectView<A>) -> Vec<CardTabView<A>> {
             _ => status.push(section),
         }
     }
-    let mut tabs = vec![tab_view(DeviceCardTab::Status, status)];
+    // ▶ leads (converged spike, section 1): the picture is the reason you
+    // look at a connected card, so it sits leftmost and Status is one tab
+    // away rather than the other way round.
+    let mut tabs = Vec::new();
+    if has_play {
+        tabs.push(tab_view(DeviceCardTab::Play, Vec::new()));
+    }
+    tabs.push(tab_view(DeviceCardTab::Status, status));
     if !project.is_empty() {
         tabs.push(tab_view(DeviceCardTab::Project, project));
     }
@@ -165,7 +187,7 @@ mod tests {
             observed_version: Some(3),
             head_version: Some(5),
         };
-        let tabs = device_card_tabs(device_rich_object(&input(&state)));
+        let tabs = device_card_tabs(device_rich_object(&input(&state)), false);
         assert_eq!(
             tab_ids(&tabs),
             vec![
@@ -196,14 +218,43 @@ mod tests {
         );
     }
 
+    /// ▶ leads the row and carries no sections — its content is the
+    /// device's frames, so no rich-object evidence ever lands on it and it
+    /// must never badge (a badge would be a health claim the tab cannot
+    /// back up).
+    #[test]
+    fn play_leads_the_row_and_carries_nothing_but_the_picture() {
+        let state = RosterCardState::RunningUpToDate;
+        let with_play = device_card_tabs(device_rich_object(&input(&state)), true);
+        assert_eq!(
+            tab_ids(&with_play),
+            vec![
+                DeviceCardTab::Play,
+                DeviceCardTab::Status,
+                DeviceCardTab::Project,
+                DeviceCardTab::Settings,
+                DeviceCardTab::Console,
+                DeviceCardTab::Danger,
+            ]
+        );
+        let play = tab(&with_play, DeviceCardTab::Play);
+        assert!(play.sections.is_empty());
+        assert_eq!(play.badge, None);
+        // and the same card with nothing to show simply loses the tab —
+        // every other tab keeps its place.
+        let without = device_card_tabs(device_rich_object(&input(&state)), false);
+        assert_eq!(tab_ids(&without), tab_ids(&with_play)[1..]);
+    }
+
     #[test]
     fn backup_rides_the_project_tab_on_the_diverged_card() {
-        let tabs = device_card_tabs(device_rich_object(&input(
-            &RosterCardState::EditedOnDevice {
+        let tabs = device_card_tabs(
+            device_rich_object(&input(&RosterCardState::EditedOnDevice {
                 local_saved_at: None,
                 pushed_at: None,
-            },
-        )));
+            })),
+            false,
+        );
         let project = tab(&tabs, DeviceCardTab::Project);
         let titles: Vec<&str> = project
             .sections
@@ -221,7 +272,7 @@ mod tests {
         };
         let mut input = input(&RosterCardState::RunningUpToDate);
         input.bundled_fw = Some(&bundled);
-        let tabs = device_card_tabs(device_rich_object(&input));
+        let tabs = device_card_tabs(device_rich_object(&input), false);
         assert_eq!(
             tab(&tabs, DeviceCardTab::Settings).badge,
             Some(UiStatusKind::Attention)
@@ -236,7 +287,7 @@ mod tests {
             label: "Installing firmware".to_string(),
             percent: Some(62),
         };
-        let tabs = device_card_tabs(device_rich_object(&input(&state)));
+        let tabs = device_card_tabs(device_rich_object(&input(&state)), false);
         assert!(!tab_ids(&tabs).contains(&DeviceCardTab::Danger));
     }
 
@@ -247,7 +298,7 @@ mod tests {
         };
         let mut input = input(&state);
         input.fw = None;
-        let tabs = device_card_tabs(device_rich_object(&input));
+        let tabs = device_card_tabs(device_rich_object(&input), false);
         assert_eq!(
             tab_ids(&tabs),
             vec![
@@ -281,14 +332,18 @@ mod tests {
 
     #[test]
     fn loaded_sim_gains_the_project_tab() {
-        let tabs = device_card_tabs(sim_rich_object(&SimRichInput {
-            state: &RosterCardState::RunningUpToDate,
-            project_name: Some("porch-sign"),
-            now_secs: NOW,
-        }));
+        let tabs = device_card_tabs(
+            sim_rich_object(&SimRichInput {
+                state: &RosterCardState::RunningUpToDate,
+                project_name: Some("porch-sign"),
+                now_secs: NOW,
+            }),
+            true,
+        );
         assert_eq!(
             tab_ids(&tabs),
             vec![
+                DeviceCardTab::Play,
                 DeviceCardTab::Status,
                 DeviceCardTab::Project,
                 DeviceCardTab::Console,
@@ -303,11 +358,14 @@ mod tests {
 
     #[test]
     fn sim_tabs_are_the_honestly_applicable_set() {
-        let tabs = device_card_tabs(sim_rich_object(&SimRichInput {
-            state: &RosterCardState::ConnectedEmpty,
-            project_name: None,
-            now_secs: NOW,
-        }));
+        let tabs = device_card_tabs(
+            sim_rich_object(&SimRichInput {
+                state: &RosterCardState::ConnectedEmpty,
+                project_name: None,
+                now_secs: NOW,
+            }),
+            false,
+        );
         // no Technical evidence → no Settings tab; empty → no Project tab;
         // the stop-sim danger zone is always there
         assert_eq!(

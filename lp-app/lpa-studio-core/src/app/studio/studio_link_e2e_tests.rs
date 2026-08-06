@@ -3871,15 +3871,53 @@ fn the_play_tab_feeds_the_card_frames_the_device_published() {
     );
 }
 
+/// P3's default rule, end to end: a connected board running a project opens
+/// its card on ▶ with NO tab selection anywhere — and because the tab and
+/// the feed's gate are the same answer (`effective_card_tab`), the feed is
+/// already running when the card is first drawn.
+///
+/// This is the whole "▶ is the default" promise: not a renderer preference,
+/// but a card that is already showing frames the first time you look at it.
+#[test]
+fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
+    let (store, host) = library();
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Play,
+        "a Ready board running a project opens on its picture"
+    );
+
+    run_card_feeds(&mut studio);
+    assert!(
+        device_card(&studio, &card_key).frame_preview.is_some(),
+        "the default tab feeds itself — no gesture required"
+    );
+
+    // And an explicit choice outranks the default, permanently: moving to
+    // Status must not snap back to ▶ on the next view build.
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Status);
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Status,
+        "the user's tab choice is sticky"
+    );
+}
+
 /// The gate, negative half: a card on any other tab issues NO frame read.
 /// The feed is the only wire traffic a non-lens device session generates
 /// between heartbeats, so a card nobody is watching must generate none.
+///
+/// The tab is selected EXPLICITLY here: a fresh card on a loaded, answering
+/// board now opens on ▶ (P3's default rule), so "no selection" is no longer
+/// a way to express "watching something else".
 #[test]
 fn a_card_on_another_tab_never_pulls_frames() {
     let (store, host) = library();
-    let (mut studio, _card_key, _device) = studio_with_loaded_device(&store, host);
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Settings);
 
-    // No tab selection at all: a fresh card opens on Status.
     run_card_feeds(&mut studio);
 
     let feed = studio.card_feed_for_test().expect("the device session");

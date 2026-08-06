@@ -30,9 +30,10 @@ pub struct UiDeviceCard {
     /// Where the card stands in the honest roster vocabulary.
     pub state: RosterCardState,
     /// The project the device holds (live cards) or last ran (offline
-    /// cards) — identity for the card's hero strip (gallery-rework P05,
-    /// vision D12: a thumbnail strip under the title bar with the project's
-    /// name overlaid), never health. `None` renders no strip.
+    /// cards) — identity for the card's ▶ tab (honest-device preview P3:
+    /// the project chip on the play tab's meta row, under the picture the
+    /// board itself published), never health. `None` means no ▶ tab at all:
+    /// nothing to draw.
     pub project: Option<UiDeviceProjectChip>,
     /// Running-firmware build facts from the live link's hello (provenance
     /// + the feature set compiled into the image) — Technical evidence for
@@ -103,6 +104,12 @@ pub struct UiDeviceCard {
     pub ui: CardUiState,
 }
 
+/// The (≤1) sim card's reserved identity key — the sim has no uid and no
+/// registry entry, so its `CardUiState` and view-transition name key by
+/// this token instead. Named because the controller's default-tab rule has
+/// to recognize the sim card by key alone.
+pub const SIM_CARD_KEY: &str = "runtime-sim";
+
 impl UiDeviceCard {
     /// The card's CANONICAL identity — the ONE key both the UI-state map
     /// and the scene-fork's `view-transition-name` consume (2026-07-25
@@ -130,7 +137,7 @@ impl UiDeviceCard {
     /// keeps every rung.
     pub fn identity_key(&self) -> &str {
         if self.sim {
-            return "runtime-sim";
+            return SIM_CARD_KEY;
         }
         self.uid
             .as_deref()
@@ -172,11 +179,10 @@ impl UiDeviceCard {
     }
 }
 
-/// The device's project, as the card's hero strip names it: thumbnail seed
-/// + display name (gallery-rework P05 — the strip replaced this as the
-/// small in-body chip). Identity only — the status line and edge tint
-/// carry health. On offline/not-responding cards the renderer dims the
-/// strip (last-known, not current).
+/// The device's project, as the card's ▶ tab names it: thumbnail seed +
+/// display name. Identity only — the status line and edge tint carry
+/// health. On offline/not-responding cards the renderer dims the PICTURE
+/// (last-known, not current); the chip itself stays legible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceProjectChip {
     /// `prj_…` uid — thumbnail seed and the push/review target key.

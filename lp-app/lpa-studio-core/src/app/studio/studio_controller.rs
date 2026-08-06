@@ -826,10 +826,54 @@ impl StudioController {
     /// for, and a ▶ tab with no feed would be an empty promise. P3's
     /// default-when-connected rule belongs here, not in a second table.
     fn effective_card_tab(&self, card_key: &str) -> crate::DeviceCardTab {
-        self.card_ui
-            .get(card_key)
-            .map(|state| state.tab)
-            .unwrap_or_default()
+        match self.card_ui.get(card_key) {
+            // An explicit choice is sticky, always. Nothing about the link
+            // coming back should move a tab the user put there.
+            Some(state) => state.tab,
+            None => self.default_card_tab(card_key),
+        }
+    }
+
+    /// What a card with no saved choice opens on: ▶ when there is a live
+    /// picture to open on, the front door otherwise (P3's
+    /// default-when-connected rule).
+    ///
+    /// "A live picture" is a session that is ANSWERING and running a project
+    /// — the same pair the renderer reads off the built card
+    /// (`card.project.is_some()` on a Ready link) to decide the ▶ tab
+    /// exists. Deriving it from the pool here rather than from the card
+    /// keeps the rule where the feed can consult it: `card_feed_active`
+    /// asks this question before any card is built.
+    ///
+    /// Landing it HERE and not in a second table at the renderer is the
+    /// point — a default that disagreed with the feed's gate would either
+    /// pull frames for a hidden tab or open a ▶ tab nothing feeds.
+    fn default_card_tab(&self, card_key: &str) -> crate::DeviceCardTab {
+        let has_picture = if card_key == crate::SIM_CARD_KEY {
+            // The sim's ▶ is its own re-simulation (it IS the simulator, so
+            // re-simulating is honest there) — a loaded project is all it
+            // needs.
+            self.pool
+                .sim_session()
+                .is_some_and(|session| session.sim_loaded_project().is_some())
+        } else {
+            self.device_id_for_card_key(card_key)
+                .and_then(|id| self.pool.device_session(id))
+                .is_some_and(|session| {
+                    matches!(session.device_state(), Some(DeviceState::Ready { .. }))
+                        && session.device_sync().is_some_and(|sync| {
+                            matches!(
+                                sync.content,
+                                DeviceContent::Known { .. } | DeviceContent::Adopted { .. }
+                            )
+                        })
+                })
+        };
+        if has_picture {
+            crate::DeviceCardTab::Play
+        } else {
+            crate::DeviceCardTab::Status
+        }
     }
 
     /// The card-identity key a live DEVICE session's card wears, mirroring
@@ -3879,8 +3923,16 @@ impl StudioController {
     /// Operation-in-flight card state reads) so the in-place progress and
     /// the edge treatment never disagree.
     fn overlay_card_ui(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
-        if let Some(saved) = self.card_ui.get(card.identity_key()) {
+        // The tab the card comes up on is the ONE answer
+        // (`effective_card_tab`): the saved choice, else the default rule.
+        // Reading it here rather than leaning on `CardUiState::default()`
+        // is what makes a fresh connected card open on ▶ — and what keeps
+        // the rendered tab and the frame feed's gate the same fact.
+        let key = card.identity_key().to_string();
+        if let Some(saved) = self.card_ui.get(&key) {
             card.ui = saved.clone();
+        } else {
+            card.ui.tab = self.default_card_tab(&key);
         }
         // The CARD-OWNED op flow first (model §2, I1): it survives the
         // session the op severed, so it outranks session-derived

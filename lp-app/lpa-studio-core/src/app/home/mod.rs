@@ -24,7 +24,7 @@ pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, C
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
 pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};
-pub use ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
+pub use ui_device_card::{SIM_CARD_KEY, UiDeviceCard, UiDeviceProjectChip};
 pub use ui_example_card::UiExampleCard;
 pub use ui_home_view::UiHomeView;
 pub use ui_package_card::{UiCardConnection, UiPackageCard};

@@ -518,6 +518,197 @@ label:has(> input:not(:disabled)) {
     100% { left: 100%; }
 }
 
+/* ---- the device card's ▶ play tab (honest-device preview P3) ----------
+   The converged spike (`spikes/device-card-live-fixture/`, section 1): a
+   contained fixture view — NEVER letterboxed or cropped, which is what the
+   retired hero strip did — with a liveness pill inside it and a meta row
+   beneath. The G2 ruling that killed the strip was about honesty, so every
+   treatment here says where the picture came from and how old it is. */
+.ux-play-frame {
+    position: relative;
+    width: 100%;
+    height: 150px;
+    overflow: hidden;
+    border-radius: 7px;
+    /* Near-black, deliberately DARKER than the card: lamps are emissive,
+       and the field they sit in reads as "off" only against black. */
+    background: #07080a;
+    border: 1px solid var(--studio-color-border);
+}
+
+/* Offline / not-responding: the last frame is still the truth about what
+   the board was doing, so it stays — desaturated and dimmed, the card
+   grammar's "last known, not current". */
+.ux-play-frame-dim {
+    filter: saturate(0.45) brightness(0.55);
+}
+
+/* The lamp field is inset so an edge lamp is not clipped by the frame. */
+.ux-play-lamps {
+    position: absolute;
+    inset: 5%;
+}
+
+/* The sim's re-simulated canvas, revealed after its first presented
+   frame (the gallery thumb's reveal discipline at tab scale). */
+.ux-play-canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+}
+
+.ux-play-canvas.is-revealed {
+    opacity: 1;
+    transition: opacity 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-play-canvas.is-revealed {
+        transition: none;
+    }
+}
+
+/* Liveness pill, top-right INSIDE the view: it belongs to the picture, not
+   to the card, because what it qualifies is the picture's age. */
+.ux-play-pill {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 6px;
+    border: 1px solid var(--studio-color-border);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--studio-color-terminal) 78%, transparent);
+    font-family: var(--studio-font-mono);
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.ux-play-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentcolor;
+    flex: none;
+}
+
+/* Calm green while frames keep arriving — the dot's slow blink is the only
+   motion, and it is what tells a still pattern apart from a frozen one. */
+.ux-play-pill-live {
+    color: var(--studio-status-good-text);
+}
+
+.ux-play-pill-live .ux-play-dot {
+    animation: ux-play-blink 2s ease-in-out infinite;
+}
+
+/* Amber only after the stale threshold (5 s): a device hiccup is not news. */
+.ux-play-pill-stale {
+    color: var(--studio-status-attention-text);
+}
+
+.ux-play-pill-offline {
+    color: var(--studio-status-neutral-text);
+}
+
+/* Violet = the sim's own family: a re-simulated picture must never wear the
+   green a device's frames earn. */
+.ux-play-pill-sim {
+    color: var(--studio-status-bound-text);
+}
+
+@keyframes ux-play-blink {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-play-pill-live .ux-play-dot {
+        animation: none;
+    }
+}
+
+/* The offline veil: says outright that this is not now. */
+.ux-play-veil {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: end center;
+    padding-bottom: 8px;
+    background: rgba(7, 8, 10, 0.25);
+    color: var(--studio-color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+/* No frame yet: an empty frame with a sentence, never a fake picture. */
+.ux-play-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 0 14px;
+    color: var(--studio-color-text-dim);
+    font-size: 11.5px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.ux-play-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--studio-color-text-dim);
+}
+
+.ux-play-spring {
+    flex: 1;
+}
+
+.ux-play-swatch {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    flex: none;
+}
+
+.ux-play-project {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.ux-play-project-name {
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ux-play-fps {
+    flex: none;
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+}
+
+.ux-play-fps-stale {
+    color: var(--studio-status-attention-text);
+}
+
 /* Safe-mode callout: the device booted with the recovery output clamp.
    Warning family (device condition), NOT the node language's unsaved
    yellow; sits above the card's tab body so every tab shows it. */
