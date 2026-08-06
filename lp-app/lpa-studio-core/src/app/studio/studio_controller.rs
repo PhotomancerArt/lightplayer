@@ -4628,7 +4628,14 @@ impl StudioController {
                     .is_some_and(|project| project.uid == key || project.name == key)
             });
             if already_running && server_live {
-                return self.attach_lens(sim_id, updates).await;
+                let notices = self.attach_lens(sim_id, updates.clone()).await?;
+                // A re-attach IS a landed open-in-sim: the user clicked
+                // "Open in sim" and the sim now runs that project, board
+                // and all. It just landed EARLIER, so nothing loads here
+                // and `note_sim_loaded_project` never runs — which left
+                // the picker up on exactly this route (G1b ruling 6).
+                self.stand_down_sim_setup(updates).await?;
+                return Ok(notices);
             }
             self.pool.set_lens(sim_id);
             if server_live {
@@ -4696,6 +4703,7 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
+                self.stand_down_sim_setup(updates.clone()).await?;
                 // The open path's own notices come FIRST — a format upgrade
                 // is the thing the user most needs to read, and it must not
                 // be a console-only line (P3).
@@ -5551,6 +5559,7 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
+                self.stand_down_sim_setup(updates.clone()).await?;
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -5704,6 +5713,52 @@ impl StudioController {
             session.set_sim_loaded_project(Some(crate::SimLoadedProject { uid, name }));
             session.set_sim_board_id(target);
         }
+    }
+
+    /// A project running on the simulator answers the setup wizard's board
+    /// question, so a flow still sitting at its picker stands down (G1b
+    /// ruling 6, 2026-08-05 — "Open in sim" used to leave the sim reading
+    /// "select a board" for a board it had already inherited).
+    ///
+    /// Called from every shape an open-in-sim lands in: the push
+    /// ([`Self::open_pending_package`], where
+    /// [`Self::note_sim_loaded_project`] has just set the board), the demo
+    /// load, and the D37 re-attach, where the project landed on an earlier
+    /// click and nothing loads at all.
+    ///
+    /// The board is read back through the same D4 accessor the card's
+    /// "as \<board\>" line uses, so the wizard and the card can only ever
+    /// agree. An untargeted project infers nothing, and the reducer keeps
+    /// the picker up for exactly that case.
+    ///
+    /// Gated on the SIM flow: a hardware wizard is working through its own
+    /// board on the end of a cable, and a project opening on the simulator
+    /// is not its business. The reducer refuses it a second time on
+    /// capabilities (§7.14), so neither side depends on the other's check.
+    async fn stand_down_sim_setup(&mut self, updates: UxUpdateSink) -> UiResult {
+        if !self.setup.as_ref().is_some_and(|session| session.sim) {
+            return Ok(UiNotices::new());
+        }
+        if !self
+            .pool
+            .lens_session()
+            .is_some_and(crate::RuntimeSession::is_sim)
+        {
+            return Ok(UiNotices::new());
+        }
+        let board_id = self.lens_board_id().map(str::to_string);
+        let Some(session) = self.setup.as_mut() else {
+            return Ok(UiNotices::new());
+        };
+        let commands = session
+            .flow
+            .handle(crate::SetupEvent::SetUpElsewhere { board_id });
+        // Through the executor loop like every other reduction, which is
+        // also what drops a flow that just closed. Boxed because the two
+        // are mutually recursive by TYPE — the loop can run a command that
+        // opens a package, and a package open is what calls this — even
+        // though this edge asks for no commands at all.
+        Box::pin(self.run_setup_commands(commands, updates)).await
     }
 
     /// Detach the editor lens (runtime-pool P3): the mirror drops, every
