@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired
 since: 2026-07-09      # best-effort: the tiers ADR; the gap opened as LED sampling landed beside it
 logged: 2026-07-28
 area: fw-browser/tier + lp-gfx-wgpu + lpc-engine/fixture
@@ -8,6 +8,7 @@ related:
     "../defects/2026-07-28-tick-error-restated-every-frame.md",
     "../adr/2026-07-09-preview-fidelity-tiers.md",
     "../adr/2026-07-09-gpu-path-forks-at-glsl.md",
+    "../adr/2026-08-05-browser-sample-readback-is-async.md",
   ]
 ---
 # A GPU-tier browser runtime cannot render a fixture control
@@ -58,6 +59,18 @@ CPU) renders correctly.
   flash the user was running. Spam fixed
   (`2026-07-28-tick-error-restated-every-frame`); the underlying
   capability gap filed here.
+- **2026-08-05** — Resurfaced at the honest-device-preview G1 walk:
+  the module face control hero, Control Output produced-product rows,
+  and `ControlProductPreview` all sat "not tracked" forever against a
+  GPU-tier preview host, with the tick error repeating 512+
+  consecutive frames (rate-limited). Split out of that plan (ruling 4,
+  `2026-08-05-1534-honest-device-preview/p3b-g1-outcomes.md`).
+- **2026-08-05** — **Retired via exit 3** (async readback):
+  `sample_rgba16` now works on the browser GPU tier as a
+  one-frame-latency `map_async` pipeline in `lp-gfx-wgpu`'s sample
+  pass (black on the very first frame, then trailing the visual by one
+  frame). Decision recorded in
+  `../adr/2026-08-05-browser-sample-readback-is-async.md`.
 
 **Exit criteria** — A GPU-tier preview of a fixture-bearing project
 either renders, or is never created in the first place with a reason the
