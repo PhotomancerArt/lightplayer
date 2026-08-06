@@ -7,6 +7,9 @@
 pub mod code_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod code_editor_stories;
+pub mod code_figure;
+#[cfg(feature = "stories")]
+pub(crate) mod code_figure_stories;
 pub mod detail_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod detail_popover_stories;
@@ -14,6 +17,7 @@ pub mod field_row;
 pub mod gradient_strip;
 #[cfg(feature = "stories")]
 pub(crate) mod gradient_strip_stories;
+pub mod help_link;
 pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
@@ -38,12 +42,14 @@ pub use code_editor::{
     CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
     CodeEditorLanguage,
 };
+pub use code_figure::{CodeFigure, CodeHighlight, CodeHighlightTone};
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_card_class,
     detail_popover_section_class,
 };
 pub use field_row::FieldRow;
 pub use gradient_strip::GradientStripCanvas;
+pub use help_link::HelpLink;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconActionButton, IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use inline_button::{
