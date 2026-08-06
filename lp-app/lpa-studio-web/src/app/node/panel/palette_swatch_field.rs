@@ -7,9 +7,9 @@
 //! - a **held** palette is one full-width strip — that is the palette,
 //!   completely;
 //! - a **cycle** is its member SET as equal segments of one band, so the
-//!   control says "these, in turn" at a glance. The rate rides the
-//!   control's readout chip (`↻ 4 · 3/min`, auto-denominated like every
-//!   other periodic reading in Studio), not the band.
+//!   control says "these, in turn" at a glance. The step rides the
+//!   control's readout chip (`↻ 4 · 20 s`, the P6 gate's plain-seconds
+//!   Step voice), not the band.
 //!
 //! The band carries the chevron that says a chooser lives behind it, and
 //! since P4 the band IS that chooser's trigger: the popover opens in
@@ -27,10 +27,9 @@
 //! path carries either. Adding the ring means plumbing a φ read onto
 //! `UiPanelControl` first.
 //!
-//! Colors are the existing panel families, unchanged: violet when the
-//! backing slot is bound, amber when a panel writer holds the channel
-//! (`docs/design/panel.md` P6 — the engaged family is decided at the P6
-//! gate, and this phase mints nothing new).
+//! Colors are the panel families: violet when the backing slot is bound,
+//! the gold `status-engaged` family when a panel writer holds the channel
+//! (`docs/design/panel.md` P6; the family was minted at the M4 P6 gate).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -65,7 +64,7 @@ pub fn PaletteSwatchField(
     /// Violet bound treatment on the frame.
     #[props(default = false)]
     bound: bool,
-    /// Amber ENGAGED treatment: a panel writer has captured this channel.
+    /// Gold ENGAGED treatment: a panel writer has captured this channel.
     /// Outranks the violet bound family, same rule as every other field.
     #[props(default = false)]
     engaged: bool,
@@ -186,7 +185,7 @@ pub(crate) fn swatch_frame_class(
     engaged: bool,
 ) -> &'static str {
     if engaged {
-        "tw:border-[var(--studio-status-attention-border)]"
+        "tw:border-[var(--studio-status-engaged-border)]"
     } else if bound {
         "tw:border-[var(--studio-status-bound-border)]"
     } else if state.invalid.is_some() {
@@ -325,7 +324,7 @@ mod tests {
         assert!(swatch_frame_class(&clean, true, false).contains("bound"));
         // Engaged outranks bound, and green stays valid-only.
         let engaged = swatch_frame_class(&clean, true, true);
-        assert!(engaged.contains("attention"));
+        assert!(engaged.contains("engaged"));
         assert!(!engaged.contains("bound"));
         for family in [
             swatch_frame_class(&clean, false, false),

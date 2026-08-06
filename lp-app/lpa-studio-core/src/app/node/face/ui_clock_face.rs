@@ -184,17 +184,6 @@ pub fn phasor_rate_display(period_seconds: f32) -> String {
     format!("{number}/{unit}")
 }
 
-/// [`phasor_rate_display`] over a formatted period reading — the shape the
-/// panel readout path has in hand. A reading that does not parse passes
-/// through untouched.
-#[must_use]
-pub fn phasor_speed_display(shown: &str) -> String {
-    match shown.trim().parse::<f32>() {
-        Ok(period) => phasor_rate_display(period),
-        Err(_) => shown.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,14 +200,5 @@ mod tests {
         assert_eq!(phasor_rate_display(0.0), "0/s");
         assert_eq!(phasor_rate_display(-3.0), "0/s");
         assert_eq!(phasor_rate_display(f32::NAN), "0/s");
-    }
-
-    /// The string entry point (panel readouts): parses and delegates, and a
-    /// non-numeric reading passes through untouched.
-    #[test]
-    fn speed_display_parses_or_passes_through() {
-        assert_eq!(phasor_speed_display("0.5"), "2/s");
-        assert_eq!(phasor_speed_display("  20 "), "3/min");
-        assert_eq!(phasor_speed_display("frozen"), "frozen");
     }
 }

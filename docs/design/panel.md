@@ -320,11 +320,14 @@ this document never specifies resolution.
   states.~~ **Requirement CONFIRMED and shipped 2026-08-03** (gate GV):
   the three states are visibly distinct and walkable — Read-following
   -automation names its driver, Read-at-default reads its authored value,
-  and Latch is amber with an off-flow reset glyph that never reflows the
-  control. Two threads stay open and are NOT to be changed without Yona:
-  (a) amber (`status-attention`) may be too intense for "held" — he leans
-  maybe-blue, "more thinking needed"; (b) the treatment still borrows
-  `status-attention` rather than a minted `status-engaged` token family.
+  and Latch wears the engaged family with an off-flow reset glyph that
+  never reflows the control. The two threads that stayed open here were
+  both settled at the M4 P6 gate (2026-08-06, decision render
+  `engaged-family-candidates`): the engaged treatment is a minted
+  `status-engaged` token family — the palette spike's gold, laddered like
+  every other status family (dark tinted bg, mid border, bright text) —
+  replacing the borrowed amber `status-attention` stand-in, which returns
+  to meaning device/roster health only.
 - **P-Q3:** ~~`panel.json` schema version field name/shape, and whether a
   clean-shutdown flush is feasible on device (or throttle-only).~~
   **Settled 2026-08-02.** The file is

@@ -116,7 +116,7 @@ impl OptionPresenceWidth {
                 return Self::ExtraWide;
             }
             // A palette strip wants the row's width, and its summary line
-            // ("cycle · 4 palettes · 3/min · 0.5 s fade") is wider still.
+            // ("cycle · 4 palettes · every 20 s · 0.5 s fade") is wider still.
             UiSlotEditorHint::Gradient if matches!(value.kind, UiSlotValueKind::Struct { .. }) => {
                 return Self::ExtraWide;
             }

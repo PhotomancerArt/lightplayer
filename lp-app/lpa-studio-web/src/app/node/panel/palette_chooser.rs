@@ -19,7 +19,7 @@
 //! building a set is several gestures in a row.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, phasor_rate_display};
+use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget};
 use lpc_model::{Gradient, GradientConfig, MAX_CYCLE_SET};
 
 use crate::base::{GradientStripCanvas, PopoverCloseHandle, StudioIcon, StudioIconName};
@@ -319,9 +319,9 @@ fn CycleTabBody(
         // hand-off.
         div { class: "tw:grid tw:gap-1 tw:border-t tw:border-border-muted tw:px-2 tw:py-1.5",
             div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
-                span { class: CONTROL_LABEL_CLASS, "Speed" }
+                span { class: CONTROL_LABEL_CLASS, "Step" }
                 span { class: "tw:font-mono tw:text-[0.7rem] tw:tabular-nums tw:text-muted-foreground",
-                    "{speed_readout(step_seconds)}"
+                    "{step_readout(step_seconds)}"
                 }
             }
             input {
@@ -580,20 +580,15 @@ fn cycle_fade_seconds(config: &GradientConfig) -> f32 {
     }
 }
 
-/// The step rate in BOTH voices — the unit-aware rate every other periodic
-/// reading in Studio uses, and the raw seconds it is derived from
-/// (`15/min · 4 s`). The P6 gate picks one; until then a reader can check
-/// one against the other. A frozen step says `held`, because it has no rate.
+/// The step in the P6 gate's Step voice: the plain seconds the slider
+/// actually moves through (`every 4 s`), never the reciprocal rate idiom.
+/// A frozen step says `held`, because it has no rate.
 #[must_use]
-pub fn speed_readout(step_seconds: f32) -> String {
+pub fn step_readout(step_seconds: f32) -> String {
     if !step_seconds.is_finite() || step_seconds <= 0.0 {
         return "held".to_string();
     }
-    format!(
-        "{} \u{b7} {}",
-        phasor_rate_display(step_seconds),
-        format_seconds(step_seconds)
-    )
+    format!("every {}", format_seconds(step_seconds))
 }
 
 /// Seconds, trimmed: `4 s`, `0.5 s`, `20 s`.
@@ -913,13 +908,13 @@ mod tests {
     }
 
     #[test]
-    fn the_speed_readout_speaks_both_voices() {
-        assert_eq!(speed_readout(4.0), "15/min \u{b7} 4 s");
-        assert_eq!(speed_readout(0.5), "2/s \u{b7} 0.5 s");
-        assert_eq!(speed_readout(20.0), "3/min \u{b7} 20 s");
+    fn the_step_readout_speaks_plain_seconds() {
+        assert_eq!(step_readout(4.0), "every 4 s");
+        assert_eq!(step_readout(0.5), "every 0.5 s");
+        assert_eq!(step_readout(20.0), "every 20 s");
         // Frozen has no rate to state.
-        assert_eq!(speed_readout(0.0), "held");
-        assert_eq!(speed_readout(f32::NAN), "held");
+        assert_eq!(step_readout(0.0), "held");
+        assert_eq!(step_readout(f32::NAN), "held");
     }
 
     #[test]

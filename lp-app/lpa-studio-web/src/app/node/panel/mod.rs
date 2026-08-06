@@ -31,6 +31,5 @@ pub use palette_chooser::{PaletteChooser, PaletteChooserTab, PaletteEditTarget};
 pub use palette_editor::{PaletteEditor, PaletteOrigin};
 pub use palette_swatch_field::PaletteSwatchField;
 pub use panel_control::PanelControl;
-pub(crate) use panel_control::phasor_speed_display;
 pub use panel_emit::PanelEmit;
 pub use toggle_field::ToggleField;

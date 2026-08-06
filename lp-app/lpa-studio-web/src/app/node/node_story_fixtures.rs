@@ -909,7 +909,7 @@ pub(crate) fn sunset_gradient() -> Gradient {
     ])
 }
 
-/// A four-palette cycle stepping every 20 s (`3/min`) with a half-second
+/// A four-palette cycle stepping every 20 s (`↻ 4 · 20 s`) with a half-second
 /// hand-off fade — the shape read surfaces render as a member SET.
 pub(crate) fn palette_cycle() -> GradientConfig {
     GradientConfig::Cycle {

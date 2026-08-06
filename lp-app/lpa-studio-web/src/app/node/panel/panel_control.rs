@@ -181,7 +181,7 @@ fn PanelControlBody(
     // Engaged outranks the bound-violet family on the readout, same ladder
     // as the swatch frame: a held value is the panel's own, not the wire's.
     let readout_class = if engaged {
-        "tw:text-status-attention-foreground"
+        "tw:text-status-engaged-foreground"
     } else if live {
         "tw:text-status-bound-foreground"
     } else {
@@ -199,17 +199,19 @@ fn PanelControlBody(
         .live_value
         .clone()
         .unwrap_or_else(|| control.value.display.clone());
-    // A phasor speed knob stores period_seconds but PRESENTS as speed (G2
-    // feedback — "phase period" was expert vocabulary): the readout is the
-    // reciprocal ("1/100 s") and the drag axis inverts so up = faster.
-    // PROVISIONAL display language pending the clock-face UX spike.
+    // A phasor period knob stores period_seconds and PRESENTS them plainly
+    // ("100 s") — the Step/plain-seconds voice the M4 P6 gate picked, which
+    // retired the PROVISIONAL reciprocal Speed readout. The GESTURE keeps
+    // the clock-face-v2 log-period feel (up = faster, equal drag = equal
+    // feel-ratio; `invert` on the knob) — that axis was judged at its own
+    // visual gate and is independent of what the readout says.
     let phasor = matches!(control.emit, UiPanelEmit::PhasorPeriod { .. });
-    // A palette's readout is the compact chip (`5 stops`, `↻ 4 · 3/min`) —
+    // A palette's readout is the compact chip (`5 stops`, `↻ 4 · 20 s`) —
     // the strips below say which palette, so the words only have to say
     // what KIND of palette it is and how fast it moves.
     let palette = control.swatch_palette();
     let shown_value = if phasor {
-        phasor_speed_display(control.shown_display())
+        format!("{} s", control.shown_display())
     } else if let Some(config) = &palette {
         format_gradient_chip(config)
     } else {
@@ -241,9 +243,9 @@ fn PanelControlBody(
                     min,
                     max,
                     step,
+                    invert: phasor,
                     state: control.state.clone(),
                     bound,
-                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
@@ -323,12 +325,6 @@ fn PanelControlBody(
         }
     }
 }
-
-/// A period reading presented as an auto-denominated rate — the G2
-/// convergence, now shared with the clock face's trace cards, so the pure
-/// function lives in `lpa-studio-core` ([`phasor_speed_display`]) and this
-/// module only re-exports it for its readout path.
-pub(crate) use lpa_studio_core::phasor_speed_display;
 
 /// The label visual shared by the trigger button and its top-layer copy:
 /// the control name in the panel's label typography plus a small info glyph
@@ -560,22 +556,6 @@ mod tests {
         bound.live_value = None;
         assert_eq!(bound.live_numeric(), None);
         assert_eq!(bound.shown_display(), "1.6");
-    }
-
-    #[test]
-    fn phasor_readouts_auto_denominate_the_rate() {
-        use super::phasor_speed_display;
-        // The G2 examples verbatim: 2/s → 3/min → 15/hr.
-        assert_eq!(phasor_speed_display("0.5"), "2/s");
-        assert_eq!(phasor_speed_display("20"), "3/min");
-        assert_eq!(phasor_speed_display("240"), "15/hr");
-        // Plasma's 100 s: under one per minute, so it reads per hour.
-        assert_eq!(phasor_speed_display("100"), "36/hr");
-        assert_eq!(phasor_speed_display("45"), "1.3/min");
-        // Period 0 is the frozen sentinel: it never cycles.
-        assert_eq!(phasor_speed_display("0.0"), "0/s");
-        // A non-numeric reading (product chip label, etc.) passes through.
-        assert_eq!(phasor_speed_display("Time product"), "Time product");
     }
 
     #[test]

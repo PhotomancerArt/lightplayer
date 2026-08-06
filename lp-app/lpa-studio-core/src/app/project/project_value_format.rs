@@ -2,8 +2,6 @@ use lpc_model::{
     FromLpValue, Gradient, GradientConfig, LpValue, ProductRef, ResourceRef, SlotMapKey,
 };
 
-use crate::phasor_rate_display;
-
 pub fn format_lp_value(value: &LpValue) -> String {
     // A gradient's storage is a stop array plus tags; printed field by
     // field it drowns every row it lands in. Every text surface says what
@@ -88,10 +86,10 @@ pub fn gradient_config_value(value: &LpValue) -> Option<GradientConfig> {
 /// that do.
 ///
 /// A static palette reads `space · method · N stops`; a cycle reads
-/// `cycle · N palettes · <rate> · <fade> s fade`, where the rate is the
-/// unit-aware step rate every other periodic reading in Studio uses
-/// ([`phasor_rate_display`]) and a frozen cycle says `held` instead of a
-/// rate it does not have.
+/// `cycle · N palettes · every <step> s · <fade> s fade` — the Step voice
+/// the M4 P6 gate picked (plain seconds, the number the slider actually
+/// moves through) — and a frozen cycle says `held` instead of a rate it
+/// does not have.
 #[must_use]
 pub fn format_gradient_summary(config: &GradientConfig) -> String {
     match config {
@@ -106,8 +104,8 @@ pub fn format_gradient_summary(config: &GradientConfig) -> String {
                 return format!("cycle \u{b7} {count} palettes \u{b7} held");
             }
             format!(
-                "cycle \u{b7} {count} palettes \u{b7} {} \u{b7} {} s fade",
-                phasor_rate_display(*step_seconds),
+                "cycle \u{b7} {count} palettes \u{b7} every {} s \u{b7} {} s fade",
+                format_step_seconds(*step_seconds),
                 format_float(*fade_seconds)
             )
         }
@@ -118,8 +116,9 @@ pub fn format_gradient_summary(config: &GradientConfig) -> String {
 /// the dense summary trimmed to what fits in a control's value slot.
 ///
 /// A held palette states its stop count (`5 stops`); a cycle states its
-/// size and step rate (`\u{21bb} 4 \u{b7} 3/min`), or `\u{21bb} 4 \u{b7}
-/// held` when the step is frozen. The colorspace, interpolation method, and
+/// size and step (`\u{21bb} 4 \u{b7} 4 s` — the P6 gate's Step voice,
+/// trimmed of the row's `every`), or `\u{21bb} 4 \u{b7} held` when the
+/// step is frozen. The colorspace, interpolation method, and
 /// fade — everything [`format_gradient_summary`] says and this does not —
 /// stay one click away in the control's detail popup, because a control
 /// panel is read at a glance while it is being played.
@@ -139,8 +138,8 @@ pub fn format_gradient_chip(config: &GradientConfig) -> String {
                 return format!("\u{21bb} {count} \u{b7} held");
             }
             format!(
-                "\u{21bb} {count} \u{b7} {}",
-                phasor_rate_display(*step_seconds)
+                "\u{21bb} {count} \u{b7} {} s",
+                format_step_seconds(*step_seconds)
             )
         }
     }
@@ -268,6 +267,18 @@ fn format_static_gradient(gradient: &Gradient) -> String {
     )
 }
 
+/// A cycle step in the gate-picked Step voice: whole seconds print bare
+/// (`4`), sub-second and fractional steps keep their (trimmed) decimals
+/// (`0.5`), matching the decision render's `every 4 s` / `every 0.5 s`.
+fn format_step_seconds(value: f32) -> String {
+    if value.is_finite() && value.fract() == 0.0 {
+        format!("{}", value as i64)
+    } else {
+        let rounded = (value * 1000.0).round() / 1000.0;
+        rounded.to_string()
+    }
+}
+
 fn format_float(value: f32) -> String {
     if value.is_finite() {
         let rounded = (value * 1000.0).round() / 1000.0;
@@ -372,9 +383,8 @@ mod tests {
                 }
                 .to_lp_value()
             ),
-            // The step rate wears the same auto-denominated units as every
-            // other periodic reading in Studio.
-            "cycle \u{b7} 3 palettes \u{b7} 3/min \u{b7} 0.5 s fade"
+            // The step speaks the gate-picked plain-seconds voice.
+            "cycle \u{b7} 3 palettes \u{b7} every 20 s \u{b7} 0.5 s fade"
         );
         // A frozen cycle has no rate to state.
         assert_eq!(
@@ -402,7 +412,7 @@ mod tests {
                 step_seconds: 20.0,
                 fade_seconds: 0.5,
             }),
-            "\u{21bb} 4 \u{b7} 3/min"
+            "\u{21bb} 4 \u{b7} 20 s"
         );
         // A frozen cycle states no rate here either.
         assert_eq!(
@@ -433,7 +443,7 @@ mod tests {
                 .to_lp_value()
             )
             .as_deref(),
-            Some("cycle \u{b7} 2 palettes \u{b7} 3/min \u{b7} 0.5 s fade")
+            Some("cycle \u{b7} 2 palettes \u{b7} every 20 s \u{b7} 0.5 s fade")
         );
         // The phasor presentation is untouched, and every other struct still
         // has no panel readout at all.

@@ -1,5 +1,7 @@
 //! The checked-in Studio palette catalog (M3 of the palette plan): starter
-//! set, WLED custom-palette import, no picker UI (M4).
+//! set and WLED custom-palette import. The picker UI consuming it is M4's
+//! palette chooser (`lpa-studio-web`'s swatch control popover), which
+//! reads [`all_palettes`] through its catalog context.
 //!
 //! Boundary, mirroring `lpa-boards`: catalog data in, nothing out. This
 //! crate owns two source trees under `assets/palettes/` —

@@ -100,7 +100,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     // every gesture (P7 item 5).
     // The def's own "Speed" VALUE uniform holds the plain label, so the
     // phasor knob disambiguates with its uniform name (G2 vocab feedback).
-    let period = control_labeled(face, "Phase speed");
+    let period = control_labeled(face, "Phase period");
     assert_eq!(period.value.kind, UiSlotValueKind::F32(20.0));
     assert_eq!(
         period.emit,
@@ -231,7 +231,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     let knob = shader_knob(&snapshot);
     assert_eq!(knob.value.kind, UiSlotValueKind::F32(2.5));
     assert_eq!(knob.state.dirty, UiNodeDirtyState::Dirty);
-    let period = shader_control(&snapshot, "Phase speed");
+    let period = shader_control(&snapshot, "Phase period");
     assert_eq!(
         period.value.kind,
         UiSlotValueKind::F32(8.0),
