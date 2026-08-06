@@ -1751,6 +1751,93 @@ fn an_open_in_sim_stands_the_sims_board_picker_down() {
     );
 }
 
+/// The SECOND shape the same landing arrives in, found on the G1 dev-server
+/// walk (2026-08-06): when the sim ALREADY runs the requested project,
+/// "Open in sim" takes the D37 re-attach instead of pushing a head — so
+/// nothing loads, `note_sim_loaded_project` never runs, and the picker used
+/// to stay up on a sim that had been wearing its board since the last click.
+#[test]
+fn an_open_in_sim_that_re_attaches_stands_the_picker_down_too() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp, SetupStateKind, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let (store, host) = library();
+    let files = edit_e2e_files()
+        .iter()
+        .map(|(name, body)| {
+            let body = match *name {
+                "project.json" => {
+                    "{\n  \"format\": 5,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
+                }
+                _ => body.to_string(),
+            };
+            (name.to_string(), body.into_bytes())
+        })
+        .collect::<Vec<_>>();
+    let package = store
+        .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+        .unwrap();
+
+    let mut studio = StudioController::new(|| 1.0);
+    studio.attach_library(host);
+    let sim_io = InProcessServerIo {
+        server: Rc::new(RefCell::new(edit_e2e_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+        "in-process",
+        Box::new(sim_io),
+    ));
+
+    let open_in_sim = |studio: &mut StudioController| {
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            ProjectOp::DetachLens,
+        )))
+        .expect("the lens detaches back to the gallery");
+    };
+
+    // First click: the push path lands the project (and its board).
+    open_in_sim(&mut studio);
+
+    // Now open the wizard, and click Open in sim on the project the sim is
+    // ALREADY running — the re-attach.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::StartSetup { sim: true },
+    )))
+    .expect("the sim entry card opens the wizard");
+    assert_eq!(
+        studio
+            .view()
+            .home
+            .expect("the gallery is up")
+            .setup
+            .expect("the wizard is on the grid")
+            .state
+            .kind(),
+        SetupStateKind::BoardPick,
+    );
+
+    open_in_sim(&mut studio);
+
+    assert_eq!(
+        studio.view().home.expect("the gallery is back").setup,
+        None,
+        "a re-attach is a landed open-in-sim too — the board was already inherited"
+    );
+}
+
 /// Poisoned-instance recovery, part 1 (worker crash): the link layer
 /// reports a sticky instance-fatal for the sim session; the tick-cadence
 /// recovery edge-detects it, surfaces the primary panic on the console,
