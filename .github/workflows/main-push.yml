@@ -1,9 +1,27 @@
+# Everything that happens when main moves, in ONE workflow so the ordering is
+# a `needs:` edge rather than a race: mint the version tag, then cut the
+# release.
+#
+# The version tag must exist BEFORE anything that stamps a build checks out,
+# or `print-app-version.sh` falls through to a bare sha — that race (lost by
+# 0.56s) is why tagging and deploying were merged into one workflow.
+# Production deployment is no longer here: `deploy-cloud.yml` deploys
+# lightplayer.app to fly.io, triggered by a GREEN run of THIS workflow, so it
+# inherits the same ordering guarantee (its checkout fetches tags, and the tag
+# is already pushed by then). The GitHub Pages deploy this workflow used to
+# carry retired with the 2026-08-06 DNS cutover — Pages no longer serves
+# lightplayer.app. `deploy-pages-channel.yml` still publishes the beta/demo
+# channels.
 name: Main push
 
 on:
   push:
     branches:
       - main
+  # Re-deploy an already-tagged main without a new commit. Tagging is skipped
+  # (see the job's `if`) — a dispatch must not mint a version for a commit that
+  # already has one.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +32,7 @@ permissions:
 
 jobs:
   tag-next-version:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
@@ -30,7 +49,7 @@ jobs:
 
       - name: Get app version
         id: version
-        run: echo "app_version=$(scripts/print-app-version.sh)" >> $GITHUB_OUTPUT
+        run: echo "app_version=$(scripts/print-app-version.sh)" >> "$GITHUB_OUTPUT"
 
   create-release:
     needs: [tag-next-version]

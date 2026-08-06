@@ -171,7 +171,6 @@ pub(crate) fn f32_to_texels(format: TextureStorageFormat, pixels: &[f32]) -> Vec
 }
 
 /// The CPU packing rule for one lane (see [`f32_to_texels`]).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn quantize_unorm16(v: f32) -> u16 {
     let raw = (f64::from(v) * 65536.0).floor();
     raw.clamp(0.0, 65535.0) as u16
