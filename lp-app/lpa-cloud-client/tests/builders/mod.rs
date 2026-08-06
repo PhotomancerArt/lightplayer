@@ -1,6 +1,6 @@
 //! The vocabulary the scenarios are written in.
 //!
-//! Three nouns — a [`Td`] (the world), a [`User`] (somebody at a keyboard),
+//! Three nouns — a [`TestWorld`] (the world), a [`User`] (somebody at a keyboard),
 //! and a [`Project`] (one copy of one project on one machine) — and every
 //! verb on them goes through the crate's real operations against the real
 //! in-process service. Nothing here writes a store directly, so no scenario
@@ -45,11 +45,11 @@ const FIRST_SHADER: &str = "first light";
 const FORMAT_VERSION: u32 = 4;
 
 /// The test world: one service, and the counters that name everything in it.
-pub struct Td {
+pub struct TestWorld {
     world: Rc<World>,
 }
 
-impl Td {
+impl TestWorld {
     /// A world with an empty service at a fixed clock.
     pub fn new() -> Self {
         Self {

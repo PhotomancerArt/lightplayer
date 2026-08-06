@@ -6,7 +6,7 @@
 
 mod builders;
 
-use builders::Td;
+use builders::TestWorld;
 use lpa_cloud_client::{ClobberSide, SyncError, TransportError};
 use lpc_cloud_api::{CloudError, Visibility};
 use lpc_history::SyncRelation;
@@ -14,7 +14,7 @@ use lpc_history::SyncRelation;
 /// Share by URL, open with no account: the whole product in one test.
 #[test]
 fn publish_then_anonymous_pull() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
@@ -40,7 +40,7 @@ fn publish_then_anonymous_pull() {
 /// The publisher keeps working; everybody holding the link catches up.
 #[test]
 fn publisher_pushes_tracker_fast_forwards() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
@@ -65,7 +65,7 @@ fn publisher_pushes_tracker_fast_forwards() {
 /// line, and the copy they forked from still tracks the original.
 #[test]
 fn viewer_edits_diverges_then_forks() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
@@ -92,7 +92,7 @@ fn viewer_edits_diverges_then_forks() {
 /// fast-forward each way, a collision, and the loser still reachable.
 #[test]
 fn two_members_edit_push_pull() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let dome = owner.project();
     let link = dome.publish(Visibility::Private);
@@ -142,7 +142,7 @@ fn two_members_edit_push_pull() {
 /// retry lands everything.
 #[test]
 fn offline_queue_then_push() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let dome = owner.project();
     let link = dome.publish(Visibility::Link);
@@ -172,7 +172,7 @@ fn offline_queue_then_push() {
 /// service is left holding one head.
 #[test]
 fn clobber_both_directions() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
 
     let keeping_mine = owner.project();
@@ -221,7 +221,7 @@ fn clobber_both_directions() {
 /// Holding the link is permission to read, never to write.
 #[test]
 fn anonymous_cannot_push() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
@@ -242,7 +242,7 @@ fn anonymous_cannot_push() {
 /// library.
 #[test]
 fn visibility_flip_revokes_link_view() {
-    let td = Td::new();
+    let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
