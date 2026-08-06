@@ -18,8 +18,11 @@
 //! Positions are optional per stop, CSS-style: an unpositioned first stop
 //! is `0`, an unpositioned last is `1`, and interior unpositioned runs
 //! distribute linearly between their positioned neighbors. Explicit
-//! positions must be non-decreasing and within `[0,1]` — errors, not
-//! clamps.
+//! positions must be finite and within `[0,1]` — errors, not clamps.
+//! Ordering is deliberately NOT enforced, mirroring
+//! [`Gradient::validate`](super::gradient::Gradient::validate): consumers
+//! sort by `at` at resolve time, so a decreasing literal is legal and must
+//! round-trip.
 //!
 //! Printing is **canonical and lossless**: `parse(print(stops)) == stops`
 //! bit-exact. Positions are omitted entirely iff the stops sit bit-exactly
@@ -52,8 +55,6 @@ pub enum StopsParseError {
     InvalidPosition { index: usize },
     /// An explicit position is outside `[0, 1]`.
     PositionOutOfRange { index: usize },
-    /// An explicit position is smaller than an earlier one.
-    PositionsNotSorted { index: usize },
 }
 
 impl fmt::Display for StopsParseError {
@@ -80,9 +81,6 @@ impl fmt::Display for StopsParseError {
             }
             Self::PositionOutOfRange { index } => {
                 write!(f, "stop {index}: position must be within 0..=1")
-            }
-            Self::PositionsNotSorted { index } => {
-                write!(f, "stop {index}: positions must not decrease")
             }
         }
     }
@@ -129,21 +127,10 @@ pub fn parse_stops(input: &str) -> Result<Vec<GradientStop>, StopsParseError> {
         return Err(StopsParseError::TooManyStops(colors.len()));
     }
 
-    // Explicit positions must already be non-decreasing (the fill below
-    // preserves monotonicity between anchors, so this is the only ordering
-    // check needed).
-    let mut last_explicit: Option<f32> = None;
-    for (index, at) in positions.iter().enumerate() {
-        if let Some(at) = at {
-            if let Some(previous) = last_explicit
-                && *at < previous
-            {
-                return Err(StopsParseError::PositionsNotSorted { index });
-            }
-            last_explicit = Some(*at);
-        }
-    }
-
+    // Ordering is deliberately NOT enforced, mirroring
+    // `Gradient::validate`: consumers sort by `at` when they resolve, so a
+    // decreasing literal is legal (and must round-trip). The fill rule
+    // interpolates between whatever anchors it finds, in either direction.
     let positions = fill_positions(positions);
     Ok(colors
         .into_iter()
@@ -366,10 +353,17 @@ mod tests {
             parse_stops("#000@1.5 #fff"),
             Err(StopsParseError::PositionOutOfRange { index: 0 })
         );
-        assert_eq!(
-            parse_stops("#000@.8 #fff@.2"),
-            Err(StopsParseError::PositionsNotSorted { index: 1 })
-        );
+    }
+
+    /// Decreasing positions are legal (validate() does not enforce order —
+    /// consumers sort at resolve) and must round-trip.
+    #[test]
+    fn decreasing_positions_parse_and_round_trip() {
+        let stops = parse_stops("#000@.8 #fff@.2").unwrap();
+        assert_eq!(stops[0].at, 0.8);
+        assert_eq!(stops[1].at, 0.2);
+        let printed = print_stops(Colorspace::Srgb, &stops);
+        assert_eq!(parse_stops(&printed).unwrap(), stops);
     }
 
     #[test]
@@ -482,7 +476,7 @@ mod tests {
     #[test]
     fn errors_display_readably() {
         assert!(
-            StopsParseError::PositionsNotSorted { index: 3 }
+            StopsParseError::PositionOutOfRange { index: 3 }
                 .to_string()
                 .contains("stop 3")
         );

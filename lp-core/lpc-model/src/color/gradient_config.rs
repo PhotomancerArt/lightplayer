@@ -19,9 +19,11 @@
 //! That is the same rule [`crate::PhasorConfig::rate_hz`] states for periods,
 //! and [`GradientConfig::is_frozen`] is the one place it lives here.
 //!
-//! Storage is the flattened fixed-shape recipe described in the [module
-//! docs](super) — [`crate::LpValue`] has no union, so both variants share one
-//! struct and the `kind` tag selects how `count` and the timings read.
+//! Storage is the flattened recipe described in the [module docs](super) —
+//! [`crate::LpValue`] has no union, so both variants share one struct: the
+//! `kind` tag selects how `set` and the timings read (static ⇒ one-entry
+//! set, zero timings). `set` is a variable-length list of [`Gradient`]
+//! values, each carrying its stops as one compact literal.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -147,9 +149,9 @@ impl Default for GradientConfig {
 
 // --- GradientConfig: hand-rolled flattened record.
 //
-// `LpValue` has no union, so both variants write the same five fields and
-// `kind` says how to read them: static ⇒ `count = 1`, `set[0]` is the
-// gradient, timings are `0.0`; cycle ⇒ `count` in 2..=8.
+// `LpValue` has no union, so both variants write the same four fields and
+// `kind` says how to read them: static ⇒ a one-entry `set`, timings `0.0`;
+// cycle ⇒ 2..=8 entries. The set's length IS the count.
 
 impl ToLpValue for GradientConfig {
     fn to_lp_value(&self) -> LpValue {
@@ -162,25 +164,13 @@ impl ToLpValue for GradientConfig {
             } => (CYCLE_KIND_TAG, set.as_slice(), *step_seconds, *fade_seconds),
         };
 
-        // Count-bounded, not padded (mirrors `Gradient::to_lp_value`):
-        // `count` bounds the read, so padding entries carry no information
-        // and a fully padded config alone would overflow the 16 KiB
-        // project-read frame budget.
-        let set: Vec<LpValue> = gradients
-            .iter()
-            .take(MAX_CYCLE_SET as usize)
-            .map(ToLpValue::to_lp_value)
-            .collect();
+        let set: Vec<LpValue> = gradients.iter().map(ToLpValue::to_lp_value).collect();
 
         LpValue::Struct {
             name: Some("GradientConfig".to_string()),
             fields: Vec::from([
                 ("kind".to_string(), kind.to_lp_value()),
                 ("set".to_string(), LpValue::Array(set)),
-                (
-                    "count".to_string(),
-                    set_count_tag(gradients.len()).to_lp_value(),
-                ),
                 ("step_seconds".to_string(), step_seconds.to_lp_value()),
                 ("fade_seconds".to_string(), fade_seconds.to_lp_value()),
             ]),
@@ -193,25 +183,21 @@ impl FromLpValue for GradientConfig {
         let LpValue::Struct { name, fields } = value else {
             return Err(ValueRootError::new("expected GradientConfig struct"));
         };
-        if name.as_deref() != Some("GradientConfig") || fields.len() != 5 {
+        if name.as_deref() != Some("GradientConfig") || fields.len() != 4 {
             return Err(ValueRootError::new("expected GradientConfig struct"));
         }
 
         let kind: String = read_field(fields, 0, "GradientConfig", "kind")?;
-        let count: i32 = read_field(fields, 2, "GradientConfig", "count")?;
-        let step_seconds: f32 = read_field(fields, 3, "GradientConfig", "step_seconds")?;
-        let fade_seconds: f32 = read_field(fields, 4, "GradientConfig", "fade_seconds")?;
+        let step_seconds: f32 = read_field(fields, 2, "GradientConfig", "step_seconds")?;
+        let fade_seconds: f32 = read_field(fields, 3, "GradientConfig", "fade_seconds")?;
 
         match kind.as_str() {
             STATIC_KIND_TAG => {
-                let mut set = read_gradient_set(fields, set_count(count, 1, 1)?)?;
+                let mut set = read_gradient_set(fields, 1, 1)?;
                 Ok(Self::Static(set.remove(0)))
             }
             CYCLE_KIND_TAG => Ok(Self::Cycle {
-                set: read_gradient_set(
-                    fields,
-                    set_count(count, MIN_CYCLE_SET as usize, MAX_CYCLE_SET as usize)?,
-                )?,
+                set: read_gradient_set(fields, MIN_CYCLE_SET as usize, MAX_CYCLE_SET as usize)?,
                 step_seconds,
                 fade_seconds,
             }),
@@ -222,46 +208,24 @@ impl FromLpValue for GradientConfig {
     }
 }
 
-/// Authored set length as its `I32` storage tag, saturating at the bound so a
-/// too-long set writes a readable value; [`GradientConfig::validate`] is what
-/// rejects it.
-fn set_count_tag(count: usize) -> i32 {
-    count.min(MAX_CYCLE_SET as usize) as i32
-}
-
-fn set_count(tag: i32, min: usize, max: usize) -> Result<usize, ValueRootError> {
-    let count = usize::try_from(tag).unwrap_or(usize::MAX);
-    if !(min..=max).contains(&count) {
-        return Err(ValueRootError::new(alloc::format!(
-            "GradientConfig.count must be {min}..={max} for this kind, got {tag}"
-        )));
-    }
-    Ok(count)
-}
-
-/// Read the `set` array and keep only the `count` authored entries.
-///
-/// Accepts any length in `count..=MAX_CYCLE_SET`: the canonical stored form
-/// is count-bounded, and the legacy zero-padded form still decodes.
+/// Read the `set` list; its length must sit within the kind's bounds.
 fn read_gradient_set(
     fields: &[(String, LpValue)],
-    count: usize,
+    min: usize,
+    max: usize,
 ) -> Result<Vec<Gradient>, ValueRootError> {
     let Some(("set", LpValue::Array(set))) =
         fields.get(1).map(|(name, value)| (name.as_str(), value))
     else {
         return Err(ValueRootError::new("expected GradientConfig.set"));
     };
-    if set.len() < count || set.len() > MAX_CYCLE_SET as usize {
+    if !(min..=max).contains(&set.len()) {
         return Err(ValueRootError::new(alloc::format!(
-            "GradientConfig.set must hold count..={MAX_CYCLE_SET} entries, got {}",
+            "GradientConfig.set must hold {min}..={max} entries for this kind, got {}",
             set.len()
         )));
     }
-    set.iter()
-        .take(count)
-        .map(Gradient::from_lp_value)
-        .collect()
+    set.iter().map(Gradient::from_lp_value).collect()
 }
 
 const GRADIENT_CONFIG_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
@@ -273,11 +237,7 @@ const GRADIENT_CONFIG_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
         },
         StaticModelStructMember {
             name: "set",
-            ty: StaticLpType::Array(&GRADIENT_STATIC_TYPE, MAX_CYCLE_SET as usize),
-        },
-        StaticModelStructMember {
-            name: "count",
-            ty: StaticLpType::I32,
+            ty: StaticLpType::List(&GRADIENT_STATIC_TYPE),
         },
         StaticModelStructMember {
             name: "step_seconds",
@@ -302,14 +262,7 @@ pub fn gradient_config_lp_type() -> LpType {
             },
             ModelStructMember {
                 name: "set".to_string(),
-                ty: LpType::Array(
-                    alloc::boxed::Box::new(gradient_lp_type()),
-                    MAX_CYCLE_SET as usize,
-                ),
-            },
-            ModelStructMember {
-                name: "count".to_string(),
-                ty: LpType::I32,
+                ty: LpType::List(alloc::boxed::Box::new(gradient_lp_type())),
             },
             ModelStructMember {
                 name: "step_seconds".to_string(),
@@ -475,9 +428,8 @@ mod tests {
         }
     }
 
-    /// Static writes `count = 1`, zero timings, and a ONE-entry set — the
-    /// stored form is count-bounded (the fixed 8 is the type's maximum, not
-    /// the stored length).
+    /// Static writes zero timings and a ONE-entry set — the set's length
+    /// IS the count, there is no separate field.
     #[test]
     fn static_storage_is_a_one_entry_flattened_struct() {
         let LpValue::Struct { name, fields } = GradientConfig::default().to_lp_value() else {
@@ -489,9 +441,8 @@ mod tests {
             fields[0],
             ("kind".to_string(), LpValue::String("static".to_string()))
         );
-        assert_eq!(fields[2], ("count".to_string(), LpValue::I32(1)));
-        assert_eq!(fields[3], ("step_seconds".to_string(), LpValue::F32(0.0)));
-        assert_eq!(fields[4], ("fade_seconds".to_string(), LpValue::F32(0.0)));
+        assert_eq!(fields[2], ("step_seconds".to_string(), LpValue::F32(0.0)));
+        assert_eq!(fields[3], ("fade_seconds".to_string(), LpValue::F32(0.0)));
 
         let LpValue::Array(set) = &fields[1].1 else {
             panic!("set must be an Array");
@@ -499,40 +450,27 @@ mod tests {
         assert_eq!(set.len(), 1);
     }
 
-    /// The legacy zero-padded storage form (a full `MAX_CYCLE_SET` array
-    /// with `count` bounding the read) still decodes.
+    /// The set length must sit within the KIND's bounds: exactly one for
+    /// static, 2..=8 for a cycle.
     #[test]
-    fn storage_accepts_the_legacy_padded_form() {
-        let config = cycle(2, 1.0);
-        let LpValue::Struct { name, mut fields } = config.to_lp_value() else {
-            panic!("GradientConfig storage must be a Struct");
-        };
-        let LpValue::Array(set) = &mut fields[1].1 else {
-            panic!("set must be an Array");
-        };
-        set.resize(MAX_CYCLE_SET as usize, Gradient::default().to_lp_value());
-
-        assert_eq!(
-            GradientConfig::from_lp_value(&LpValue::Struct { name, fields }).unwrap(),
-            config
-        );
-    }
-
-    #[test]
-    fn storage_rejects_a_count_the_kind_tag_disallows() {
-        let with_count = |kind: &str, count: i32| {
+    fn storage_rejects_a_set_length_the_kind_tag_disallows() {
+        let with_kind_and_set = |kind: &str, entries: usize| {
             let LpValue::Struct { name, mut fields } = cycle(2, 1.0).to_lp_value() else {
                 unreachable!()
             };
             fields[0].1 = LpValue::String(kind.to_string());
-            fields[2].1 = LpValue::I32(count);
+            fields[1].1 = LpValue::Array(
+                (0..entries)
+                    .map(|_| Gradient::default().to_lp_value())
+                    .collect(),
+            );
             LpValue::Struct { name, fields }
         };
 
-        assert!(GradientConfig::from_lp_value(&with_count("static", 2)).is_err());
-        assert!(GradientConfig::from_lp_value(&with_count("cycle", 1)).is_err());
-        assert!(GradientConfig::from_lp_value(&with_count("cycle", 9)).is_err());
-        assert!(GradientConfig::from_lp_value(&with_count("playlist", 2)).is_err());
+        assert!(GradientConfig::from_lp_value(&with_kind_and_set("static", 2)).is_err());
+        assert!(GradientConfig::from_lp_value(&with_kind_and_set("cycle", 1)).is_err());
+        assert!(GradientConfig::from_lp_value(&with_kind_and_set("cycle", 9)).is_err());
+        assert!(GradientConfig::from_lp_value(&with_kind_and_set("playlist", 2)).is_err());
         assert!(GradientConfig::from_lp_value(&LpValue::F32(1.0)).is_err());
     }
 
