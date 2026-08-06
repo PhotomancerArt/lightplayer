@@ -82,8 +82,22 @@ use lpa_studio_core::{UiLensRuntime, UiStudioView};
     )
 )]
 pub(crate) enum StudioRoute {
-    /// The gallery.
+    /// The landing page (`#/home`). Reached through the logo, not a nav
+    /// tab (vision D1/D11); `#/` deliberately does NOT land here — see
+    /// [`StudioRoute::Devices`]. Placeholder content until M3.
     Home,
+    /// The devices section — and the `#/` landing. A returning user's
+    /// first question is "are my devices up?", so the root hash maps
+    /// here rather than to Home (vision Q2 lean; revisit when Home gets
+    /// its real content in M3). Unknown/malformed hashes also land here
+    /// — the URL is user input.
+    Devices,
+    /// The projects library section (`#/projects`). Renders the same
+    /// gallery as Devices until the P09 page split.
+    Projects,
+    /// The explore section (`#/explore`) — community/example content.
+    /// Placeholder until modpack scaffolding gives it real material.
+    Explore,
     /// The editor as a lens on THE sim session running this project. The
     /// key is the slug (preferred) or a `prj_…` uid (machine-stable
     /// fallback). Reload respawns the sim and loads the project.
@@ -121,10 +135,10 @@ pub(crate) enum StudioRoute {
 )]
 impl StudioRoute {
     /// Parse a `location.hash` value. Unknown or malformed hashes read as
-    /// `Home` — the URL is user input (this is also where the deleted
-    /// `#/project/<key>` lands: as `Home`, no redirect). A hash-internal
-    /// query (the story book's `?viewport=`) is not part of the route and
-    /// is stripped; its owner parses it from the raw hash.
+    /// `Devices` — the URL is user input (this is also where the deleted
+    /// `#/project/<key>` lands: as `Devices`, no redirect). A
+    /// hash-internal query (the story book's `?viewport=`) is not part of
+    /// the route and is stripped; its owner parses it from the raw hash.
     pub(crate) fn parse(hash: &str) -> Self {
         let path = hash.trim_start_matches('#');
         let (path, _hash_query) = path.split_once('?').unwrap_or((path, ""));
@@ -139,7 +153,7 @@ impl StudioRoute {
                     key: key.to_string(),
                     play: true,
                 },
-                _ => StudioRoute::Home,
+                _ => StudioRoute::Devices,
             },
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => StudioRoute::Device {
@@ -150,8 +164,12 @@ impl StudioRoute {
                     uid: uid.to_string(),
                     play: true,
                 },
-                _ => StudioRoute::Home,
+                _ => StudioRoute::Devices,
             },
+            Some("home") if segments.next().is_none() => StudioRoute::Home,
+            Some("devices") if segments.next().is_none() => StudioRoute::Devices,
+            Some("projects") if segments.next().is_none() => StudioRoute::Projects,
+            Some("explore") if segments.next().is_none() => StudioRoute::Explore,
             Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
             Some("boards") => {
                 let rest: Vec<&str> = segments.collect();
@@ -175,15 +193,21 @@ impl StudioRoute {
                     story_id: (!rest.is_empty()).then(|| rest.join("/")),
                 }
             }
-            None => StudioRoute::Home,
-            Some(_) => StudioRoute::Home,
+            None => StudioRoute::Devices,
+            Some(_) => StudioRoute::Devices,
         }
     }
 
     /// The canonical hash for this route (always `#/`-prefixed).
+    /// `#/` IS the Devices hash — the root landing is the devices
+    /// section (see the variant docs); `#/devices` parses in as an
+    /// alias but is never emitted.
     pub(crate) fn hash(&self) -> String {
         match self {
-            StudioRoute::Home => "#/".to_string(),
+            StudioRoute::Home => "#/home".to_string(),
+            StudioRoute::Devices => "#/".to_string(),
+            StudioRoute::Projects => "#/projects".to_string(),
+            StudioRoute::Explore => "#/explore".to_string(),
             StudioRoute::Sim { key, play: false } => format!("#/sim/{key}"),
             StudioRoute::Sim { key, play: true } => format!("#/sim/{key}/play"),
             StudioRoute::Device { uid, play: false } => format!("#/device/{uid}"),
@@ -293,7 +317,7 @@ pub(crate) fn boot_route() -> StudioRoute {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn boot_route() -> StudioRoute {
-    StudioRoute::Home
+    StudioRoute::Devices
 }
 
 /// Push a new history entry for `route` and update the URL. Fires no
@@ -394,7 +418,7 @@ pub(crate) fn current_route() -> StudioRoute {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn current_route() -> StudioRoute {
-    StudioRoute::Home
+    StudioRoute::Devices
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -462,6 +486,9 @@ mod tests {
     fn routes_round_trip_through_their_hash() {
         let routes = [
             StudioRoute::Home,
+            StudioRoute::Devices,
+            StudioRoute::Projects,
+            StudioRoute::Explore,
             StudioRoute::Sim {
                 key: "2026-07-09-1421-basic".to_string(),
                 play: false,
@@ -516,9 +543,22 @@ mod tests {
             "#/device/dev_x/extra",
             "#/device/dev_x/play/extra",
             "#/mapping/extra",
+            "#/home/extra",
+            "#/explore/extra",
         ] {
-            assert_eq!(StudioRoute::parse(hash), StudioRoute::Home, "{hash:?}");
+            assert_eq!(StudioRoute::parse(hash), StudioRoute::Devices, "{hash:?}");
         }
+    }
+
+    /// `#/` and the `#/devices` alias both land on Devices — the root
+    /// hash is the returning-user landing (vision Q2 lean), and only
+    /// `#/` is ever emitted back.
+    #[test]
+    fn the_root_hash_is_the_devices_section() {
+        assert_eq!(StudioRoute::parse("#/"), StudioRoute::Devices);
+        assert_eq!(StudioRoute::parse(""), StudioRoute::Devices);
+        assert_eq!(StudioRoute::parse("#/devices"), StudioRoute::Devices);
+        assert_eq!(StudioRoute::Devices.hash(), "#/");
     }
 
     #[test]
@@ -596,14 +636,17 @@ mod tests {
     }
 
     #[test]
-    fn the_deleted_project_route_reads_as_home_with_no_redirect() {
+    fn the_deleted_project_route_reads_as_the_landing_with_no_redirect() {
         // D37: `#/project/<key>` is deleted outright (no users, no
         // redirect) — it parses as any other unknown hash.
         assert_eq!(
             StudioRoute::parse("#/project/2026-07-09-1421-basic"),
-            StudioRoute::Home
+            StudioRoute::Devices
         );
-        assert_eq!(StudioRoute::parse("#/project/prj_abc"), StudioRoute::Home);
+        assert_eq!(
+            StudioRoute::parse("#/project/prj_abc"),
+            StudioRoute::Devices
+        );
     }
 
     #[test]

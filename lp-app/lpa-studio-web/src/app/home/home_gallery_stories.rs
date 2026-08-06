@@ -1,4 +1,8 @@
-//! Home gallery stories: first run, populated, opening, and no-store.
+//! Gallery-page stories: first run, populated, opening, and no-store.
+//! The P09 split divided the combined gallery into Devices / Projects /
+//! Explore pages; these stories stack all three from one fixture so the
+//! old coverage (and the cross-page states, like empty-device push
+//! buttons) stays in frame.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
@@ -9,9 +13,11 @@ use lpa_studio_core::{
     UiPackageCard,
 };
 
-use crate::app::home::HomeGallery;
+use lpa_studio_core::UiAction;
+
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -89,6 +95,7 @@ fn devices() -> Vec<UiDeviceCard> {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
         UiDeviceCard {
             port_label: None,
@@ -110,6 +117,7 @@ fn devices() -> Vec<UiDeviceCard> {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
     ]
 }
@@ -128,10 +136,11 @@ fn first_run() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -156,10 +165,11 @@ fn gallery_chooser_buttons() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -215,10 +225,11 @@ fn project_format_states() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -238,10 +249,11 @@ fn populated() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -284,6 +296,7 @@ fn connected_device_and_project_chip() -> Element {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     });
     let home = UiHomeView {
         devices,
@@ -293,10 +306,11 @@ fn connected_device_and_project_chip() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -320,10 +334,11 @@ fn project_open_in_another_tab() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -343,11 +358,12 @@ fn opening_a_project() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     home.opening = Some(home.projects[0].uid.clone());
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -430,6 +446,7 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -458,13 +475,14 @@ fn sim_and_live_device_home() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }
 
 fn gallery(home: UiHomeView, roster_label: Option<String>) -> Element {
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -490,6 +508,7 @@ fn sim_running_only() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -517,6 +536,7 @@ fn device_in_safe_mode() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -549,6 +569,7 @@ fn project_live_in_two_places() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -570,6 +591,7 @@ fn sim_and_offline_device() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -606,15 +628,42 @@ fn store_unavailable_with_issue() -> Element {
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
                 on_action: |_| {},
             }
+        }
+    }
+}
+
+/// The P09 pages stacked from one fixture — the story stand-in for the
+/// old combined gallery page (the app renders them on separate routes).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn GalleryPages(
+    home: UiHomeView,
+    #[props(default)] now_secs: Option<f64>,
+    #[props(default)] has_ever_granted: Option<bool>,
+    #[props(default)] roster_label: Option<String>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-10",
+            DevicesPage {
+                home: home.clone(),
+                now_secs,
+                has_ever_granted,
+                roster_label,
+                on_action,
+            }
+            ProjectsPage { home: home.clone(), now_secs, on_action }
+            ExplorePage { home: Some(home), on_action }
         }
     }
 }

@@ -276,6 +276,7 @@ mod tests {
         let tabs = device_card_tabs(sim_rich_object(&SimRichInput {
             state: &RosterCardState::RunningUpToDate,
             project_name: Some("porch-sign"),
+            board_id: None,
             now_secs: NOW,
         }));
         assert_eq!(
@@ -298,6 +299,7 @@ mod tests {
         let tabs = device_card_tabs(sim_rich_object(&SimRichInput {
             state: &RosterCardState::ConnectedEmpty,
             project_name: None,
+            board_id: None,
             now_secs: NOW,
         }));
         // no Technical evidence → no Settings tab; empty → no Project tab;
