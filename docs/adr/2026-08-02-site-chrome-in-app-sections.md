@@ -79,6 +79,6 @@ embedded nodes as the teaching strategy — both point at in-app.
 
 ## Follow-ups
 
-- Interactive docs architecture (live embedded nodes) — separate plan.
+- Interactive docs architecture (live embedded nodes) — shipped, see `2026-08-06-interactive-docs-architecture.md`.
 - Boards "I have one of these" setup entry — future work.
 - Landing page; when it exists, the lockup may become its link.
