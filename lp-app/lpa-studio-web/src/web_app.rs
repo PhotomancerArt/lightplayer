@@ -260,7 +260,22 @@ pub fn App() -> Element {
                 // the focused document): lens on the sim + open project →
                 // #/sim/<slug>; lens on a device → #/device/<uid>.
                 let current = route.peek().clone();
-                if editor_showing {
+                // The URL follows the lens only while a SHELL route is
+                // what's rendered (the gallery routes, where a card open
+                // resolves into the lens URL, and the lens routes, where
+                // boot/slug/identity resolution lands). In any other
+                // section — Home, Explore, Boards, Docs — the user
+                // deliberately left the editor surface; yanking the URL
+                // back would make those sections unreachable while a
+                // lens is attached (seen live with `#/home` bouncing).
+                let on_shell_route = matches!(
+                    current,
+                    StudioRoute::Devices
+                        | StudioRoute::Projects
+                        | StudioRoute::Sim { .. }
+                        | StudioRoute::Device { .. }
+                );
+                if editor_showing && on_shell_route {
                     // `same_session`, not `!=`: play is a lens ZOOM on the
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
