@@ -24,9 +24,24 @@
 //! capture of frame zero deterministic; the `data-preview-painted` marker
 //! rides the same contract as the preview canvases.
 //!
-//! Dropping the driver cancels the scheduled frame — a face that unmounts
-//! leaks neither closure nor animation (the loop also idles for free while
-//! the tab is hidden, which is rAF's own behavior).
+//! **The backing store follows the box, and the box arrives late.** A card's
+//! pixel size is measured from layout, and the app's stylesheet is injected
+//! by the wasm bundle after boot (`document::Stylesheet`, see `index.html`) —
+//! so a paint that beats it measures a box the card does not end up with, and
+//! bakes a bitmap the browser then squeezes into the real one. Everything
+//! stated in device pixels (the 3px pad, the 1px midline, the stroke width)
+//! shrinks and aliases away under that squeeze; the curve, which is
+//! normalized, comes through unchanged. On a frozen story page nothing
+//! repaints it, so that render is a second stable terminal and baselines
+//! alternated between the two (defect
+//! 2026-08-05-clock-face-baselines-oscillate). A `ResizeObserver` per driver
+//! repaints whenever a card's box changes, which is what makes the styled
+//! size win no matter which paint got there first.
+//!
+//! Dropping the driver cancels the scheduled frame and disconnects the
+//! observer — a face that unmounts leaks neither closure nor animation (the
+//! loop also idles for free while the tab is hidden, which is rAF's own
+//! behavior).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -75,6 +90,12 @@ struct DriverInner {
     /// animations but cannot freeze rAF, and an animating baseline would
     /// churn on every CI capture.
     frozen: Cell<Option<bool>>,
+    /// Watches every mounted card canvas for box changes and repaints it at
+    /// the new size. Load-bearing on the frozen story page, where the rAF
+    /// loop stops after the first frame: without it the stylesheet landing
+    /// after that frame leaves a stale unstyled bitmap on screen (see the
+    /// module docs).
+    resize: RefCell<Option<web_sys::ResizeObserver>>,
 }
 
 /// The face-level animation driver. `None` inside when there is no browser
@@ -82,6 +103,10 @@ struct DriverInner {
 pub(crate) struct PhasorTraceDriver {
     inner: Option<Rc<DriverInner>>,
     _closure: Option<Closure<dyn FnMut(f64)>>,
+    /// The `ResizeObserver`'s callback. Held here rather than in the shared
+    /// inner so the driver's `Rc` graph stays acyclic, exactly like the rAF
+    /// closure above: dropping the driver frees both.
+    _resize_closure: Option<Closure<dyn FnMut(web_sys::js_sys::Array)>>,
 }
 
 /// Identity comparison for Dioxus prop memoization: a driver is equal only
@@ -99,16 +124,10 @@ impl PartialEq for PhasorTraceDriver {
 impl PhasorTraceDriver {
     pub(crate) fn new() -> Self {
         let Some(window) = web_sys::window() else {
-            return Self {
-                inner: None,
-                _closure: None,
-            };
+            return Self::inert();
         };
         let Some(performance) = window.performance() else {
-            return Self {
-                inner: None,
-                _closure: None,
-            };
+            return Self::inert();
         };
         let inner = Rc::new(DriverInner {
             window,
@@ -117,15 +136,12 @@ impl PhasorTraceDriver {
             raf_id: Cell::new(None),
             tick: RefCell::new(None),
             frozen: Cell::new(None),
+            resize: RefCell::new(None),
         });
         let for_frames = inner.clone();
         let closure = Closure::wrap(Box::new(move |now: f64| {
             for_frames.raf_id.set(None);
-            for card in for_frames.cards.borrow().iter() {
-                if let Some(frozen) = paint_card(card, now) {
-                    for_frames.frozen.set(Some(frozen));
-                }
-            }
+            for_frames.paint_all(now);
             for_frames.schedule();
         }) as Box<dyn FnMut(f64)>);
         *inner.tick.borrow_mut() = Some(
@@ -134,9 +150,33 @@ impl PhasorTraceDriver {
                 .unchecked_ref::<web_sys::js_sys::Function>()
                 .clone(),
         );
+        // A card's box changed (the stylesheet landed, the pane resized):
+        // repaint every card so each backing store matches its box again.
+        // Painting is idempotent — time is pinned to the card's anchor on a
+        // frozen page and re-derived from it otherwise — so an extra pass
+        // only ever corrects geometry.
+        let for_resize = inner.clone();
+        let resize_closure = Closure::<dyn FnMut(web_sys::js_sys::Array)>::new(
+            move |_entries: web_sys::js_sys::Array| {
+                let now = for_resize.performance.now();
+                for_resize.paint_all(now);
+            },
+        );
+        *inner.resize.borrow_mut() =
+            web_sys::ResizeObserver::new(resize_closure.as_ref().unchecked_ref()).ok();
         Self {
             inner: Some(inner),
             _closure: Some(closure),
+            _resize_closure: Some(resize_closure),
+        }
+    }
+
+    /// A driver with no browser behind it (host-side component tests).
+    fn inert() -> Self {
+        Self {
+            inner: None,
+            _closure: None,
+            _resize_closure: None,
         }
     }
 
@@ -182,33 +222,59 @@ impl PhasorTraceDriver {
     }
 
     /// A card's canvas just mounted: paint its first frame (the sync-time
-    /// paint may have run before the element existed). On a frozen page the
-    /// paint pins itself to the anchor (elapsed exactly zero) so a capture
-    /// of the mounted state is byte-stable run to run.
+    /// paint may have run before the element existed) and put it under the
+    /// resize observer. On a frozen page the paint pins itself to the anchor
+    /// (elapsed exactly zero) so a capture of the mounted state is byte-stable
+    /// run to run; the observer is what keeps that stable state the STYLED
+    /// one when this paint beat the stylesheet.
     pub(crate) fn canvas_mounted(&self, index: usize) {
         let Some(inner) = &self.inner else {
             return;
         };
         let now = inner.performance.now();
-        if let Some(card) = inner.cards.borrow().get(index)
-            && let Some(frozen) = paint_card(card, now)
+        let canvas_id = {
+            let cards = inner.cards.borrow();
+            let Some(card) = cards.get(index) else {
+                return;
+            };
+            if let Some(frozen) = paint_card(card, now) {
+                inner.frozen.set(Some(frozen));
+            }
+            card.canvas_id.clone()
+        };
+        if let Some(observer) = inner.resize.borrow().as_ref()
+            && let Some(canvas) = canvas_by_id(&canvas_id)
         {
-            inner.frozen.set(Some(frozen));
+            observer.observe(&canvas);
         }
     }
 }
 
 impl Drop for PhasorTraceDriver {
     fn drop(&mut self) {
-        if let Some(inner) = &self.inner
-            && let Some(id) = inner.raf_id.take()
-        {
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        if let Some(id) = inner.raf_id.take() {
             let _ = inner.window.cancel_animation_frame(id);
+        }
+        if let Some(observer) = inner.resize.borrow_mut().take() {
+            observer.disconnect();
         }
     }
 }
 
 impl DriverInner {
+    /// Redraw every card as of `now_ms`, recording whether the paints found
+    /// themselves inside the story page's capture box.
+    fn paint_all(&self, now_ms: f64) {
+        for card in self.cards.borrow().iter() {
+            if let Some(frozen) = paint_card(card, now_ms) {
+                self.frozen.set(Some(frozen));
+            }
+        }
+    }
+
     /// Schedule the next frame while any card is live; quietly stops the
     /// loop when the card list empties or a paint has discovered it lives
     /// inside the story page's capture box — the cards then hold their
@@ -240,10 +306,7 @@ impl DriverInner {
 /// Quietly does nothing (`None`) when the canvas is not in the DOM yet —
 /// the mount hook and the next frame both retry.
 fn paint_card(card: &TraceCard, now_ms: f64) -> Option<bool> {
-    let canvas = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(&card.canvas_id))
-        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())?;
+    let canvas = canvas_by_id(&card.canvas_id)?;
     let frozen = canvas
         .closest("[data-story-capture=\"1\"]")
         .ok()
@@ -258,8 +321,11 @@ fn paint_card(card: &TraceCard, now_ms: f64) -> Option<bool> {
     };
 
     // Match the backing store to the CSS box (the spike's `px()` helper):
-    // the canvas is styled w-full h-[42px], so the pixel size follows
-    // layout × devicePixelRatio.
+    // the canvas is styled `width:100%; height:42px`, so the pixel size
+    // follows layout × devicePixelRatio. The card wears
+    // `ux-box-sized-canvas` so the story-capture ready gate can assert this
+    // exact equation before it shoots: a backing store out of step with its
+    // box is what this defect looked like.
     let rect = canvas.get_bounding_client_rect();
     let dpr = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
     let width = (rect.width() * dpr).round().max(1.0) as u32;
@@ -343,6 +409,14 @@ fn paint_card(card: &TraceCard, now_ms: f64) -> Option<bool> {
     // capture harness can wait for a painted first frame.
     let _ = canvas.set_attribute("data-preview-painted", "1");
     Some(frozen)
+}
+
+/// The card canvas for `id`, when it is in the DOM.
+fn canvas_by_id(id: &str) -> Option<web_sys::HtmlCanvasElement> {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
 }
 
 /// The consumer's shaping, mirroring the engine's `shape_phasor`

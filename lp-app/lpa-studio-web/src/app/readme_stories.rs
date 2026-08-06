@@ -221,6 +221,7 @@ fn readme_lens_card() -> UiDeviceCard {
         ],
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -291,6 +292,7 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
         UiDeviceCard {
             port_label: None,
@@ -310,6 +312,7 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
     ];
     UiHomeView {
@@ -324,5 +327,6 @@ fn readme_home_view() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }

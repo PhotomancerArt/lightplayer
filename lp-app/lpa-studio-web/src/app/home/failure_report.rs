@@ -155,6 +155,7 @@ mod tests {
             fw: None,
             hardware: None,
             detected_chip: Some("esp32c6".to_string()),
+            board_id: None,
             safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
