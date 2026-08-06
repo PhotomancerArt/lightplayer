@@ -22,17 +22,32 @@
 //! pipeline reuses the render pipeline's bind group layout and uniform
 //! buffer as-is.
 //!
-//! Native only: results come back through the blocking buffer map in
-//! [`crate::read_back`], then quantize with the CPU packing rule into the
-//! caller's RGBA16 buffer. The browser tier cannot block on a map and LED
-//! output is not a browser product path, so wasm32 keeps an explicit error
-//! (see `LpShader::sample_rgba16` in [`crate::render`]).
+//! # Readback
+//!
+//! Results quantize with the CPU packing rule into the caller's RGBA16
+//! buffer, but how the bytes leave the GPU differs by target:
+//!
+//! - **native**: the blocking buffer map in [`crate::read_back`] —
+//!   synchronous, same-frame results (the LED-output path of the
+//!   non-embedded lp-server).
+//! - **wasm32**: the browser cannot block on a buffer map, so the pass
+//!   keeps a persistent `MAP_READ` buffer per point count and runs it as a
+//!   **one-frame-latency pipeline**: each call submits this frame's draw,
+//!   harvests the previous call's `map_async` result if it has landed (the
+//!   worker's event loop turns between ticks, resolving the map promise),
+//!   issues a copy+map for the frame just drawn when the buffer is free,
+//!   and serves the most recent completed frame (black until the first
+//!   readback lands). This is the async-readback exit of
+//!   `docs/debt/gpu-tier-cannot-sample-led-output.md`.
 
 use lp_gfx::GfxError;
 use lps_shared::TextureStorageFormat;
 
 use crate::gpu_graphics::GpuShared;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::read_back::read_back_f32;
+#[cfg(target_arch = "wasm32")]
+use crate::texture_backing::gpu_channels;
 use crate::texture_backing::{GpuTexture, gpu_format, quantize_unorm16};
 
 /// Hand-written point-list vertex stage. Attribute 0 is the precomputed
@@ -58,12 +73,23 @@ const VERTEX_STRIDE: u64 = 16;
 
 /// The compiled sample pipeline plus its per-count resources. Built lazily
 /// on the first `sample_rgba16` call (render-only consumers — the gallery —
-/// never pay for it); resources are rebuilt only when the point count
-/// changes.
+/// never pay for it).
+///
+/// Resources are kept **per point count** (most-recently-used at the back,
+/// capped at [`MAX_RESOURCE_SETS`]): one shader instance serves every
+/// fixture sampling its product, so calls with different LED counts
+/// interleave within a frame. A single rebuilt-on-change set would churn
+/// buffers every call on native and, on wasm32, destroy the in-flight
+/// async readback before it ever landed — permanently black.
 pub(crate) struct SamplePass {
     pipeline: wgpu::RenderPipeline,
-    resources: Option<SampleResources>,
+    resources: Vec<SampleResources>,
 }
+
+/// Cap on retained per-count resource sets. Distinct counts come from
+/// distinct fixtures (few) and change only under editing; past the cap the
+/// least-recently-used set is dropped.
+const MAX_RESOURCE_SETS: usize = 8;
 
 /// Vertex buffer and row-major `W × H` grid target for one point count.
 struct SampleResources {
@@ -72,6 +98,27 @@ struct SampleResources {
     height: u32,
     vertex_buffer: wgpu::Buffer,
     target: GpuTexture,
+    /// Browser async readback state (see module docs); dropped with the
+    /// rest of the set on LRU eviction, which also abandons any in-flight
+    /// map (the dropped buffer's callback resolves into a state handle
+    /// nobody reads).
+    #[cfg(target_arch = "wasm32")]
+    readback: AsyncReadback,
+}
+
+/// One-frame-latency readback pipeline for the browser tier: a persistent
+/// `MAP_READ` buffer plus the most recent completed frame.
+#[cfg(target_arch = "wasm32")]
+struct AsyncReadback {
+    buffer: wgpu::Buffer,
+    padded_bytes_per_row: u32,
+    /// `Some` while a `map_async` is outstanding; the callback writes the
+    /// map result into the shared cell (single-threaded wasm — the lock is
+    /// never contended).
+    pending: Option<std::sync::Arc<std::sync::Mutex<Option<Result<(), wgpu::BufferAsyncError>>>>>,
+    /// Most recent completed frame, quantized (`count * 4` channels).
+    /// Zeros — black — until the first readback lands.
+    last: Vec<u16>,
 }
 
 impl SamplePass {
@@ -146,7 +193,7 @@ impl SamplePass {
 
         Self {
             pipeline,
-            resources: None,
+            resources: Vec::new(),
         }
     }
 
@@ -178,7 +225,7 @@ impl SamplePass {
         self.ensure_resources(shared, count);
         let resources = self
             .resources
-            .as_ref()
+            .last()
             .expect("sample resources were just ensured");
         let (width, height) = (resources.width, resources.height);
 
@@ -231,15 +278,25 @@ impl SamplePass {
         }
         shared.queue.submit([encoder.finish()]);
 
-        // Row-major readback: texel (col, row) is index row * W + col, so
-        // channels line up with `out` directly; the final row's unused tail
-        // (count not divisible by W) falls off the zip.
+        self.read_back_into(shared, out)
+    }
+
+    /// Native: blocking row-major readback of the frame just drawn. Texel
+    /// (col, row) is index row * W + col, so channels line up with `out`
+    /// directly; the final row's unused tail (count not divisible by W)
+    /// falls off the zip.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_back_into(&mut self, shared: &GpuShared, out: &mut [u16]) -> Result<(), GfxError> {
+        let resources = self
+            .resources
+            .last()
+            .expect("sample resources were just ensured");
         let pixels = read_back_f32(
             &shared.device,
             &shared.queue,
             &resources.target,
-            width,
-            height,
+            resources.width,
+            resources.height,
             TextureStorageFormat::Rgba16Unorm,
             None,
         )?;
@@ -249,35 +306,160 @@ impl SamplePass {
         Ok(())
     }
 
-    fn ensure_resources(&mut self, shared: &GpuShared, count: u32) {
-        if self
+    /// Browser: one-frame-latency pipeline (see module docs). Harvest the
+    /// previous call's map if it has landed, issue a copy+map for the frame
+    /// just drawn when the buffer is free, and serve the most recent
+    /// completed frame.
+    #[cfg(target_arch = "wasm32")]
+    fn read_back_into(&mut self, shared: &GpuShared, out: &mut [u16]) -> Result<(), GfxError> {
+        use std::sync::{Arc, Mutex};
+
+        let resources = self
             .resources
-            .as_ref()
-            .is_none_or(|resources| resources.count != count)
-        {
-            let max_dim = shared.device.limits().max_texture_dimension_2d;
-            let width = count.min(max_dim);
-            let height = count.div_ceil(width);
-            let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("lp-gfx-wgpu sample points"),
-                size: u64::from(count) * VERTEX_STRIDE,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let target = GpuTexture::new(
-                &shared.device,
-                width,
-                height,
-                TextureStorageFormat::Rgba16Unorm,
-                "lp-gfx-wgpu sample target",
-            );
-            self.resources = Some(SampleResources {
-                count,
-                width,
-                height,
-                vertex_buffer,
-                target,
-            });
+            .last_mut()
+            .expect("sample resources were just ensured");
+        let readback = &mut resources.readback;
+
+        // Harvest: did the previous call's map land?
+        if let Some(state) = &readback.pending {
+            let landed = state.lock().expect("map state (uncontended)").take();
+            match landed {
+                // Still in flight (slow frame) — serve the stale frame and
+                // try again next call.
+                None => {}
+                Some(Err(e)) => {
+                    readback.pending = None;
+                    return Err(GfxError::Backend(format!(
+                        "sample read_back buffer map: {e:?}"
+                    )));
+                }
+                Some(Ok(())) => {
+                    let slice = readback.buffer.slice(..);
+                    let data = slice.get_mapped_range();
+                    // Row-major grid readback, same layout as native; only
+                    // the first `count * 4` channels are live (the final
+                    // row's unused tail is dropped by the `last` bound).
+                    let row_channels = resources.width as usize * 4;
+                    let mut lane = 0usize;
+                    'rows: for row in 0..resources.height {
+                        let start = (row * readback.padded_bytes_per_row) as usize;
+                        let row_bytes = &data[start..start + row_channels * 4];
+                        for chunk in row_bytes.chunks_exact(4) {
+                            if lane == readback.last.len() {
+                                break 'rows;
+                            }
+                            let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                            readback.last[lane] = quantize_unorm16(v);
+                            lane += 1;
+                        }
+                    }
+                    drop(data);
+                    readback.buffer.unmap();
+                    readback.pending = None;
+                }
+            }
         }
+
+        // Issue: copy the frame just drawn and map it, unless a previous
+        // map is still holding the buffer.
+        if readback.pending.is_none() {
+            let mut encoder = shared
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &resources.target.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback.buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(readback.padded_bytes_per_row),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::Extent3d {
+                    width: resources.width,
+                    height: resources.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            shared.queue.submit([encoder.finish()]);
+
+            let state = Arc::new(Mutex::new(None));
+            let callback_state = Arc::clone(&state);
+            readback
+                .buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    *callback_state.lock().expect("map state (uncontended)") = Some(result);
+                });
+            readback.pending = Some(state);
+        }
+
+        out.copy_from_slice(&readback.last);
+        Ok(())
+    }
+
+    /// Ensure a resource set for `count` exists and sits at the back of
+    /// `self.resources` (the most-recently-used slot the callers read).
+    fn ensure_resources(&mut self, shared: &GpuShared, count: u32) {
+        if let Some(pos) = self
+            .resources
+            .iter()
+            .position(|resources| resources.count == count)
+        {
+            let existing = self.resources.remove(pos);
+            self.resources.push(existing);
+            return;
+        }
+        if self.resources.len() >= MAX_RESOURCE_SETS {
+            self.resources.remove(0);
+        }
+        let max_dim = shared.device.limits().max_texture_dimension_2d;
+        let width = count.min(max_dim);
+        let height = count.div_ceil(width);
+        let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lp-gfx-wgpu sample points"),
+            size: u64::from(count) * VERTEX_STRIDE,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let target = GpuTexture::new(
+            &shared.device,
+            width,
+            height,
+            TextureStorageFormat::Rgba16Unorm,
+            "lp-gfx-wgpu sample target",
+        );
+        #[cfg(target_arch = "wasm32")]
+        let readback = {
+            let bytes_per_pixel = gpu_channels(TextureStorageFormat::Rgba16Unorm) as u32 * 4;
+            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(align) * align;
+            AsyncReadback {
+                buffer: shared.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("lp-gfx-wgpu sample read_back"),
+                    size: u64::from(padded_bytes_per_row) * u64::from(height),
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }),
+                padded_bytes_per_row,
+                pending: None,
+                last: vec![0; count as usize * 4],
+            }
+        };
+        self.resources.push(SampleResources {
+            count,
+            width,
+            height,
+            vertex_buffer,
+            target,
+            #[cfg(target_arch = "wasm32")]
+            readback,
+        });
     }
 }
