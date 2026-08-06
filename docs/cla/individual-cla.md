@@ -25,7 +25,7 @@ steward of the LightPlayer project, including any successor legal entity or
 assignee that later assumes stewardship of the project.
 
 **"Project"** means the LightPlayer software and associated repositories
-(currently hosted under <https://github.com/light-player>), including any
+(currently hosted under <https://github.com/PhotomancerArt>), including any
 successor locations.
 
 **"Contribution"** means any original work of authorship, including any

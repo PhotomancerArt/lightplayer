@@ -227,7 +227,7 @@ emulator with per-board memory maps and an FPU proven bit-equal to real S3 silic
 
 ## Cranelift Fork
 
-LightPlayer uses a [forked version of Cranelift](https://github.com/light-player/lp-cranelift)
+LightPlayer uses a [forked version of Cranelift](https://github.com/PhotomancerArt/lp-cranelift)
 with modifications for embedded use:
 
 - **32-bit RISC-V Support** - `riscv32imac` code generation (upstream Cranelift only supports
@@ -235,7 +235,7 @@ with modifications for embedded use:
 - **`no_std`** - Supports `no_std` + alloc for both object and JIT compilation, enabling the
   compiler to run on bare-metal targets
 - **regalloc2 fork** - Paired with a
-  [forked regalloc2](https://github.com/light-player/lp-regalloc2) with `ChunkedVec` for OOM
+  [forked regalloc2](https://github.com/PhotomancerArt/lp-regalloc2) with `ChunkedVec` for OOM
   mitigation and feature-gated ION allocator
 
 The fork maintains compatibility with upstream Cranelift while adding the necessary features for
