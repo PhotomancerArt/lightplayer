@@ -131,44 +131,57 @@ pub static PLASMA_FILES: &[ExampleFile] = &[
     ),
 ];
 
-/// `examples/plasma-grid` — the SAME plasma shader and knobs on a 16×16
-/// grid mapping. Exists for the "one effect, any shape" beat of the
-/// interactive docs ("What's a shader?"): a docs page runs `plasma` and
-/// `plasma-grid` side by side off shared knobs, so the two must stay
-/// byte-identical except `project.json` (the name) and
-/// `fixture.map2d.json` (the shape).
-pub static PLASMA_GRID_FILES: &[ExampleFile] = &[
+/// `examples/plasma-duo` — the plasma shader driving TWO fixtures in one
+/// module: the disc and a 16×16 grid, each with its own output channel.
+/// Exists for the "What's a shader?" docs page ("it gets projected onto
+/// your LEDs, regardless of their shape"): one sim, one set of knobs,
+/// two shapes reacting together. The shader and clock stay byte-identical
+/// with `examples/plasma` so the docs edit-me story and the gallery
+/// example never drift apart.
+pub static PLASMA_DUO_FILES: &[ExampleFile] = &[
     (
         "project.json",
-        include_bytes!("../../../../../examples/plasma-grid/project.json"),
+        include_bytes!("../../../../../examples/plasma-duo/project.json"),
     ),
     (
         "module.json",
-        include_bytes!("../../../../../examples/plasma-grid/module.json"),
+        include_bytes!("../../../../../examples/plasma-duo/module.json"),
     ),
     (
         "clock.json",
-        include_bytes!("../../../../../examples/plasma-grid/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../examples/plasma-grid/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../examples/plasma-grid/output.json"),
+        include_bytes!("../../../../../examples/plasma-duo/clock.json"),
     ),
     (
         "shader.json",
-        include_bytes!("../../../../../examples/plasma-grid/shader.json"),
+        include_bytes!("../../../../../examples/plasma-duo/shader.json"),
     ),
     (
         "shader.glsl",
-        include_bytes!("../../../../../examples/plasma-grid/shader.glsl"),
+        include_bytes!("../../../../../examples/plasma-duo/shader.glsl"),
     ),
     (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../examples/plasma-grid/fixture.map2d.json"),
+        "disc.json",
+        include_bytes!("../../../../../examples/plasma-duo/disc.json"),
+    ),
+    (
+        "grid.json",
+        include_bytes!("../../../../../examples/plasma-duo/grid.json"),
+    ),
+    (
+        "disc-out.json",
+        include_bytes!("../../../../../examples/plasma-duo/disc-out.json"),
+    ),
+    (
+        "grid-out.json",
+        include_bytes!("../../../../../examples/plasma-duo/grid-out.json"),
+    ),
+    (
+        "disc.map2d.json",
+        include_bytes!("../../../../../examples/plasma-duo/disc.map2d.json"),
+    ),
+    (
+        "grid.map2d.json",
+        include_bytes!("../../../../../examples/plasma-duo/grid.map2d.json"),
     ),
 ];
 
@@ -280,10 +293,10 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         files: METEOR_FILES,
     },
     EmbeddedExample {
-        id: "examples/plasma-grid",
-        name: "Plasma Grid",
+        id: "examples/plasma-duo",
+        name: "Plasma Duo",
         kind: "Module",
-        files: PLASMA_GRID_FILES,
+        files: PLASMA_DUO_FILES,
     },
     EmbeddedExample {
         id: "examples/zook-dome",
@@ -329,29 +342,22 @@ mod tests {
         assert!(embedded_example("examples/unknown").is_none());
     }
 
-    /// The "one effect, any shape" contract (interactive docs): the grid
-    /// variant is byte-identical to plasma except its name and mapping,
-    /// so the docs page's shared knobs honestly drive one shader on two
-    /// shapes. A drift here (e.g. a plasma shader tweak not copied over)
-    /// silently breaks that story.
+    /// The docs-example contract: plasma-duo drives the SAME shader (and
+    /// clock) bytes as the gallery's plasma, so the "What's a shader?"
+    /// page's edit-me listing and the standalone example never drift
+    /// apart. A plasma shader tweak not copied over breaks this loudly.
     #[test]
-    fn plasma_grid_differs_from_plasma_only_in_name_and_mapping() {
+    fn plasma_duo_shares_plasmas_shader_bytes() {
         let plasma = embedded_example("examples/plasma").expect("plasma is embedded");
-        let grid = embedded_example("examples/plasma-grid").expect("plasma-grid is embedded");
+        let duo = embedded_example("examples/plasma-duo").expect("plasma-duo is embedded");
         let plasma_files: std::collections::BTreeMap<_, _> = plasma.files().into_iter().collect();
-        let grid_files: std::collections::BTreeMap<_, _> = grid.files().into_iter().collect();
-        assert_eq!(
-            plasma_files.keys().collect::<Vec<_>>(),
-            grid_files.keys().collect::<Vec<_>>(),
-            "the two variants ship the same file set"
-        );
-        for (path, bytes) in &plasma_files {
-            let grid_bytes = &grid_files[path];
-            if path == "project.json" || path == "fixture.map2d.json" {
-                assert_ne!(bytes, grid_bytes, "{path} is the deliberate difference");
-            } else {
-                assert_eq!(bytes, grid_bytes, "{path} must stay byte-identical");
-            }
+        let duo_files: std::collections::BTreeMap<_, _> = duo.files().into_iter().collect();
+        for shared in ["shader.glsl", "shader.json", "clock.json"] {
+            assert_eq!(
+                plasma_files[&shared.to_string()],
+                duo_files[&shared.to_string()],
+                "{shared} must stay byte-identical between plasma and plasma-duo"
+            );
         }
     }
 

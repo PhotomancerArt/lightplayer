@@ -7,7 +7,7 @@
   },
   "bindings": {
     "input": {
-      "source": "bus:control.out"
+      "source": "bus:control.disc"
     }
   },
   "options": {

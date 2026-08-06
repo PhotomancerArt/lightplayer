@@ -1,93 +1,102 @@
 # What's a shader?
 
-```embed hero-preview example=examples/plasma
+```embed sim-canvas sim=main view=product
 ```
 
-That's a shader. It's running right now, in your browser, on a
-simulated LED board — nothing was installed, nothing was flashed. What
-you're watching is the classic "plasma" pattern being computed, color
-by color, sixty-ish times a second.
-
-If you've used WLED, you already know the word *effect*: you scroll a
-list, pick one, and it runs. A shader plays the same role — it's the
-thing that decides what your LEDs do — with one difference that changes
-everything: **a shader isn't a menu item. It's a friendly little
-program, and you can open it.**
-
-We'll get there in three steps, and you can touch everything along the
-way.
-
-## First, the part you already know
-
-Here are the plasma shader's knobs. Drag them.
-
-```embed panel sim=disc,grid mode=interactive
+```embed panel sim=main mode=interactive
 ```
 
-Familiar, right? Speed and scale, just like a WLED effect's sliders.
-The sim above responds live as you drag — go ahead and make a mess.
-(The Reset button in the corner puts everything back the way it was.
-You can't break anything on this page, which is rather the point of a
-simulator.)
+That's a shader: a friendly little program that decides what your LEDs
+do. This one is the classic "plasma," and it's running right now, in
+your browser, on a simulated board. The knobs are its controls — drag
+them and the picture answers.
 
-So far, LightPlayer looks like WLED with different paint. Here's where
-the floor opens.
+If you're coming from WLED, here's the one-sentence version: a shader
+is what an *effect* would be if you could open it.
 
-## The reveal
+## Any shape you've got
 
-Those knobs aren't settings we hard-coded for you. Each one is a line
-in the shader itself. This is the entire plasma program — about fifteen
-lines — with the line behind the **Scale** knob highlighted:
+A shader draws a picture. It doesn't know or care where your LEDs are —
+a **mapping** tells LightPlayer where each one actually sits, and the
+picture gets projected onto them. Same shader, same knobs, two very
+different shapes, live:
+
+```embed sim-canvas sim=main view=map fixture=disc
+```
+
+```embed sim-canvas sim=main view=map fixture=grid
+```
+
+Both of these are fixtures in one project, fed by the one shader above.
+Strip, ring, matrix, or a dome you soldered at 2 a.m. — write the
+effect once and point it at every shape you own. (In WLED, 2D lives in
+a separate world with its own effect list. Here there's no separate
+world.)
+
+## Now edit it
+
+This is the whole program — about fifteen lines — and it's live. Change
+something and watch the sims above follow:
+
+```embed editor sim=main
+```
+
+Some things to try:
+
+- **Slow it down:** the numbers `13.0`, `9.0`, `11.0`, `15.0` are how
+  fast each wave rides the base cycle. Halve one.
+- **Meet a knob:** the `scale` on line 3 *is* the Scale knob above —
+  the shader declared it, LightPlayer built the slider. (That's what
+  violet means everywhere in Studio: *bound* — wired so something else
+  can drive it.)
+- **Repaint it:** the `vec3(0.0, 0.33, 0.67)` near the end is the
+  palette's phase offsets. Nudge them.
+
+Breaking it is fine — a typo shows its error right in the editor, the
+LEDs keep their last good frame, and **Reset** puts everything back the
+way it was. That's what simulators are for.
+
+## Make it yours
+
+The page you're on is a sandbox; the real editor is one click away —
+same project, plus everything else Studio can do:
+
+```embed open-in-studio example=examples/plasma-duo
+```
+
+It lands in your projects and it's yours to keep, break, and rebuild.
+
+## For shader engineers
+
+You don't need any of this yet — come back when you want the machinery.
+
+**The dialect.** Shaders are GLSL with one entry point:
+`vec4 render(vec2 pos)` returns the color at `pos`, called for every
+position each frame. Inputs arrive as `layout(binding = N) uniform`
+declarations. No `main()`, no varyings, no version pragma.
+
+**Knobs are declared, not built.** The shader's sidecar (`shader.json`)
+lists what it consumes: a plain value (`scale`, with min/max/default)
+or a phasor (a cycle position the clock advances). Anything bound to a
+channel shows up on the panel automatically — declaring an input *is*
+publishing a knob:
 
 ```embed code-figure src=plasma-shader
 ```
 
-That violet highlight isn't decoration. In Studio, violet always means
-*bound* — a value wired up so something else can drive it. The shader's
-author wrote `scale` into the math, declared "this is a knob," and
-LightPlayer did the rest: the slider you dragged a moment ago exists
-*because of that line*.
+**Deterministic math.** Shaders run in fixed-point by default, compiled
+on the device itself — the same frames render in your browser's sim and
+on the chip. That's also why the plasma rides one `phase` cycle with
+whole-number multiples: exactness survives the wrap.
 
-Which means the effects list isn't a wall anymore. Want a knob WLED
-never gave you? Add a line. Want the plasma to breathe instead of
-scroll? Change the math. Anyone can do this — the [editor](#/docs/guide)
-is built for it, and shaders this size are genuinely small.
-
-## One effect, any shape
-
-Here's the same shader — the exact same fifteen lines, byte for byte —
-running on two different physical layouts at once. The disc you've been
-watching, and a 16×16 grid:
-
-```embed sim-canvas sim=disc view=map
-```
-
-```embed sim-canvas sim=grid view=map
-```
-
-Notice they're both still listening to the knobs above. In WLED, 2D
-setups live in a separate world with their own effect list. Here
-there's no separate world: a shader computes color *at a position*, and
-a **mapping** tells LightPlayer where your LEDs actually are — strip,
-ring, grid, or a dome you soldered at 2 a.m. Write the effect once and
-it runs on every shape you own.
-
-(How mappings work is its own good question — that page is on its way.)
-
-## Make it yours
-
-Reading about it only gets you so far. Open this very shader in the
-real editor — same plasma, same knobs, plus everything else Studio can
-do:
-
-```embed open-in-studio example=examples/plasma
-```
-
-It lands in your projects, it's yours, and you can always reset it.
-Break it with confidence.
+**The library.** The standard GLSL functions are there — trig, `exp`
+family, `mix`, `clamp`, `smoothstep`, vector ops — plus extras like
+`hsv2rgb` and `hash`, and `sampler2D` textures. Your own helper
+functions work as you'd expect, which means portable snippet libraries
+like [lygia](https://lygia.xyz) are a good hunting ground.
 
 ## Where next
 
 - [Brightness and smooth fades](#/docs/brightness-and-smooth-fades) —
-  what those output settings actually do to your colors.
+  what the output settings do to your colors.
 - [The guide](#/docs/guide) — the map of everything else.

@@ -29,9 +29,9 @@ pub use docs_page::DocsPage;
 /// `lpa_studio_core::app::home::embedded_example`).
 #[derive(Debug, PartialEq)]
 pub struct DocsSimSpec {
-    /// The article-facing handle, e.g. `disc` in ` ```embed panel sim=disc `.
+    /// The article-facing handle, e.g. `main` in ` ```embed panel sim=main `.
     pub name: &'static str,
-    /// The embedded example this sim runs, e.g. `examples/plasma`.
+    /// The embedded example this sim runs, e.g. `examples/plasma-duo`.
     pub example_id: &'static str,
 }
 
@@ -73,12 +73,8 @@ pub const PAGES: &[DocPage] = &[
         markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.md"),
         sims: &[
             DocsSimSpec {
-                name: "disc",
-                example_id: "examples/plasma",
-            },
-            DocsSimSpec {
-                name: "grid",
-                example_id: "examples/plasma-grid",
+                name: "main",
+                example_id: "examples/plasma-duo",
             },
         ],
     },

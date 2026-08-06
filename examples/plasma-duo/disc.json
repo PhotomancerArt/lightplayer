@@ -4,20 +4,8 @@
     "width": 32,
     "height": 32
   },
-  "bindings": {
-    "input": {
-      "source": "bus:visual.out"
-    },
-    "output": {
-      "target": "bus:control.out"
-    }
-  },
   "sampling": "direct",
   "diagnostic_mode": "off",
-  "mapping": {
-    "kind": "Map2d",
-    "source": "fixture.map2d.json"
-  },
   "color_order": "rgb",
   "transform": [
     [
@@ -37,5 +25,17 @@
     ]
   ],
   "brightness": 1.0,
-  "gamma_correction": false
+  "gamma_correction": false,
+  "bindings": {
+    "input": {
+      "source": "bus:visual.out"
+    },
+    "output": {
+      "target": "bus:control.disc"
+    }
+  },
+  "mapping": {
+    "kind": "Map2d",
+    "source": "disc.map2d.json"
+  }
 }
