@@ -3,8 +3,8 @@
 //! A section of the running app, not a standalone page: `web_app`'s route
 //! signal drives `page`, so article switches and section switches are both
 //! plain re-renders — the actor and every open runtime session survive
-//! them. That is also what makes live, running examples inside articles
-//! possible (the interactive-docs initiative builds on it).
+//! them. That is also what makes the live examples inside articles work
+//! (see `docs/adr/2026-08-06-interactive-docs-architecture.md`).
 
 use dioxus::prelude::*;
 use lpa_studio_core::UiAction;

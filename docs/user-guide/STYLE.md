@@ -15,6 +15,11 @@ you write well for everyone on either side of them.
 
 ## Voice
 
+**Provisional register:** the canonical voice is being established by
+hand-written copy; until then, treat this section and the shipped
+articles as direction, not gospel — when hand-written copy and this
+guide disagree, the copy wins and this guide gets updated.
+
 Friendly computing. The docs sound like a knowledgeable friend showing
 you something they genuinely think is cool — never a manual talking
 down to you, never marketing talking past you.
