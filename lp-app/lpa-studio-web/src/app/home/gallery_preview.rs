@@ -111,6 +111,15 @@ pub(crate) struct StaticThumbPreviews;
 /// presented frame, and recovers from errors by remounting a fresh canvas
 /// generation and leasing again (bounded; then parks on an error badge).
 pub(crate) fn use_thumb_preview(source: Option<PreviewSource>) -> ThumbPreview {
+    use_preview_lease(source, None)
+}
+
+/// The general lease hook behind [`use_thumb_preview`]: same host, same
+/// visibility/recovery discipline, with the slot's present cadence left to
+/// the caller. Gallery thumbs pass `None` (the host default); a docs
+/// article's hero preview is a single large canvas the reader is actually
+/// looking at, so it asks for a smoother rate.
+pub(crate) fn use_preview_lease(source: Option<PreviewSource>, fps: Option<f32>) -> ThumbPreview {
     let frame_id = use_hook(|| {
         let id = NEXT_THUMB_ID.fetch_add(1, Ordering::Relaxed);
         format!("gallery-thumb-{id}")
@@ -122,13 +131,13 @@ pub(crate) fn use_thumb_preview(source: Option<PreviewSource>) -> ThumbPreview {
     };
     #[cfg(target_arch = "wasm32")]
     {
-        wasm::use_live_thumb(frame_id, source)
+        wasm::use_live_thumb(frame_id, source, fps)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         // Host builds of this crate run unit tests only and never mount a
         // live preview; the static stack still renders.
-        let _ = source;
+        let _ = (source, fps);
         ThumbPreview {
             frame_id,
             canvas: None,
@@ -251,8 +260,12 @@ mod wasm {
         remounts: u8,
     }
 
-    /// The wasm arm of [`super::use_thumb_preview`].
-    pub(super) fn use_live_thumb(frame_id: String, source: Option<PreviewSource>) -> ThumbPreview {
+    /// The wasm arm of [`super::use_preview_lease`].
+    pub(super) fn use_live_thumb(
+        frame_id: String,
+        source: Option<PreviewSource>,
+        fps: Option<f32>,
+    ) -> ThumbPreview {
         // Canvas element generation: bumped on every recovery so a fresh
         // element mounts (a GPU-tier canvas is consumed by its transfer).
         let generation = use_signal(|| 0_u32);
@@ -272,7 +285,7 @@ mod wasm {
                     return; // static thumb: nothing to drive
                 };
                 loop {
-                    drive_thumb(&state, &frame_id, &source, generation, badge, revealed);
+                    drive_thumb(&state, &frame_id, &source, fps, generation, badge, revealed);
                     TimeoutFuture::new(THUMB_POLL_MS).await;
                 }
             }
@@ -305,6 +318,7 @@ mod wasm {
         state_rc: &Rc<RefCell<LiveThumbState>>,
         frame_id: &str,
         source: &PreviewSource,
+        fps: Option<f32>,
         mut generation: Signal<u32>,
         mut badge: Signal<Option<ThumbPreviewBadge>>,
         mut revealed: Signal<bool>,
@@ -328,7 +342,7 @@ mod wasm {
                 let handle = host.lease(PreviewSlotRequest {
                     source: source.clone(),
                     canvas_id: thumb_canvas_id(frame_id, *generation.peek()),
-                    fps: None,
+                    fps,
                     profile: PreviewProfile::default(),
                 });
                 state.last_revision = None;
