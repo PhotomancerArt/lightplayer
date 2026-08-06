@@ -71,8 +71,8 @@ use std::rc::Rc;
 
 use crate::base::{
     CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
-    CodeEditorLanguage, DetailPopover, DetailSection, IconMenuTone, Platform, StudioIconName,
-    keyboard,
+    CodeEditorLanguage, DetailPopover, DetailSection, HelpLink, IconMenuTone, Platform,
+    StudioIconName, keyboard,
 };
 
 /// Quiet period after the last keystroke before an auto-apply fires — long
@@ -363,6 +363,15 @@ pub fn AssetEditor(
                                 FullErrorPopover { raw: error.raw.clone() }
                             }
                         },
+                    }
+                }
+                // The "?": shader source is where "what's a shader" gets
+                // asked with the code on screen — link the page that
+                // answers it (GLSL editors only; JSON assets aren't shaders).
+                if editor.kind == UiAssetEditorKind::Glsl {
+                    HelpLink {
+                        href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                        title: "What's a shader?",
                     }
                 }
                 // Right half: persistence, independent of the error state.

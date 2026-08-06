@@ -25,6 +25,7 @@ pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
+pub mod help_link;
 pub mod inline_button;
 #[cfg(feature = "stories")]
 pub(crate) mod inline_button_stories;
@@ -46,6 +47,7 @@ pub use code_editor::{
     CodeEditorLanguage,
 };
 pub use code_figure::{CodeFigure, CodeHighlight, CodeHighlightTone};
+pub use help_link::HelpLink;
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_card_class,
     detail_popover_section_class,

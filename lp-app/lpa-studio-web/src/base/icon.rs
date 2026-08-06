@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
-    CircleAlert, CircleDot, CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
+    CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
     Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off,
     ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil,
     Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
@@ -29,6 +29,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::NodeTreeItem => rsx! { Boxes { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
         StudioIconName::Info => rsx! { Info { size } },
+        StudioIconName::Help => rsx! { CircleQuestionMark { size } },
         StudioIconName::InfoBare => rsx! {
             span {
                 class: "tw:inline-flex tw:items-center tw:justify-center tw:font-mono tw:font-bold",
@@ -127,6 +128,8 @@ pub enum StudioIconName {
     NodeTreeItem,
     Edited,
     Info,
+    /// The "?" help affordance (docs deep links).
+    Help,
     InfoBare,
     UnboundValue,
     Expanded,
