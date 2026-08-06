@@ -431,7 +431,10 @@ fn heading_anchor_by_node(nodes: &[MdNode]) -> Vec<Option<String>> {
 /// document order — the same ids [`MarkdownDocs`] assigns as heading `id`
 /// attributes. Host-testable so callers (e.g. a future table of contents)
 /// don't need to re-derive the slugging/dedup rules themselves.
-#[allow(dead_code, reason = "consumed by a docs TOC in a later phase (P3+)")]
+#[allow(
+    dead_code,
+    reason = "consumed by the generated docs checks (test-only) and a docs TOC in a later phase"
+)]
 pub(crate) fn heading_anchors(text: &str) -> Vec<String> {
     heading_anchor_by_node(&parse_markdown(text))
         .into_iter()
