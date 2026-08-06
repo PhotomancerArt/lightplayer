@@ -1,4 +1,4 @@
-//! The Home landing page (`#/home`, vision D14 / spike §5) — **the M3
+//! The Home landing page (`/home`, vision D14 / spike §5) — **the M3
 //! stub**: lockup, one-line tagline, three dive-in cards. Deliberately
 //! no marketing depth and no demo strip; the real landing pass is M3's.
 //! Reached through the logo only — there is no Home nav tab (D11).
@@ -24,7 +24,7 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     icon: StudioIconName::Usb,
                     title: "Devices",
                     detail: "Your boards and the simulator — set up, connect, play.",
-                    href: "#/",
+                    href: "/",
                 }
                 // The sim path: land on Devices WITH the wizard already
                 // walking the simulate-a-device flow (same op as the
@@ -33,7 +33,7 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     icon: StudioIconName::Simulator,
                     title: "Try the simulator",
                     detail: "Set up the simulator as a board — no hardware needed.",
-                    href: "#/",
+                    href: "/",
                     on_press: on_action.map(|on_action| {
                         EventHandler::new(move |()| {
                             on_action.call(home_action(HomeOp::StartSetup { sim: true }));
@@ -44,7 +44,7 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     icon: StudioIconName::Play,
                     title: "Explore",
                     detail: "Example projects to open, run, and make yours.",
-                    href: "#/explore",
+                    href: "/explore",
                 }
             }
         }

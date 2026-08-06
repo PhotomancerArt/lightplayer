@@ -941,7 +941,7 @@ pub(crate) fn DeviceCard(
                         // shell wordmark uses (the hash may not change).
                         a {
                             class: "{grow_button_class(transport_label.is_empty())} tw:no-underline",
-                            href: "#/",
+                            href: "/",
                             title: "Back to the gallery",
                             aria_label: "Shrink {card.name} back to the gallery",
                             onclick: move |_| {
@@ -2133,7 +2133,7 @@ fn project_picker_body(
 /// The D29 editor entry, now dispatched from the grow control (⤢): move
 /// the editor lens onto the device session and open its running project.
 /// The card targets the attached session (`uid: None`); the
-/// `#/device/<uid>` route passes the uid.
+/// `/device/<uid>` route passes the uid.
 fn open_device_project_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),

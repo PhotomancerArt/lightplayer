@@ -18,7 +18,7 @@ use crate::base::{PopoverButton, PopoverPlacement};
 
 /// GitHub slug used when no deploy `version.json` is present (local dev builds),
 /// so the repo link and copyright still resolve.
-const DEFAULT_REPO: &str = "light-player/lightplayer";
+const DEFAULT_REPO: &str = "PhotomancerArt/lightplayer";
 /// Studio is authored by Yona Appletree / photomancer.art.
 const AUTHOR: &str = "Yona Appletree";
 const AUTHOR_URL: &str = "https://photomancer.art";
@@ -298,7 +298,7 @@ fn VersionFooter(repo: String) -> Element {
             if cfg!(feature = "stories") {
                 a {
                     class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
-                    href: "#/stories",
+                    href: "/stories",
                     onclick: move |event| {
                         // App() only checks the story-book hash at mount, so
                         // set the hash and reload to enter it.

@@ -6,6 +6,15 @@
 - **Supersedes:** None
 - **Superseded by:** None
 
+> **Cloud annotation (2026-08-06,
+> `2026-08-06-cloud-service-architecture.md`).** This ADR's premise
+> "there is no cloud provider and no account system" is no longer true —
+> the lp-cloud service and Google accounts exist. The decision itself
+> stands unchanged: envelopes remain the **anonymous, copy-semantics**
+> sharing path (paste mints a fresh uid), while cloud sync is the
+> **identity-preserving** path (push/pull keeps the project uid). The two
+> deliberately coexist.
+
 > **Migration annotation (2026-08-04,
 > `2026-08-04-project-format-migration-architecture.md`).** "Deliberately
 > not migrated" below is about the **envelope's own** `format` field (the

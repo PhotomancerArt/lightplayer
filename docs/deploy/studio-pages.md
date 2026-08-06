@@ -9,9 +9,9 @@ browser serial assets are currently resolved from root paths such as
 
 | Channel | URL | Source |
 |---|---|---|
-| Production Studio | `https://lightplayer.app/` | `light-player/lightplayer`, GitHub Pages from Actions |
-| Beta Studio | `https://beta.lightplayer.app/` | `light-player/lightplayer-beta-pages`, branch Pages |
-| Web demo | `https://demo.lightplayer.app/` | `light-player/lightplayer-demo-pages`, branch Pages |
+| Production Studio | `https://lightplayer.app/` | `PhotomancerArt/lightplayer`, GitHub Pages from Actions |
+| Beta Studio | `https://beta.lightplayer.app/` | `PhotomancerArt/lightplayer-beta-pages`, branch Pages |
+| Web demo | `https://demo.lightplayer.app/` | `PhotomancerArt/lightplayer-demo-pages`, branch Pages |
 
 ## Automated Setup
 
@@ -29,11 +29,11 @@ human when token scopes or organization settings block automation.
 The source repo needs GitHub App credentials for manual beta/demo deployments.
 The app should be installed only on:
 
-- `light-player/lightplayer-beta-pages`
-- `light-player/lightplayer-demo-pages`
+- `PhotomancerArt/lightplayer-beta-pages`
+- `PhotomancerArt/lightplayer-demo-pages`
 
 The app needs only repository **Contents: Read and write** permission. Store the
-credentials in `light-player/lightplayer` as Actions secrets:
+credentials in `PhotomancerArt/lightplayer` as Actions secrets:
 
 ```text
 LIGHTPLAYER_PAGES_APP_ID
@@ -66,10 +66,16 @@ AAAA  @     2606:50c0:8003::153
 Subdomain records:
 
 ```text
-CNAME www   light-player.github.io
-CNAME beta  light-player.github.io
-CNAME demo  light-player.github.io
+CNAME www   photomancerart.github.io
+CNAME beta  photomancerart.github.io
+CNAME demo  photomancerart.github.io
 ```
+
+> **Pending:** live DNS for `beta` and `demo` still targets the pre-rename
+> `light-player.github.io`. This keeps working — GitHub Pages routes custom
+> domains by the repo's `CNAME` file, and every `*.github.io` name resolves to
+> the same Pages anycast addresses — but the records should be re-pointed at
+> `photomancerart.github.io` so they do not depend on the old org name.
 
 Remove parking, forwarding, or old apex `A`/`AAAA`/`ALIAS`/`ANAME` records.
 Extra apex records can prevent GitHub from provisioning the Pages certificate.
@@ -78,7 +84,7 @@ Extra apex records can prevent GitHub from provisioning the Pages certificate.
 
 Production:
 
-1. Open `https://github.com/light-player/lightplayer/settings/pages`.
+1. Open `https://github.com/PhotomancerArt/lightplayer/settings/pages`.
 2. Set the Pages source to GitHub Actions.
 3. Set the custom domain to `lightplayer.app`.
 4. Wait for the DNS check and TLS certificate.
@@ -130,8 +136,21 @@ files so debug wasm artifacts are easy to spot.
 
 ## Deploy
 
-Production deploys automatically from `main` through the `Deploy Studio Pages`
-workflow.
+Production deploys automatically from `main` through the `Main push` workflow's
+`Build and deploy Studio` job. That job is deliberately `needs:`-ordered behind
+`tag-next-version` in the same workflow, so the commit's version tag exists
+before the deploy checks out — when the deploy was its own workflow on the same
+`push: main` trigger, the two raced and production published `<sha>-dirty-<time>`
+instead of the tag.
+
+The job resolves `APP_VERSION` immediately after checkout, before the build
+runs, and `prepare-pages-artifact.mjs` prefers that over shelling out to
+`print-app-version.sh` itself. The build writes generated files into the
+checkout (dx recompiles `assets/tailwind.css` from `tailwind.css`), so a
+version resolved after the build always reads as dirty.
+
+Re-deploying an already-tagged `main` without a new commit is a
+`workflow_dispatch` on `Main push`; tagging is skipped for that event.
 
 Beta and demo deploy manually through the `Deploy Pages Channel` workflow:
 

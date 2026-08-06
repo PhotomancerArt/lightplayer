@@ -46,6 +46,18 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      # Before the build, for the same reason as the production deploy in
+      # deploy-cloud.yml: `print-app-version.sh` reads `git status --porcelain`,
+      # and the build writes generated files into the checkout. No
+      # `--require-tag` here — channels deploy arbitrary refs, and an untagged
+      # ref legitimately stamps `<sha>`.
+      - name: Resolve app version
+        run: |
+          set -euo pipefail
+          version="$(scripts/print-app-version.sh)"
+          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Deploying app version: ${version}"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -59,7 +71,8 @@ jobs:
 
       # Studio serves an image per chip (lp-fw/builds/served.json) and two of
       # the three are Xtensa. Same pin, targets and `default: false` reasoning
-      # as deploy-studio-pages.yml — read the comment there. Beta-only,
+      # as the retired deploy-studio-pages.yml did (production is fly.io now,
+      # via deploy-cloud.yml — read the comment there). Beta-only,
       # matching the studio build step below: the demo channel ships no
       # firmware.
       - name: Install Xtensa Rust toolchain
@@ -120,7 +133,7 @@ jobs:
         with:
           app-id: ${{ secrets.LIGHTPLAYER_PAGES_APP_ID }}
           private-key: ${{ secrets.LIGHTPLAYER_PAGES_PRIVATE_KEY }}
-          owner: light-player
+          owner: PhotomancerArt
           repositories: |
             lightplayer-beta-pages
             lightplayer-demo-pages
@@ -135,8 +148,8 @@ jobs:
           set -euo pipefail
           target_repo=""
           case "$CHANNEL" in
-            beta) target_repo="light-player/lightplayer-beta-pages" ;;
-            demo) target_repo="light-player/lightplayer-demo-pages" ;;
+            beta) target_repo="PhotomancerArt/lightplayer-beta-pages" ;;
+            demo) target_repo="PhotomancerArt/lightplayer-demo-pages" ;;
             *) echo "unknown channel: $CHANNEL" >&2; exit 2 ;;
           esac
 

@@ -616,7 +616,10 @@ async function discoverStoryIdsOnce() {
     { timeoutMs: discoveryTimeoutMs, label: "story-discovery Chrome (--dump-dom)" },
   );
   const storyIds = [];
-  for (const anchor of html.matchAll(/<a\b[^>]*href="#\/stories\/([^"]+)"[^>]*>/g)) {
+  // Story links became real paths when the router moved off the hash
+  // (P09); the legacy `#/stories/…` form is still accepted so this
+  // scraper works against either build during a bisect.
+  for (const anchor of html.matchAll(/<a\b[^>]*href="(?:#\/|\/)stories\/([^"]+)"[^>]*>/g)) {
     const storyId = decodeURIComponent(anchor[1]).split(/[?#]/, 1)[0];
     // `#[story(screenshot)]` rides the discovery link (see story_book.rs).
     if (/data-story-screenshot="1"/.test(anchor[0])) {
