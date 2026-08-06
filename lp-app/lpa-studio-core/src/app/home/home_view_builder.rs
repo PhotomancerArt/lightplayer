@@ -760,7 +760,9 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
-        board_id: None,
+        // the registry's board fact rides the remembered card (G1b ruling
+        // 9/10: Details names it; the gone device's ▶ box shows it)
+        board_id: device.board_id.clone(),
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),

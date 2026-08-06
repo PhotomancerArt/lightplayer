@@ -1954,7 +1954,7 @@ fn card_tab_and_sheet_drive_through_core_ops() {
             .expect("the connected device card");
         assert_eq!(
             card.ui.tab,
-            DeviceCardTab::Settings,
+            DeviceCardTab::Details,
             "fresh card = Settings front door"
         );
         card.identity_key().to_string()
@@ -4138,10 +4138,10 @@ fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
 
     // And an explicit choice outranks the default, permanently: moving to
     // Settings must not snap back to ▶ on the next view build.
-    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Settings);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
     assert_eq!(
         device_card(&studio, &card_key).ui.tab,
-        crate::DeviceCardTab::Settings,
+        crate::DeviceCardTab::Details,
         "the user's tab choice is sticky"
     );
 }
@@ -4157,7 +4157,7 @@ fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
 fn a_card_on_another_tab_never_pulls_frames() {
     let (store, host) = library();
     let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
-    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Settings);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
 
     run_card_feeds(&mut studio);
 

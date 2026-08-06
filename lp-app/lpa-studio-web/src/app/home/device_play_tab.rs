@@ -42,6 +42,7 @@ use crate::app::home::card_thumb::thumb_swatch_style;
 use crate::app::node::lamp_view::LampView;
 use crate::base::icon::StudioIconName;
 use crate::base::inline_button::InlineButton;
+use lpa_studio_core::board_display_name;
 
 /// What the ▶ tab is showing, and therefore how it is dressed.
 ///
@@ -79,6 +80,10 @@ pub(crate) fn PlayTabBody(
     sim: bool,
     now: f64,
     open_action: Option<UiAction>,
+    /// The Reconnect dispatch for a gone device (G1b ruling 8: the
+    /// button lives IN the picture box — the box is where the absence
+    /// shows). `None` on live/sim cards.
+    reconnect_action: Option<UiAction>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Last known, not current — the same pair the card grammar dims for.
@@ -121,7 +126,25 @@ pub(crate) fn PlayTabBody(
                 }
             }
             if liveness == PlayLiveness::Waiting {
-                p { class: "ux-play-empty", "{waiting_line(muted)}" }
+                // The gone device with NO remembered frame shows what we
+                // DO remember: the board it is (G1b ruling 10), with the
+                // way back right under it. No board on record keeps the
+                // honest sentence.
+                div { class: "ux-play-empty",
+                    if let Some(board_id) = card.board_id.as_deref().filter(|_| muted) {
+                        p { class: "ux-play-board", "{board_display_name(board_id)}" }
+                    } else {
+                        p { class: "tw:m-0", "{waiting_line(muted)}" }
+                    }
+                    if let Some(action) = reconnect_action.clone() {
+                        InlineButton {
+                            label: "Reconnect {card.name}",
+                            icon: Some(StudioIconName::Usb),
+                            text: Some("Reconnect".to_string()),
+                            on_press: move |_| on_action.call(action.clone()),
+                        }
+                    }
+                }
             }
             if let Some(pill) = pill {
                 span { class: "ux-play-pill {pill_family_class(liveness, sim)}",
@@ -130,7 +153,17 @@ pub(crate) fn PlayTabBody(
                 }
             }
             if liveness == PlayLiveness::Offline {
-                div { class: "ux-play-veil", "offline · last frame" }
+                div { class: "ux-play-veil",
+                    "offline · last frame"
+                    if let Some(action) = reconnect_action.clone() {
+                        InlineButton {
+                            label: "Reconnect {card.name}",
+                            icon: Some(StudioIconName::Usb),
+                            text: Some("Reconnect".to_string()),
+                            on_press: move |_| on_action.call(action.clone()),
+                        }
+                    }
+                }
             }
         }
         div { class: "ux-play-meta",

@@ -90,6 +90,7 @@ pub use app::project::{
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
+pub use app::roster::board_display_name;
 pub use app::roster::{
     BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
     DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
