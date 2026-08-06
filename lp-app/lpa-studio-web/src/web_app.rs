@@ -618,13 +618,13 @@ pub fn App() -> Element {
                     // lpa-boards stays platform-blind.
                     lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
                 },
-                StudioRoute::Docs { page } => rsx! {
+                StudioRoute::Docs { page, anchor } => rsx! {
                     // The section gets the app's real dispatcher: the
                     // `open-in-studio` embed runs the same `OpenExample`
                     // flow a gallery card does, into the user's own
                     // library. Docs SIMS never come through here — they
                     // are leased controllers of their own (D2).
-                    crate::app::DocsPage { page, on_studio_action: on_action }
+                    crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
                 _ => rsx! {
                     StudioShell {

@@ -369,8 +369,11 @@ pub fn AssetEditor(
                 // asked with the code on screen — link the page that
                 // answers it (GLSL editors only; JSON assets aren't shaders).
                 if editor.kind == UiAssetEditorKind::Glsl {
+                    // Deep-links THE REVEAL: this reader already has code
+                    // on screen, so land them on the knob-is-a-line beat,
+                    // not the page top.
                     HelpLink {
-                        href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                        href: crate::app::docs::docs_links::what_is_a_shader::THE_REVEAL,
                         title: "What's a shader?",
                     }
                 }
