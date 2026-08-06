@@ -17,7 +17,7 @@ set -euo pipefail
 
 # --- what we are building ---------------------------------------------------
 APP="${LP_FLY_APP:-lightplayer}"
-REGION="${LP_FLY_REGION:-sea}"
+REGION="${LP_FLY_REGION:-sjc}"  # sea no longer exists for new orgs
 VOLUME="${LP_FLY_VOLUME:-data}"
 VOLUME_GB="${LP_FLY_VOLUME_GB:-3}"
 BUCKET="${LP_FLY_BUCKET:-lightplayer-cloud}"

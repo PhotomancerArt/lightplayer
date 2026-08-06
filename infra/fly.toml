@@ -11,7 +11,7 @@
 # flyctl from infra/. The CLI flags say what they mean.
 
 app = "lightplayer"
-primary_region = "sea"
+primary_region = "sjc"  # Seattle (sea) was retired for new fly orgs; San Jose is nearest
 
 # ---------------------------------------------------------------------------
 # ONE MACHINE. This is a design constraint, not a cost decision.
