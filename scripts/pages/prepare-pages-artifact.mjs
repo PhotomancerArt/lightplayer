@@ -34,9 +34,14 @@ const configs = {
       "firmware",
       "serial-debug.html",
       "vendor",
+      // The embedded stylesheet @font-faces /fonts/*.woff2 (style.css) —
+      // invisible to dx's asset graph, and silently absent from every
+      // deployed artifact until 2026-08-06 (system-font fallback hid it).
+      "fonts",
     ],
     required: [
       "index.html",
+      "fonts/Inter-Regular.woff2",
       // `minBytes` is the guard against shipping the Tailwind PLACEHOLDER.
       // `assets/tailwind.css` is gitignored and written by dx on every build;
       // lpa-studio-web's build.rs drops a ~130-byte stub in its place so plain

@@ -282,7 +282,7 @@ and editor-foundation primitives.
 Run the dev server and open:
 
 ```text
-http://127.0.0.1:2820/#/stories
+http://127.0.0.1:2820/stories
 ```
 
 Visual baselines are **CI-canonical**: the `validate-stories` CI job captures

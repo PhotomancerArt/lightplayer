@@ -353,7 +353,7 @@ pub(crate) fn swatch_confirmed() -> Element {
 }
 
 #[story(
-    description = "The #/boards catalog page: tier legend, sort + SoC filter controls, cards with renderer thumbnails — and the D5 driver warning on the CH340K board (rendered as on macOS)."
+    description = "The /boards catalog page: tier legend, sort + SoC filter controls, cards with renderer thumbnails — and the D5 driver warning on the CH340K board (rendered as on macOS)."
 )]
 pub(crate) fn catalog_page_macos() -> Element {
     rsx! {
@@ -364,7 +364,7 @@ pub(crate) fn catalog_page_macos() -> Element {
 }
 
 #[story(
-    description = "The board detail view (#/boards/domraem/dom-z-102 deep link): full caps pinout, driver section with the verified macOS CH340K steps, and the os-tagged note system."
+    description = "The board detail view (/boards/domraem/dom-z-102 deep link): full caps pinout, driver section with the verified macOS CH340K steps, and the os-tagged note system."
 )]
 pub(crate) fn detail_page_dom_z_102() -> Element {
     rsx! {
