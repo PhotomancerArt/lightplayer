@@ -26,9 +26,30 @@ use crate::base::markdown_text::MdEmbedRef;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DocsPage(
     #[props(default)] page: Option<String>,
+    /// Heading anchor from the route (`#/docs/<slug>#<anchor>`, help
+    /// links): scrolled to after render. The whole string lives inside
+    /// `location.hash`, so the browser's native fragment scroll never
+    /// fires — this effect is the mechanism, not a progressive touch-up.
+    #[props(default)]
+    anchor: Option<String>,
     #[props(default)] on_studio_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let page = page_for(page.as_deref());
+    // Re-runs on article and anchor changes alike; MarkdownDocs renders
+    // heading ids synchronously with the article, so the target exists by
+    // the time the effect fires. A missing id (stale link that somehow
+    // escaped the build check) is a silent no-scroll, not an error.
+    let scroll_slug = page.slug;
+    let scroll_anchor = anchor.clone();
+    use_effect(use_reactive!(|(scroll_slug, scroll_anchor)| {
+        let _ = scroll_slug;
+        if let Some(anchor) = scroll_anchor
+            && let Some(document) = web_sys::window().and_then(|window| window.document())
+            && let Some(target) = document.get_element_by_id(&anchor)
+        {
+            target.scroll_into_view();
+        }
+    }));
     // Refreshed rather than captured: `web_app` builds a fresh
     // `EventHandler` every render, and a click must ride the live one.
     // Writing through the cell is not reactive, so this cannot loop.
