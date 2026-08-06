@@ -360,6 +360,16 @@ Recorded so the two can be reconciled rather than silently diverge:
     controller emits it only for a sim flow whose lens is the sim, so a
     hardware wizard never sees it either.
 
+    **The landing has two shapes, and both report it.** The push
+    (`open_pending_package`) is the obvious one. The other is the D37
+    re-attach: when the sim is ALREADY running the requested project,
+    "Open in sim" re-attaches the lens instead of pushing a head, so
+    nothing loads and `note_sim_loaded_project` never runs — the project
+    landed on an earlier click and the board came with it then. Found on
+    the G1 dev-server walk (2026-08-06) with the push path already fixed;
+    the picker stayed up on a sim that had been wearing its board the
+    whole time.
+
 ## 8 · Command → existing machinery
 
 The executor is a pure mapping (`setup_flow/executor.rs`); it decides
