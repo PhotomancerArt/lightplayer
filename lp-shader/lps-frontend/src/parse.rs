@@ -178,7 +178,9 @@ fn rewrite_user_uniform_sampler2d_decls_for_naga(user_snippet: &str) -> String {
         out.push_str(&user_snippet[cursor..d.span.start]);
         // Indentation for the synthesized companion line: the whitespace run
         // between the declaration and its line start (empty when code precedes).
-        let line_start = user_snippet[..d.span.start].rfind('\n').map_or(0, |i| i + 1);
+        let line_start = user_snippet[..d.span.start]
+            .rfind('\n')
+            .map_or(0, |i| i + 1);
         let lead = &user_snippet[line_start..d.span.start];
         let lead_ws = if lead.chars().all(char::is_whitespace) {
             lead
@@ -455,7 +457,10 @@ mod uniform_sampler2d_compat_tests {
                  layout(binding = 1) uniform sampler2D palette;\n\
                  layout(binding = 2) uniform float bright;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
-        assert!(o.contains("layout(binding = 1) uniform texture2D palette;"), "{o}");
+        assert!(
+            o.contains("layout(binding = 1) uniform texture2D palette;"),
+            "{o}"
+        );
         assert!(
             o.contains("layout(set=0, binding=3) uniform sampler __lp_samp_palette;"),
             "{o}"
@@ -468,7 +473,10 @@ mod uniform_sampler2d_compat_tests {
     fn default_binding_clears_every_explicit_slot() {
         let s = "layout(binding = 4) uniform float speed;\nuniform sampler2D tex;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
-        assert!(o.contains("layout(set=0, binding=5) uniform texture2D tex;"), "{o}");
+        assert!(
+            o.contains("layout(set=0, binding=5) uniform texture2D tex;"),
+            "{o}"
+        );
         assert!(
             o.contains("layout(set=0, binding=6) uniform sampler __lp_samp_tex;"),
             "{o}"
