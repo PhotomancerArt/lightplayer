@@ -217,12 +217,10 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
         // a target that still `needs_flash` is not set up by a project
         // landing elsewhere — it has no firmware yet — and a board that
         // could not be inferred leaves the picker the only way to answer.
-        (SetupState::BoardPick(pick), SetupEvent::SetUpElsewhere { board_id }) => {
-            match board_id {
-                Some(_) if !caps.needs_flash => SetupStep::go(closed(CloseReason::SetUpElsewhere)),
-                _ => SetupStep::go(SetupState::BoardPick(pick)),
-            }
-        }
+        (SetupState::BoardPick(pick), SetupEvent::SetUpElsewhere { board_id }) => match board_id {
+            Some(_) if !caps.needs_flash => SetupStep::go(closed(CloseReason::SetUpElsewhere)),
+            _ => SetupStep::go(SetupState::BoardPick(pick)),
+        },
         (SetupState::BoardPick(_), SetupEvent::Back) => SetupStep::with(
             // On a no-connect target BOARD_PICK is the entry state, so
             // "back" leaves the flow (design §7.1).

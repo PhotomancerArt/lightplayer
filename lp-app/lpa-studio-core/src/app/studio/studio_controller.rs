@@ -4696,7 +4696,8 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
-                self.stand_down_setup_after_sim_load(updates.clone()).await?;
+                self.stand_down_setup_after_sim_load(updates.clone())
+                    .await?;
                 // The open path's own notices come FIRST — a format upgrade
                 // is the thing the user most needs to read, and it must not
                 // be a console-only line (P3).
@@ -5549,7 +5550,8 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
-                self.stand_down_setup_after_sim_load(updates.clone()).await?;
+                self.stand_down_setup_after_sim_load(updates.clone())
+                    .await?;
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,

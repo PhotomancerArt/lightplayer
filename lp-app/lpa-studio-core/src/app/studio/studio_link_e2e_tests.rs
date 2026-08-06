@@ -1638,6 +1638,119 @@ fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
     );
 }
 
+/// G1b ruling 6 (2026-08-05): the sim's setup wizard used to sit at
+/// "select a board" after an **Open in sim** had already answered the
+/// question — the project's advisory `target` becomes the sim's board on
+/// the way in (D4, the test above), and the wizard never heard.
+///
+/// The repro end to end: open the wizard, click Open in sim on a project
+/// card (`HomeOp::OpenPackage` — the op `#/sim/<slug>` rides), then go
+/// back to the gallery and look at what the wizard is asking for.
+#[test]
+fn an_open_in_sim_stands_the_sims_board_picker_down() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp, SetupStateKind, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let back_on_the_gallery_after_opening = |target: Option<&str>| {
+        let (store, host) = library();
+        let files = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| {
+                let body = match (*name, target) {
+                    ("project.json", Some(target)) => {
+                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                    }
+                    _ => body.to_string(),
+                };
+                (name.to_string(), body.into_bytes())
+            })
+            .collect::<Vec<_>>();
+        let package = store
+            .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+
+        let mut studio = StudioController::new(|| 1.0);
+        studio.attach_library(host);
+        let sim_io = InProcessServerIo {
+            server: Rc::new(RefCell::new(edit_e2e_server())),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(sim_io),
+        ));
+
+        // The wizard is up and asking, exactly as the entry card leaves it.
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::StartSetup { sim: true },
+        )))
+        .expect("the sim entry card opens the wizard");
+        assert_eq!(
+            studio
+                .view()
+                .home
+                .expect("the gallery is up")
+                .setup
+                .expect("the wizard is on the grid")
+                .state
+                .kind(),
+            SetupStateKind::BoardPick,
+            "the sim path opens on the board pick (design §7.1)"
+        );
+
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        // "…then return to the Studio gallery."
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            ProjectOp::DetachLens,
+        )))
+        .expect("the lens detaches back to the gallery");
+        studio
+    };
+
+    // A TARGETED project answers the picker's only question, so the flow
+    // is over: no wizard on the grid, and the sim wears the board.
+    let studio = back_on_the_gallery_after_opening(Some("seeed/xiao-esp32-c6"));
+    assert_eq!(
+        studio.view().home.expect("the gallery is back").setup,
+        None,
+        "the landing supplied the board; the picker has nothing left to ask"
+    );
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        Some("seeed/xiao-esp32-c6"),
+    );
+
+    // An UNTARGETED one infers nothing, so the picker stays — the ruling's
+    // "the wizard appears only when nothing can be inferred".
+    let studio = back_on_the_gallery_after_opening(None);
+    assert_eq!(
+        studio
+            .view()
+            .home
+            .expect("the gallery is back")
+            .setup
+            .expect("nothing was inferred, so the wizard is still asking")
+            .state
+            .kind(),
+        SetupStateKind::BoardPick,
+    );
+}
+
 /// Poisoned-instance recovery, part 1 (worker crash): the link layer
 /// reports a sticky instance-fatal for the sim session; the tick-cadence
 /// recovery edge-detects it, surfaces the primary panic on the console,

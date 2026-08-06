@@ -70,6 +70,9 @@ BOARD_PICK                       picker filtered to the detected chip + Generic;
   —Confirm (nothing picked)→     BOARD_PICK            (the forward verb is not armed)
   —Back→                         CONNECT_INTRO         [ReleasePort]   when needs_connect
   —Back→                         CLOSED(Cancelled)                     otherwise (it is the entry state)
+  —SetUpElsewhere(board)→        CLOSED(SetUpElsewhere)                when !needs_flash (§7.14)
+  —SetUpElsewhere(none)→         BOARD_PICK            (nothing inferred; the picker still asks)
+  —SetUpElsewhere→               BOARD_PICK            (inert when needs_flash — no firmware yet)
 PROBE_FAILED                     retry / replug hint / BOARD_FIRST link
   —Retry→                        PROBING               [ProbeBoard]
   —PickBoardFirst→               BOARD_FIRST           [ReleasePort]
@@ -145,11 +148,15 @@ CLOSED                           terminal
   remembered.
 - **CLOSED carries a reason**: `Cancelled` (nothing was written),
   `IncompleteFlash` (the board's card is marked — it needs re-flashing),
-  `Adopted` (§5), and `LeftConnected` (§7.12 — ✕ after the flash landed).
-  Only the first two release the port: a board that is flashed, adopted,
-  or both has earned its place on the roster, and dropping its session on
-  the way out is how it ends up reading "not connected" one frame after
-  it was set up.
+  `Adopted` (§5), `LeftConnected` (§7.12 — ✕ after the flash landed), and
+  `SetUpElsewhere` (§7.14 — a project landed on the target while the
+  picker was still asking). Only the first two release the port: a board
+  that is flashed, adopted, or both has earned its place on the roster,
+  and dropping its session on the way out is how it ends up reading "not
+  connected" one frame after it was set up.
+- **`SetUpElsewhere` is an OUTCOME, not a gesture**, like `ProbeCompleted`
+  and `FlashSucceeded`: no component can name it, only the controller
+  reporting what the world did. `gesture.rs`'s partition test enforces it.
 
 ## 3 · Provision step (shared)
 
@@ -330,6 +337,28 @@ Recorded so the two can be reconciled rather than silently diverge:
     CLEARS the reconcile state before re-reading, so a re-read that
     cannot run would otherwise leave the board with no identity at all,
     one command before the push demands one.
+
+14. **A target can be set up out from under the flow.** flow-spec assumed
+    the wizard was the only way a target gets set up, and BOARD_PICK is
+    where that assumption bites: "Open in sim" on a project card loads
+    that project onto the simulator, and the project's advisory manifest
+    `target` becomes the sim's board on the way in (honest-device-preview
+    vision D4). The wizard went on asking for a board the landing had
+    already supplied (G1b ruling 6, 2026-08-05).
+
+    `SetUpElsewhere { board_id }` is that report. It **closes** the flow
+    rather than walking it on to PROVISION, because PROVISION *generates
+    a starter project and pushes it* — here that would overwrite the
+    project the user just opened — while everything setup exists to
+    produce (a running target, a board, a project) is already true. So
+    CLOSED is the completed outcome, not a shortcut past one.
+
+    Two capability guards, no kind check (R2): a target that still
+    `needs_flash` is not set up by a project landing somewhere else (it
+    has no firmware yet), and `board_id: None` — the untargeted project —
+    infers nothing, so the picker stays the only way to answer. The
+    controller emits it only for a sim flow whose lens is the sim, so a
+    hardware wizard never sees it either.
 
 ## 8 · Command → existing machinery
 
