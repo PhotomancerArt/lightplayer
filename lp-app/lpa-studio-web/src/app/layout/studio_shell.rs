@@ -2,8 +2,19 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
-use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame};
+use crate::app::{DevicesPage, ProjectNodeWorkspace, ProjectOpeningFrame, ProjectsPage};
 use crate::core::PaneView;
+
+/// Which gallery page the shell renders when the view has no open
+/// editor (P09 split): the route picks it — `#/` = Devices,
+/// `#/projects` = Projects. Lens routes leave the default; they only
+/// see the gallery in transient detach windows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShellGallery {
+    #[default]
+    Devices,
+    Projects,
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -13,6 +24,9 @@ pub fn StudioShell(
     /// Fixed clock for home-gallery stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
+    /// The gallery page for no-editor renders (see [`ShellGallery`]).
+    #[props(default)]
+    gallery: ShellGallery,
     /// The route says a project but the view hasn't reached it yet: render
     /// the project-shaped opening frame instead of the gallery (the URL's
     /// intent picks the frame — no gallery flash on a project reload).
@@ -57,10 +71,17 @@ pub fn StudioShell(
     }
 
     if let Some(home) = home {
-        return rsx! {
-            div { class: "tw:grid tw:gap-7",
-                HomeGallery { home: *home, now_secs, on_action }
-            }
+        return match gallery {
+            ShellGallery::Devices => rsx! {
+                div { class: "tw:grid tw:gap-7",
+                    DevicesPage { home: *home, now_secs, on_action }
+                }
+            },
+            ShellGallery::Projects => rsx! {
+                div { class: "tw:grid tw:gap-7",
+                    ProjectsPage { home: *home, now_secs, on_action }
+                }
+            },
         };
     }
 

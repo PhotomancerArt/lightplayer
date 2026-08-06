@@ -21,15 +21,13 @@ pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod readme_stories;
 pub mod roster;
-pub mod section_stubs;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
 pub mod wiring;
 
 pub use docs::DocsPage;
-pub use home::{HomeGallery, ProjectOpeningFrame};
+pub use home::{DevicesPage, ExplorePage, HomePage, ProjectOpeningFrame, ProjectsPage};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};
-pub use section_stubs::{ExplorePage, HomePage};
 pub use wiring::WiringDrawerBody;

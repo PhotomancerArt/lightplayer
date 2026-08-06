@@ -245,6 +245,16 @@ pub fn App() -> Element {
                 let editor_showing = !next.panes.is_empty();
                 loop_editor_open.set(editor_showing);
                 let bound = editor_showing.then(|| router::lens_route(&next)).flatten();
+                // A NEW document took the lens this emission (none → some,
+                // or a different session): that is a navigation the user
+                // caused from wherever they are — an example opened from
+                // Explore must land in the editor — so it rewrites the URL
+                // even off the shell routes below.
+                let bound_changed = match (&*loop_bound_route.borrow(), &bound) {
+                    (None, Some(_)) => true,
+                    (Some(previous), Some(next_bound)) => !previous.same_session(next_bound),
+                    _ => false,
+                };
                 *loop_bound_route.borrow_mut() = bound.clone();
                 let opening_now = next
                     .home
@@ -260,14 +270,15 @@ pub fn App() -> Element {
                 // the focused document): lens on the sim + open project →
                 // #/sim/<slug>; lens on a device → #/device/<uid>.
                 let current = route.peek().clone();
-                // The URL follows the lens only while a SHELL route is
-                // what's rendered (the gallery routes, where a card open
-                // resolves into the lens URL, and the lens routes, where
-                // boot/slug/identity resolution lands). In any other
-                // section — Home, Explore, Boards, Docs — the user
+                // A STEADY lens follows the URL only while a shell route
+                // is what's rendered (the gallery routes, where a card
+                // open resolves into the lens URL, and the lens routes,
+                // where boot/slug/identity resolution lands). In any
+                // other section — Home, Explore, Boards, Docs — the user
                 // deliberately left the editor surface; yanking the URL
                 // back would make those sections unreachable while a
                 // lens is attached (seen live with `#/home` bouncing).
+                // A lens CHANGE (`bound_changed`) rewrites from anywhere.
                 let on_shell_route = matches!(
                     current,
                     StudioRoute::Devices
@@ -275,7 +286,7 @@ pub fn App() -> Element {
                         | StudioRoute::Sim { .. }
                         | StudioRoute::Device { .. }
                 );
-                if editor_showing && on_shell_route {
+                if editor_showing && (on_shell_route || bound_changed) {
                     // `same_session`, not `!=`: play is a lens ZOOM on the
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
@@ -283,13 +294,19 @@ pub fn App() -> Element {
                     if let Some(target) = bound
                         && !target.same_session(&current)
                     {
-                        if matches!(current, StudioRoute::Devices | StudioRoute::Projects) {
-                            // a gallery open: a real navigation, so a real
-                            // history entry (back returns to the gallery)
-                            router::navigate(&target);
-                        } else {
-                            // boot/forward resolution: no duplicate entries
+                        if matches!(
+                            current,
+                            StudioRoute::Sim { .. } | StudioRoute::Device { .. }
+                        ) {
+                            // boot/forward resolution on a lens route
+                            // (uid → slug, identity landing): same place,
+                            // no duplicate entries
                             router::replace(&target);
+                        } else {
+                            // an open from a page (gallery card, Explore
+                            // example): a real navigation, so a real
+                            // history entry (back returns to that page)
+                            router::navigate(&target);
                         }
                         route.set(target);
                     }
@@ -653,10 +670,13 @@ pub fn App() -> Element {
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {
                 StudioRoute::Home => rsx! {
-                    crate::app::HomePage {}
+                    crate::app::HomePage { on_action }
                 },
                 StudioRoute::Explore => rsx! {
-                    crate::app::ExplorePage {}
+                    crate::app::ExplorePage {
+                        home: current_view.home.clone().map(|home| *home),
+                        on_action,
+                    }
                 },
                 StudioRoute::Boards { board } => rsx! {
                     // The detected OS drives per-bridge driver warnings
@@ -667,6 +687,18 @@ pub fn App() -> Element {
                 StudioRoute::Docs { page } => rsx! {
                     crate::app::DocsPage { page }
                 },
+                StudioRoute::Projects => rsx! {
+                    StudioShell {
+                        view: current_view,
+                        running: false,
+                        gallery: crate::app::layout::ShellGallery::Projects,
+                        opening_frame,
+                        play,
+                        on_action,
+                    }
+                },
+                // Devices (`#/`) and the lens routes: the shell's default
+                // gallery page is Devices.
                 _ => rsx! {
                     StudioShell {
                         view: current_view,
