@@ -3935,18 +3935,31 @@ impl StudioController {
     /// One probe pass's evidence, in the link layer's own vocabulary.
     fn setup_probe_evidence(&self, device_id: crate::RuntimeId) -> crate::ProbeEvidence {
         let session = self.pool.device_session(device_id);
-        let hello = session.and_then(|session| match session.device_state() {
-            Some(DeviceState::Ready { hello }) => Some(hello),
+        let device_state = session.and_then(crate::RuntimeSession::device_state);
+        let hello = match &device_state {
+            Some(DeviceState::Ready { hello }) => Some(hello.clone()),
             _ => None,
-        });
+        };
         let snapshot = session
             .and_then(crate::RuntimeSession::hardware_session)
             .map(lpa_link::DeviceSession::snapshot);
+        // The no-firmware signature has two sources: the session sitting
+        // in ROM download mode, and the link's OWN boot-line classifier
+        // (`invalid header: 0xffffffff` after a clean ROM banner →
+        // `DeviceState::BlankFlash`). The G2 walk's blank C6 was hard-reset
+        // OUT of the bootloader before the wizard's read, so only the
+        // second source knew — ignoring it turned "blank, pick a board"
+        // into "nothing intelligible answered".
+        let state_says_blank = matches!(
+            device_state,
+            Some(DeviceState::BlankFlash | DeviceState::Bootloader)
+        );
         crate::ProbeEvidence {
             hello_seen: hello.is_some(),
-            no_firmware_signature: snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
+            no_firmware_signature: state_says_blank
+                || snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
             lines: snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.recent_lines.clone())
@@ -8899,6 +8912,33 @@ mod tests {
         // A session that predates the request keeps its card.
         studio.setup_port_snapshot = Some(vec![newborn]);
         assert!(!studio.view().home.expect("home view").devices.is_empty());
+    }
+
+    #[test]
+    fn a_blank_flash_device_state_is_blank_evidence_not_unresponsive() {
+        // The G2 blank-C6 walk: the board was hard-reset out of the
+        // bootloader before the wizard's read, so `link_mode` was normal —
+        // but the link's boot-line classifier had already concluded
+        // `BlankFlash` (`invalid header: 0xffffffff`). That state IS the
+        // no-firmware signature.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let device_id = studio
+            .pool
+            .install(
+                crate::app::runtime_pool::RuntimePayload::stub_device_for_test(
+                    DeviceState::BlankFlash,
+                ),
+            )
+            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message));
+        let evidence = studio.setup_probe_evidence(device_id);
+        assert!(evidence.no_firmware_signature);
+        assert!(!evidence.hello_seen);
+        let probe = crate::classify_board(&evidence, &[]);
+        assert!(
+            matches!(probe.verdict, crate::BoardVerdict::Blank { known: None }),
+            "a BlankFlash link state must classify Blank, got {:?}",
+            probe.verdict
+        );
     }
 
     #[test]
