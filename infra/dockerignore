@@ -1,0 +1,49 @@
+# Build-context exclusions for infra/Dockerfile.
+#
+# Named `dockerignore`, not `.dockerignore`, and copied into place by whoever
+# builds:
+#
+#   cp infra/dockerignore .dockerignore
+#
+# Two reasons. Docker only reads `.dockerignore` from the context ROOT, and
+# this context is the repo root — so the file cannot simply live in infra/.
+# And a permanent root `.dockerignore` would be read by every other docker
+# build in the repo (Dockerfile.ci has its own `dockerignore-ci` for exactly
+# this reason — same convention, same trick).
+#
+# Getting this wrong is not subtle: without it the context includes a warm
+# `target/` — gigabytes — and the upload to fly's remote builder becomes the
+# slowest part of the deploy.
+
+# The build tree, except the one thing the image needs from it: the Studio
+# web bundle that CI stages before the build. Docker (unlike git) re-includes
+# paths under an excluded directory, so this exception actually works.
+target/*
+!target/pages
+target/pages/*
+!target/pages/studio
+
+# History, worktrees, and editor droppings.
+.git
+.github
+.claude
+**/*.swp
+**/*~
+
+# Large trees no server build reads.
+docs-archive
+scratch
+test_round
+
+# Node/dx caches, if a local build left any behind.
+**/node_modules
+.dx
+
+# ⚠️ Deliberately short. Cargo needs EVERY workspace member's manifest to
+# resolve the lockfile, even for `cargo build -p lp-cloud-server`, and the
+# member list is not confined to the obvious directories — `spikes/
+# naga-wasm-poc` is a member, and `third_party/{naga,pp-rs,esp-storage,
+# ser-write-json}` are path dependencies. Excluding a directory that later
+# grows a member breaks the deploy with a "failed to load manifest" ten
+# minutes into a remote build. The source tree is tens of megabytes; `target/`
+# was the only thing worth excluding, so that is what this file excludes.

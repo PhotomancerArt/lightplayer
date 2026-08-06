@@ -1,0 +1,105 @@
+# fly.io configuration for the lightplayer.app service.
+#
+# Deploy with the config and Dockerfile named explicitly, from the repo root
+# (the build context must be the root — see infra/Dockerfile):
+#
+#   flyctl deploy . --config infra/fly.toml --dockerfile infra/Dockerfile --remote-only
+#
+# There is deliberately no [build] section: `build.dockerfile` resolves
+# relative to the working directory, which for us is the repo root and not
+# this file's directory, so the path would be a trap for anyone who ran
+# flyctl from infra/. The CLI flags say what they mean.
+
+app = "lightplayer"
+primary_region = "sea"
+
+# ---------------------------------------------------------------------------
+# ONE MACHINE. This is a design constraint, not a cost decision.
+# ---------------------------------------------------------------------------
+# The metadata store is SQLite on the attached volume, in WAL mode: many
+# readers, exactly one writer, and the writer must be the only process with
+# the file open. Two machines would both mount... nothing, actually — a fly
+# volume attaches to a single machine, so a second machine would come up with
+# an empty /data, restore from litestream, and start replicating a divergent
+# copy over the good one. That failure is silent and it eats the backup.
+#
+# So: one machine, one volume. `fly scale count 1` is the invariant. There is
+# no `max_machines` key to enforce it in this file — the enforcement is that
+# infra/bootstrap.sh creates exactly one volume, and this comment.
+#
+# The scale-out path, if it is ever needed, is a Postgres adapter behind the
+# same MetaStore port (the hexagonal payoff), not a second machine here.
+[deploy]
+  # `rolling` wants two machines alive at once, which the volume forbids.
+  # `immediate` replaces in place: a few seconds of 502 per deploy, which for
+  # offline-first clients is a sync retry rather than an outage.
+  strategy = "immediate"
+
+[env]
+  # Non-secret configuration. Everything here is readable in `fly config
+  # show`; secrets (Google OAuth, Tigris keys) live in `fly secrets` and are
+  # set by infra/bootstrap.sh.
+
+  # The canonical origin: absolute OG urls are built against it and an https
+  # value is what makes the session cookie `Secure` (config.rs).
+  #
+  # ⚠️ BEFORE THE DNS CUTOVER this must be the fly.dev hostname, or the
+  # Google redirect and the OG urls point at a domain that is still GitHub
+  # Pages. P11 smokes against fly.dev with:
+  #   LP_CLOUD_BASE_URL = "https://lightplayer.fly.dev"
+  # and flips it to the line below in the same commit as the cutover.
+  LP_CLOUD_BASE_URL = "https://lightplayer.app"
+
+  # Metadata in SQLite on the volume; blobs and trees in Tigris.
+  LP_CLOUD_STORE = "sqlite"
+  LP_CLOUD_DATA_DIR = "/data"
+  LP_CLOUD_BLOBS = "s3"
+  LP_CLOUD_S3_BUCKET = "lightplayer-cloud"
+  LP_CLOUD_S3_ENDPOINT = "https://fly.storage.tigris.dev"
+  LP_CLOUD_S3_REGION = "auto"
+
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are SECRETS, set by
+  # `fly storage create` during bootstrap. They are read by both the blob
+  # store and litestream. Nothing about them belongs in this file.
+
+  # LP_CLOUD_DEV_AUTH is absent on purpose. Even if it were set, config.rs
+  # refuses dev auth on a non-localhost base URL (Q23's second lock) — but
+  # the first lock is that nobody ever wrote the variable here.
+
+  RUST_LOG = "info"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # Machines never stop. A stopped machine means a cold start on the first
+  # share-link unfurl — a Discord crawler does not wait — and it means
+  # litestream is not running, so nothing is being replicated.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    # /healthz answers without touching the store on purpose, so a slow
+    # request never reads as an unhealthy machine (page_route.rs).
+    method = "GET"
+    path = "/healthz"
+    protocol = "http"
+    interval = "15s"
+    timeout = "2s"
+    # Long enough for litestream to restore a database from Tigris before the
+    # first probe: a restore of a metadata-only DB is seconds, not minutes,
+    # but a cold bucket read on a fresh machine is not instant.
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # 1 GB rather than the 256 MB default: rusqlite's page cache, the axum
+  # runtime, and litestream's WAL buffers share this machine, and an OOM kill
+  # mid-write is the one failure mode SQLite handles least gracefully.
+  memory = "1gb"
