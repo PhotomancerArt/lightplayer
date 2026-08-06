@@ -1,0 +1,41 @@
+# Litestream: continuous replication of the metadata database to Tigris.
+#
+# Copied to /etc/litestream.yml in the image; used by infra/entrypoint.sh for
+# both the boot-time restore and the replicate-with-exec supervision.
+#
+# What this protects: users, membership, visibility, refs/heads, the event
+# index. Blobs and trees are already in the same bucket by content address
+# (LP_CLOUD_BLOBS=s3) and need no replication — they are immutable and
+# multi-instance-safe by construction. This file exists because the one
+# mutable thing in the system lives on a single machine's disk.
+
+dbs:
+  # ⚠️ The server names this file itself: LP_CLOUD_DATA_DIR + "cloud.sqlite"
+  # (lp-cloud-server/src/app_state.rs). If that name ever changes, change it
+  # here and in infra/entrypoint.sh in the same commit — a mismatch means
+  # litestream faithfully replicates a file nobody writes and reports success
+  # forever.
+  - path: /data/cloud.sqlite
+
+    replicas:
+      - type: s3
+        bucket: lightplayer-cloud
+
+        # Prefix inside the bucket. Blobs live at their content addresses at
+        # the bucket root, so the WAL generations get their own namespace and
+        # a `litestream snapshots` never has to reason about blob keys.
+        path: litestream
+
+        # Tigris is S3-compatible; `auto` is its region sentinel.
+        endpoint: https://fly.storage.tigris.dev
+        region: auto
+
+        # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in
+        # the process environment — the same secrets `fly storage create` set
+        # for the blob store, so there is one set of Tigris keys and one place
+        # to rotate them. Deliberately not written here: a config file in the
+        # image is a config file in a registry.
+
+        # sync-interval is left at its default (1s). Retention likewise
+        # (24h snapshots, 72h WAL). The whole database is small; there is no
+        # tuning to do until there is a measurement to justify it.
