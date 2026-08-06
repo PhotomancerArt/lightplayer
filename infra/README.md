@@ -158,10 +158,12 @@ content-addressed, and already in the same bucket.
 
 ## How to roll back DNS
 
-If the apex has to go back to GitHub Pages, the Pages workflow
-(`deploy-studio-pages.yml`) is still live and still deploying — that is
-deliberate until P12 — so the only thing to undo is the zone. Re-enter these
-nine records at GoDaddy, exactly as they were on 2026-08-05:
+If the apex has to go back to GitHub Pages, note that the Pages deploy is
+**retired** (it went with the cutover): the Pages site is frozen at its last
+deploy and will not refresh itself. Rolling back therefore means accepting
+that snapshot, or restoring the deploy job from git history and running it
+first. Then re-enter these nine records at GoDaddy, exactly as they were on
+2026-08-05:
 
 ```
 A     @    185.199.108.153

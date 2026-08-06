@@ -80,7 +80,25 @@ jobs:
           # Deploy exactly the commit CI validated (empty on manual
           # dispatch, which then checks out the default branch head).
           ref: ${{ github.event.workflow_run.head_sha }}
+          # Full history AND tags: the version below is read from the tag
+          # `main-push.yml` pushed for this very commit.
           fetch-depth: 0
+          fetch-tags: true
+
+      # BEFORE the build, and this ordering is the whole point:
+      # `print-app-version.sh` reads `git status --porcelain`, and the build
+      # writes generated files into the checkout — resolve after it and
+      # production stamps `<sha>-dirty-<time>` instead of the version. That
+      # exact bug is why tagging and deploying were merged into main-push.yml;
+      # this deploy rides that workflow's success, so the tag already exists.
+      # `--require-tag` fails loudly rather than shipping a sha-stamped
+      # production build.
+      - name: Resolve app version
+        run: |
+          set -euo pipefail
+          version="$(scripts/print-app-version.sh --require-tag)"
+          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Deploying app version: ${version}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

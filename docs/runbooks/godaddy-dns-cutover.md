@@ -265,9 +265,11 @@ This is the feature the whole cutover exists for; do not skip it.
 ## 5. Rollback
 
 If the apex is broken and you want GitHub Pages back, this is the whole
-procedure. The Pages workflow (`deploy-studio-pages.yml`) is still live and
-still deploying on every push to `main` — that is deliberate until P12 — so
-Pages is current the moment DNS points back.
+procedure. ⚠️ The Pages deploy is **retired** — the Pages site is frozen at
+its last deploy (2026-08-06) and no longer refreshes on push. Rolling back
+serves that snapshot; to serve something newer, restore the deploy job from
+git history (it lived in `main-push.yml`, before that in
+`deploy-studio-pages.yml`) and run it before flipping DNS.
 
 At <https://dcc.godaddy.com/control/portfolio/lightplayer.app/settings>:
 
