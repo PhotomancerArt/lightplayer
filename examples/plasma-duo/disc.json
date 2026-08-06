@@ -1,0 +1,41 @@
+{
+  "kind": "Fixture",
+  "render_size": {
+    "width": 32,
+    "height": 32
+  },
+  "sampling": "direct",
+  "diagnostic_mode": "off",
+  "color_order": "rgb",
+  "transform": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "brightness": 1.0,
+  "gamma_correction": false,
+  "bindings": {
+    "input": {
+      "source": "bus:visual.out"
+    },
+    "output": {
+      "target": "bus:control.disc"
+    }
+  },
+  "mapping": {
+    "kind": "Map2d",
+    "source": "disc.map2d.json"
+  }
+}

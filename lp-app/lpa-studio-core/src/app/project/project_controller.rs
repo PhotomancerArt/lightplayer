@@ -9,11 +9,11 @@ use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
 };
 use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
-use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
     SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
 };
+use crate::app::project::{format_lp_value, gradient_config_value};
 use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
 use crate::core::notice::UiNotices;
 use crate::{
@@ -572,6 +572,13 @@ impl ProjectController {
                     primary_visual: channel.primary_visual,
                     contended,
                     preview,
+                    // Palettes get the same treatment products do: the value
+                    // box draws the thing, not a description of it.
+                    gradient: channel
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.value.as_ref())
+                        .and_then(gradient_config_value),
                     writers,
                     readers,
                 }
@@ -2189,6 +2196,32 @@ impl ProjectController {
         // legacy path (host tests, storeless platforms): deploy the bundled
         // files directly — no persistence
         let loaded = server.load_demo_project().await?;
+        self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+        self.project_fs_root = loaded.fs_root;
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
+    /// Docs-host deploy (interactive docs D2): push a compiled-in example
+    /// straight to the runtime as deploy files — **never** through the
+    /// library. No catalog transaction, no OPFS seeding, regardless of
+    /// whether a library is attached: docs sims must not plant cards in
+    /// the user's gallery. The storage dir is derived from the example id
+    /// so a docs deploy never collides with the demo's `studio` dir.
+    pub(crate) async fn load_example_direct(
+        &mut self,
+        server: &mut StudioServerClient,
+        example_id: &str,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let files = crate::app::preview_host::example_deploy_files(example_id)
+            .map_err(UiError::MissingSession)?;
+        // `examples/plasma` → `docs-plasma`: a filesystem-safe storage id.
+        let short = example_id.rsplit('/').next().unwrap_or(example_id);
+        let storage_id = format!("docs-{short}");
+        let loaded = server
+            .load_deployed_files(&storage_id, example_id, files)
+            .await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;

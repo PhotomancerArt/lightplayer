@@ -51,6 +51,19 @@ pub enum UiPanelEmit {
         waveform: lpc_model::Waveform,
         phase_offset: f32,
     },
+    /// The gesture value is a whole [`lpc_model::GradientConfig`], written
+    /// as-is.
+    ///
+    /// The palette chooser is the one control that carries NO field along:
+    /// a phasor's period rides inside a record whose other fields must
+    /// survive the edit, but a palette pick replaces the config outright —
+    /// the same rule the engine reads it by (`resolve_gradient_config`
+    /// takes a driven config *whole*, never as a partial overlay, so a
+    /// palette never shows a set nobody authored together).
+    ///
+    /// Carries no payload for exactly that reason, and marks the control as
+    /// non-numeric: no `f32` gesture ladder applies to it.
+    Gradient,
 }
 
 /// A front-panel control projected from a slot that is on a panel —
@@ -136,6 +149,33 @@ impl UiPanelControl {
     /// The live reading as a toggle state.
     pub fn live_bool(&self) -> Option<bool> {
         self.live_value.as_deref()?.parse().ok()
+    }
+
+    /// The palette this control presents, when its value is one — the
+    /// [`crate::UiPanelWidget::PaletteSwatch`] payload.
+    ///
+    /// The parse is the model's own ([`gradient_config_value`]), reached
+    /// through the value kind's `LpValue` mirror, so neither panel renderer
+    /// walks the padded storage itself. `None` for any other value family,
+    /// which is what a swatch/value disagreement falls back on.
+    ///
+    /// [`gradient_config_value`]: crate::app::project::gradient_config_value
+    pub fn gradient_config(&self) -> Option<lpc_model::GradientConfig> {
+        crate::app::project::gradient_config_value(&self.value.kind.to_lp_value())
+    }
+
+    /// The palette a SWATCH control presents — [`Self::gradient_config`]
+    /// gated on the widget family, so a knob over some other struct-shaped
+    /// slot never renders strips and a swatch over a non-palette value
+    /// falls back to the read-only display.
+    ///
+    /// Both panel renderers ask here rather than each writing the guard: a
+    /// control is one derivation with two presentations.
+    pub fn swatch_palette(&self) -> Option<lpc_model::GradientConfig> {
+        if !matches!(self.widget, crate::UiPanelWidget::PaletteSwatch) {
+            return None;
+        }
+        self.gradient_config()
     }
 
     /// The control's popover sections: the backing slot row's aspects plus

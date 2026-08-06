@@ -28,4 +28,14 @@ pub enum UiPanelWidget {
     },
     /// Boolean toggle.
     Toggle,
+    /// A palette: the closed face of the chooser (M4 P3).
+    ///
+    /// Unlike every widget above it, this one has no range and no scalar
+    /// gesture — the value it presents is a whole
+    /// [`lpc_model::GradientConfig`], and a gesture replaces the config
+    /// outright rather than moving a number inside it
+    /// ([`crate::UiPanelEmit::Gradient`]). The FACE it renders is
+    /// mode-adaptive: a held palette is one full-width strip, a cycle is its
+    /// member set plus the step rate.
+    PaletteSwatch,
 }

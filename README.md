@@ -2,6 +2,8 @@
   <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup__lg.png" alt="LightPlayer" width="720">
 </p>
 
+<p align="center"><em>Friendly shaders, everywhere.</em></p>
+
 LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
 preview them in a built-in simulator, and run them on real hardware — where they are JIT-compiled
 to native code on the device itself.
@@ -16,10 +18,11 @@ browser, and the built-in simulator means you don't need any hardware to start p
 **What makes it different:**
 
 - **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native machine code) runs
-  on the microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
-- **Studio in your browser.** Live previews, node-based project editing, and AI-assisted shader
-  authoring (bring your own API key). The built-in simulator runs the real firmware as a WASM
-  worker — no hardware needed to try everything.
+  on the microcontroller itself, JIT-compiling shaders to RISC-V or Xtensa machine code — in
+  Q16.16 fixed point on chips without a floating-point unit, native float where there is one.
+- **Studio in your browser.** Live previews, node-based project editing, a 2D fixture-mapping
+  editor, and AI-assisted shader authoring (bring your own API key). The built-in simulator runs
+  the real firmware as a WASM worker — no hardware needed to try everything.
 - **Plug it in.** USB-first: connect a device and go. No WiFi provisioning dance.
 - **Self-contained, open projects.** A project is a folder of JSON and GLSL files. Open format,
   AGPL-licensed platform.
@@ -60,13 +63,16 @@ For a headless engine demo without the Studio:
 
 ```bash
 just demo
-just demo -- <example-name>   # run other examples
+just demo <example-name>   # run other examples (see examples/)
 ```
 
 # Run on hardware
 
-LightPlayer runs on ESP32-family boards — ESP32-C6, ESP32-S3, and classic ESP32 — with the
-supported-board list at **[lightplayer.app/#/boards](https://lightplayer.app/#/boards)**.
+LightPlayer runs on ESP32-family boards — ESP32-C6 (RISC-V), ESP32-S3, and classic ESP32 (both
+Xtensa) — with the supported-board list at
+**[lightplayer.app/#/boards](https://lightplayer.app/#/boards)**. Shaders are JIT-compiled to the
+chip's own instruction set, on the chip. It goes surprisingly fast on modest silicon: a
+decade-old classic ESP32 drives 1,500 LEDs across five outputs at 30 fps, using both cores.
 
 The quickest demo path uses an ESP32-C6. To flash firmware, push the `examples/basic` project over
 USB serial, and run it on real hardware:
@@ -79,11 +85,12 @@ You need an ESP32-C6 board connected by USB, the RISC-V target installed (the re
 `install-rv32-target`), and [`espflash`](https://github.com/esp-rs/espflash) on your `PATH` for
 flashing.
 
-**Wiring (GPIO is hardcoded today):** connect a WS2812-class addressable strip (or other device
-driven the same way) to **GPIO 18** as the data line—**not** the `pin` field in
-`examples/basic/src/strip.output/node.json`, which the firmware does not use yet. The firmware
-initializes a buffer for **256** LEDs; the basic demo mapping uses **241** pixels, which fits in
-that limit.
+**Wiring:** connect a WS2812-class addressable strip's data line to **GPIO 18**. Where outputs go
+is configured, not hardcoded: each output channel names a board endpoint — `ws281x:local:D10` in
+[`examples/basic/output.json`](examples/basic/output.json) — which the board's manifest maps to a
+physical pin (the default ESP32-C6 profile maps `D10` to GPIO 18). Outputs can be rewired from the
+Studio, boards can drive multiple output channels concurrently (up to 1,024 LEDs per channel), and
+a `/hardware.json` pushed to the device overrides the built-in board profile.
 
 For an empty flash and firmware only (no project push), use `just demo-esp32c6-standalone`.
 
@@ -122,15 +129,19 @@ firmware tests.
   filesystem, browser firmware host
 - **`lp-core/`** Platform core (`lpc-*` crates): rendering engine, data model, wire protocol,
   registry, board manifests
-- **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
-  Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
+- **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RISC-V
+  and Xtensa JIT, Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
   [`lp-shader/README.md`](lp-shader/README.md)
-- **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32c6`), emulator firmware (`fw-emu`), browser worker
-  (`fw-browser`), integration tests (`fw-tests`)
+- **`lp-fw/`** Firmware: ESP32 targets (`fw-esp32c6`, `fw-esp32s3`, and `fw-esp32v3` for the
+  classic ESP32) over a shared chip-generic layer (`fw-esp32-common`), the multi-channel WS281x
+  driver (`lp-ws281x`), host and browser runtimes (`fw-host`, `fw-browser`), emulator firmware
+  (`fw-emu`), and integration tests (`fw-tests`) — see [`lp-fw/README.md`](lp-fw/README.md)
 - **`lp-gfx/`** GPU rendering layer (wgpu) used for Studio previews
 - **`lp-emu/`** Architecture-neutral emulator substrate (`lp-emu-core`) and host↔guest ABI
   (`lp-emu-abi`) shared by the architecture emulators
 - **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
+- **`lp-xt/`** Xtensa (ESP32-S3 / classic ESP32) instruction model, emulator, and ELF tooling —
+  the Xtensa counterpart to `lp-riscv/`
 - **`lp-cli/`** Developer CLI (projects, dev server, board manifests, GPIO calibration); runs
   from a source checkout
 - **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
