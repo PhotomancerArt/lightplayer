@@ -1271,6 +1271,7 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.ambient_device_sync().cloned())
+                .with_sessions(self.chrome_sessions())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -1314,8 +1315,25 @@ impl StudioController {
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
+            .with_sessions(self.chrome_sessions())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
+    }
+
+    /// The chrome strip's session projection (D15/D16), built in BOTH
+    /// view arms — the strip renders wherever the chrome does. Same
+    /// registry + pool evidence the gallery roster consumes.
+    fn chrome_sessions(&self) -> Vec<crate::UiChromeSession> {
+        let registry_cards = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.devices.as_slice())
+            .unwrap_or(&[]);
+        home_view_builder::chrome_sessions(
+            registry_cards,
+            &self.home_pool_evidence(),
+            self.lens_runtime().as_ref(),
+        )
     }
 
     /// The board the LENS runtime is known to be — for a device,

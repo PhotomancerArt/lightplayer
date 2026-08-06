@@ -121,7 +121,9 @@ pub fn VersionBadge() -> Element {
             open_class: chip_open_class(&chip).to_string(),
             trigger: chip_trigger(&chip),
             label: "Build info".to_string(),
-            title: "Build info".to_string(),
+            // Icon-only trigger: the build identity rides the hover title
+            // and the popover, not the bar.
+            title: format!("Build info — {}", chip_text(&chip)),
             popup_class: POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
@@ -197,32 +199,17 @@ fn chip_text(chip: &BuildChip) -> String {
     }
 }
 
-/// The chip trigger content: state icon + build identity. Long branch
-/// names ellipsize from the LEFT (RTL container, LTR bidi-override text)
-/// so the distinctive tail of `claude/some-long-branch-b6680f` survives.
-///
-/// On narrow viewports the text drops and the chip becomes its icon — a
-/// branch name is the first thing worth spending phone width on. States
-/// with no icon (loading, the no-git fallback) keep their short text
-/// instead, so the chip is never empty.
+/// The chip trigger content: icon only. The bar has no room to spend on
+/// a branch name once open devices live in it (2026-08-05 call) — the
+/// build identity moved to the hover title and the popover, and the tone
+/// family still says state at a glance (dirty = warning, release =
+/// heading color).
 fn chip_trigger(chip: &BuildChip) -> Element {
-    let text = chip_text(chip);
-    let has_icon = matches!(chip, BuildChip::Release(_) | BuildChip::Branch { .. });
-    let text_class = if has_icon {
-        "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:max-[640px]:hidden"
-    } else {
-        "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap"
-    };
     rsx! {
         match chip {
-            BuildChip::Release(_) => rsx! { Tag { size: 12 } },
-            BuildChip::Branch { .. } => rsx! { GitBranch { size: 12 } },
-            BuildChip::Loading | BuildChip::DevFallback => rsx! {},
-        }
-        span {
-            class: "{text_class}",
-            style: "direction: rtl; text-align: left;",
-            span { style: "unicode-bidi: bidi-override; direction: ltr;", "{text}" }
+            BuildChip::Release(_) => rsx! { Tag { size: 13 } },
+            BuildChip::Branch { .. } | BuildChip::DevFallback => rsx! { GitBranch { size: 13 } },
+            BuildChip::Loading => rsx! { span { class: "tw:text-[0.65rem] tw:font-bold", "…" } },
         }
     }
 }
@@ -407,16 +394,14 @@ fn VersionDetailRow(label: &'static str, value: String, href: Option<String>) ->
     }
 }
 
-// Chip classes: one shared geometry, three tone families. Kept as full
-// literals (no runtime concat) so the Tailwind scanner sees every class.
+// Chip classes: one shared geometry (a round icon button), three tone
+// families. Kept as full literals (no runtime concat) so the Tailwind
+// scanner sees every class.
 macro_rules! chip_class_str {
     ($tone:literal) => {
         concat!(
-            "tw:inline-flex tw:h-7 tw:max-w-[360px] tw:min-w-0 tw:cursor-pointer ",
-            "tw:max-[1100px]:max-w-[220px] ",
-            "tw:items-center tw:gap-1.5 tw:rounded-full tw:border tw:px-2.5 ",
-            "tw:max-[640px]:gap-0 tw:max-[640px]:px-2 ",
-            "tw:font-mono tw:text-[0.65rem] tw:font-bold ",
+            "tw:inline-flex tw:h-7 tw:w-7 tw:flex-none tw:cursor-pointer ",
+            "tw:items-center tw:justify-center tw:rounded-full tw:border tw:p-0 ",
             $tone
         )
     };
