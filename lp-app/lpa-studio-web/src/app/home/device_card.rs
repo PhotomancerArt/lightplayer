@@ -723,6 +723,7 @@ pub(crate) fn DeviceCard(
             bundled_fw: bundled_fw.as_ref(),
             detected_chip: card.detected_chip.as_deref(),
             port_label: card.port_label.as_deref(),
+            board_id: card.board_id.as_deref(),
             now_secs: now,
         })
         .sections
@@ -750,7 +751,7 @@ pub(crate) fn DeviceCard(
         // is no longer a synonym for "after the front door".
         let after_front_door = tabs
             .iter()
-            .position(|tab| tab.tab == DeviceCardTab::Settings)
+            .position(|tab| tab.tab == DeviceCardTab::Details)
             .map_or(0, |index| index + 1);
         tabs.insert(
             after_front_door,
@@ -790,7 +791,7 @@ pub(crate) fn DeviceCard(
     let active_tab = tabs
         .iter()
         .find(|tab| tab.tab == card.ui.tab)
-        .map_or(DeviceCardTab::Settings, |tab| tab.tab);
+        .map_or(DeviceCardTab::Details, |tab| tab.tab);
     // The open sheet projected to the render enum (confirm arm rebuilt
     // from its verb). `None` = no sheet.
     let active_sheet = card.ui.sheet.as_ref().map(|s| sheet_to_web(s, &card));
@@ -1039,11 +1040,20 @@ pub(crate) fn DeviceCard(
                                     // dispatches (G1: the picture carries its
                                     // own way in).
                                     open_action: grow_action.clone(),
+                                    // The gone device's way back, IN the box
+                                    // (G1b ruling 8).
+                                    reconnect_action: (!sim
+                                        && matches!(
+                                            card.state,
+                                            RosterCardState::Offline { .. }
+                                                | RosterCardState::NotResponding
+                                        ))
+                                    .then(|| reconnect_device_action(card.uid.clone())),
                                     on_action,
                                 }
                             },
-                            DeviceCardTab::Settings => rsx! {
-                                {settings_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
+                            DeviceCardTab::Details => rsx! {
+                                {details_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
                             },
                             DeviceCardTab::Console => rsx! {
                                 {console_tab_body(&card.console_tail)}
@@ -1282,23 +1292,23 @@ fn tab_button<A>(
     }
 }
 
-/// The Settings front door: the Health section with the status line up front, and
+/// The Details front door: the Health section with the status line up front, and
 /// the state-table affordance — today's card body, re-homed. The project's
 /// identity rides the ▶ tab's meta row (honest-device preview P3) rather
 /// than a row here.
-fn settings_tab_body(
+fn details_tab_body(
     card: &UiDeviceCard,
     tabs: &[CardTabView<CardRowAction>],
     on_action: EventHandler<UiAction>,
     card_key: &str,
     now_secs: Option<f64>,
 ) -> Element {
-    // The folded front door (G1: Status retired into Settings): health
+    // The folded front door (G1: Status retired; G1b: renamed Details): health
     // sections keep their narrative treatment and the forms; Technical
     // sections follow as plain fact rows.
     let sections = tabs
         .iter()
-        .find(|tab| tab.tab == DeviceCardTab::Settings)
+        .find(|tab| tab.tab == DeviceCardTab::Details)
         .map(|tab| tab.sections.as_slice())
         .unwrap_or_default();
     let (technical, health): (Vec<_>, Vec<_>) = sections
@@ -1914,13 +1924,12 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
-        // ▶ goes to the tab that actually plays something. The gear keeps
-        // Settings even now that health folded into it (G1: the Status tab
-        // retired) — the gear is the "about this device" glyph users
-        // already track.
+        // ▶ goes to the tab that actually plays something. Details wears
+        // the info glyph (G1b rename — the front door is what we KNOW
+        // about the device, not its settings).
         DeviceCardTab::Play => StudioIconName::Play,
         DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
-        DeviceCardTab::Settings => StudioIconName::Settings,
+        DeviceCardTab::Details => StudioIconName::Info,
         DeviceCardTab::Performance => StudioIconName::Performance,
         DeviceCardTab::Console => StudioIconName::Console,
         DeviceCardTab::Danger => StudioIconName::Danger,

@@ -8,16 +8,17 @@
 //! | Tab | sections | present when |
 //! |---|---|---|
 //! | Play | — (the device's own frames) | the card has a project |
-//! | Settings | Health + Technical | always |
+//! | Details | Health + Technical | always |
 //! | Project | Project + Backup | either section exists |
 //! | Performance | Performance | data flows (data-adaptive: hidden today) |
 //! | Console | — (D42; content is the per-session console) | always |
 //! | Danger | Danger zone | danger affordances exist |
 //!
 //! There is no Status tab (G1 ruling, honest-device-preview plan,
-//! 2026-08-05): health evidence rides Settings, which inherited Status's
-//! front-door role — the stable default a fresh card with no picture
-//! opens on. This amends the M7′ "Status is stable core" grammar.
+//! 2026-08-05): health evidence rides Details (né Settings — renamed at
+//! G1b), which inherited Status's front-door role — the stable default a
+//! fresh card with no picture opens on. This amends the M7′ "Status is
+//! stable core" grammar.
 //!
 //! Grouping keys on the FIXED schema titles the roster builders own
 //! (`device_rich_object` / `sim_rich_object`) — the titles are identity,
@@ -48,11 +49,12 @@ pub enum DeviceCardTab {
     /// with no live evidence at all opens on, and that is the front door.
     Play,
     /// The card's front door — the stable default a fresh card with no
-    /// picture opens on. Health evidence lives here alongside Technical
-    /// (the Status tab it absorbed retired at the honest-device-preview
-    /// G1 gate).
+    /// picture opens on: everything known and remembered about the
+    /// device (health story, board, uid, transport, port, firmware).
+    /// Renamed from Settings at G1b ("it really isn't settings"); it
+    /// absorbed the Status tab one gate earlier.
     #[default]
-    Settings,
+    Details,
     Project,
     Performance,
     Console,
@@ -64,7 +66,7 @@ impl DeviceCardTab {
     pub fn label(self) -> &'static str {
         match self {
             Self::Play => "Play",
-            Self::Settings => "Settings",
+            Self::Details => "Details",
             Self::Project => "Project",
             Self::Performance => "Performance",
             Self::Console => "Console",
@@ -84,7 +86,7 @@ pub struct CardTabView<A> {
 
 /// Group a rich-object view's sections onto the card's tabs. Tab presence
 /// is data-adaptive (a tab with nothing honest to show is absent), except
-/// Settings and Console — the stable core every card carries.
+/// Details and Console — the stable core every card carries.
 ///
 /// `has_play` decides the ▶ tab, which no section feeds: its content is the
 /// device's own published frames, not rich-object evidence. It is an
@@ -105,7 +107,7 @@ pub fn device_card_tabs<A>(view: RichObjectView<A>, has_play: bool) -> Vec<CardT
             "Performance" => performance.push(section),
             "Danger zone" => danger.push(section),
             // Health — and, defensively, any future section the mapping
-            // hasn't learned: Settings is the card's front door.
+            // hasn't learned: Details is the card's front door.
             _ => settings.push(section),
         }
     }
@@ -118,7 +120,7 @@ pub fn device_card_tabs<A>(view: RichObjectView<A>, has_play: bool) -> Vec<CardT
     if has_play {
         tabs.push(tab_view(DeviceCardTab::Play, Vec::new()));
     }
-    tabs.push(tab_view(DeviceCardTab::Settings, settings));
+    tabs.push(tab_view(DeviceCardTab::Details, settings));
     if !project.is_empty() {
         tabs.push(tab_view(DeviceCardTab::Project, project));
     }
@@ -195,7 +197,7 @@ mod tests {
         assert_eq!(
             tab_ids(&tabs),
             vec![
-                DeviceCardTab::Settings,
+                DeviceCardTab::Details,
                 DeviceCardTab::Project,
                 DeviceCardTab::Console,
                 DeviceCardTab::Danger,
@@ -239,7 +241,7 @@ mod tests {
             tab_ids(&with_play),
             vec![
                 DeviceCardTab::Play,
-                DeviceCardTab::Settings,
+                DeviceCardTab::Details,
                 DeviceCardTab::Project,
                 DeviceCardTab::Console,
                 DeviceCardTab::Danger,
@@ -284,12 +286,12 @@ mod tests {
             device_rich_object(&input(&RosterCardState::RunningUpToDate)),
             false,
         );
-        assert_eq!(tab(&quiet, DeviceCardTab::Settings).badge, None);
+        assert_eq!(tab(&quiet, DeviceCardTab::Details).badge, None);
         let mut input = input(&RosterCardState::RunningUpToDate);
         input.bundled_fw = Some(&bundled);
         let tabs = device_card_tabs(device_rich_object(&input), false);
         assert_eq!(
-            tab(&tabs, DeviceCardTab::Settings).badge,
+            tab(&tabs, DeviceCardTab::Details).badge,
             Some(UiStatusKind::Attention)
         );
     }
@@ -305,26 +307,36 @@ mod tests {
     }
 
     #[test]
-    fn offline_device_keeps_reconnect_on_settings_and_forget_in_danger() {
+    fn offline_device_moves_reconnect_to_the_play_box_and_keeps_forget_in_danger() {
         let state = RosterCardState::Offline {
             last_seen_at: Some(NOW - 2.0 * 86_400.0),
         };
         let mut input = input(&state);
         input.fw = None;
-        let tabs = device_card_tabs(device_rich_object(&input), false);
+        let tabs = device_card_tabs(device_rich_object(&input), true);
         assert_eq!(
             tab_ids(&tabs),
             vec![
-                DeviceCardTab::Settings,
+                DeviceCardTab::Play,
+                DeviceCardTab::Details,
                 DeviceCardTab::Project,
                 DeviceCardTab::Console,
                 DeviceCardTab::Danger,
             ]
         );
-        // the state-table Reconnect stays the front door's affordance
-        // (the old whole-card click-to-reconnect retired with M7′)
+        // G1b ruling 8: a card WITH a ▶ tab carries Reconnect inside the
+        // picture box (renderer-side), so the front door stays button-free.
         assert_eq!(
-            tab(&tabs, DeviceCardTab::Settings).sections[0].affordances,
+            tab(&tabs, DeviceCardTab::Details).sections[0].affordances,
+            Vec::new()
+        );
+        // …but a card with no project — no ▶ — keeps the front-door
+        // Reconnect: there is no other surface.
+        let mut projectless = input.clone();
+        projectless.project_name = None;
+        let bare = device_card_tabs(device_rich_object(&projectless), false);
+        assert_eq!(
+            tab(&bare, DeviceCardTab::Details).sections[0].affordances,
             vec![DeviceDetailAffordance::Roster(RosterAffordance::Reconnect)]
         );
         // registered + offline → Troubleshoot (always offered, 2026-07-31)
@@ -357,7 +369,7 @@ mod tests {
             tab_ids(&tabs),
             vec![
                 DeviceCardTab::Play,
-                DeviceCardTab::Settings,
+                DeviceCardTab::Details,
                 DeviceCardTab::Project,
                 DeviceCardTab::Console,
                 DeviceCardTab::Danger,
@@ -385,7 +397,7 @@ mod tests {
         assert_eq!(
             tab_ids(&tabs),
             vec![
-                DeviceCardTab::Settings,
+                DeviceCardTab::Details,
                 DeviceCardTab::Console,
                 DeviceCardTab::Danger,
             ]
@@ -411,6 +423,7 @@ mod tests {
             bundled_fw: None,
             detected_chip: None,
             port_label: None,
+            board_id: None,
             now_secs: NOW,
         }
     }

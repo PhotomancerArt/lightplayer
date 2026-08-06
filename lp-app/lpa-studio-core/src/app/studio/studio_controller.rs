@@ -909,7 +909,7 @@ impl StudioController {
         if has_picture {
             crate::DeviceCardTab::Play
         } else {
-            crate::DeviceCardTab::Settings
+            crate::DeviceCardTab::Details
         }
     }
 

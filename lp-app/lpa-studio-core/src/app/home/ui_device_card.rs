@@ -53,10 +53,13 @@ pub struct UiDeviceCard {
     /// (gallery-rework vision D4 — inherited from the project it runs, and
     /// rendered as the card's "as \<board\>" line).
     ///
-    /// Device cards leave this `None` on purpose: a device's board is a
-    /// registry fact (`RegisteredDevice.board_id`) read straight from
-    /// `HomeInputs.registered`, and duplicating it onto the presentation
-    /// would give the two surfaces a way to disagree.
+    /// LIVE device cards leave this `None` on purpose: a live board's
+    /// identity claim is `hardware.board_id` from its own hello, and
+    /// duplicating the registry fact beside it would give two surfaces a
+    /// way to disagree. REMEMBERED (registry) cards DO carry the
+    /// registry's `board_id` here (G1b rulings 9/10) — offline there is
+    /// no hello, and the Details tab + the gone device's ▶ box both name
+    /// the board from it.
     pub board_id: Option<String>,
     /// The port as the app can name it (endpoint label + grant short id,
     /// e.g. "ESP32 Serial (0x303a:0x1001) · port-2") — the Technical tab's

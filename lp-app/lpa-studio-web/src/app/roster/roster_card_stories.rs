@@ -1,6 +1,6 @@
 //! The roster card vocabulary sheet: one story per direction.md state row,
 //! plus the sim-card variant (D36), the standing firmware chip, and the
-//! control-panel tabs open (Project / Settings / Danger — the sections
+//! control-panel tabs open (Project / Details / Danger — the sections
 //! the retired detail popover carried, now card-resident; M7′ D39–D41).
 //!
 //! These stories are the visual-gate surface for the card grammar. Each
@@ -46,7 +46,7 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
 const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
-    description = "Green filled edge: running the local project's tip. The card opens on its ▶ tab in the live app (the default-when-connected rule); this sheet pins the Settings tab (the folded front door — the Status tab retired at the honest-preview G1) so the vocabulary stays comparable across states. The hero strip that used to sit under the title bar is GONE — honest-device preview P3."
+    description = "Green filled edge: running the local project's tip. The card opens on its ▶ tab in the live app (the default-when-connected rule); this sheet pins the Details tab (the folded front door — Status retired at G1, Settings renamed at G1b) so the vocabulary stays comparable across states. The hero strip that used to sit under the title bar is GONE — honest-device preview P3."
 )]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
@@ -204,7 +204,7 @@ fn holds_old_format_project() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: blank flash — the Settings front door IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
+    description = "Amber filled edge: blank flash — the Details front door IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
 )]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
@@ -291,7 +291,7 @@ fn troubleshoot_sheet_open() -> Element {
                 card: UiDeviceCard {
                     port_label: None,
                     session_key: None,
-                    ui: opened(DeviceCardTab::Settings, Some(CardSheet::Troubleshoot)),
+                    ui: opened(DeviceCardTab::Details, Some(CardSheet::Troubleshoot)),
                     ..device_card(RosterCardState::NotResponding, false)
                 },
                 now_secs: Some(STORY_NOW),
@@ -319,7 +319,7 @@ fn bootloader_entry_instructing() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Settings,
+                        DeviceCardTab::Details,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(Some(
                             "fw-esp32c6",
                         )))),
@@ -344,7 +344,7 @@ fn bootloader_entry_generic() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Settings,
+                        DeviceCardTab::Details,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(None))),
                     ),
                     ..device_card(RosterCardState::NotResponding, false)
@@ -367,7 +367,7 @@ fn bootloader_entry_waiting() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Settings,
+                        DeviceCardTab::Details,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6")).begin_waiting(),
                         )),
@@ -392,7 +392,7 @@ fn bootloader_entry_confirmed() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Settings,
+                        DeviceCardTab::Details,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6"))
                                 .begin_waiting()
@@ -419,7 +419,7 @@ fn bootloader_entry_not_yet() -> Element {
                     port_label: None,
                     session_key: None,
                     ui: opened(
-                        DeviceCardTab::Settings,
+                        DeviceCardTab::Details,
                         Some(CardSheet::BootloaderEntry(
                             BootloaderEntryFlow::start(Some("fw-esp32c6"))
                                 .begin_waiting()
@@ -441,14 +441,14 @@ fn in_use_elsewhere() -> Element {
 }
 
 #[story(
-    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Settings front door as the state-table affordance (the old click-to-reconnect is retired). An offline card keeps its ▶ tab — the last frame it saw, dimmed and veiled — but opens on Settings, because there is nothing live to open onto."
+    description = "Gray remembered edge (double line, whole card faded): remembered only. Reconnect lives IN the ▶ box (G1b ruling 8) — the picture is where the absence shows, so the way back sits on it; the Details front door carries facts, not buttons. An offline card keeps its ▶ tab — the last frame it saw, dimmed and veiled — but opens on Details, because there is nothing live to open onto."
 )]
 fn offline() -> Element {
     sheet(vec![card(offline_state(), true)])
 }
 
 #[story(
-    description = "The ▶ play tab (honest-device preview P3, converged spike section 1), left to right: LIVE — the board's own published frame with the calm green \"live · N fps\" pill; STALE — frames stopped for longer than the 5 s threshold, so the picture holds and only the label changes to amber; OFFLINE — the last frame this session saw, desaturated and veiled (last known, NOT current); WAITING — a remembered card that never fed a frame, which shows an empty frame and a sentence rather than a plausible-looking pattern. Nothing here is re-simulated in the browser: that is the whole point of the tab, and the reason the hero strip it replaces was ruled dishonest at G2."
+    description = "The ▶ play tab (honest-device preview P3, converged spike section 1), left to right: LIVE — the board's own published frame with the calm green \"live · N fps\" pill; STALE — frames stopped for longer than the 5 s threshold, so the picture holds and only the label changes to amber; OFFLINE — the last frame this session saw, desaturated and veiled (last known, NOT current); WAITING — a remembered card that never fed a frame, which shows the REMEMBERED BOARD (registry fact) with Reconnect under it (G1b rulings 8+10) rather than a plausible-looking pattern; the veiled OFFLINE frame carries Reconnect too. Nothing here is re-simulated in the browser: that is the whole point of the tab, and the reason the hero strip it replaces was ruled dishonest at G2."
 )]
 fn play_tab_states() -> Element {
     sheet(vec![
@@ -540,7 +540,7 @@ fn project_tab_running_behind() -> Element {
 }
 
 #[story(
-    description = "The Settings tab open on a live Running device: the Technical facts (uid, transport, firmware provenance) with the advisory firmware-update chip — the chip badges the Settings tab (which also carries the health story now that Status folded into it), never the edge tint."
+    description = "The Details tab open on a live Running device: the Technical facts (uid, transport, firmware provenance) with the advisory firmware-update chip — the chip badges the Details tab (health story + everything remembered, G1b rename of Settings), never the edge tint."
 )]
 fn settings_tab_running() -> Element {
     sheet(vec![rsx! {
@@ -549,7 +549,7 @@ fn settings_tab_running() -> Element {
                 card: UiDeviceCard {
                     port_label: None,
                     session_key: None,
-                    ui: opened(DeviceCardTab::Settings, None),
+                    ui: opened(DeviceCardTab::Details, None),
                     ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
                 },
                 now_secs: Some(STORY_NOW),
@@ -561,7 +561,7 @@ fn settings_tab_running() -> Element {
 }
 
 #[story(
-    description = "G1 question 3 — the Settings tab's capability lines are GAPS-ONLY. Left: an all-capable device, whose Technical section says nothing extra (no noise where there is no news). Right: the same device on a build with no fluid/radio runtime and no radio wired — three added lines naming exactly what is missing."
+    description = "G1 question 3 — the Details tab's capability lines are GAPS-ONLY. Left: an all-capable device, whose Technical section says nothing extra (no noise where there is no news). Right: the same device on a build with no fluid/radio runtime and no radio wired — three added lines naming exactly what is missing."
 )]
 fn settings_tab_capability_gaps() -> Element {
     let gapped: Vec<LpFeature> = all_capable_features()
@@ -580,7 +580,7 @@ fn settings_tab_capability_gaps() -> Element {
                     card: UiDeviceCard {
                         port_label: None,
                         session_key: None,
-                        ui: opened(DeviceCardTab::Settings, None),
+                        ui: opened(DeviceCardTab::Details, None),
                         ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
                     },
                     now_secs: Some(STORY_NOW),
@@ -594,7 +594,7 @@ fn settings_tab_capability_gaps() -> Element {
                     card: UiDeviceCard {
                         port_label: None,
                         session_key: None,
-                        ui: opened(DeviceCardTab::Settings, None),
+                        ui: opened(DeviceCardTab::Details, None),
                         ..device_card_with_capabilities(
                             RosterCardState::RunningUpToDate,
                             true,
@@ -675,7 +675,7 @@ fn name_sheet_open() -> Element {
                 card: UiDeviceCard {
                     port_label: None,
                     session_key: None,
-                    ui: opened(DeviceCardTab::Settings, Some(CardSheet::Name)),
+                    ui: opened(DeviceCardTab::Details, Some(CardSheet::Name)),
                     ..device_card(RosterCardState::NeedsAName, false)
                 },
                 now_secs: Some(STORY_NOW),
@@ -839,7 +839,7 @@ fn pane_grown_device() -> Element {
 }
 
 #[story(
-    description = "D43: the live sim card grown into the editor pane — sim glyph, the honestly-applicable tabs (no Settings/Performance), the permanent console region at the bottom."
+    description = "D43: the live sim card grown into the editor pane — sim glyph, the honestly-applicable tabs (no Details-only Technical facts, no Performance). The console is the Console tab here too (G1b ruling 7 retired the permanent region)."
 )]
 fn pane_grown_sim() -> Element {
     sheet(vec![rsx! {
@@ -862,7 +862,7 @@ fn pane_grown_sim() -> Element {
 }
 
 #[story(
-    description = "The standing amber chip: firmware drift is advisory on any Running row — it badges the Settings tab, never the edge tint (project drift owns the edge)."
+    description = "The standing amber chip: firmware drift is advisory on any Running row — it badges the Details tab, never the edge tint (project drift owns the edge)."
 )]
 fn firmware_update_chip() -> Element {
     // the chip rides only an honest comparison: clean builds, differing
@@ -925,6 +925,10 @@ fn play_card(state: RosterCardState, frame: Option<(f64, Option<f32>)>) -> Eleme
         Some((age, fps)) => (Some(story_frame()), Some(age), fps),
         None => (None, None, None),
     };
+    // Remembered cards carry the registry board fact (G1b ruling 10) —
+    // it is what the gone device's empty box names.
+    let board_id =
+        matches!(state, RosterCardState::Offline { .. }).then(|| "seeed/xiao-esp32-c6".to_string());
     rsx! {
         div { class: "tw:w-64",
             DeviceCard {
@@ -933,6 +937,7 @@ fn play_card(state: RosterCardState, frame: Option<(f64, Option<f32>)>) -> Eleme
                     frame_preview,
                     frame_age_secs,
                     frame_fps,
+                    board_id,
                     ..device_card(state, true)
                 },
                 now_secs: Some(STORY_NOW),

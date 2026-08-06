@@ -42,4 +42,15 @@ pub use roster_affordance::RosterAffordance;
 pub use roster_card_state::{ConnectPhase, DegradedReason, DeviceFormatStanding, RosterCardState};
 pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
 pub use roster_state_spec::{RosterStateSpec, RosterTreatment};
+
+/// A board id's human name for card lines: the catalog's `display_name`
+/// when the id is a known board, else the raw id verbatim — advisory
+/// metadata may name a board this build's catalog doesn't carry (a future
+/// board, a typo'd id), and the line should still say something rather
+/// than disappear. Same rule as the project card's "for \<board\>" badge.
+pub fn board_display_name(board_id: &str) -> String {
+    lpa_boards::board_by_id(board_id)
+        .map(|board| board.display_name.clone())
+        .unwrap_or_else(|| board_id.to_string())
+}
 pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};
