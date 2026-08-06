@@ -16,6 +16,8 @@
 pub mod docs_checks;
 pub mod docs_page;
 pub mod embeds;
+#[cfg(feature = "stories")]
+pub(crate) mod embeds_stories;
 
 pub use docs_checks::docs_links;
 pub use docs_page::DocsPage;
@@ -45,11 +47,9 @@ pub struct DocPage {
     pub markdown: &'static str,
     /// Sims this article's embeds may reference, empty for static pages.
     /// Every `sim=` argument in the article must name one of these — the
-    /// generated checks in [`docs_checks`] enforce it.
-    #[allow(
-        dead_code,
-        reason = "read by the generated docs checks; the sim boot lands in a later phase"
-    )]
+    /// generated checks in [`docs_checks`] enforce it, and
+    /// `embeds::DocsSimProvider` boots exactly this list when the page
+    /// mounts.
     pub sims: &'static [DocsSimSpec],
 }
 
@@ -92,17 +92,6 @@ pub fn page_for(slug: Option<&str>) -> &'static DocPage {
 }
 
 /// Code listings an article can show by id (the `code-figure` embed).
-///
-/// Ungated so the table's "the range still points at the right line" tests
-/// run in default builds; its only consumer today is the stories-gated
-/// figure, until the embed wires it into articles.
-#[cfg_attr(
-    not(feature = "stories"),
-    allow(
-        dead_code,
-        reason = "consumed by the stories-gated code figure; the docs embed lands in a later phase"
-    )
-)]
 pub(crate) mod code_figures;
 
 #[cfg(test)]

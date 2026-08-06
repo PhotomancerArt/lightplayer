@@ -7,13 +7,6 @@
 pub mod code_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod code_editor_stories;
-#[cfg_attr(
-    not(feature = "stories"),
-    allow(
-        dead_code,
-        reason = "rendered by its stories today; the docs `code-figure` embed lands in a later phase"
-    )
-)]
 pub mod code_figure;
 #[cfg(feature = "stories")]
 pub(crate) mod code_figure_stories;
@@ -21,11 +14,11 @@ pub mod detail_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod detail_popover_stories;
 pub mod field_row;
+pub mod help_link;
 pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
-pub mod help_link;
 pub mod inline_button;
 #[cfg(feature = "stories")]
 pub(crate) mod inline_button_stories;
@@ -47,12 +40,12 @@ pub use code_editor::{
     CodeEditorLanguage,
 };
 pub use code_figure::{CodeFigure, CodeHighlight, CodeHighlightTone};
-pub use help_link::HelpLink;
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_card_class,
     detail_popover_section_class,
 };
 pub use field_row::FieldRow;
+pub use help_link::HelpLink;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use inline_button::{

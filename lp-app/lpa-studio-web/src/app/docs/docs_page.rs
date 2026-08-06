@@ -7,18 +7,33 @@
 //! possible (the interactive-docs initiative builds on it).
 
 use dioxus::prelude::*;
+use lpa_studio_core::UiAction;
 
 use super::embeds::render_embed;
+use super::embeds::{DocsSimProvider, DocsStudioActions};
 use super::{DocPage, PAGES, page_for};
 use crate::base::MarkdownDocs;
 use crate::base::markdown_text::MdEmbedRef;
 
 /// The docs section body. `page` is the route's article slug; unknown and
 /// missing slugs resolve to the guide's landing article.
+///
+/// `on_studio_action` is the running app's dispatcher, lent to the section
+/// so the `open-in-studio` embed can run the real open flow. It is
+/// deliberately optional: the story book and any other host renders the
+/// section without one, and the button goes inert there.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn DocsPage(#[props(default)] page: Option<String>) -> Element {
+pub fn DocsPage(
+    #[props(default)] page: Option<String>,
+    #[props(default)] on_studio_action: Option<EventHandler<UiAction>>,
+) -> Element {
     let page = page_for(page.as_deref());
+    // Refreshed rather than captured: `web_app` builds a fresh
+    // `EventHandler` every render, and a click must ride the live one.
+    // Writing through the cell is not reactive, so this cannot loop.
+    let studio_actions = use_context_provider(DocsStudioActions::empty);
+    *studio_actions.0.borrow_mut() = on_studio_action;
     // The one place `embed` fences become components. Unknown names are an
     // authoring mistake the generated checks catch before merge; if one ever
     // reaches a reader, it says so out loud rather than vanishing.
@@ -41,7 +56,15 @@ pub fn DocsPage(#[props(default)] page: Option<String>) -> Element {
                 }
             }
             article { class: "tw:min-w-0 tw:flex-1",
-                MarkdownDocs { text: page.markdown.to_string(), embeds: Some(embeds) }
+                // KEYED BY SLUG on purpose: switching articles must remount
+                // the provider, because that is what runs the docs sims'
+                // teardown (`DocsSimProvider`'s `use_drop` → the enqueued
+                // StopSimulator that terminates the Worker). A shared,
+                // un-keyed provider would carry one article's sims into the
+                // next and leak them.
+                DocsSimProvider { key: "{page.slug}", sims: page.sims,
+                    MarkdownDocs { text: page.markdown.to_string(), embeds: Some(embeds) }
+                }
             }
         }
     }
