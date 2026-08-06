@@ -313,10 +313,12 @@ pub struct GradientStop {
 
 /// A palette: stops in one authoring space, read one way.
 ///
-/// The stop list is a plain `Vec` here; [`ToLpValue`] prints it as the
-/// canonical [stops literal](super::stops_string) and [`FromLpValue`]
-/// parses it back, bit-exact.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// The stop list is a plain `Vec` here; every external surface — the
+/// [`ToLpValue`] storage, the serde JSON, and the def codec — carries it as
+/// the canonical [stops literal](super::stops_string), printed and parsed
+/// bit-exact. One representation everywhere (ADR
+/// 2026-08-05-gradient-stops-string-storage).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Gradient {
     /// Space the stops are authored in and interpolated in.
     pub space: Colorspace,
@@ -325,6 +327,51 @@ pub struct Gradient {
     /// Authored stops, [`MIN_GRADIENT_STOPS`]..=[`MAX_GRADIENT_STOPS`] once
     /// [`Gradient::validate`] passes.
     pub stops: Vec<GradientStop>,
+}
+
+// Serde carries the SAME shape as the LpValue storage: tokens plus one
+// stops literal. Hand-written because the literal's printing depends on
+// `space` (hex is confined to the sRGB-shaped spaces), which a per-field
+// derive cannot see.
+
+impl Serialize for Gradient {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct as _;
+        let mut out = serializer.serialize_struct("Gradient", 3)?;
+        out.serialize_field("space", &self.space)?;
+        out.serialize_field("method", &self.method)?;
+        out.serialize_field(
+            "stops",
+            &super::stops_string::print_stops(self.space, &self.stops),
+        )?;
+        out.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Gradient {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Repr {
+            space: Colorspace,
+            method: InterpMethod,
+            stops: String,
+        }
+        let repr = Repr::deserialize(deserializer)?;
+        let stops = super::stops_string::parse_stops(&repr.stops)
+            .map_err(|error| serde::de::Error::custom(alloc::format!("stops: {error}")))?;
+        Ok(Self {
+            space: repr.space,
+            method: repr.method,
+            stops,
+        })
+    }
 }
 
 impl Gradient {
@@ -740,16 +787,26 @@ mod tests {
         );
     }
 
+    /// Serde carries the SAME shape as the storage: tokens + one stops
+    /// literal. This is what catalog files and authored def JSON spell.
     #[test]
-    fn gradient_serde_is_the_friendly_authored_form() {
+    fn gradient_serde_is_the_stops_literal_form() {
         let json = serde_json::to_string(&Gradient::default()).unwrap();
-
-        assert!(json.contains("\"space\":\"srgb\""), "{json}");
-        assert!(json.contains("\"method\":\"linear\""), "{json}");
-        assert!(json.contains("\"at\":0.0"), "{json}");
+        assert_eq!(
+            json,
+            r##"{"space":"srgb","method":"linear","stops":"#000000 #ffffff"}"##
+        );
 
         let parsed: Gradient = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Gradient::default());
+
+        // A bad literal is a serde error, not a guess.
+        assert!(
+            serde_json::from_str::<Gradient>(
+                r#"{"space":"srgb","method":"linear","stops":"nope"}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
