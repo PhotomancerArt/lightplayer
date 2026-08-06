@@ -6,7 +6,7 @@ use lp_collection::VecMap;
 
 use crate::{
     ControlExtent, ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, NodeId,
-    ProductKind, ProductRef, ResourceDomain, ResourceRef, VisualProduct,
+    ProductKind, ProductRef, ResourceDomain, ResourceRef, TimeProduct, VisualProduct,
 };
 
 use super::{
@@ -78,7 +78,11 @@ where
         (LpType::Mat2x2, LpValue::Mat2x2(matrix)) => write_matrix(value, matrix),
         (LpType::Mat3x3, LpValue::Mat3x3(matrix)) => write_matrix(value, matrix),
         (LpType::Mat4x4, LpValue::Mat4x4(matrix)) => write_matrix(value, matrix),
-        (LpType::Array(item_ty, len), LpValue::Array(items)) if items.len() == *len => {
+        // A fixed-size array value may carry FEWER elements than the type's
+        // declared length: the declared size is the maximum, and the absent
+        // tail is type-default — a value never pads dead entries onto disk
+        // or wire just to reach a declared maximum.
+        (LpType::Array(item_ty, len), LpValue::Array(items)) if items.len() <= *len => {
             write_lp_array(value, item_ty, items)
         }
         (LpType::List(item_ty), LpValue::Array(items)) => write_lp_array(value, item_ty, items),
@@ -94,6 +98,9 @@ where
         }
         (LpType::Product(ProductKind::Control), LpValue::Product(ProductRef::Control(product))) => {
             write_control_product(value, product)
+        }
+        (LpType::Product(ProductKind::Time), LpValue::Product(ProductRef::Time(product))) => {
+            write_time_product(value, product)
         }
         _ => Err(SlotWriteError::Serialize),
     }
@@ -145,6 +152,7 @@ where
         LpValue::Resource(resource) => write_resource_ref(value, resource),
         LpValue::Product(ProductRef::Visual(product)) => write_visual_product(value, product),
         LpValue::Product(ProductRef::Control(product)) => write_control_product(value, product),
+        LpValue::Product(ProductRef::Time(product)) => write_time_product(value, product),
         LpValue::IVec2(_)
         | LpValue::IVec3(_)
         | LpValue::IVec4(_)
@@ -237,6 +245,7 @@ where
             output,
             preferred_extent,
         ))),
+        ProductKind::Time => Ok(ProductRef::Time(TimeProduct::new(node, output))),
     }
 }
 
@@ -248,10 +257,13 @@ where
     match text.as_str() {
         "visual" => Ok(ProductKind::Visual),
         "control" => Ok(ProductKind::Control),
+        "time" => Ok(ProductKind::Time),
         _ => Err(SyntaxError::new(
             "",
             None,
-            alloc::format!("invalid product kind {text:?}. Expected one of: visual, control."),
+            alloc::format!(
+                "invalid product kind {text:?}. Expected one of: visual, control, time."
+            ),
         )),
     }
 }
@@ -320,6 +332,20 @@ where
     object.finish()
 }
 
+fn write_time_product<W>(
+    value: SlotValueWriter<'_, W>,
+    product: &TimeProduct,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object.prop("kind")?.string("time")?;
+    object.prop("node")?.u32(product.node().as_u32())?;
+    object.prop("output")?.u32(product.output())?;
+    object.finish()
+}
+
 fn write_control_extent<W>(
     value: SlotValueWriter<'_, W>,
     extent: ControlExtent,
@@ -346,6 +372,7 @@ fn product_kind_name(kind: ProductKind) -> &'static str {
     match kind {
         ProductKind::Visual => "visual",
         ProductKind::Control => "control",
+        ProductKind::Time => "time",
     }
 }
 
@@ -363,14 +390,17 @@ where
         items.push(read_lp_value(item_ty, item)?);
     }
 
+    // Fixed-size arrays accept UP TO the declared length: the declared size
+    // is the maximum, and a shorter value's absent tail is type-default
+    // (fixed sizes are maxima, not required lengths).
     if let Some(expected_len) = expected_len
-        && items.len() != expected_len
+        && items.len() > expected_len
     {
         return Err(SyntaxError::new(
             "",
             None,
             alloc::format!(
-                "expected array of {expected_len} values, found {}",
+                "expected array of at most {expected_len} values, found {}",
                 items.len()
             ),
         ));
@@ -690,7 +720,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        ModelEnumVariant, RuntimeBufferId, VisualProduct,
+        ModelEnumVariant, RuntimeBufferId, TimeProduct, VisualProduct,
         slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter},
     };
     use alloc::boxed::Box;
@@ -750,6 +780,21 @@ mod tests {
         assert_eq!(
             write_json_value(&ty, &value),
             r#"{"kind":"control","node":3,"output":2,"preferred_extent":{"rows":4,"samples_per_row":12}}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_reads_and_writes_time_products() {
+        let ty = LpType::Product(ProductKind::Time);
+        let value = read_json_value(ty.clone(), r#"{"kind":"time","node":4,"output":0}"#);
+
+        assert_eq!(
+            value,
+            LpValue::Product(ProductRef::time(TimeProduct::new(NodeId::new(4), 0)))
+        );
+        assert_eq!(
+            write_json_value(&ty, &value),
+            r#"{"kind":"time","node":4,"output":0}"#
         );
     }
 
@@ -820,6 +865,44 @@ mod tests {
         let error = read_lp_value(&endpoint_ty(), reader.value()).unwrap_err();
 
         assert!(error.message().contains("payload"));
+    }
+
+    /// The def-file seam of the gradient storage (color.md §5): a
+    /// `GradientConfig` value — token metadata, a variable-length `set`,
+    /// and one stops literal per gradient — must write into authored JSON
+    /// and read back unchanged through the shape-driven codec. This is
+    /// exactly the inline `consumed[<name>].gradient.some` slot a palette
+    /// pick edits.
+    #[test]
+    fn slot_value_codec_round_trips_a_gradient_config() {
+        use crate::{Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, ToLpValue};
+
+        let config = GradientConfig::Cycle {
+            set: vec![
+                Gradient {
+                    space: Colorspace::Oklab,
+                    method: InterpMethod::Linear,
+                    stops: vec![
+                        GradientStop {
+                            at: 0.0,
+                            c: [0.0, 0.0, 0.0],
+                        },
+                        GradientStop {
+                            at: 1.0,
+                            c: [0.9, 0.1, 0.1],
+                        },
+                    ],
+                },
+                Gradient::default(),
+            ],
+            step_seconds: 20.0,
+            fade_seconds: 0.5,
+        };
+        let ty = crate::gradient_config_lp_type();
+        let value = config.to_lp_value();
+
+        let json = write_json_value(&ty, &value);
+        assert_eq!(read_json_value(ty, &json), value);
     }
 
     fn read_json_value(ty: LpType, json: &str) -> LpValue {

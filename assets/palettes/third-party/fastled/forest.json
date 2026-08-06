@@ -1,0 +1,14 @@
+{
+  "id": "fastled_forest",
+  "name": "Forest",
+  "license": {
+    "spdx": "MIT",
+    "author": "FastLED (Daniel Garcia, Mark Kriegsman et al.)",
+    "source_url": "https://github.com/FastLED/FastLED/blob/master/src/colorpalettes.cpp.hpp"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#006400 #006400 #556b2f #006400 #008000 #228b22 #6b8e23 #008000 #2e8b57 #66cdaa #32cd32 #9acd32 #90ee90 #7cfc00 #66cdaa #228b22"
+  }
+}

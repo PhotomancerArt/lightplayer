@@ -20,6 +20,10 @@ pub struct ManifestFields {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// Advisory board target (gallery-rework vision D3); `None` for an
+    /// untargeted project. Passed through read-only — the library never
+    /// writes it (P02 scope: reading only; the generator writes it, P03).
+    pub target: Option<String>,
 }
 
 pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
@@ -28,6 +32,7 @@ pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
         format: manifest.format,
         uid: manifest.uid,
         name: manifest.name,
+        target: manifest.target,
     })
 }
 
@@ -73,7 +78,7 @@ mod tests {
     use lpfs::LpFsMemory;
 
     const MANIFEST: &[u8] = br#"{
-  "format": 4,
+  "format": 5,
   "name": "demo"
 }
 "#;
@@ -85,6 +90,27 @@ mod tests {
         let fields = read_manifest(&fs).unwrap();
         assert_eq!(fields.uid, None);
         assert_eq!(fields.name.as_deref(), Some("demo"));
+    }
+
+    /// P02: `target` reads through the same seam as `uid`/`name`, and is
+    /// `None` when the container omits it — the common, untargeted case.
+    #[test]
+    fn read_manifest_reads_target_when_present() {
+        let fs = LpFsMemory::new();
+        fs.write_file(MANIFEST_PATH.as_path(), MANIFEST).unwrap();
+        assert_eq!(read_manifest(&fs).unwrap().target, None);
+
+        let targeted: &[u8] = br#"{
+  "format": 4,
+  "name": "demo",
+  "target": "espressif/esp32-c6-devkitc-1"
+}
+"#;
+        fs.write_file(MANIFEST_PATH.as_path(), targeted).unwrap();
+        assert_eq!(
+            read_manifest(&fs).unwrap().target.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
     }
 
     #[test]
@@ -132,7 +158,7 @@ mod tests {
         fs.write_file(
             MANIFEST_PATH.as_path(),
             br#"{
-  "format": 4,
+  "format": 5,
   "uid": "garbage"
 }
 "#,

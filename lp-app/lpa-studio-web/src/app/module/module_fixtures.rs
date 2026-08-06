@@ -18,14 +18,15 @@
 
 use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace,
-    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState,
-    UiSlotFieldState, UiSlotValue, UiStatus,
+    UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
+    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
+    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
+use crate::app::node::node_story_fixtures::control_preview_product;
 
 use super::PanelGesture;
 
@@ -99,6 +100,7 @@ fn knob(
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Knob { min, max, step },
@@ -121,6 +123,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Fader {
@@ -147,6 +150,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Toggle,
@@ -162,6 +166,70 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             aspects: Vec::new(),
         },
     )
+}
+
+/// One palette swatch control (M4 P3) — the closed face of the chooser, on
+/// a module panel. Its value is a whole `GradientConfig`, built through the
+/// model's own storage exactly as the projection builds one.
+fn swatch(
+    scope: &str,
+    channel: &str,
+    label: &str,
+    config: &lpc_model::GradientConfig,
+) -> UiPanelControlView {
+    UiPanelControlView::new(
+        channel,
+        UiPanelControl {
+            emit: UiPanelEmit::Gradient,
+            label: label.to_string(),
+            address: Some(walk_address(scope, channel)),
+            widget: UiPanelWidget::PaletteSwatch,
+            value: crate::app::node::node_story_fixtures::gradient_slot_value(config),
+            live_value: None,
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: channel.to_string(),
+                engaged: false,
+            }),
+            unit: None,
+            state: UiSlotFieldState::editable(),
+            aspects: Vec::new(),
+        },
+    )
+}
+
+/// A panel of palette swatches in the three panel states — the module-panel
+/// half of the P3 gate, where the node card's `palette-swatch` stories are
+/// the other. Static and cycle sit side by side on purpose: the two modes
+/// are the widget's whole design question.
+pub(crate) fn palette_panel() -> UiPanelGroup {
+    use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
+    let held = lpc_model::GradientConfig::Static(sunset_gradient());
+    UiPanelGroup::new("Palettes", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                swatch(ROOT_SCOPE, "palette", "at default", &held),
+                "authored palette",
+            ),
+            {
+                // Following: a config channel drives the slot, and what
+                // comes back is the channel's summary in words — the strips
+                // keep showing the authored config.
+                let mut view = swatch(ROOT_SCOPE, "cycle", "following", &palette_cycle());
+                view.control.live_value = Some(
+                    lpa_studio_core::app::project::format_gradient_summary(&palette_cycle()),
+                );
+                view.with_state(
+                    UiPanelControlState::ReadFollowing,
+                    Some("show \u{b7} palette"),
+                )
+            },
+            engaged(
+                swatch(ROOT_SCOPE, "held", "engaged", &palette_cycle()),
+                "show \u{b7} palette",
+            ),
+        ])
 }
 
 /// Put a control in Read-following-automation, displaying `live`.
@@ -393,6 +461,63 @@ pub(crate) fn root_face() -> UiModuleFace {
     }
 }
 
+/// A control-first module's face: nothing writes the scope's visual, so
+/// the mirror would render cleared and the hero is the scope's `control.out`
+/// product instead — the fixture's lamp layout, drawn by the same preview
+/// component the fixture card uses.
+pub(crate) fn control_root_face() -> UiModuleFace {
+    UiModuleFace {
+        preview: Some(
+            control_preview_product("output")
+                .with_detail("16 RGB lamps · mirrors control.out")
+                .with_tracking(UiProductTrackingState::Tracking),
+        ),
+        panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
+            .with_target(scope_target(ROOT_SCOPE))
+            .with_controls(vec![at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            )]),
+        wiring: Some(control_wiring()),
+        wiring_open: false,
+        provenance: None,
+        auto_save: Some(true),
+    }
+}
+
+/// A control-first scope's wiring: the fixture renders the lamps and the
+/// hardware output reads them; no channel carries a visual.
+fn control_wiring() -> UiBusView {
+    UiBusView {
+        channels: vec![
+            channel(
+                "time",
+                "Instant",
+                Some("12.44"),
+                vec![site("clock", "seconds")],
+                vec![site("scanner", "time")],
+            ),
+            UiBusChannelView {
+                // The hero and the value box show the SAME lamps: both
+                // hang off the scope's resolved control product.
+                preview: Some(UiBusChannelPreview {
+                    kind: UiProductKind::Control,
+                    preview: control_preview_product("output").preview,
+                    tracking: UiProductTrackingState::Tracking,
+                    frame: UiProductPreviewFrame::VISUAL_DEFAULT,
+                }),
+                ..channel(
+                    "control.out",
+                    "Color",
+                    Some("control product #7:0"),
+                    vec![site("Fixture", "output")],
+                    vec![site("Output", "input")],
+                )
+            },
+        ],
+    }
+}
+
 /// The root module's children, as sibling cards BELOW its card: two leaves
 /// that write host channels, the two embedded plasma modules (each with its
 /// own child), and the fixture. All of them — a module's children are
@@ -560,6 +685,7 @@ fn channel(
         primary_visual: false,
         contended: false,
         preview: None,
+        gradient: None,
         writers,
         readers,
     }

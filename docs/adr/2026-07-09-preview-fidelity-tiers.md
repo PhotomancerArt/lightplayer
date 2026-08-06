@@ -18,7 +18,13 @@
   the default everywhere and the only option on boards without an FPU.
 - **Related:** `2026-07-08-glsl-canonical-builtins.md`,
   `2026-07-09-gpu-path-forks-at-glsl.md`, `docs/design/q32.md`,
-  `docs/design/float.md`
+  `docs/design/float.md`. **Amended 2026-08-05** by
+  `2026-08-05-browser-sample-readback-is-async.md`: this ADR predates
+  LED-output sampling, whose blocking readback was native-only and left
+  browser GPU-tier runtimes unable to render fixture-bearing projects
+  (carried as `docs/debt/gpu-tier-cannot-sample-led-output.md`, now
+  retired); the browser GPU tier now samples via an async readback with
+  one frame of latency.
 
 ## Context
 

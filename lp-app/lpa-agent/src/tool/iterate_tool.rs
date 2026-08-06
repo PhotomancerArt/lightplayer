@@ -394,7 +394,7 @@ fn input_schema() -> Value {
                     { "type": "number" }, { "type": "boolean" },
                     { "type": "array", "items": { "type": "number" },
                       "minItems": 2, "maxItems": 4 } ] },
-                "description": "Uniform writes keyed by path (e.g. \"time\", \"cfg.speed\"). Numbers coerce to the declared type; arrays map to vec2/vec3/vec4." },
+                "description": "Uniform writes keyed by path (e.g. \"phase\", \"cfg.speed\"); a phasor or seconds uniform takes a plain number here like any other float — this does not need `upsert_param`. Numbers coerce to the declared type; arrays map to vec2/vec3/vec4." },
             "probes": { "type": "array", "maxItems": 8, "items": probe },
             "diff": { "type": "object", "additionalProperties": false,
                 "required": ["vs"], "properties": { "vs": { "const": "previous" } },
@@ -451,14 +451,14 @@ mod tests {
             "source": RED,
             "note": "solid red",
             "size": [128, 128],
-            "bindings": { "time": 1.5, "cfg.color": [1, 0, 0] },
+            "bindings": { "phase": 0.25, "cfg.color": [1, 0, 0] },
             "probes": [
                 { "id": "center", "ty": "vec4", "expr": "render(pos)",
                   "domain": { "point": { "at": [0.5, 0.5] } } },
                 { "id": "row", "ty": "float", "expr": "render(pos).r",
                   "domain": { "line": { "from": [0, 0.5], "to": [1, 0.5], "n": 8 } },
                   "reduce": "stats",
-                  "vary": { "binding": "time", "values": [0, 1] } }
+                  "vary": { "binding": "phase", "values": [0, 1] } }
             ],
             "diff": { "vs": "previous" },
             "capture": {}

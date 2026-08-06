@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_rainfall",
+  "name": "Rainfall",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/rainfall"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "step",
+    "stops": "#e5b42c@0 #f2b464@0.142857 #f3e977@0.285714 #91ce7e@0.428571 #43be87@0.571429 #34b485@0.714286 #069b42@0.857143"
+  }
+}

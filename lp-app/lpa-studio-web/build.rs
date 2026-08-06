@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use syn::{Attribute, Item, Meta};
+use syn::{Attribute, Expr, Item, Lit, Meta};
 
 fn main() {
     println!("cargo:rerun-if-changed=src");
@@ -15,6 +15,7 @@ fn main() {
     ensure_tailwind_placeholder(&manifest_dir);
     let src_dir = manifest_dir.join("src");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
+    generate_docs_checks(&manifest_dir, &src_dir, &out_dir);
     let generated_path = out_dir.join("story_registry.generated.rs");
 
     let story_files = discover_story_files(&src_dir).unwrap_or_else(|error| {
@@ -641,3 +642,764 @@ fn slash_path(path: &Path) -> String {
 fn rust_string_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+// ==========================================================================
+// Docs article scan
+// ==========================================================================
+//
+// The in-app docs section (`src/app/docs`) compiles articles in from
+// `docs/user-guide/`. Articles reference code by name: `embed` directive
+// fences, `sim=` handles a page declares, and `#/docs/<slug>[#<anchor>]`
+// links. None of those references is checked by the compiler, so this scan
+// turns them into data and generates the tests that check them
+// (`docs_checks.generated.rs`, wrapped by `src/app/docs/docs_checks.rs`).
+//
+// The scan is deliberately line-based rather than a second markdown parser:
+// the generated `scan_matches_the_markdown_parser` test compares its embed
+// names and heading anchors against the real renderer's parse of the real
+// articles, so any divergence (setext headings, exotic inline formatting in
+// a heading) shows up as a failing test on the article that triggers it
+// rather than as a silently wrong check.
+
+/// One `PAGES` entry as declared in `src/app/docs/mod.rs`.
+#[derive(Debug)]
+struct DocPageDecl {
+    slug: String,
+    /// Article file name inside `docs/user-guide/`.
+    file: String,
+    /// Declared sims: `(name, example_id)` in declaration order.
+    sims: Vec<(String, String)>,
+}
+
+/// A registered article plus everything the scan found in it.
+#[derive(Debug)]
+struct DocsArticle {
+    page: DocPageDecl,
+    scan: ArticleScan,
+}
+
+/// What one article's markdown references, in document order.
+#[derive(Debug, Default)]
+struct ArticleScan {
+    /// `embed` fence names.
+    embeds: Vec<String>,
+    /// `(embed name, sim handle)` for every `sim=` argument, comma lists
+    /// split into one entry per handle.
+    sim_refs: Vec<(String, String)>,
+    /// `(slug, anchor)` for every `#/docs/...` link target; anchor is empty
+    /// for an unanchored link.
+    links: Vec<(String, String)>,
+    /// Heading anchor ids, deduped exactly as the renderer dedupes them.
+    anchors: Vec<String>,
+}
+
+fn generate_docs_checks(manifest_dir: &Path, src_dir: &Path, out_dir: &Path) {
+    let docs_dir = user_guide_dir(manifest_dir);
+    println!("cargo:rerun-if-changed={}", docs_dir.display());
+    for markdown_file in markdown_files(&docs_dir) {
+        println!("cargo:rerun-if-changed={}", markdown_file.display());
+    }
+
+    let pages = read_docs_manifest(&src_dir.join("app/docs/mod.rs"));
+    let mut articles = pages
+        .into_iter()
+        .map(|page| {
+            let path = docs_dir.join(&page.file);
+            let markdown = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!(
+                    "docs page `{}` names `{}`, which could not be read: {error}",
+                    page.slug,
+                    path.display()
+                )
+            });
+            DocsArticle {
+                scan: scan_article(&markdown),
+                page,
+            }
+        })
+        .collect::<Vec<_>>();
+    articles.sort_by(|left, right| left.page.slug.cmp(&right.page.slug));
+
+    fs::write(
+        out_dir.join("docs_checks.generated.rs"),
+        render_docs_checks(&articles),
+    )
+    .expect("write generated docs checks");
+}
+
+/// `docs/user-guide/`, from `lp-app/lpa-studio-web/`.
+fn user_guide_dir(manifest_dir: &Path) -> PathBuf {
+    let repo_root = manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| panic!("crate at {} has no repo root", manifest_dir.display()));
+    let docs_dir = repo_root.join("docs/user-guide");
+    assert!(
+        docs_dir.is_dir(),
+        "expected the user guide at {} (resolved from {})",
+        docs_dir.display(),
+        manifest_dir.display()
+    );
+    docs_dir
+}
+
+/// Every `.md` file in the guide directory, sorted. Files that are not
+/// registered in `PAGES` (the contributor-facing `STYLE.md`, for one) are
+/// still watched — adding an article should rebuild the checks — but only
+/// registered pages are scanned, since only they render.
+fn markdown_files(docs_dir: &Path) -> Vec<PathBuf> {
+    let mut files = fs::read_dir(docs_dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", docs_dir.display()))
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+/// Read the `PAGES` manifest out of `app/docs/mod.rs`.
+///
+/// Parsed rather than duplicated: the slug ↔ article-file mapping and the
+/// per-page sim declarations both live there, and a copy here would be the
+/// exact kind of drift these checks exist to prevent. A shape this does not
+/// understand fails the build with the offending entry named.
+fn read_docs_manifest(mod_path: &Path) -> Vec<DocPageDecl> {
+    let source = fs::read_to_string(mod_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", mod_path.display()));
+    let parsed = syn::parse_file(&source)
+        .unwrap_or_else(|error| panic!("Rust parse error in {}: {error}", mod_path.display()));
+    let pages = parsed
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Const(item) if item.ident == "PAGES" => Some(item),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no `PAGES` const in {}", mod_path.display()));
+    let entries = array_elements(&pages.expr).unwrap_or_else(|| {
+        panic!(
+            "`PAGES` in {} is not a `&[...]` array literal",
+            mod_path.display()
+        )
+    });
+    entries
+        .iter()
+        .map(|entry| parse_doc_page_entry(entry, mod_path))
+        .collect()
+}
+
+fn parse_doc_page_entry(expr: &Expr, mod_path: &Path) -> DocPageDecl {
+    let Expr::Struct(entry) = expr else {
+        panic!(
+            "every `PAGES` entry in {} must be a `DocPage {{ ... }}` literal",
+            mod_path.display()
+        );
+    };
+
+    let mut slug = None;
+    let mut file = None;
+    let mut sims = Vec::new();
+    for field in &entry.fields {
+        let syn::Member::Named(name) = &field.member else {
+            continue;
+        };
+        match name.to_string().as_str() {
+            "slug" => slug = string_literal(&field.expr),
+            "markdown" => file = include_str_file_name(&field.expr),
+            "sims" => sims = parse_sim_specs(&field.expr, mod_path),
+            _ => {}
+        }
+    }
+
+    let slug = slug.unwrap_or_else(|| {
+        panic!(
+            "a `PAGES` entry in {} has no string-literal `slug`",
+            mod_path.display()
+        )
+    });
+    let file = file.unwrap_or_else(|| {
+        panic!(
+            "docs page `{slug}` in {} must set `markdown` to `include_str!(\"...\")`",
+            mod_path.display()
+        )
+    });
+    DocPageDecl { slug, file, sims }
+}
+
+fn parse_sim_specs(expr: &Expr, mod_path: &Path) -> Vec<(String, String)> {
+    let elements = array_elements(expr).unwrap_or_else(|| {
+        panic!(
+            "a `PAGES` entry in {} sets `sims` to something other than a `&[...]` array",
+            mod_path.display()
+        )
+    });
+    elements
+        .iter()
+        .map(|element| {
+            let Expr::Struct(spec) = element else {
+                panic!(
+                    "every `sims` entry in {} must be a `DocsSimSpec {{ ... }}` literal",
+                    mod_path.display()
+                );
+            };
+            let mut name = None;
+            let mut example_id = None;
+            for field in &spec.fields {
+                let syn::Member::Named(field_name) = &field.member else {
+                    continue;
+                };
+                match field_name.to_string().as_str() {
+                    "name" => name = string_literal(&field.expr),
+                    "example_id" => example_id = string_literal(&field.expr),
+                    _ => {}
+                }
+            }
+            match (name, example_id) {
+                (Some(name), Some(example_id)) => (name, example_id),
+                _ => panic!(
+                    "a `DocsSimSpec` in {} is missing a string-literal `name` or `example_id`",
+                    mod_path.display()
+                ),
+            }
+        })
+        .collect()
+}
+
+/// `&[a, b]` or `[a, b]` → its elements.
+fn array_elements(expr: &Expr) -> Option<Vec<Expr>> {
+    match expr {
+        Expr::Reference(reference) => array_elements(&reference.expr),
+        Expr::Array(array) => Some(array.elems.iter().cloned().collect()),
+        _ => None,
+    }
+}
+
+fn string_literal(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(literal) => match &literal.lit {
+            Lit::Str(value) => Some(value.value()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `include_str!("../../docs/user-guide/x.md")` → `x.md`.
+fn include_str_file_name(expr: &Expr) -> Option<String> {
+    let Expr::Macro(macro_expr) = expr else {
+        return None;
+    };
+    if !macro_expr
+        .mac
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "include_str")
+    {
+        return None;
+    }
+    let path: syn::LitStr = macro_expr.mac.parse_body().ok()?;
+    let path = path.value();
+    Some(path.rsplit('/').next()?.to_string())
+}
+
+// -- markdown scanning ------------------------------------------------------
+
+fn scan_article(markdown: &str) -> ArticleScan {
+    let mut scan = ArticleScan::default();
+    let mut anchor_counts: HashMap<String, u32> = HashMap::new();
+    // The open fence's marker character and length, per CommonMark: a fence
+    // closes on the same character, at least as long, with nothing after it.
+    let mut open_fence: Option<(char, usize)> = None;
+
+    for line in markdown.lines() {
+        let trimmed = line.trim_start();
+        if let Some((marker, length)) = fence_marker(trimmed) {
+            match open_fence {
+                Some((open_marker, open_length)) => {
+                    if marker == open_marker
+                        && length >= open_length
+                        && trimmed[length..].trim().is_empty()
+                    {
+                        open_fence = None;
+                    }
+                }
+                None => {
+                    if let Some((name, args)) = parse_embed_info(trimmed[length..].trim()) {
+                        for (key, value) in &args {
+                            if key == "sim" {
+                                for sim in value.split(',').filter(|sim| !sim.is_empty()) {
+                                    scan.sim_refs.push((name.clone(), sim.to_string()));
+                                }
+                            }
+                        }
+                        scan.embeds.push(name);
+                    }
+                    open_fence = Some((marker, length));
+                }
+            }
+            continue;
+        }
+        if open_fence.is_some() {
+            continue;
+        }
+
+        if let Some(text) = heading_text(line) {
+            let slug = slugify(&text);
+            let count = anchor_counts.entry(slug.clone()).or_insert(0);
+            *count += 1;
+            scan.anchors.push(if *count == 1 {
+                slug
+            } else {
+                format!("{slug}-{count}")
+            });
+        }
+        collect_doc_links(line, &mut scan.links);
+    }
+
+    scan
+}
+
+/// A fence opener/closer: three or more backticks or tildes.
+fn fence_marker(trimmed_line: &str) -> Option<(char, usize)> {
+    let marker = trimmed_line.chars().next()?;
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+    let length = trimmed_line.chars().take_while(|ch| *ch == marker).count();
+    (length >= 3).then_some((marker, length))
+}
+
+/// The `embed <name> [key=value]...` fence grammar, kept identical to
+/// `src/base/markdown_text.rs`'s `code_block_or_embed`: `embed` must be the
+/// info string's first word, and a bare `embed` with no name is malformed
+/// (it renders as a plain code block, so it is not an embed reference).
+fn parse_embed_info(info: &str) -> Option<(String, Vec<(String, String)>)> {
+    let mut words = info.split_whitespace();
+    if words.next()? != "embed" {
+        return None;
+    }
+    let name = words.next()?.to_string();
+    let args = words
+        .filter_map(|word| {
+            word.split_once('=')
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+        })
+        .collect();
+    Some((name, args))
+}
+
+/// An ATX heading's text, or `None` for any other line. Only column-zero
+/// headings count — those are the ones the renderer gives an `id` to.
+fn heading_text(line: &str) -> Option<String> {
+    if !line.starts_with('#') {
+        return None;
+    }
+    let hashes = line.chars().take_while(|ch| *ch == '#').count();
+    if hashes > 6 {
+        return None;
+    }
+    let rest = &line[hashes..];
+    if !rest.is_empty() && !rest.starts_with([' ', '\t']) {
+        return None;
+    }
+    // Trailing `#`s and other punctuation need no stripping: slugify drops
+    // every non-alphanumeric anyway.
+    Some(strip_inline_link_targets(rest.trim()))
+}
+
+/// Reduce `[label](target)` to `label` so a link inside a heading slugs to
+/// the same anchor the renderer computes (which sees only the label).
+fn strip_inline_link_targets(text: &str) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '[' {
+            let close = chars[index + 1..].iter().position(|ch| *ch == ']');
+            if let Some(close) = close.map(|offset| index + 1 + offset) {
+                if chars.get(close + 1) == Some(&'(') {
+                    if let Some(end) = chars[close + 2..].iter().position(|ch| *ch == ')') {
+                        out.extend(&chars[index + 1..close]);
+                        index = close + 2 + end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+/// Collect `#/docs/<slug>[#<anchor>]` markdown link targets from one line.
+/// Only real link destinations (`](...)`) count — prose that mentions the
+/// route shape in backticks is not a link.
+fn collect_doc_links(line: &str, links: &mut Vec<(String, String)>) {
+    let mut rest = line;
+    while let Some(index) = rest.find("](") {
+        let after = &rest[index + 2..];
+        let end = after
+            .find(|ch: char| ch == ')' || ch.is_whitespace())
+            .unwrap_or(after.len());
+        let target = after[..end].trim_matches(['<', '>']);
+        if let Some(target) = target.strip_prefix("#/docs/") {
+            let (slug, anchor) = match target.split_once('#') {
+                Some((slug, anchor)) => (slug, anchor),
+                None => (target, ""),
+            };
+            links.push((slug.to_string(), anchor.to_string()));
+        }
+        rest = &after[end..];
+    }
+}
+
+/// Heading text → anchor id.
+///
+/// SOURCE OF TRUTH: `src/base/markdown_text.rs`'s `slugify`. A build script
+/// cannot depend on its own crate, so this is a verbatim duplicate; the
+/// generated `scan_matches_the_markdown_parser` test compares this side's
+/// output against that one's over every real article, so the two cannot
+/// drift silently. Change one, change the other.
+fn slugify(text: &str) -> String {
+    let mut slug = String::with_capacity(text.len());
+    let mut needs_dash = false;
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if needs_dash && !slug.is_empty() {
+                slug.push('-');
+            }
+            needs_dash = false;
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            needs_dash = true;
+        }
+    }
+    slug
+}
+
+// -- codegen ----------------------------------------------------------------
+
+fn render_docs_checks(articles: &[DocsArticle]) -> String {
+    let mut generated = String::new();
+    generated.push_str("// @generated by lpa-studio-web/build.rs\n");
+    generated.push_str("// Scanned from docs/user-guide/, driven by app/docs/mod.rs's PAGES.\n\n");
+    generated.push_str(&render_docs_links(articles));
+    generated.push('\n');
+    generated.push_str(&render_generated_checks(articles));
+    generated
+}
+
+/// The compile-time link surface: `docs_links::<page>::HREF` and one const
+/// per heading anchor. A link written through these can only name a page
+/// and anchor that exist, because a missing one is a missing const.
+fn render_docs_links(articles: &[DocsArticle]) -> String {
+    let mut generated = String::new();
+    generated.push_str(
+        "/// Every in-app docs link target, as consts: a page's `HREF` plus one\n\
+         /// const per heading anchor. Naming a page or anchor that does not exist\n\
+         /// is a missing const, i.e. a compile error rather than a dead link.\n",
+    );
+    generated.push_str(
+        "#[allow(\n    dead_code,\n    reason = \"the link surface is consumed by docs help links in a later phase\"\n)]\n",
+    );
+    generated.push_str("pub mod docs_links {\n");
+    let mut modules = BTreeMap::new();
+    for article in articles {
+        let module = identifier(&article.page.slug, false);
+        if let Some(existing) = modules.insert(module.clone(), article.page.slug.clone()) {
+            panic!(
+                "docs slugs `{existing}` and `{}` both map to the link module `{module}`",
+                article.page.slug
+            );
+        }
+    }
+    for article in articles {
+        let module = identifier(&article.page.slug, false);
+        let slug = &article.page.slug;
+        generated.push_str(&format!("    /// `#/docs/{slug}`\n"));
+        generated.push_str(&format!("    pub mod {module} {{\n"));
+        generated.push_str(&format!(
+            "        pub const HREF: &str = \"#/docs/{}\";\n",
+            rust_string_literal(slug)
+        ));
+        let mut consts = BTreeMap::new();
+        for anchor in &article.scan.anchors {
+            let name = identifier(anchor, true);
+            if let Some(existing) = consts.insert(name.clone(), anchor.clone()) {
+                panic!(
+                    "docs page `{slug}` anchors `{existing}` and `{anchor}` both map to \
+                     the link const `{name}`; rename one of the headings"
+                );
+            }
+            assert!(
+                name != "HREF",
+                "docs page `{slug}` has a heading whose anchor collides with `HREF`"
+            );
+        }
+        for (name, anchor) in &consts {
+            generated.push_str(&format!(
+                "        pub const {name}: &str = \"#/docs/{}#{}\";\n",
+                rust_string_literal(slug),
+                rust_string_literal(anchor)
+            ));
+        }
+        generated.push_str("    }\n");
+    }
+    generated.push_str("}\n");
+    generated
+}
+
+fn render_generated_checks(articles: &[DocsArticle]) -> String {
+    let mut generated = String::new();
+    generated.push_str("#[cfg(test)]\nmod generated_checks {\n");
+    generated.push_str(
+        "    use crate::app::docs::PAGES;\n\
+         \x20   use crate::app::docs::embeds::EMBED_NAMES;\n\
+         \x20   use crate::base::markdown_text::{MdNode, heading_anchors, parse_markdown};\n\n",
+    );
+    generated.push_str(
+        "    /// One registered article as `build.rs` scanned it.\n\
+         \x20   struct ScannedArticle {\n\
+         \x20       slug: &'static str,\n\
+         \x20       file: &'static str,\n\
+         \x20       sims: &'static [(&'static str, &'static str)],\n\
+         \x20       embeds: &'static [&'static str],\n\
+         \x20       sim_refs: &'static [(&'static str, &'static str)],\n\
+         \x20       links: &'static [(&'static str, &'static str)],\n\
+         \x20       anchors: &'static [&'static str],\n\
+         \x20   }\n\n",
+    );
+
+    generated.push_str("    const SCANNED: &[ScannedArticle] = &[\n");
+    for article in articles {
+        generated.push_str("        ScannedArticle {\n");
+        generated.push_str(&format!(
+            "            slug: \"{}\",\n",
+            rust_string_literal(&article.page.slug)
+        ));
+        generated.push_str(&format!(
+            "            file: \"{}\",\n",
+            rust_string_literal(&article.page.file)
+        ));
+        generated.push_str(&format!(
+            "            sims: {},\n",
+            pair_slice(&article.page.sims)
+        ));
+        generated.push_str(&format!(
+            "            embeds: {},\n",
+            string_slice(&article.scan.embeds)
+        ));
+        generated.push_str(&format!(
+            "            sim_refs: {},\n",
+            pair_slice(&article.scan.sim_refs)
+        ));
+        generated.push_str(&format!(
+            "            links: {},\n",
+            pair_slice(&article.scan.links)
+        ));
+        generated.push_str(&format!(
+            "            anchors: {},\n",
+            string_slice(&article.scan.anchors)
+        ));
+        generated.push_str("        },\n");
+    }
+    generated.push_str("    ];\n\n");
+
+    generated.push_str(GENERATED_CHECK_TESTS);
+    generated.push_str("}\n");
+    generated
+}
+
+/// The assertions themselves are fixed text — only `SCANNED` varies per
+/// build — so they live here as one literal rather than being assembled.
+const GENERATED_CHECK_TESTS: &str = r####"
+    fn scanned(slug: &str) -> &'static ScannedArticle {
+        SCANNED
+            .iter()
+            .find(|article| article.slug == slug)
+            .unwrap_or_else(|| panic!("no scanned article for docs page `{slug}`"))
+    }
+
+    /// The scan reads `PAGES` out of the source at build time; if that read
+    /// ever drifts from the const the app actually renders, every other
+    /// check here is checking the wrong thing.
+    #[test]
+    fn the_scan_matches_the_manifest() {
+        assert_eq!(
+            SCANNED.len(),
+            PAGES.len(),
+            "build.rs scanned {} article(s) but PAGES declares {}",
+            SCANNED.len(),
+            PAGES.len()
+        );
+        for page in PAGES {
+            let article = scanned(page.slug);
+            let declared = page
+                .sims
+                .iter()
+                .map(|sim| (sim.name, sim.example_id))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                article.sims.to_vec(),
+                declared,
+                "docs page `{}` ({}) declares different sims than build.rs read",
+                page.slug,
+                article.file
+            );
+        }
+    }
+
+    /// A typo'd directive name would otherwise render as an unknown-embed
+    /// box in the shipped article.
+    #[test]
+    fn every_embed_fence_names_a_registered_directive() {
+        for article in SCANNED {
+            for embed in article.embeds {
+                assert!(
+                    EMBED_NAMES.contains(embed),
+                    "{} uses `embed {embed}`, which is not a registered directive; \
+                     known directives: {EMBED_NAMES:?}",
+                    article.file
+                );
+            }
+        }
+    }
+
+    /// `sim=` addresses a sim the page declares in its `PAGES` entry.
+    #[test]
+    fn every_sim_reference_is_declared_by_its_page() {
+        for article in SCANNED {
+            for (embed, sim) in article.sim_refs {
+                assert!(
+                    article.sims.iter().any(|(name, _)| name == sim),
+                    "{} has `embed {embed} ... sim={sim}`, but page `{}` declares {:?}",
+                    article.file,
+                    article.slug,
+                    article.sims.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    /// In-docs links resolve to a real page and, when anchored, to a real
+    /// heading on it.
+    #[test]
+    fn every_docs_link_resolves() {
+        for article in SCANNED {
+            for (slug, anchor) in article.links {
+                assert!(
+                    PAGES.iter().any(|page| page.slug == *slug),
+                    "{} links to `#/docs/{slug}`, which is not a page in PAGES",
+                    article.file
+                );
+                if !anchor.is_empty() {
+                    let target = scanned(slug);
+                    assert!(
+                        target.anchors.contains(anchor),
+                        "{} links to `#/docs/{slug}#{anchor}`, but `{}` has no such heading; \
+                         its anchors: {:?}",
+                        article.file,
+                        target.file,
+                        target.anchors
+                    );
+                }
+            }
+        }
+    }
+
+    /// The build-time scan is line-based; the renderer uses pulldown-cmark.
+    /// This pins the two together over the real articles, so a heading style
+    /// or fence shape the scan gets wrong fails here instead of quietly
+    /// weakening the checks above (it also guards the duplicated `slugify`).
+    #[test]
+    fn the_scan_matches_the_markdown_parser() {
+        for page in PAGES {
+            let article = scanned(page.slug);
+            let parsed = parse_markdown(page.markdown)
+                .into_iter()
+                .filter_map(|node| match node {
+                    MdNode::Embed { name, .. } => Some(name),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                article.embeds.to_vec(),
+                parsed,
+                "build.rs and the markdown renderer disagree about the embed fences in {}",
+                article.file
+            );
+            assert_eq!(
+                article.anchors.to_vec(),
+                heading_anchors(page.markdown),
+                "build.rs and the markdown renderer disagree about the heading anchors in {}",
+                article.file
+            );
+        }
+    }
+"####;
+
+fn string_slice(values: &[String]) -> String {
+    if values.is_empty() {
+        return "&[]".to_string();
+    }
+    let items = values
+        .iter()
+        .map(|value| format!("\"{}\"", rust_string_literal(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("&[{items}]")
+}
+
+fn pair_slice(values: &[(String, String)]) -> String {
+    if values.is_empty() {
+        return "&[]".to_string();
+    }
+    let items = values
+        .iter()
+        .map(|(left, right)| {
+            format!(
+                "(\"{}\", \"{}\")",
+                rust_string_literal(left),
+                rust_string_literal(right)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("&[{items}]")
+}
+
+/// Slug or anchor → a Rust identifier: non-alphanumerics become `_`, and a
+/// leading digit gets an `_` prefix. `upper` picks const case.
+fn identifier(value: &str, upper: bool) -> String {
+    let mut ident = String::with_capacity(value.len() + 1);
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            ident.push(if upper {
+                ch.to_ascii_uppercase()
+            } else {
+                ch.to_ascii_lowercase()
+            });
+        } else {
+            ident.push('_');
+        }
+    }
+    if ident.is_empty() || ident.starts_with(|ch: char| ch.is_ascii_digit()) {
+        ident.insert(0, '_');
+    }
+    if !upper && RUST_KEYWORDS.contains(&ident.as_str()) {
+        ident.push('_');
+    }
+    ident
+}
+
+/// Enough of the keyword list that a plausible slug (`type`, `move`, `use`)
+/// cannot generate a module name that will not compile.
+const RUST_KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate",
+    "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl", "in",
+    "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+    "return", "self", "static", "struct", "super", "trait", "true", "try", "type", "typeof",
+    "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+];

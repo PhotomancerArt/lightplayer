@@ -3,7 +3,13 @@
   "target": "esp32",
   "vendor": "domraem",
   "product": "DOM-Z-102",
-  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller \u2014 the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). The screw terminal at the top of the right rail is silkscreened IO13 and marked \"spare\" \u2014 read directly off the physical board by Yona on 2026-08-02. This CORRECTS an earlier entry that called it IO12 and claimed it drove an onboard relay; that entry rested on a sketch transcription plus a vendor listing note (\"Relay configuration (to GPIO12)\") that names no terminal and may belong to a different model in the same product family. The board's own capability list mentions no relay. GPIO13 is NOT a strapping pin (classic ESP32 straps are GPIO0/2/5/12/15), so it carries none of the boot risk GPIO12 would have. It is offered here as a claimable output; note it is NOT one of the four fused/level-shifted DATA terminals, so its drive is the raw 3.3 V pad \u2014 adequate on the bench, marginal over long runs into 5 V WS281x pixels. GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
+  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller — the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). The screw terminal at the top of the right rail is silkscreened IO13 and marked \"spare\" — read directly off the physical board by Yona on 2026-08-02. This CORRECTS an earlier entry that called it IO12 and claimed it drove an onboard relay; that entry rested on a sketch transcription plus a vendor listing note (\"Relay configuration (to GPIO12)\") that names no terminal and may belong to a different model in the same product family. The board's own capability list mentions no relay. GPIO13 is NOT a strapping pin (classic ESP32 straps are GPIO0/2/5/12/15), so it carries none of the boot risk GPIO12 would have. It is offered here as a claimable output; note it is NOT one of the four fused/level-shifted DATA terminals, so its drive is the raw 3.3 V pad — adequate on the bench, marginal over long runs into 5 V WS281x pixels. GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
+  "soft_limits": {
+    "totalLeds": {
+      "value": 1500,
+      "measured": "2026-08-05: 5 wires x 300 LEDs (1500 total) at 29.99 fps, zero guard trips/skips/errors, 240 s telemetry soak on the dual-core pusher build (plan 2026-08-05-0901-pinmux-8wire-overlap, G1 pass incl. scope check). The binding resource is the heap, not frame time: ~89.5 B/LED of duplication across engine and output stages, and the classic's heap is two regions - watch largest_free. 8 wires must be read against this envelope (8 x ~200), never as 8 x dome strips."
+    }
+  },
   "board_label": [
     {
       "label": "IO18",
@@ -27,7 +33,7 @@
       "label": "IO2",
       "gpio": "/gpio/2",
       "status": "assigned",
-      "note": "data channel 4 (bottom); classic-ESP32 strapping pin (boot mode); must be low/floating at reset, which a WS281x data line satisfies \u2014 fine as an output once booted"
+      "note": "data channel 4 (bottom); classic-ESP32 strapping pin (boot mode); must be low/floating at reset, which a WS281x data line satisfies — fine as an output once booted"
     },
     {
       "label": "IO13",
@@ -60,7 +66,7 @@
         "IO1",
         "U0TXD"
       ],
-      "reserved_reason": "UART0 TX into the CH340K bridge \u2014 the host serial link; driving it drops the link"
+      "reserved_reason": "UART0 TX into the CH340K bridge — the host serial link; driving it drops the link"
     },
     {
       "address": "/gpio/2",
@@ -85,7 +91,7 @@
         "IO3",
         "U0RXD"
       ],
-      "reserved_reason": "UART0 RX from the CH340K bridge \u2014 the host serial link; driving it drops the link"
+      "reserved_reason": "UART0 RX from the CH340K bridge — the host serial link; driving it drops the link"
     },
     {
       "address": "/gpio/13",
@@ -164,6 +170,14 @@
     {
       "address": "/rmt/ws281x3",
       "display_label": "RMT WS281x 3",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x4",
+      "display_label": "RMT WS281x 4",
       "capabilities": [
         "rmt",
         "ws281x-output"

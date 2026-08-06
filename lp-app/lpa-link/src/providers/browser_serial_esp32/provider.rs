@@ -573,6 +573,27 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         self.manage_inner(session_id, request, events).await
     }
 
+    /// Revoke the endpoint's Web Serial grant and forget the endpoint.
+    ///
+    /// This is the ONE place a grant dies. Without it, "forget this
+    /// device" was undone by the next page load: the grant survived, the
+    /// auto-connect sweep re-enumerated the port, and the silicon-anchored
+    /// identity re-derived the same `dev_` uid, so the sighting write
+    /// recreated the registry row the user had just deleted.
+    ///
+    /// Endpoint state goes first so a failed `forget()` cannot leave this
+    /// provider handing out an endpoint over a port it no longer trusts;
+    /// re-granting mints a fresh endpoint through `request_access`.
+    /// `Ok(false)` = the grant survives (browser without `forget()`).
+    async fn forget_endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<bool, LinkError> {
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        self.endpoints.borrow_mut().remove(endpoint_id);
+        self.sessions
+            .borrow_mut()
+            .retain(|_, state| state.port_id != port_id);
+        browser_serial::forget(port_id).await
+    }
+
     async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
         // Mark the session closed and copy the port id out BEFORE awaiting
         // the JS close: no internal borrow may span the await.
@@ -642,6 +663,7 @@ fn map_firmware_flash_result(result: BrowserEsp32FlashResult) -> LinkFirmwareFla
             manifest_path: result.manifest.manifest_path,
         },
         chip_name: result.chip_name,
+        probed_mac: result.base_mac,
         logs: result.logs,
         progress: map_progress(result.progress),
     }

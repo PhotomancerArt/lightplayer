@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_virus",
+  "name": "Virus",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/virus"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#000006 #000d4b #006464 #00942a #706700 #cf2300 #e07000 #efb300 #fefa00"
+  }
+}

@@ -8,9 +8,12 @@ use lpa_studio_core::{
     UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::GradientConfig;
 
 use crate::app::node::ConfigSlotRow;
-use crate::app::node::node_story_fixtures::config_row_states_fixture;
+use crate::app::node::node_story_fixtures::{
+    config_row_states_fixture, gradient_slot_value, palette_cycle, sunset_gradient,
+};
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
@@ -99,6 +102,34 @@ pub(crate) fn published_value() -> Element {
     }
 }
 
+#[story(
+    description = "Palette rows in real row chrome: a held palette and a cycle, each drawing its strip(s) in the value cell with the summary line under them. Same row grammar as every other slot — label cell, value cell, trailing affordances — with the strip stretching the value cell instead of a struct string overflowing it."
+)]
+pub(crate) fn gradient_slot() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "palette",
+                    "Palette",
+                    gradient_slot_value(&GradientConfig::Static(sunset_gradient())),
+                )
+                .with_address(story_slot_address("palette")),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("cycle", "Cycle", gradient_slot_value(&palette_cycle()))
+                    .with_address(story_slot_address("cycle")),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
 #[story(description = "An open popup for a publishing slot showing the Published as wording.")]
 pub(crate) fn published_popup() -> Element {
     rsx! {
@@ -179,9 +210,9 @@ pub(crate) fn debug_chrome() -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
             ConfigSlotRow {
-                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
-                    .with_address(story_slot_address("controls.running"))
-                    .with_edit_entry_address(story_slot_address("controls.running"))
+                slot: UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::bool(true))
+                    .with_address(story_slot_address("test_pattern"))
+                    .with_edit_entry_address(story_slot_address("test_pattern"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -193,7 +224,7 @@ pub(crate) fn debug_chrome() -> Element {
             }
             ConfigSlotRow {
                 slot: UiConfigSlot::value(
-                    "controls.rate",
+                    "probe.rate",
                     "Rate",
                     UiSlotValue::f32(2.0).with_editor(UiSlotEditorHint::Slider {
                         min: 0.0,
@@ -201,8 +232,8 @@ pub(crate) fn debug_chrome() -> Element {
                         step: Some(0.05),
                     }),
                 )
-                    .with_address(story_slot_address("controls.rate"))
-                    .with_edit_entry_address(story_slot_address("controls.rate"))
+                    .with_address(story_slot_address("probe.rate"))
+                    .with_edit_entry_address(story_slot_address("probe.rate"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -224,9 +255,9 @@ pub(crate) fn debug_detail_popup() -> Element {
     rsx! {
         div { class: "tw:min-h-72",
             ConfigSlotRow {
-                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(false))
-                    .with_address(story_slot_address("controls.running"))
-                    .with_edit_entry_address(story_slot_address("controls.running"))
+                slot: UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::bool(false))
+                    .with_address(story_slot_address("test_pattern"))
+                    .with_edit_entry_address(story_slot_address("test_pattern"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -305,8 +336,8 @@ pub(crate) fn editable_clean_controls() -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
             ConfigSlotRow {
-                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
-                    .with_address(story_slot_address("controls.running"))
+                slot: UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::bool(true))
+                    .with_address(story_slot_address("test_pattern"))
                     .with_state(UiSlotFieldState::editable().with_debug(true)),
                 depth: 0,
                 index: 0,
@@ -314,7 +345,7 @@ pub(crate) fn editable_clean_controls() -> Element {
             }
             ConfigSlotRow {
                 slot: UiConfigSlot::value(
-                    "controls.rate",
+                    "probe.rate",
                     "Rate",
                     UiSlotValue::f32(1.0).with_editor(UiSlotEditorHint::Slider {
                         min: 0.0,
@@ -322,7 +353,7 @@ pub(crate) fn editable_clean_controls() -> Element {
                         step: Some(0.05),
                     }),
                 )
-                    .with_address(story_slot_address("controls.rate"))
+                    .with_address(story_slot_address("probe.rate"))
                     .with_state(UiSlotFieldState::editable().with_debug(true)),
                 depth: 0,
                 index: 1,
@@ -566,7 +597,7 @@ pub(crate) fn rejected_edit() -> Element {
     rsx! {
         ConfigSlotRow {
             slot: UiConfigSlot::value(
-                "controls.rate",
+                "probe.rate",
                 "Rate",
                 UiSlotValue::f32(9.0).with_editor(UiSlotEditorHint::Slider {
                     min: 0.0,
@@ -574,7 +605,7 @@ pub(crate) fn rejected_edit() -> Element {
                     step: Some(0.05),
                 }),
             )
-                .with_address(story_slot_address("controls.rate"))
+                .with_address(story_slot_address("probe.rate"))
                 .with_state(
                     UiSlotFieldState::editable()
                         .with_dirty(UiNodeDirtyState::Error)

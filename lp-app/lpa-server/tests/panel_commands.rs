@@ -20,7 +20,10 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer, Project};
-use lpc_model::{AsLpPath, LpPathBuf, LpValue};
+use lpc_model::{
+    AsLpPath, Colorspace, FromLpValue, Gradient, GradientConfig, GradientStop, InterpMethod,
+    LpPathBuf, LpValue, ToLpValue,
+};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::{
@@ -180,6 +183,29 @@ fn probe(project: &mut Project) -> WireBindingGraph {
     graph
 }
 
+/// One channel's owning scope.
+fn channel_scope(graph: &WireBindingGraph, name: &str) -> WireScopeRef {
+    graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == name)
+        .unwrap_or_else(|| panic!("no {name} channel in the graph"))
+        .scope
+        .expect("channels list scoped")
+}
+
+/// One channel's current resolved value.
+fn channel_value(graph: &WireBindingGraph, name: &str) -> Option<LpValue> {
+    graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == name)?
+        .value
+        .as_ref()?
+        .value
+        .clone()
+}
+
 /// The `time` channel's scope and current resolved value.
 fn time_channel(graph: &WireBindingGraph) -> (WireScopeRef, Option<LpValue>) {
     let channel = graph
@@ -233,7 +259,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
     server
@@ -259,7 +285,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
             br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }
@@ -328,6 +354,185 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
             .map(|c| &c.name)
             .collect::<alloc::vec::Vec<_>>()
     );
+}
+
+/// The palette chooser's write path (M4 P3), end to end on the wire shape
+/// Studio dispatches: a panel write whose payload is a whole
+/// `GradientConfig` — a STRUCT, where every other panel command carries a
+/// scalar. The engine's `resolve_gradient_config` takes a driven config
+/// whole (never as a partial overlay), so what has to round-trip is the
+/// entire record: kind tag, the gradient set, and both timings.
+#[test]
+fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
+    let (mut server, project_path) = server_with_palette_shader_project("panel-palette-write");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    let project = project_mut(&mut server, handle);
+    let scope = channel_scope(&probe(project), "palette");
+
+    let picked = GradientConfig::Cycle {
+        set: vec![solid([1.0, 0.0, 0.0]), solid([0.0, 0.4, 1.0])],
+        step_seconds: 20.0,
+        fade_seconds: 0.5,
+    };
+    let response = project.panel_write(&WirePanelWriteRequest {
+        scope,
+        channel: "palette".to_string(),
+        value: picked.to_lp_value(),
+        ttl_ms: None,
+    });
+    assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
+
+    let graph = probe(project);
+    let held = channel_value(&graph, "palette").expect("the channel resolves to the held palette");
+    assert_eq!(
+        GradientConfig::from_lp_value(&held).expect("the payload is still a GradientConfig"),
+        picked,
+        "the picked palette survives the wire whole — set, count, and timings"
+    );
+
+    // And clearing releases it, exactly like a scalar control.
+    let response = project.panel_clear(&WirePanelClearRequest::Channel {
+        scope,
+        channel: "palette".to_string(),
+    });
+    assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 0 });
+    assert_ne!(
+        channel_value(&probe(project), "palette"),
+        Some(picked.to_lp_value()),
+        "clearing drops the panel's palette"
+    );
+}
+
+/// The same gradient panel write, read back through the REAL wire transport
+/// — the budgeted project-read stream sink — instead of calling the engine
+/// probe directly. This is browser Studio's actual read path after a
+/// palette pick, and it is where the padded §5 storage form used to fail
+/// the whole read: the probe echoes the held channel value raw inside one
+/// event, and a padded `GradientConfig` (~17.7 KiB) alone exceeded
+/// `PROJECT_READ_FRAME_MAX_BYTES` ("project-read event exceeded frame
+/// budget of 16384 bytes"). The stops-literal storage form (ADR
+/// 2026-08-05-gradient-stops-string-storage) is what keeps this passing.
+#[test]
+fn a_gradient_panel_write_survives_a_wire_project_read() {
+    let (mut server, project_path) = server_with_palette_shader_project("panel-palette-wire-read");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    let project = project_mut(&mut server, handle);
+    let scope = channel_scope(&probe(project), "palette");
+    let picked = GradientConfig::Cycle {
+        set: vec![solid([1.0, 0.0, 0.0]), solid([0.0, 0.4, 1.0])],
+        step_seconds: 20.0,
+        fade_seconds: 0.5,
+    };
+    let response = project.panel_write(&WirePanelWriteRequest {
+        scope,
+        channel: "palette".to_string(),
+        value: picked.to_lp_value(),
+        ttl_ms: None,
+    });
+    assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
+
+    let messages = vec![WireMessage::Client(ClientMessage {
+        id: 13,
+        msg: ClientRequest::ProjectRead {
+            handle,
+            request: ProjectReadRequest {
+                since: None,
+                queries: Vec::new(),
+                probes: vec![lpc_wire::ProjectProbeRequest::BindingGraph(
+                    BindingGraphProbeRequest {
+                        include_values: true,
+                    },
+                )],
+            },
+        },
+    })];
+    let mut transport = VecTransport::default();
+    block_on(server.tick_and_send(16, messages, &mut transport)).expect("tick");
+    let events: Vec<ProjectReadEvent> = transport
+        .sent
+        .into_iter()
+        .filter_map(|message| match message.msg {
+            WireServerMsgBody::ProjectRead { events } => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let errors: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            ProjectReadEvent::Error { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "the wire read after a palette pick must not fail: {errors:?}"
+    );
+}
+
+/// One solid-color gradient, so an assertion is about the palette path
+/// rather than about a transfer function.
+fn solid(c: [f32; 3]) -> Gradient {
+    Gradient {
+        space: Colorspace::LinearSrgb,
+        method: InterpMethod::Linear,
+        stops: vec![GradientStop { at: 0.0, c }, GradientStop { at: 1.0, c }],
+    }
+}
+
+/// One shader whose `palette` slot consumes `bus:palette` — the wiring that
+/// makes a palette swatch a PANEL control rather than a card-local one.
+fn server_with_palette_shader_project(name: &str) -> (LpServer, LpPathBuf) {
+    let (mut server, project_path) = server_with_clock_project(name);
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("module.json").as_path(),
+            br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "tint": { "ref": "./tint.json" }
+  }
+}
+"#,
+        )
+        .expect("write module");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("tint.json").as_path(),
+            br#"
+{
+  "kind": "Shader",
+  "source": "tint.glsl",
+  "float_mode": "fixed",
+  "bindings": { "palette": { "source": "bus:palette" } },
+  "consumed": {
+    "palette": {
+      "kind": "palette", "value": "sampler2D",
+      "label": "Palette", "description": ""
+    }
+  }
+}
+"#,
+        )
+        .expect("write shader");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("tint.glsl").as_path(),
+            b"layout(binding = 0) uniform vec2 outputSize;\n\
+              layout(binding = 1) uniform sampler2D palette;\n\
+              vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }",
+        )
+        .expect("write glsl");
+    (server, project_path)
 }
 
 #[test]

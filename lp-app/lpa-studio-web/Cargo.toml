@@ -24,6 +24,10 @@ lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
 lpa-agent = { path = "../lpa-agent" }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
+# The Gradient value type and its checked-in catalog + sampling helpers,
+# for GradientStripCanvas.
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpa-palettes = { path = "../lpa-palettes" }
 # Story fixtures build lamp layouts from the shared mapping corpus.
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, optional = true }
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
@@ -78,6 +82,8 @@ web-sys = { version = "0.3", features = [
     "StorageManager",
     "Url",
     "VisibilityState",
+    "CssStyleDeclaration",
+    "DomRect",
     "Window",
     "Worker",
 ] }

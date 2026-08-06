@@ -92,7 +92,7 @@ fn mutation_ack_and_overlay_read_carry_base_value_displays() {
         read.base_values,
         vec![(
             ArtifactLocation::file("/clock.json"),
-            SlotPath::parse("controls.rate").expect("rate path"),
+            SlotPath::parse("transport.rate").expect("rate path"),
             "1.0".to_string(),
         )],
         "overlay reads carry base displays for every resolvable pending path"
@@ -196,7 +196,7 @@ fn rate_mutation(id: u64, rate: f32) -> WireOverlayMutationRequest {
         mutation: MutationOp::PutSlotEdit {
             artifact: ArtifactLocation::file("/clock.json"),
             edit: SlotEdit::assign_value(
-                SlotPath::parse("controls.rate").expect("rate path"),
+                SlotPath::parse("transport.rate").expect("rate path"),
                 LpValue::F32(rate),
             ),
         },
@@ -253,7 +253,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
     server
@@ -279,7 +279,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
             br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }

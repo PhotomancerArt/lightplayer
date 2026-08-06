@@ -108,6 +108,13 @@ pub fn PopoverButton(
     /// centered-glyph treatment, so nothing shifts when the popover opens.
     #[props(default = false)]
     layer_keeps_layout: bool,
+    /// Lock the panel's width to the anchor's VISIBLE width (the measured
+    /// rect plus the open-state inflate), overriding any width in
+    /// `popup_class`. For anchored popovers that read as the control's own
+    /// body — a panel a-few-px narrower than its anchor reads as a mistake,
+    /// and welding only one edge leaves a shelf on the other.
+    #[props(default = false)]
+    match_anchor_width: bool,
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
@@ -160,7 +167,21 @@ pub fn PopoverButton(
     } else {
         (String::new(), String::new())
     };
-    let panel_style = format!("{} {panel_clip}", current_position.style());
+    // The width lock measures the anchor's rect and adds the open-state
+    // inflate so both panel edges weld with the swollen outline; the panel's
+    // ResizeObserver reports the locked width back into `panel_size`, so the
+    // centered alignment lands on exactly the anchor's footprint.
+    let panel_width_style = if match_anchor_width {
+        trigger_rect()
+            .map(|rect| format!("width: {:.1}px;", rect.width + 2.0 * TRIGGER_INFLATE_PX))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let panel_style = format!(
+        "{} {panel_clip} {panel_width_style}",
+        current_position.style()
+    );
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());

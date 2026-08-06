@@ -1,17 +1,21 @@
 ---
-status: carried
+status: resolved
 since: 2026-05-12
 logged: 2026-08-01
+resolved: 2026-08-05
 area: clock node / studio node faces
 related:
   - "../adr/2026-08-01-debug-slots-taxonomy.md"
   - "../adr/2026-07-26-node-card-faces.md"
   - "plan notes: ~/.photomancer/planning/lp2025/2026-07-31-1736-ephemeral-slots/notes.md (S9, D6)"
+  - "plan: ~/.photomancer/planning/lp2025/2026-08-04-2355-clock-tape-hero/"
 ---
 # The clock's transport controls have no transport UI
 
-**Shape** — `ClockControls`
-(`lp-core/lpc-model/src/nodes/clock/clock_controls.rs`) exposes
+**Shape** — `ClockTransport`
+(`lp-core/lpc-model/src/nodes/clock/clock_transport.rs`, named
+`ClockControls` at `controls` until plan
+`2026-08-04-2355-clock-tape-hero` P1) exposes
 `running`, `rate`, and `scrub_offset_seconds` as Debug-role slots, and
 the engine consumes all three every frame. The UI for them is the
 generic slot renderer: a toggle, a number, and — for the scrub offset —
@@ -36,7 +40,7 @@ that it mostly is not done; the scrub slot reads as unfinished; and the
 `Debug` category carries an example that undercuts its own definition,
 which costs explanation every time the taxonomy is taught.
 
-**Workarounds** — Set `controls.scrub_offset_seconds` in the clock
+**Workarounds** — Set `transport.scrub_offset_seconds` in the clock
 card's Debug section and read the resulting time from the clock's
 produced state; Clear (per value or per node) returns to live time.
 
@@ -46,9 +50,39 @@ produced state; Clear (per value or per node) returns to live time.
   Debug section (P3) at least makes the controls findable and marks the
   system as debug-driven while an offset is held; the transport gap is
   untouched.
+- 2026-08-04 — **the engine half now exists.** The TimeProduct work
+  (plan `2026-08-04-0003-timeproduct-m2-core`, P8) added a breakpoint
+  log to the timebase store: per-phasor `Breakpoint { t_eff, phase,
+  cycle, rate }` segments behind the default-on, host-only `scrub-log`
+  feature on `lpc-engine`, trimmed to a 30 s window. Reads at a
+  scrubbed-back effective time are answered by closed-form segment
+  lookup and are **bit-exact** against the values the live path
+  produced, so a future scrub bar can move time freely without the
+  motion changing. Devices keep the forward-only integrator with no
+  log (nm/strings on the rv32 ELF find no log symbols), and follow a
+  backward scrub through the clock's now-signed `delta_seconds`.
+  Nothing user-facing changed: the only way to drive it is still the
+  generic Debug slider, so the exit criteria below are untouched — the
+  half that was hard is simply no longer the blocker.
+- 2026-08-05 — **RESOLVED by the tape transport** (plan
+  `2026-08-04-2355-clock-tape-hero`, P3–P5 on PR #345, after the spike's
+  two gate rounds chose the tape direction). The clock card's OUTPUT
+  hero is now a transport instrument: a scrolling tape strip under a
+  fixed playhead (drag = scrub, px = seconds), a log ׼–×8 speed fader
+  with magnetic octave detents, run/pause, calm m:ss digits, and an
+  amber off-live chip with tap-to-return. The three slots stay
+  `SlotRole::Debug` (transient by design — Q2) but their generic rows
+  no longer render anywhere: the face claims them
+  (`retire_face_claimed_debug_rows`, `node_controller.rs`), and the
+  tape carries the debug affordance itself — changed controls tint
+  attention-orange and one `clear` affordance drops every override.
+  The surface is card-level (and P6 exposes it on the module panel),
+  not the project level the exit criteria guessed — the clock IS the
+  project's timebase, so its card is the transport's natural home.
 
-**Exit criteria** — A transport surface exists (scrub/rate/run at the
-project level, with a position readout), the clock's three controls move
-onto it, and the `Debug` naming re-check in
-`../adr/2026-08-01-debug-slots-taxonomy.md` (follow-up (a)) can be
-answered against a Debug category that holds only diagnostics.
+**Exit criteria** — MET 2026-08-05, with one deliberate refinement: the
+transport surface lives on the clock card (+ module panel, P6) rather
+than a separate project-level home. The `Debug` naming re-check
+(taxonomy follow-up (a)) is answered by this plan's ADR (P7): with the
+transport rows retired into a real instrument, the drawer's remaining
+in-tree example is pure diagnostics (`OutputDef::test_pattern`).

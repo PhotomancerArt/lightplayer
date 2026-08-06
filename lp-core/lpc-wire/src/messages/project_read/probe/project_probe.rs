@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use super::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
     ControlProductProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
+    TimebaseProbeRequest, TimebaseProbeResult,
 };
 
 /// Request-scoped diagnostic work attached to a project read.
@@ -15,6 +16,7 @@ pub enum ProjectProbeRequest {
     RenderProduct(RenderProductProbeRequest),
     ControlProduct(ControlProductProbeRequest),
     BindingGraph(BindingGraphProbeRequest),
+    Timebase(TimebaseProbeRequest),
     // Future: ShaderPixel(ShaderPixelProbeRequest),
     // Future: ShaderTrace(ShaderTraceProbeRequest),
     // Future: ControlBuffer(ControlBufferProbeRequest),
@@ -30,6 +32,7 @@ pub enum ProjectProbeResult {
     RenderProduct(RenderProductProbeResult),
     ControlProduct(ControlProductProbeResult),
     BindingGraph(BindingGraphProbeResult),
+    Timebase(TimebaseProbeResult),
     // Future: ShaderPixel(ShaderPixelProbeResult),
     // Future: ShaderTrace(ShaderTraceProbeResult),
     // Future: ControlBuffer(ControlBufferProbeResult),
@@ -79,7 +82,7 @@ impl ProjectProbeResult {
                 }
                 Err(result) => Err(Self::ControlProduct(result)),
             },
-            Self::BindingGraph(_) => Err(self),
+            Self::BindingGraph(_) | Self::Timebase(_) => Err(self),
         }
     }
 }

@@ -1,0 +1,14 @@
+{
+  "id": "fastled_party",
+  "name": "Party",
+  "license": {
+    "spdx": "MIT",
+    "author": "FastLED (Daniel Garcia, Mark Kriegsman et al.)",
+    "source_url": "https://github.com/FastLED/FastLED/blob/master/src/colorpalettes.cpp.hpp"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#5500ab #84007c #b5004b #e5001b #e81700 #b84700 #ab7700 #abab00 #ab5500 #dd2200 #f2000e #c2003e #8f0071 #5f00a1 #2f00d0 #0007f9"
+  }
+}

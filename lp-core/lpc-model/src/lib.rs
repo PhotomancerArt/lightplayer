@@ -44,6 +44,7 @@ pub mod slot_views {
 }
 
 pub mod artifact;
+pub mod color;
 pub mod feature;
 pub mod hardware_endpoint_spec;
 pub mod manifest;
@@ -56,6 +57,7 @@ pub mod resources;
 pub mod server;
 pub mod slots;
 pub mod sync;
+pub mod time;
 
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
@@ -76,8 +78,14 @@ pub use binding::{
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::{
-    ChannelName, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS,
-    WellKnownChannel, well_known_channel,
+    ChannelName, PALETTE_CHANNEL, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL,
+    WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
+};
+pub use color::{
+    COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_CONFIG_SHAPE_NAME, GRADIENT_SHAPE_NAME, Gradient,
+    GradientConfig, GradientError, GradientStop, INTERP_METHOD_SHAPE_NAME, InterpMethod,
+    MAX_CYCLE_SET, MAX_GRADIENT_STOPS, MIN_CYCLE_SET, MIN_GRADIENT_STOPS, StopsParseError,
+    gradient_config_lp_type, gradient_lp_type, parse_stops, print_stops,
 };
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Legacy semantic value kind used by the pre-slot property model.
@@ -110,13 +118,13 @@ pub use node::{
 };
 pub use nodes::{
     ArtifactPathResolutionError, Brightness, ButtonDef, ButtonDefView, ButtonState,
-    ButtonStateView, ChannelMetaDef, ChannelMetaDefView, ClockControls, ClockDef, ClockDefView,
-    ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, ControlRadioDef,
-    ControlRadioDefView, ControlRadioState, ControlRadioStateView, FixtureDef, FixtureDefView,
-    FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView,
-    FloatMode, FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType,
-    MappingConfig, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OutputChannelDef,
-    OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    ButtonStateView, CLOCK_TRANSPORT_SHAPE_NAME, ChannelMetaDef, ChannelMetaDefView, ClockDef,
+    ClockDefView, ClockState, ClockTransport, ColorOrder, ComputeShaderDef, ComputeShaderDefView,
+    ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView, FixtureDef,
+    FixtureDefView, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, FixtureState,
+    FixtureStateView, FloatMode, FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite,
+    LampType, MappingConfig, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter,
+    OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
     PlaylistEntryView, PlaylistState, PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL,
     STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
@@ -130,7 +138,7 @@ pub use nodes::{
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
     ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind,
-    ProductRef, VisualProduct,
+    ProductRef, TimeProduct, VisualProduct,
 };
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
@@ -154,8 +162,8 @@ pub use slot::{
     ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
     PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
     RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, ToLpValue, U32List, U32ListSlot, ValueEditorHint, ValueRootError,
-    VisualProductSlot, Xy, XySlot,
+    SlotValueShape, TimeProductSlot, ToLpValue, U32List, U32ListSlot, ValueEditorHint,
+    ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
@@ -181,5 +189,9 @@ pub use slot::{
     lookup_slot_data_and_shape, lookup_slot_data_mut, lp_value_matches_type, remove_slot_map_entry,
     resolve_slot_role, role_matches_direction, set_slot_option_none, set_slot_option_some_default,
     set_slot_value, set_slot_variant_default, slot_data_revision,
+};
+pub use time::{
+    DEFAULT_PHASOR_PERIOD_SECONDS, PHASOR_CONFIG_SHAPE_NAME, PhasorConfig, SECONDS_SHAPE_NAME,
+    WAVEFORM_SHAPE_NAME, Waveform, seconds_shape, static_seconds_shape,
 };
 pub use value::value_path::ValuePath;

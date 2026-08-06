@@ -12,7 +12,7 @@ use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -189,7 +189,7 @@ fn load_and_trivial_apply_produce_identical_scope_tables() {
     // Trivial content change: touch the clock def body.
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();
@@ -249,7 +249,7 @@ fn load_and_apply_produce_identical_bus_wiring() {
     let (mut engine, mut registry) = rt.into_parts();
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();
@@ -318,7 +318,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     // pinned: writer accounting that omits module publishes works at
     // depth 1 by coincidence and resolves C to ROOT's visual at depth 2.
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -438,7 +438,7 @@ fn r7_authored_export_and_root_module_runtime() {
     // the export's name; the root wears a real module runtime (its output
     // interface exists like any module's).
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -539,7 +539,7 @@ fn panel_writer_survives_apply_project_changes() {
 
     fs.write_file(
         "/clock.json".as_path(),
-        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+        br#"{ "kind": "Clock", "transport": { "rate": 2.0 } }"#,
     )
     .expect("rewrite clock");
     let shapes = engine.slot_shapes().clone();

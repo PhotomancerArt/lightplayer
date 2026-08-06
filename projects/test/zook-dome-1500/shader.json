@@ -1,0 +1,20 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": { "period_seconds": 20.0, "waveform": "ramp", "phase_offset": 0.0 },
+      "label": "Phase",
+      "description": "Base chase phase; bands ride integer harmonics of it"
+    }
+  }
+}

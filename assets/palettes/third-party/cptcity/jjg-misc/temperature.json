@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_temperature",
+  "name": "Temperature",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/temperature"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "step",
+    "stops": "#1316b4@0 #2331c7@0.043478 #2d42c9@0.086957 #3755cb@0.130435 #365fc6@0.173913 #466fcf@0.217391 #507dd2@0.26087 #598dd6@0.304348 #629bd9@0.347826 #7eb9e9@0.391304 #a5d7ff@0.434783 #c4e5b7@0.478261 #b4dfa8@0.521739 #b0d793@0.565217 #c7cf74@0.608696 #dbc85b@0.652174 #debd50@0.695652 #d9a449@0.73913 #d39242@0.782609 #d1853e@0.826087 #cc7139@0.869565 #ca6232@0.913043 #c74528@0.956522"
+  }
+}

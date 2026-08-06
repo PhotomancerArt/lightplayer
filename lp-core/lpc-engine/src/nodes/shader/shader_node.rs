@@ -17,15 +17,17 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, Revision, ShaderMapKeyDef,
-    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
+    AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
+    OptionSlot, PhasorConfig, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
+    ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TimeProduct, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
+use crate::dataflow::timebase::PhasorKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
@@ -35,7 +37,16 @@ use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, Visual
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
+use super::palette_bake_cache::{PaletteBake, PaletteBakeCache};
+use super::palette_eval::{
+    PaletteCyclePosition, palette_cycle_gradients, palette_cycle_position, palette_frame_zero,
+    palette_phasor_config,
+};
+use super::phasor_eval::{phasor_frame_zero, shape_phasor};
 use super::shader_input_materialize::materialize_shader_input;
+
+/// The well-known channel a scope's timebase lives on.
+const TIME_CHANNEL: &str = "time";
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -95,6 +106,11 @@ pub struct ShaderNode {
     /// frame — a stale window from a tick where this node was not demanded
     /// must not authorize a compile long after the pressure broadcast.
     compile_window: Option<Revision>,
+    /// Baked palette strips for this node's `sampler2D` uniforms, keyed by
+    /// the value hash of what was resolved for them
+    /// ([`PaletteBakeCache`]). Rebuildable: dropped under memory pressure
+    /// and re-baked on the next tick.
+    palette_cache: PaletteBakeCache,
     state: ShaderState,
 }
 
@@ -117,6 +133,7 @@ impl ShaderNode {
             needs_compile: true,
             compile_window_requested: false,
             compile_window: None,
+            palette_cache: PaletteBakeCache::new(),
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -226,6 +243,7 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
+            textures: palette_texture_specs(&self.consumed_slots),
             ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
         };
 
@@ -350,8 +368,28 @@ impl ShaderNode {
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut uniforms = Vec::new();
         let mut failures = Vec::new();
+        let mut timebase = TimeProductCache::new();
+        let palette_slots = palette_slot_count(&self.consumed_slots);
         for (name, slot) in &self.consumed_slots.entries {
-            let (value, failure) = resolve_or_default_input(ctx, name, slot, "visual shader")?;
+            // Palette uniforms are textures, not values: they resolve to a
+            // gradient config, bake to a strip, and bind as a sampler. The
+            // value path below has no shape that could carry one.
+            if slot.kind.value().is_texture() {
+                let (value, failure) =
+                    resolve_palette_input(ctx, name, slot, &mut self.palette_cache, palette_slots);
+                if let Some(failure) = failure {
+                    failures.push((name.clone(), failure));
+                }
+                // A palette with no texture this tick contributes no uniform
+                // rather than a wrong one; the render path's frame-zero bake
+                // is what keeps the uniform set complete.
+                if let Some(value) = value {
+                    uniforms.push((name.clone(), value));
+                }
+                continue;
+            }
+            let (value, failure) =
+                resolve_or_default_input(ctx, name, slot, "visual shader", &mut timebase)?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
@@ -364,6 +402,53 @@ impl ShaderNode {
             self.node_id,
             "visual-shader",
         );
+        Ok(())
+    }
+
+    /// Give every palette uniform a texture before the shader runs, even one
+    /// no tick has resolved yet.
+    ///
+    /// The backend treats a uniform its generated header declares but the
+    /// uniform set omits as a hard error, and a `sampler2D` cannot be
+    /// answered from [`default_uniforms`] the way a `float` can — there is no
+    /// graphics backend at node construction to allocate a strip with. So the
+    /// frame-zero answer is baked here instead, on the first render, from the
+    /// slot's own config at [`palette_frame_zero`]: deterministic, allocated
+    /// once, and the same strip a resolved tick would land on when the
+    /// timebase has not moved. Mirrors `phasor_frame_zero`.
+    fn ensure_palette_uniforms(&mut self, ctx: &RenderContext<'_>) -> Result<(), NodeError> {
+        let palette_slots = palette_slot_count(&self.consumed_slots);
+        if palette_slots == 0 {
+            return Ok(());
+        }
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        for (name, slot) in &self.consumed_slots.entries {
+            if !slot.kind.value().is_texture()
+                || self
+                    .visual_uniforms
+                    .iter()
+                    .any(|(uniform, _)| uniform == name)
+            {
+                continue;
+            }
+            let config = slot.gradient_config();
+            let position = palette_frame_zero(&config);
+            let Some((from, to)) = palette_cycle_gradients(&config, position) else {
+                continue;
+            };
+            let bake = PaletteBake {
+                from,
+                to,
+                mix_steps: position.mix_steps,
+            };
+            let value = self
+                .palette_cache
+                .uniform_for(graphics, &bake, palette_slots)
+                .map_err(err_ctx("bake frame-zero palette"))?;
+            self.visual_uniforms.push((name.clone(), value));
+        }
         Ok(())
     }
 }
@@ -417,9 +502,15 @@ impl NodeRuntime for ShaderNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Nothing droppable: `shader` is the compiled product (keep-last-good
-        // contract, not a rebuildable cache), and the source string is the
-        // input for the next compile.
+        // `shader` is the compiled product (keep-last-good contract, not a
+        // rebuildable cache) and the source string is the input for the next
+        // compile, so neither goes. The palette strips do: they are a pure
+        // function of resolved values, and the next tick re-bakes exactly the
+        // ones still in use. Dropping the textures also clears the uniform
+        // values that pointed at them, so nothing keeps a stale descriptor.
+        self.palette_cache.clear();
+        self.visual_uniforms
+            .retain(|(_, value)| !matches!(value, LpsValueF32::Texture2D(_)));
         Ok(())
     }
 
@@ -507,6 +598,29 @@ pub(super) fn format_compile_stats(
     )
 }
 
+/// Hot-apply a uniform's authored record onto the running node's copy.
+///
+/// Only the fields the ENGINE itself reads are synced. This copy feeds
+/// header generation, the compute ABI descriptor, and
+/// `materialize_shader_input`; it is never published to a client, because
+/// `snapshot_node_slots` sends the registry's authored def as the node's
+/// `.def` root and a shader's `.state` root is just its output product.
+///
+/// Three fields of `ShaderSlotDef` are therefore left out on purpose —
+/// each verified inert, not overlooked:
+///
+/// - `step` and `unit` are panel presentation. The studio derives its face
+///   from that authored `.def` root, so an edit to either already reaches
+///   the panel live; no engine path consults them. Copying them would buy
+///   nothing and, through this function's return value, force a full GLSL
+///   recompile on a presentation-only edit.
+/// - `default_bind` is a binding, and bindings are load-time
+///   materializations rather than resolver-read values. An edit to one
+///   already takes effect: every project apply clears and re-registers the
+///   whole binding table from current defs, precisely so that a changed
+///   `default_bind` lands (`Engine::apply_project_changes`). Copying the
+///   endpoint here would register nothing and leave the runtime record
+///   claiming a wire the binding table does not have.
 pub(super) fn sync_shader_slot_def_from_authored(
     ctx: &mut TickContext<'_>,
     base_path: &str,
@@ -523,21 +637,61 @@ pub(super) fn sync_shader_slot_def_from_authored(
         return Ok(changed);
     };
     changed |= set_slot_if_changed(&mut slot.value, value);
-    if let Some(key) = slot.key.data.as_mut() {
-        if let Some(value) = try_read_authored_value::<ShaderMapKeyDef>(
+    // `key` and `mapping` describe map STORAGE — `materialize_map_input`
+    // is the only reader, and a value slot never reaches it. Probing them
+    // on a value slot would ask the resolver for two paths that cannot
+    // exist, and every distinct query key it is handed persists a route
+    // entry across frames (ADR 2026-07-31), so the dead probes would cost
+    // resident bytes on every project forever.
+    let is_map = matches!(slot.kind.value(), ShaderSlotKind::Map);
+    if is_map {
+        changed |= sync_optional_value_from_authored::<ShaderMapKeyDef>(
             ctx,
             &alloc::format!("{base_path}.key.some"),
-        )? {
-            changed |= set_slot_if_changed(key, value);
-        }
+            &mut slot.key,
+        )?;
     }
-    if let Some(default) = slot.default.data.as_mut() {
-        if let Some(value) =
-            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.default.some"))?
-        {
-            changed |= set_slot_if_changed(default, value);
-        }
+    // The phasor config is a value LEAF (a `PhasorConfig` struct), not a
+    // record of sub-slots, so the whole config syncs in one read — which is
+    // what makes a live period drag hot-apply without a reload. Creation-
+    // capable for the value→phasor kind transition (the authored side has a
+    // config the runtime option lacks), and gated like `key`/`mapping`:
+    // probing `.phasor.some` on a non-phasor slot would persist a dead
+    // resolver route entry per slot forever (ADR 2026-07-31).
+    if matches!(slot.kind.value(), ShaderSlotKind::Phasor) {
+        changed |= sync_optional_value_from_authored::<PhasorConfig>(
+            ctx,
+            &alloc::format!("{base_path}.phasor.some"),
+            &mut slot.phasor,
+        )?;
     }
+    // The gradient config syncs the same way — one read of a value leaf, so a
+    // live palette edit hot-applies — but its result is deliberately NOT
+    // folded into `changed`. `changed` means *compile*-affecting, and a
+    // palette's compile contract is its `TextureBindingSpec`, which depends
+    // on the slot's KIND alone (`palette_texture_specs`). Or-ing it in would
+    // JIT-recompile the shader on every frame of a color-picker drag, for a
+    // spec that is byte-identical before and after.
+    if matches!(slot.kind.value(), ShaderSlotKind::Palette) {
+        sync_optional_value_from_authored::<GradientConfig>(
+            ctx,
+            &alloc::format!("{base_path}.gradient.some"),
+            &mut slot.gradient,
+        )?;
+    }
+    changed |= sync_optional_value_from_authored::<f32>(
+        ctx,
+        &alloc::format!("{base_path}.default.some"),
+        &mut slot.default,
+    )?;
+    // `min` and `max` deliberately keep the update-only shape: they belong
+    // with `step` and `unit` above. The only reader of either
+    // (`compute_shader_state::value_shape_for_slot`, for the Slider-vs-Number
+    // editor hint) shapes a compute node's PRODUCED slots, and this function
+    // only ever walks CONSUMED ones — so a created option here would have no
+    // reader, while the probe that creates it would persist a resolver route
+    // entry on every value slot forever (measured: ~223 B each). The panel
+    // gets a newly authored range from the authored `.def` root regardless.
     if let Some(min) = slot.min.data.as_mut() {
         if let Some(value) =
             try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
@@ -550,6 +704,23 @@ pub(super) fn sync_shader_slot_def_from_authored(
             try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
         {
             changed |= set_slot_if_changed(max, value);
+        }
+    }
+    // `mapping` is an OptionSlot of a RECORD, not of a value slot, so it
+    // cannot go through the helper: creation needs a whole struct before
+    // the per-field reads below have anywhere to land. `kind` stands in
+    // for "the authored side has a mapping at all" — the remaining fields
+    // then sync onto the placeholder exactly as they would onto a loaded
+    // record.
+    if is_map && slot.mapping.data.is_none() {
+        if let Some(kind) = try_read_authored_value::<ShaderSlotMappingKind>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.kind"),
+        )? {
+            let mut mapping = ShaderSlotMappingDef::default();
+            mapping.kind.set(kind);
+            slot.mapping = OptionSlot::some(mapping);
+            changed = true;
         }
     }
     if let Some(mapping) = slot.mapping.data.as_mut() {
@@ -643,6 +814,39 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
     T::from_lp_value(value.value())
         .map(Some)
         .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+/// Sync one optional authored field onto the runtime slot def, CREATING
+/// the option when the runtime copy does not have one yet.
+///
+/// Creation is the point. An `if let Some(existing) = slot.data.as_mut()`
+/// guard can only UPDATE an option that already exists, so a uniform
+/// authored without a `default` (or `min`/`max`/`key`) and later given one
+/// in a live authoring edit kept its `none` until the project reloaded —
+/// and `default` is engine-read: `materialize_value_input` falls back to
+/// `slot.default_value()` whenever the binding does not resolve, so the
+/// new default silently did not take effect on the running node.
+///
+/// Absence on the authored side stays "leave as loaded": a host with no
+/// authored def (a unit fake) must not have its fields wiped.
+fn sync_optional_value_from_authored<T>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+    slot: &mut OptionSlot<ValueSlot<T>>,
+) -> Result<bool, NodeError>
+where
+    T: lpc_model::FromLpValue + PartialEq,
+{
+    let Some(value) = try_read_authored_value::<T>(ctx, path)? else {
+        return Ok(false);
+    };
+    Ok(match slot.data.as_mut() {
+        Some(existing) => set_slot_if_changed(existing, value),
+        None => {
+            *slot = OptionSlot::some(ValueSlot::new(value));
+            true
+        }
+    })
 }
 
 pub(super) fn set_slot_if_changed<T>(slot: &mut ValueSlot<T>, value: T) -> bool
@@ -787,6 +991,7 @@ impl RenderNode for ShaderNode {
                 .map_err(err_ctx("clear render target"))?;
             return Ok(());
         }
+        self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
         let shader = self
             .shader
@@ -832,6 +1037,7 @@ impl RenderNode for ShaderNode {
                 .map_err(err_ctx("clear sample target"))?;
             return Ok(());
         }
+        self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(
             request.output_width,
             request.output_height,
@@ -878,20 +1084,401 @@ fn fuel_exhausted_failure(trap: &lp_gfx::ShaderFuelTrap) -> Result<(), NodeError
     Err(NodeError::msg(format!("{trap}")))
 }
 
+/// The uniform set a shader renders with before its first tick.
+///
+/// A uniform the backend's generated header declares but the frame-0 set
+/// omits is a hard backend error, so every kind that declares a `float`
+/// uniform must answer here — including the timebase kinds, whose store has
+/// not been queried yet and whose honest frame-0 answer is the start of the
+/// first cycle.
 fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform> {
     slots
         .entries
         .iter()
-        .filter_map(|(name, slot)| {
-            if *slot.kind.value() == ShaderSlotKind::Value {
-                model_value_to_lps_value_f32(&slot.default_value())
-                    .ok()
-                    .map(|value| (name.clone(), value))
-            } else {
-                None
-            }
+        .filter_map(|(name, slot)| match *slot.kind.value() {
+            ShaderSlotKind::Value => model_value_to_lps_value_f32(&slot.default_value())
+                .ok()
+                .map(|value| (name.clone(), value)),
+            ShaderSlotKind::Phasor => Some((
+                name.clone(),
+                LpsValueF32::F32(phasor_frame_zero(&slot.phasor_config())),
+            )),
+            ShaderSlotKind::Seconds => Some((name.clone(), LpsValueF32::F32(0.0))),
+            // A map declares an array the backend fills from slot data, and a
+            // palette declares a sampler whose strip cannot be allocated
+            // without a graphics backend. The palette's frame-zero answer is
+            // baked on the first render instead
+            // ([`ShaderNode::ensure_palette_uniforms`]).
+            ShaderSlotKind::Map | ShaderSlotKind::Palette => None,
         })
         .collect()
+}
+
+/// How many of this node's uniforms are palettes.
+///
+/// Sets the bake cache's capacity, and short-circuits the whole palette path
+/// for the overwhelmingly common shader that has none.
+fn palette_slot_count(slots: &MapSlot<String, ShaderSlotDef>) -> usize {
+    slots
+        .entries
+        .values()
+        .filter(|slot| slot.kind.value().is_texture())
+        .count()
+}
+
+/// The compile-time texture binding contract for this node's palette slots.
+///
+/// One [`lps_shared::TextureBindingSpec`] per `sampler2D` uniform leaf, keyed
+/// by uniform name — the map `lp-shader` validates the shader's declared
+/// samplers against, failing compilation on a missing *or* extra spec
+/// (`docs/design/lp-shader-texture-access.md`). A shader node left this
+/// defaulted-empty until palettes existed, which is why any `sampler2D` used
+/// to fail to compile at all.
+///
+/// Every palette gets the same spec, and deliberately so:
+///
+/// - **`Rgba16Unorm`** — the only 16-bit format that supports *filtered*
+///   sampling, and the precision canonical LinearSrgb wants.
+/// - **`Linear`** — a palette is a ramp; nearest sampling would quantize
+///   every gradient to 256 visible bands.
+/// - **`Repeat` on X** — a palette read past its end wraps, so a shader can
+///   scroll `u` without clamping and a cyclic gradient joins seamlessly.
+/// - **height-one** — the strip is `WIDTH × 1`, and the hint tells lowering
+///   to ignore `uv.y` entirely.
+///
+/// Per-slot authoring of filter and wrap is deliberately **not** offered.
+/// That would be a model change (a new authored field on `ShaderSlotDef`),
+/// and nothing has yet wanted a palette sampled any other way; the one spec
+/// is what makes every baked strip interchangeable across shaders.
+fn palette_texture_specs(slots: &MapSlot<String, ShaderSlotDef>) -> lp_shader::TextureBindingSpecs {
+    let mut specs = lp_shader::TextureBindingSpecs::new();
+    for (name, slot) in &slots.entries {
+        if slot.kind.value().is_texture() {
+            specs.insert(
+                name.clone(),
+                lp_shader::texture_binding::height_one(
+                    crate::color::PALETTE_BAKE_FORMAT,
+                    lps_shared::TextureFilter::Linear,
+                    lps_shared::TextureWrap::Repeat,
+                ),
+            );
+        }
+    }
+    specs
+}
+
+/// Per-node-tick memo of the scope's time product.
+///
+/// Resolved at most once per `produce` and shared by every timebase uniform
+/// on the node: `fw-esp32v3` runs the resolver payload cache OFF, so a
+/// per-uniform `bus:time` resolve would be a real per-uniform bus walk on the
+/// tier that can least afford one.
+pub(super) struct TimeProductCache {
+    resolved: Option<Result<TimeProduct, String>>,
+}
+
+impl TimeProductCache {
+    pub(super) fn new() -> Self {
+        Self { resolved: None }
+    }
+
+    fn get(&mut self, ctx: &mut TickContext<'_>) -> Result<TimeProduct, String> {
+        if self.resolved.is_none() {
+            self.resolved = Some(resolve_time_product(ctx));
+        }
+        self.resolved
+            .clone()
+            .expect("time product was just resolved")
+    }
+}
+
+/// Resolve the reader's scope's `bus:time` down to a [`TimeProduct`] handle.
+///
+/// Scoped deliberately: a module that shadows `time` with its own clock must
+/// drive the phasors inside it, and an unscoped read would silently pick some
+/// other scope's writer (or refuse as ambiguous).
+fn resolve_time_product(ctx: &mut TickContext<'_>) -> Result<TimeProduct, String> {
+    let query = QueryKey::Bus {
+        scope: ctx.bus_read_scope(),
+        channel: lpc_model::ChannelName(String::from(TIME_CHANNEL)),
+    };
+    let production = ctx.resolve(&query).map_err(|e| e.message)?;
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| String::from("bus:time is not a value"))?;
+    match value.value() {
+        lpc_model::LpValue::Product(lpc_model::ProductRef::Time(product)) => Ok(*product),
+        other => Err(format!(
+            "bus:time does not carry a time product (got {other:?})"
+        )),
+    }
+}
+
+/// Evaluate a `seconds` uniform: the scope timebase's effective seconds.
+fn resolve_seconds_input(
+    ctx: &mut TickContext<'_>,
+    timebase: &mut TimeProductCache,
+) -> (LpsValueF32, Option<String>) {
+    match timebase
+        .get(ctx)
+        .and_then(|product| ctx.time_product_seconds(product).map_err(|e| e.to_string()))
+    {
+        Ok(seconds) => (LpsValueF32::F32(seconds), None),
+        // No timebase reachable: run at the start of the timeline and warn,
+        // exactly as a broken `bus:` binding on a value slot does. Silently
+        // freezing at zero is the failure mode this whole path exists to
+        // prevent.
+        Err(message) => (LpsValueF32::F32(0.0), Some(message)),
+    }
+}
+
+/// Evaluate a `phasor` uniform: resolve the config (and with it the
+/// integrator's identity), query the store, shape the ramp.
+fn resolve_phasor_input(
+    ctx: &mut TickContext<'_>,
+    name: &str,
+    slot: &ShaderSlotDef,
+    timebase: &mut TimeProductCache,
+) -> Result<(LpsValueF32, Option<String>), NodeError> {
+    let slot_path = SlotPath::parse(name)
+        .map_err(|e| NodeError::msg(format!("invalid phasor slot {name:?}: {e}")))?;
+    let (config, key, mut failure) = resolve_phasor_config(ctx, &slot_path, slot);
+    let shaped_default = LpsValueF32::F32(phasor_frame_zero(&config));
+
+    let product = match timebase.get(ctx) {
+        Ok(product) => product,
+        Err(message) => {
+            failure.get_or_insert(message);
+            return Ok((shaped_default, failure));
+        }
+    };
+    let reader_node = ctx.node_id();
+    match ctx.time_product_phasor(product, &key, &config, (reader_node, &slot_path)) {
+        Ok((phase, _cycle)) => Ok((LpsValueF32::F32(shape_phasor(&config, phase)), failure)),
+        Err(error) => {
+            failure.get_or_insert_with(|| error.to_string());
+            Ok((shaped_default, failure))
+        }
+    }
+}
+
+/// The config a phasor slot evaluates against this tick, and the integrator
+/// identity that follows from where the config came from (parent D3).
+///
+/// A channel-driven config is `Shared`, so every reader of that channel rides
+/// one integrator; anything slot-local — an authored config, a `default`
+/// fallback, or a bound channel nobody writes (R6) — is `Private` to this
+/// node's slot. The key changing across that boundary is what resets the
+/// phase when a channel "grabs the reins".
+///
+/// A channel drives the **period only**. `waveform` and `phase_offset` are
+/// output shaping — how one consumer wants to read a cycle — and stay
+/// slot-local by construction (settled: "waveform is ALWAYS slot-local"),
+/// which is also what lets two readers share one integrator and still look
+/// different. The period is the one field the store integrates, so it is the
+/// one field sharing has to be about.
+fn resolve_phasor_config(
+    ctx: &mut TickContext<'_>,
+    slot_path: &SlotPath,
+    slot: &ShaderSlotDef,
+) -> (PhasorConfig, PhasorKey, Option<String>) {
+    let private = PhasorKey::Private {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
+        return (slot.phasor_config(), private, None);
+    };
+    let query = QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let driven = ctx
+        .resolve(&query)
+        .map_err(|e| e.message)
+        .and_then(|production| {
+            production
+                .value_leaf()
+                .ok_or_else(|| String::from("phasor config channel is not a value"))
+                .and_then(|value| {
+                    PhasorConfig::from_lp_value(value.value())
+                        .map_err(|e| format!("phasor config channel: {e}"))
+                })
+        });
+    let local = slot.phasor_config();
+    match driven {
+        Ok(config) => (
+            PhasorConfig {
+                period_seconds: config.period_seconds,
+                ..local
+            },
+            PhasorKey::Shared { scope, channel },
+            None,
+        ),
+        // The channel has a writer but its value is not a config: report it
+        // and keep running on the slot-local shaping. Falling back to the
+        // shared key would attach this node to an integrator whose rate it
+        // cannot see.
+        Err(message) => (slot.phasor_config(), private, Some(message)),
+    }
+}
+
+/// Evaluate a `palette` uniform: resolve the config (and with it the
+/// integrator's identity), read the cycle position from the timebase, bake.
+///
+/// Returns `None` for the uniform — with the reason — rather than a wrong
+/// texture whenever the strip cannot be produced. The render path's
+/// frame-zero bake is what keeps the uniform set complete in that case, so a
+/// palette whose channel breaks mid-session keeps showing its authored
+/// default instead of going black, exactly as a broken value binding does.
+fn resolve_palette_input(
+    ctx: &mut TickContext<'_>,
+    name: &str,
+    slot: &ShaderSlotDef,
+    cache: &mut PaletteBakeCache,
+    palette_slots: usize,
+) -> (Option<LpsValueF32>, Option<String>) {
+    let slot_path = match SlotPath::parse(name) {
+        Ok(path) => path,
+        Err(e) => return (None, Some(format!("invalid palette slot {name:?}: {e}"))),
+    };
+    let (config, key, mut failure) = resolve_gradient_config(ctx, &slot_path, slot);
+    let position = palette_cycle_position_for(ctx, &config, &key, &slot_path, &mut failure);
+
+    let Some((from, to)) = palette_cycle_gradients(&config, position) else {
+        failure.get_or_insert_with(|| String::from("palette config has no gradients"));
+        return (None, failure);
+    };
+    let bake = PaletteBake {
+        from,
+        to,
+        mix_steps: position.mix_steps,
+    };
+    let Some(graphics) = ctx.graphics() else {
+        failure.get_or_insert_with(|| String::from("no graphics backend to bake a palette into"));
+        return (None, failure);
+    };
+    match cache.uniform_for(graphics, &bake, palette_slots) {
+        Ok(value) => (Some(value), failure),
+        Err(error) => {
+            failure.get_or_insert_with(|| format!("bake palette: {error}"));
+            (None, failure)
+        }
+    }
+}
+
+/// Where a palette config sits in its cycle this tick.
+///
+/// A static config never queries the timebase — there is one gradient and no
+/// phase to read, so a shader whose palette does not cycle costs no timebase
+/// work at all. A cycle makes exactly **one** query, for the whole set's
+/// pass; see [`palette_eval`](super::palette_eval).
+fn palette_cycle_position_for(
+    ctx: &mut TickContext<'_>,
+    config: &GradientConfig,
+    key: &PhasorKey,
+    slot_path: &SlotPath,
+    failure: &mut Option<String>,
+) -> PaletteCyclePosition {
+    if matches!(config, GradientConfig::Static(_)) {
+        return palette_frame_zero(config);
+    }
+    let mut timebase = TimeProductCache::new();
+    let product = match timebase.get(ctx) {
+        Ok(product) => product,
+        Err(message) => {
+            failure.get_or_insert(message);
+            return palette_frame_zero(config);
+        }
+    };
+    let reader_node = ctx.node_id();
+    match ctx.time_product_phasor(
+        product,
+        key,
+        &palette_phasor_config(config),
+        (reader_node, slot_path),
+    ) {
+        Ok((phase, _cycle)) => palette_cycle_position(config, phase),
+        Err(error) => {
+            failure.get_or_insert_with(|| error.to_string());
+            palette_frame_zero(config)
+        }
+    }
+}
+
+/// The gradient config a palette slot bakes this tick, and the integrator
+/// identity that follows from where the config came from (parent D3).
+///
+/// The provenance rule is the phasor's, unchanged: a channel-driven config is
+/// [`PhasorKey::Shared`], so every reader of that channel walks the set in
+/// lockstep; anything slot-local — an authored config, the default palette,
+/// or a bound channel nobody writes — is [`PhasorKey::Private`] to this
+/// node's slot. Crossing that boundary changes the key and so resets the
+/// phase, which is the intended "grabbing the reins".
+///
+/// # The channel carries the WHOLE config
+///
+/// This is where palettes deliberately **differ** from phasors. A phasor
+/// channel drives the *period only*: `waveform` and `phase_offset` are output
+/// shaping — how one consumer wants to read a cycle — so they stay slot-local
+/// and two readers of one integrator can look different. There is no
+/// equivalent split here. A palette cycle's fields are:
+///
+/// - `set` — *which palettes*. Sharing a palette cycle and not sharing the
+///   palettes is a contradiction: `bus:palette` exists precisely so that two
+///   shaders show the same colors.
+/// - `step_seconds` — the period, by the same argument that makes a phasor's
+///   period shared: it is what the store integrates, so two readers on one
+///   integrator cannot disagree about it and stay in phase.
+/// - `fade_seconds` — arguably shaping, and the one field a split could have
+///   kept local. It is shared anyway, because it is not *output* shaping: the
+///   fade decides which two entries are mixed and by how much, i.e. what the
+///   texels are, not how one reader reads them. Two shaders on `bus:palette`
+///   dissolving on different schedules would show visibly different colors at
+///   the same instant while claiming to share a palette — which is the exact
+///   failure the shared key exists to prevent.
+///
+/// So there is nothing left for the slot-local config to contribute when a
+/// channel drives it, and the driven config is taken whole. The slot's own
+/// `gradient` stays the fallback for when nothing does — never a partial
+/// overlay, which would leave a palette showing a set nobody authored
+/// together.
+fn resolve_gradient_config(
+    ctx: &mut TickContext<'_>,
+    slot_path: &SlotPath,
+    slot: &ShaderSlotDef,
+) -> (GradientConfig, PhasorKey, Option<String>) {
+    let private = PhasorKey::Private {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
+        return (slot.gradient_config(), private, None);
+    };
+    let query = QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let driven = ctx
+        .resolve(&query)
+        .map_err(|e| e.message)
+        .and_then(|production| {
+            production
+                .value_leaf()
+                .ok_or_else(|| String::from("palette channel is not a value"))
+                .and_then(|value| {
+                    GradientConfig::from_lp_value(value.value())
+                        .map_err(|e| format!("palette channel: {e}"))
+                })
+        });
+    match driven {
+        Ok(config) => (config, PhasorKey::Shared { scope, channel }, None),
+        // The channel has a writer but its value is not a gradient config:
+        // report it and keep baking the slot-local palette. Taking the shared
+        // key anyway would attach this node to an integrator whose set it
+        // cannot see.
+        Err(message) => (slot.gradient_config(), private, Some(message)),
+    }
 }
 
 /// Resolve one consumed shader input, falling back to its authored default
@@ -902,28 +1489,65 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
 /// default silently would freeze e.g. a `bus:time`-driven shader with zero
 /// diagnostics. Shared by the visual and compute shader nodes; `context`
 /// labels error messages ("visual shader" / "compute shader").
+///
+/// That "an unbound slot resolves `Ok`" is a claim about the *host*, not
+/// this function: it holds only because
+/// `EngineResolveHost::read_shader_consumed_slot_default` projects the
+/// uniform name onto `consumed[<name>]`. Without that projection every
+/// unbound uniform reported here, and the warning meant nothing —
+/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.md`.
+///
+/// The timebase kinds (`phasor`, `seconds`) never reach the materialize
+/// helper: their value comes from the scope's time product, not from the
+/// slot's resolved data, and `timebase` memoizes that product across every
+/// timebase uniform on the node.
 pub(super) fn resolve_or_default_input(
     ctx: &mut TickContext<'_>,
     name: &str,
     slot: &ShaderSlotDef,
     context: &str,
+    timebase: &mut TimeProductCache,
 ) -> Result<(LpsValueF32, Option<String>), NodeError> {
+    match *slot.kind.value() {
+        ShaderSlotKind::Seconds => return Ok(resolve_seconds_input(ctx, timebase)),
+        ShaderSlotKind::Phasor => return resolve_phasor_input(ctx, name, slot, timebase),
+        // A palette never reaches here from the visual shader node — it takes
+        // the bake path before this function is called, and the compute node
+        // has no palette support yet. The materialize helper below refuses it
+        // by name rather than by silence.
+        ShaderSlotKind::Value | ShaderSlotKind::Map | ShaderSlotKind::Palette => {}
+    }
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;
-    let (production, failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
+    let (production, mut failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
         Ok(production) => (Some(production), None),
         Err(e) => (None, Some(e.message)),
     };
-    let value = materialize_shader_input(
+    let materialized = materialize_shader_input(
         name,
         slot,
         production.as_ref().map(|production| production.data()),
         ctx.slot_shapes(),
-    )
-    .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?;
+    );
+    let value = match materialized {
+        Ok(value) => value,
+        // The binding resolved, but to a value this uniform's declared shape
+        // cannot hold — the kind mismatch D12 is about, and the shape the
+        // `bus:time` swap gives every un-migrated `float time` uniform. It is
+        // a *diagnosable* wiring fault, not a broken shader, so it lands in
+        // the same warn-and-run-on-the-default path a failed resolve does
+        // rather than failing the whole node (which would take the shader's
+        // output down and leave the fixture black).
+        Err(mismatch) if production.is_some() => {
+            failure.get_or_insert_with(|| mismatch.to_string());
+            materialize_shader_input(name, slot, None, ctx.slot_shapes())
+                .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?
+        }
+        Err(e) => return Err(NodeError::msg(format!("{context} input {name:?}: {e}"))),
+    };
     Ok((value, failure))
 }
 
@@ -981,6 +1605,88 @@ fn validate_shader_visual_product(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod frame_zero_uniform_tests {
+    use super::*;
+    use lp_collection::VecMap;
+    use lpc_model::{PhasorConfig, ShaderSlotMappingDef, Waveform};
+
+    /// The backend fails hard on a uniform its generated header declares but
+    /// the uniform set omits, so every kind that declares a `float` must
+    /// answer at frame 0 — before any tick, with no timebase queried yet.
+    #[test]
+    fn every_scalar_kind_answers_before_the_first_tick() {
+        let uniforms = default_uniforms(&slots());
+
+        let names: Vec<&str> = uniforms.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["elapsed", "level", "wave"],
+            "map slots declare an array the header sizes itself; the three \
+             scalar kinds must all be present"
+        );
+    }
+
+    /// Frame 0 is the start of the first cycle, shaped: a sine phasor holds
+    /// its midpoint, not zero, and a phase offset rotates that start.
+    #[test]
+    fn a_phasor_starts_at_its_own_shaped_zero() {
+        let uniforms = default_uniforms(&slots());
+
+        assert_eq!(uniform(&uniforms, "level"), 0.5, "the authored default");
+        assert_eq!(uniform(&uniforms, "elapsed"), 0.0, "seconds start at zero");
+        // Sine with a 0.25 offset: 0.5 + 0.5·sin(2π·0.25) = 1.0.
+        assert!(
+            (uniform(&uniforms, "wave") - 1.0).abs() < 1e-6,
+            "wave: {}",
+            uniform(&uniforms, "wave")
+        );
+    }
+
+    fn slots() -> MapSlot<String, ShaderSlotDef> {
+        let mut entries = VecMap::new();
+        entries.insert(
+            String::from("level"),
+            ShaderSlotDef::value_f32("Level", "", 0.5, None),
+        );
+        entries.insert(
+            String::from("wave"),
+            ShaderSlotDef::phasor(
+                "Wave",
+                "",
+                PhasorConfig {
+                    period_seconds: 4.0,
+                    waveform: Waveform::Sine,
+                    phase_offset: 0.25,
+                },
+            ),
+        );
+        entries.insert(
+            String::from("elapsed"),
+            ShaderSlotDef::seconds("Elapsed", ""),
+        );
+        entries.insert(
+            String::from("events"),
+            ShaderSlotDef::map_u32_native(
+                lpc_model::CONTROL_MESSAGE_SHAPE_NAME,
+                ShaderSlotMappingDef::sentinel(2, "id", 0),
+            ),
+        );
+        MapSlot::new(entries)
+    }
+
+    fn uniform(uniforms: &[VisualUniform], name: &str) -> f32 {
+        match uniforms
+            .iter()
+            .find(|(uniform, _)| uniform == name)
+            .map(|(_, value)| value)
+        {
+            Some(LpsValueF32::F32(value)) => *value,
+            other => panic!("uniform {name:?}: {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1217,6 +1923,83 @@ mod tests {
         assert_eq!(got_id, rid);
     }
 
+    /// The visual half of the compute node's
+    /// `unbound_uniform_runs_on_its_authored_default_without_warning`: an
+    /// unbound uniform resolves through its authored default and leaves the
+    /// node status clean. Both node kinds go through the same engine-host
+    /// projection, and it keys off the `NodeDef` variant, so both variants
+    /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
+    #[test]
+    fn unbound_uniform_runs_on_its_authored_default_without_warning() {
+        let source = "layout(binding = 0) uniform float time;\nvec4 render(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+        engine
+            .load_test_node_defs(
+                &mut registry,
+                &[(sh_id, NodeDef::Shader(shader_def_with_time()))],
+                frame,
+            )
+            .expect("load test defs");
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(ShaderNode::new(
+                    sh_id,
+                    shader_def_with_time(),
+                    shader_asset_text(source, frame),
+                )),
+                frame,
+            )
+            .expect("attach shader");
+
+        // Nothing binds `time`; the authored default (0.5) is the answer.
+        let time = resolve_with_engine_host(
+            &mut engine,
+            &registry,
+            QueryKey::ConsumedSlot {
+                node: sh_id,
+                slot: SlotPath::parse("time").expect("time path"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("an unbound uniform resolves through its authored default")
+        .0;
+        assert_eq!(
+            *time.value_leaf().expect("value").value(),
+            lpc_model::LpValue::F32(0.5)
+        );
+
+        engine.tick(&registry, 500).expect("tick");
+        let entry = engine.tree().get(sh_id).expect("node");
+        let crate::node::NodeEntryState::Alive(node) = entry.state.value() else {
+            panic!("node alive");
+        };
+        assert_eq!(
+            node.runtime_status(),
+            None,
+            "a node behaving exactly as authored reports nothing"
+        );
+    }
+
     #[test]
     fn authored_consumed_entries_added_after_load_reach_the_uniform_supply() {
         // The runtime node starts WITHOUT the `speed` record while the
@@ -1283,6 +2066,100 @@ mod tests {
                 },
             )
             .expect("render succeeds once the reconciled record supplies `speed`");
+    }
+
+    #[test]
+    fn authored_default_added_after_load_reaches_the_uniform() {
+        // The runtime node's `speed` record carries `default: none` while
+        // the registry's effective def gives it 0.75 — the state a live
+        // authoring edit (adding a default to a uniform that never had
+        // one) produces. The per-field sync must CREATE the option, not
+        // only update an existing one: `default` is engine-read, so
+        // `materialize_value_input` otherwise keeps falling back to the
+        // stale `none`'s 0.0 until the project reloads.
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+
+        let mut authored = shader_def_with_time();
+        authored.consumed_slots.entries.insert(
+            String::from("speed"),
+            ShaderSlotDef::value_f32("Speed", "", 0.75, None),
+        );
+        engine
+            .load_test_node_defs(&mut registry, &[(sh_id, NodeDef::Shader(authored))], frame)
+            .expect("load test defs");
+        // The runtime node's copy predates the authored default.
+        let mut stale = shader_def_with_time();
+        let mut speed = ShaderSlotDef::value_f32("Speed", "", 0.75, None);
+        speed.default = OptionSlot::none();
+        stale
+            .consumed_slots
+            .entries
+            .insert(String::from("speed"), speed);
+        let sh = ShaderNode::new(sh_id, stale, shader_asset_text(source, frame));
+        engine
+            .attach_runtime_node(sh_id, Box::new(sh), frame)
+            .expect("attach shader");
+
+        engine.tick(&registry, 500).expect("tick");
+        let q = QueryKey::ProducedSlot {
+            node: sh_id,
+            slot: shader_output_path(),
+        };
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
+
+        let request = crate::products::visual::RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.5,
+        };
+        // First render requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        engine
+            .render_texture_for_test(&registry, VisualProduct::new(sh_id, 0), &request)
+            .expect("warm-up render");
+        let texture = engine
+            .render_texture_for_test(&registry, VisualProduct::new(sh_id, 0), &request)
+            .expect("render texture");
+        let sample = texture
+            .sample_batch(&TextureSampleBatch {
+                points: vec![TextureUvSamplePoint {
+                    u_q16: 32768,
+                    v_q16: 32768,
+                }],
+                time_seconds: 0.5,
+            })
+            .expect("host product samples");
+        // 0.75 in unorm16 is ~49151; the stale `none` would render 0.
+        let red = sample.samples[0].rgba_unorm16[0];
+        assert!(
+            red > 45_000,
+            "expected the authored default 0.75, got {red}"
+        );
+        assert!(
+            red < 53_000,
+            "expected the authored default 0.75, got {red}"
+        );
     }
 
     #[test]

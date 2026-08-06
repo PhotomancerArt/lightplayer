@@ -46,6 +46,102 @@
         }
       },
       {
+        "name": "phasor",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 4055979827,
+                  "meta": {},
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "period_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "waveform",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "phase_offset",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "PhasorConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "gradient",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "gradient",
+                  "id": 2273791358,
+                  "meta": {},
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "kind",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "set",
+                          "ty": {
+                            "list": {
+                              "struct": {
+                                "fields": [
+                                  {
+                                    "name": "space",
+                                    "ty": "string"
+                                  },
+                                  {
+                                    "name": "method",
+                                    "ty": "string"
+                                  },
+                                  {
+                                    "name": "stops",
+                                    "ty": "string"
+                                  }
+                                ],
+                                "name": "Gradient"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "step_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "fade_seconds",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "GradientConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "default_bind",
         "shape": {
           "option": {
@@ -55,6 +151,24 @@
                 "shape": {
                   "editor": "path",
                   "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "panel",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 4287644159,
                   "meta": {},
                   "ty": "string"
                 }

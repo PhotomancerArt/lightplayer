@@ -4,19 +4,93 @@
   "bindings": {
     "emitters": {
       "target": "bus:fluid.emitters"
-    },
-    "time": {
-      "source": "bus:time"
     }
   },
   "float_mode": "fixed",
   "consumed": {
-    "time": {
-      "kind": "value",
+    "wave_a": {
+      "kind": "phasor",
       "value": "f32",
+      "phasor": {
+        "period_seconds": 20.2683403,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
       "default": 0,
-      "label": "",
-      "description": ""
+      "label": "Emitter A swing",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_a2": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 27.7648497,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Emitter A rise",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_b2": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 33.7261701,
+        "waveform": "ramp",
+        "phase_offset": 0.2707226
+      },
+      "default": 0,
+      "label": "Emitter B swing",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_b": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 27.3181977,
+        "waveform": "ramp",
+        "phase_offset": 0.3342254
+      },
+      "default": 0,
+      "label": "Emitter B rise",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_c": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 33.0693973,
+        "waveform": "ramp",
+        "phase_offset": 0.6684507
+      },
+      "default": 0,
+      "label": "Emitter C swing",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_c2": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 49.3573094,
+        "waveform": "ramp",
+        "phase_offset": 0.447862
+      },
+      "default": 0,
+      "label": "Emitter C rise",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_breathe": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 34.906586,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Breathe",
+      "description": "Cycle position (0-1)"
     }
   },
   "produced": {

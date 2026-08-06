@@ -50,6 +50,37 @@ const captureAttempts = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_ATTEMPTS",
 // container around ~580). Restarts cost ~1-2s and resume from disk, so a low
 // ceiling is cheap insurance everywhere, including local runs.
 const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTART_EVERY", 120);
+// Hard ceiling on any child process this script waits on (`runProcess`).
+// Load-bearing: the two 2026-08-05 CI wedges (5h08m and 3h35m of runner time,
+// both cancelled by hand) were the story-DISCOVERY Chrome — a `--dump-dom`
+// run that never exited, awaited by a bare `once(child, "exit")` with no
+// bound. Every existing timeout in this file guards the CDP capture path,
+// which discovery never reaches, so the run went silent between "story build"
+// and the first capture line and stayed there until GitHub's 6-hour default.
+// A timeout on the process wait is the structural fix; the Chrome-side reason
+// it hangs is unidentified and does not need to be, to bound it.
+const subprocessTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_SUBPROCESS_TIMEOUT_MS", 180_000);
+// Discovery gets its own bound plus retries: it is a single short Chrome run,
+// and a killed attempt costs nothing to redo, so retrying keeps a transient
+// browser hang from turning the whole job red. Sized off a MEASURED happy
+// path, not off `--virtual-time-budget=5000`: a cold Chrome takes ~21s here
+// (launch and profile setup dominate the virtual-time budget), so the default
+// is ~6x that rather than the "few seconds" the flag suggests. Err generous —
+// the failure mode being fixed is a 5-hour hang, not a slow discovery.
+const discoveryTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_DISCOVERY_TIMEOUT_MS", 120_000);
+const discoveryAttempts = parsePositiveIntegerEnv("STUDIO_STORY_DISCOVERY_ATTEMPTS", 3);
+// Backstop deadline for the ENTIRE run, enforced by a watchdog timer rather
+// than by racing individual awaits — so it covers phases nobody has thought to
+// bound yet, which is precisely the class the 2026-08-05 wedges belonged to.
+// Sized above the slowest healthy CI run (p95 23.7 min, max 24.4) with room to
+// spare; the `validate-stories` job timeout (45 min) is the outer backstop, and
+// this fires first so the failure carries a diagnostic instead of a bare
+// "operation was canceled".
+const runDeadlineMs = parsePositiveIntegerEnv("STUDIO_STORY_RUN_DEADLINE_MS", 40 * 60_000);
+// Heartbeat cadence. The point is not the capture phase (every capture already
+// logs a `wrote` line) — it is the SILENT phases: a wedge must say where it
+// stopped instead of emitting nothing for hours.
+const progressIntervalMs = parsePositiveIntegerEnv("STUDIO_STORY_PROGRESS_INTERVAL_MS", 30_000);
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
@@ -191,6 +222,51 @@ if (!chrome) {
   process.exit(1);
 }
 
+// Where the run currently is, and how far the capture has got. Both exist for
+// one reason: so a hang is DIAGNOSABLE. The heartbeat prints them periodically
+// and the watchdog prints them on the way out, which is the difference between
+// "the job produced no output for five hours" and "it stopped in
+// `discovering stories`".
+const runStartedAt = Date.now();
+let currentPhase = "starting up";
+const progress = { captured: 0, total: 0 };
+
+function setPhase(phase) {
+  currentPhase = phase;
+}
+
+function elapsedLabel() {
+  const seconds = Math.round((Date.now() - runStartedAt) / 1000);
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function progressLine() {
+  const captured =
+    progress.total > 0 ? ` — ${progress.captured}/${progress.total} captured` : "";
+  return `[+${elapsedLabel()}] ${currentPhase}${captured}`;
+}
+
+const heartbeat = setInterval(() => {
+  console.log(progressLine());
+}, progressIntervalMs);
+// unref: a heartbeat must never be the reason the process stays alive. During a
+// real wedge the event loop is held open by the wedged handle itself (a child
+// process, a socket), so the timer still fires.
+heartbeat.unref();
+
+const watchdog = setTimeout(() => {
+  console.error(
+    `\nDEADLINE: story capture exceeded ${runDeadlineMs} ms without finishing.\n` +
+      `  ${progressLine()}\n` +
+      "  Raise STUDIO_STORY_RUN_DEADLINE_MS if this machine is genuinely that slow;\n" +
+      "  otherwise the phase named above is where to look.",
+  );
+  // Exit code 3: distinct from drift (1) and usage errors (2), so a wedge is
+  // never mistaken for a baseline difference.
+  process.exit(3);
+}, runDeadlineMs);
+watchdog.unref();
+
 // Resume support: fingerprint the built app (the wasm bytes → identical render
 // output) and stash it in the capture dir. A re-run against the *same* build
 // keeps whatever was already captured and only fills in the rest; any change to
@@ -225,20 +301,28 @@ await new Promise((resolve, reject) => {
 });
 
 try {
+  setPhase("waiting for the static server");
   await waitForServer(baseUrl);
+  setPhase("discovering stories (dump-dom Chrome)");
+  console.log(`[+${elapsedLabel()}] Discovering stories...`);
   const discoveredStoryIds = await discoverStoryIds();
   if (discoveredStoryIds.length === 0) {
     throw new Error("No story links were discovered from the storybook page.");
   }
   const storyIds = filterStoryIds(discoveredStoryIds, storyFilters);
+  console.log(`[+${elapsedLabel()}] Discovered ${storyIds.length} stories.`);
 
   // Clear any sentinel from a previous completed check so a crashed capture
   // can't inherit it (the sentinel is rewritten after a complete comparison).
   if (mode === "check") {
     await rm(path.join(captureDir, ".check-complete"), { force: true });
   }
+  setPhase("capturing");
   const files = await captureStoriesWithRetry(storyIds, captureDir);
+  setPhase("optimizing PNGs (oxipng)");
+  console.log(`[+${elapsedLabel()}] Optimizing ${files.length} PNGs...`);
   await optimizePngs(files, { required: mode !== "pngs" });
+  setPhase("comparing baselines");
 
   if (mode === "baselines") {
     await replaceBaselineImages(captureDir, outputDir);
@@ -278,6 +362,8 @@ try {
     console.log(`Story PNGs: ${path.relative(repoRoot, outputDir)}`);
   }
 } finally {
+  clearInterval(heartbeat);
+  clearTimeout(watchdog);
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }
@@ -493,16 +579,42 @@ function parsePositiveIntegerEnv(name, defaultValue) {
   return parsed;
 }
 
+// Discovery is one bounded Chrome run, retried: on 2026-08-05 this exact
+// invocation hung twice in CI (see `subprocessTimeoutMs`). Each attempt now
+// dies at `discoveryTimeoutMs` and the next one gets a fresh browser, so a
+// transient hang costs a minute instead of the whole job — and a persistent
+// one fails loudly with a message naming the phase.
 async function discoverStoryIds() {
-  const html = await runChrome([
-    "--headless=new",
-    "--disable-gpu",
-    "--disable-application-cache",
-    "--disk-cache-size=0",
-    "--virtual-time-budget=5000",
-    "--dump-dom",
-    `${baseUrl}?story-discovery=${Date.now()}#/stories`,
-  ]);
+  let lastError;
+  for (let attempt = 1; attempt <= discoveryAttempts; attempt += 1) {
+    try {
+      return await discoverStoryIdsOnce();
+    } catch (error) {
+      lastError = error;
+      if (attempt < discoveryAttempts) {
+        console.warn(
+          `Story discovery attempt ${attempt}/${discoveryAttempts} failed: ${error.message}\n` +
+            "Retrying with a fresh Chrome...",
+        );
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function discoverStoryIdsOnce() {
+  const html = await runChrome(
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--disable-application-cache",
+      "--disk-cache-size=0",
+      "--virtual-time-budget=5000",
+      "--dump-dom",
+      `${baseUrl}?story-discovery=${Date.now()}#/stories`,
+    ],
+    { timeoutMs: discoveryTimeoutMs, label: "story-discovery Chrome (--dump-dom)" },
+  );
   const storyIds = [];
   for (const anchor of html.matchAll(/<a\b[^>]*href="#\/stories\/([^"]+)"[^>]*>/g)) {
     const storyId = decodeURIComponent(anchor[1]).split(/[?#]/, 1)[0];
@@ -575,6 +687,8 @@ async function captureStories(storyIds, directory) {
   }
 
   const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
+  progress.total = pending.length;
+  progress.captured = 0;
   console.log(
     `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories, up to ${STORY_VIEWPORTS.length} sizes each) with ${concurrency} Chrome pages...`,
   );
@@ -627,6 +741,7 @@ async function captureStoryWorker({ browser, directory, files, nextPending, page
     // lists built from the same on-disk state.
     if (await isNonEmptyFile(file)) {
       files[targetIndex] = file;
+      progress.captured += 1;
       continue;
     }
     const url = storyPngUrl(target.storyId, target.viewport);
@@ -641,6 +756,7 @@ async function captureStoryWorker({ browser, directory, files, nextPending, page
       await browser.recycle(pageIndex);
       await browser.capture(pageIndex, url, target.storyId, target.viewport, file);
     }
+    progress.captured += 1;
     console.log(`wrote ${path.relative(repoRoot, file)}`);
     files[targetIndex] = file;
   }
@@ -1073,9 +1189,28 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       // stamps data-preview-painted on each canvas after its first blit;
       // demand it on every preview canvas in the story.
       const unpainted = el.querySelectorAll(
-        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted])',
+        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted]),' +
+          'canvas.ux-produced-product-lamp-canvas:not([data-preview-painted])',
       );
       if (unpainted.length > 0) {
+        return false;
+      }
+      // A canvas that sizes its backing store from layout (the clock face's
+      // phasor traces) paints a bitmap for the box it measured. Measure that
+      // box before the app's stylesheet lands and the bitmap is drawn for the
+      // unstyled 300x150 intrinsic size, then squeezed into the real box —
+      // a second stable terminal that alternated baselines run to run
+      // (docs/defects/2026-08-05-clock-face-baselines-oscillate.md). The app
+      // repaints on resize; this refuses to shoot until it has.
+      const dpr = window.devicePixelRatio || 1;
+      const mismatched = [...el.querySelectorAll('canvas.ux-box-sized-canvas')].filter((c) => {
+        const rect = c.getBoundingClientRect();
+        return (
+          c.width !== Math.max(1, Math.round(rect.width * dpr)) ||
+          c.height !== Math.max(1, Math.round(rect.height * dpr))
+        );
+      });
+      if (mismatched.length > 0) {
         return false;
       }
       return !document.querySelector('[data-story-wait="1"]');
@@ -1546,15 +1681,21 @@ async function waitForServer(url) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
-async function runChrome(args) {
-  return await runProcess(chrome, [
-    "--no-first-run",
-    "--no-default-browser-check",
-    ...args,
-  ]);
+async function runChrome(args, options) {
+  return await runProcess(
+    chrome,
+    ["--no-first-run", "--no-default-browser-check", ...args],
+    options,
+  );
 }
 
-async function runProcess(command, args) {
+// Wait for a child process, BOUNDED. The bare `once(child, "exit")` this
+// replaced is what let a hung discovery Chrome burn 5 hours of CI in silence
+// (docs/debt/story-capture-pipeline.md, 2026-08-05): nothing else in this file
+// covers a child that never exits, because every other timeout guards the CDP
+// capture path.
+async function runProcess(command, args, { timeoutMs = subprocessTimeoutMs, label } = {}) {
+  const name = label ?? path.basename(command);
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
@@ -1564,9 +1705,32 @@ async function runProcess(command, args) {
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
   });
-  const [code] = await once(child, "exit");
-  if (code !== 0) {
-    throw new Error(`${command} exited with ${code}: ${stderr.trim()}`);
+
+  const exited = once(child, "exit");
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(true), timeoutMs);
+  });
+  // Race rather than `child.kill` on a timer alone: the point is that this
+  // function ALWAYS settles, even if the kill itself does not take.
+  const outcome = await Promise.race([
+    exited.then(([code]) => ({ code })),
+    timedOut.then(() => ({ killed: true })),
+  ]);
+  clearTimeout(timer);
+
+  if (outcome.killed) {
+    // SIGKILL, not SIGTERM: a wedged headless Chrome has nothing to flush, and
+    // a polite signal it ignores would just re-open the hole this closes.
+    child.kill("SIGKILL");
+    exited.catch(() => {});
+    throw new Error(
+      `${name} did not exit within ${timeoutMs} ms — killed.` +
+        (stderr.trim() ? `\nstderr: ${stderr.trim()}` : ""),
+    );
+  }
+  if (outcome.code !== 0) {
+    throw new Error(`${name} exited with ${outcome.code}: ${stderr.trim()}`);
   }
   return stdout;
 }

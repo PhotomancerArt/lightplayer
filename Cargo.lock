@@ -5444,6 +5444,7 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpa-server",
+ "lpa-upgrade",
  "lpc-engine",
  "lpc-hardware",
  "lpc-mapping",
@@ -5820,7 +5821,18 @@ dependencies = [
  "lpc-mapping",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-palettes"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "png",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5853,6 +5865,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "js-sys",
+ "jsonschema",
  "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
@@ -5861,7 +5874,10 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpa-server",
+ "lpa-upgrade",
+ "lpc-engine",
  "lpc-history",
+ "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
@@ -5898,9 +5914,11 @@ dependencies = [
  "lpa-fs-opfs",
  "lpa-link",
  "lpa-mapping-editor",
+ "lpa-palettes",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "lpc-mapping",
+ "lpc-model",
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
@@ -5922,6 +5940,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpa-upgrade"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "lpc-registry",
+ "lpfs",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

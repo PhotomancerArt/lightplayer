@@ -5,6 +5,8 @@ set -euo pipefail
 #
 #   scripts/watch-pr.sh [<pr>]            watch checks to completion
 #                                         exit 0 = all green, 1 = a check failed
+#                                         exit 2 = no checks registered in time
+#                                         exit 3 = PR is conflicting (no CI runs)
 #   scripts/watch-pr.sh --merged <pr>     wait until the PR merges
 #                                         exit 0 = merged, 1 = closed unmerged
 #
@@ -37,11 +39,16 @@ pr="${1:-}"
 
 # gh infers the PR from the branch when $pr is empty; keep args as an array so
 # an explicit number/URL passes through unchanged.
+#
+# Always expand it as ${pr_args[@]+"${pr_args[@]}"}. macOS ships bash 3.2,
+# where a bare "${pr_args[@]}" on an EMPTY array is an unbound-variable error
+# under `set -u` — i.e. exactly the no-argument case this script exists to
+# support. The +alternate form yields zero words instead of tripping set -u.
 pr_args=()
 [[ -n "$pr" ]] && pr_args=("$pr")
 
 view() {
-  gh pr view "${pr_args[@]}" --json "$1" --jq "$2"
+  gh pr view ${pr_args[@]+"${pr_args[@]}"} --json "$1" --jq "$2"
 }
 
 state="$(view state .state)"
@@ -82,6 +89,15 @@ EOF
 empty_deadline=""
 while true; do
   if [[ "$(view statusCheckRollup '.statusCheckRollup | length')" == "0" ]]; then
+    # A conflicted PR gets NO pull_request CI at all: no run will ever
+    # register, so waiting out the timeout only delays the news. (mergeable
+    # is UNKNOWN while GitHub recomputes it after a push; only the settled
+    # CONFLICTING verdict short-circuits.)
+    if [[ "$(view mergeable .mergeable)" == "CONFLICTING" ]]; then
+      echo "PR is CONFLICTING — GitHub runs no pull_request CI on a conflicted PR." >&2
+      echo "Merge the base branch into it (resolve, push), then re-watch." >&2
+      exit 3
+    fi
     [[ -n "$empty_deadline" ]] || empty_deadline=$((SECONDS + REGISTER_TIMEOUT))
     if ((SECONDS >= empty_deadline)); then
       no_ci_diagnostic
@@ -97,7 +113,7 @@ while true; do
   # watch itself can die with "no checks reported" when the list goes empty
   # mid-run — that is the same transient state as above, so re-enter the poll
   # loop instead of passing gh's failure through.
-  if out="$(gh pr checks "${pr_args[@]}" --watch --fail-fast --interval "$POLL_INTERVAL" 2>&1)"; then
+  if out="$(gh pr checks ${pr_args[@]+"${pr_args[@]}"} --watch --fail-fast --interval "$POLL_INTERVAL" 2>&1)"; then
     rc=0
   else
     rc=$?

@@ -18,7 +18,7 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 4\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 5\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -62,7 +62,7 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
 fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 4\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 5\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -83,7 +83,7 @@ fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
         r#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }
@@ -270,7 +270,7 @@ fn commit_slot_overlay_writes_effective_node_def() {
             MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(2.0),
                 ),
             },
@@ -283,7 +283,7 @@ fn commit_slot_overlay_writes_effective_node_def() {
         .commit_overlay(&fs, Revision::new(3), &ctx)
         .unwrap();
 
-    // `controls.rate` is transient: commit still rewrites the def file, but
+    // `transport.rate` is transient: commit still rewrites the def file, but
     // transient values never serialize, so the authored `rate` is scrubbed
     // and the pending edit stays in the overlay.
     let text = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();

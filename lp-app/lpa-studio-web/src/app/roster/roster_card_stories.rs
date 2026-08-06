@@ -20,8 +20,8 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
-    DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource,
+    DegradedReason, DeviceCardTab, DeviceFormatStanding, RosterCardState, UiDeviceCard,
+    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::{BuildFacts, HardwareFacts};
 
@@ -42,7 +42,9 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
-#[story(description = "Green filled edge: running the local project's tip.")]
+#[story(
+    description = "Green filled edge: running the local project's tip. The hero strip (gallery-rework P05, vision D12) is the card's default identity treatment now — the project's art under the title bar with its name pill bottom-left, replacing the small in-body chip."
+)]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
 }
@@ -128,7 +130,7 @@ fn operation_pushing() -> Element {
 }
 
 #[story(
-    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′)."
+    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′). No project means no hero strip (gallery-rework P05) — the body's own \"nothing loaded\" status line carries the empty case."
 )]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
@@ -177,7 +179,29 @@ fn holds_unreadable_data() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name stamps at first post-flash contact."
+    description = "Amber filled edge: the board holds a project at a format this Studio does not use (P5, 2026-08-04). Left: a format the migration chain reaches — the card names what it found and offers ONE verb, Upgrade, which pulls, migrates in the LIBRARY and pushes the result (the device is never rewritten in place, D14); it dispatches without a confirm because the pre-upgrade copy is already banked. Right: below the upgrade floor — no automatic path exists, so there is no button that would only refuse; the note names the remedy and the way out stays the wipe. Both replace what used to be a Running card lying about a board whose firmware had refused to load the project."
+)]
+fn holds_old_format_project() -> Element {
+    sheet(vec![
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::Upgradable { found: 4 },
+                expected: 5,
+            },
+            false,
+        ),
+        card(
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::TooOld { found: Some(2) },
+                expected: 5,
+            },
+            false,
+        ),
+    ])
+}
+
+#[story(
+    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name lands in the registry at first post-flash contact, under the uid the board's own silicon derives."
 )]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
@@ -241,7 +265,7 @@ fn needs_firmware_update() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: holds a project but no stamped identity; the Name-it row (and the title-bar name) open the D41 name-stamping sheet — card-anchored, never a dialog."
+    description = "Amber filled edge: a live board with no name yet; the Name-it row (and the title-bar name) open the D41 naming sheet — card-anchored, never a dialog."
 )]
 fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
@@ -414,20 +438,50 @@ fn in_use_elsewhere() -> Element {
 }
 
 #[story(
-    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired)."
+    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired). The hero strip dims to match (gallery-rework P05) — last-known art, not current, per the project chip's identity-not-health contract; no live preview lease for an offline card."
 )]
 fn offline() -> Element {
     sheet(vec![card(offline_state(), true)])
 }
 
 #[story(
-    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session."
+    description = "Gallery-rework P05 gate: the hero strip's three device-card states side by side — Running (live art + name pill), Offline (dimmed, last-known art — identity, not health), and Connected-empty (no project, so no strip; the status line's \"nothing loaded\" carries it)."
+)]
+fn hero_strip_states() -> Element {
+    sheet(vec![
+        card(RosterCardState::RunningUpToDate, true),
+        card(offline_state(), true),
+        card(RosterCardState::ConnectedEmpty, false),
+    ])
+}
+
+#[story(
+    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session. The sim wears the same hero strip (gallery-rework P05) — no special-casing in the renderer."
 )]
 fn simulator_runtime() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
                 card: sim_card(true),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Gallery-rework P04 (vision D4): the sim with a BOARD identity — it inherited the running project's advisory `target`, so the card's fact line says \"as ESP32-C6 (Seeed XIAO)\" under the status line. Advisory only: nothing about the worker changes, and a sim running an untargeted project (every other sim story here) shows no such line at all."
+)]
+fn simulator_as_board() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
                 on_action: |_| {},
@@ -586,7 +640,7 @@ fn erase_sheet_open() -> Element {
 }
 
 #[story(
-    description = "The name-stamping sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; naming stamps the uid and returns the card to Status. Supersedes the title-bar form for the unstamped board — a stamped device still renames inline in the title bar."
+    description = "The naming sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; the name writes to the registry and returns the card to Status. Supersedes the title-bar form for the unnamed board — a named device still renames inline in the title bar."
 )]
 fn name_sheet_open() -> Element {
     sheet(vec![rsx! {
@@ -905,6 +959,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -934,6 +989,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 

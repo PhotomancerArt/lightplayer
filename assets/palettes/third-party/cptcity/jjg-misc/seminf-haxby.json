@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_seminf_haxby",
+  "name": "Seminf Haxby",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/seminf-haxby"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "step",
+    "stops": "#ffffff@0 #d0d8fb@0.041667 #bac5f7@0.083333 #8fa1f1@0.125 #617aec@0.166667 #0027e0@0.208333 #1965f0@0.25 #0c81f8@0.291667 #18afff@0.333333 #31beff@0.375 #43caff@0.416667 #60e1f0@0.458333 #69ebe1@0.5 #7bebc8@0.541667 #8aecae@0.583333 #acf5a8@0.625 #cdffa2@0.666667 #dff58d@0.708333 #f0ec78@0.75 #f7d767@0.791667 #ffbd56@0.833333 #ffa044@0.875 #f4744a@0.916667 #ee4f4d@0.958333"
+  }
+}

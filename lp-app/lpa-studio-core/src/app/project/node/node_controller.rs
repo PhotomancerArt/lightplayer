@@ -179,7 +179,7 @@ impl NodeController {
             &|_| Vec::new(),
             &|_, _| None,
             &|_| None,
-            None,
+            &[],
             // No project context: focus is the whole Default-intent policy.
             &|node| node.state().focused,
         )
@@ -209,7 +209,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> UiNodeView {
         let mut children = self.ui_children_with_product_previews(
@@ -266,6 +266,12 @@ impl NodeController {
         // the active entry's child (the "one live surface" rule — see
         // `node_face_builder::kind_face`).
         let face = self.kind_face(&sections, &mut children);
+        // Face-claimed Debug rows retire from the drawer AFTER the face
+        // builder has read them (the tape lifts its values from these very
+        // rows), and only when the face actually took them over — a clock
+        // whose face failed to derive keeps its rows reachable. Ordering
+        // is the whole trick: filtering earlier would starve the lift.
+        retire_face_claimed_debug_rows(&mut sections, face.as_ref());
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
             .with_header_actions(node_header_actions(
@@ -518,7 +524,7 @@ impl NodeController {
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
@@ -557,11 +563,13 @@ impl NodeController {
                     product.preview = preview;
                     has_cached_preview = true;
                 }
-                // The primary visual is always presented live: it is
-                // subscribed project-wide regardless of node focus (ADR
+                // The primary visual and primary control are always
+                // presented live: both are subscribed project-wide
+                // regardless of node focus (ADR
                 // 2026-07-16-primary-visual-product, M6 P3).
-                let is_always_live =
-                    product.product.is_some() && product.product.as_ref() == always_live;
+                let is_always_live = product
+                    .product
+                    .is_some_and(|product| always_live.contains(&product));
                 product.tracking = if is_always_live {
                     UiProductTrackingState::Tracking
                 } else if base_tracking == UiProductTrackingState::Untracked && has_cached_preview {
@@ -633,7 +641,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeChild> {
         self.children
@@ -683,6 +691,9 @@ impl NodeController {
                         .map(|nested| nested.debug_overrides)
                         .sum::<usize>();
                 view.face = child.kind_face(&view.sections, &mut view.children);
+                // Same retirement as the top-level build path: the face
+                // claims its Debug rows only after it has read them.
+                retire_face_claimed_debug_rows(&mut view.sections, view.face.as_ref());
                 view.header_actions =
                     node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
                 // A container child keeps its picker: since the flat-root
@@ -797,6 +808,50 @@ fn embed_asset_editors_in_slots(
             UiConfigSlotBody::Empty | UiConfigSlotBody::Value(_) => {}
         }
     }
+}
+
+/// Debug rows a derived face has CLAIMED as its own surface, keyed by what
+/// the face actually carries — the clock's tape transport owns the three
+/// `transport.*` rows (plan 2026-08-04-2355-clock-tape-hero P5, closing
+/// `docs/debt/clock-transport-has-no-transport-ui.md`). Declaration-driven
+/// on the face arm, NOT a global path-prefix rule: another kind may
+/// legitimately name a slot `transport` someday and its drawer must keep
+/// working.
+fn face_claimed_debug_rows(face: &crate::UiNodeFace) -> &'static [&'static str] {
+    match face {
+        crate::UiNodeFace::Clock(face) if face.transport.is_some() => &[
+            "transport.running",
+            "transport.rate",
+            "transport.scrub_offset_seconds",
+        ],
+        _ => &[],
+    }
+}
+
+/// Drop face-claimed rows from the `DebugSlots` section, and the section
+/// itself when nothing is left — the face IS those rows' surface now
+/// (tint + Clear included), and a striped drawer with zero rows would
+/// read as broken. Runs strictly after `kind_face` consumed the sections;
+/// core-side on purpose, so the DTO and the e2e assertions tell the same
+/// story the pixels do.
+fn retire_face_claimed_debug_rows(
+    sections: &mut Vec<crate::UiNodeSection>,
+    face: Option<&crate::UiNodeFace>,
+) {
+    let Some(face) = face else {
+        return;
+    };
+    let claimed = face_claimed_debug_rows(face);
+    if claimed.is_empty() {
+        return;
+    }
+    sections.retain_mut(|section| {
+        let crate::UiNodeSection::DebugSlots(rows) = section else {
+            return true;
+        };
+        rows.retain(|row| !claimed.contains(&row.key.as_str()));
+        !rows.is_empty()
+    });
 }
 
 /// Contextual node-header actions (pane grammar actions slot, M3 UX gate

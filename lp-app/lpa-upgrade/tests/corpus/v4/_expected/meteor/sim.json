@@ -1,0 +1,57 @@
+{
+  "kind": "ComputeShader",
+  "source": "sim.glsl",
+  "bindings": {
+    "count": {
+      "source": "bus:count"
+    },
+    "speed": {
+      "source": "bus:speed"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "count": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3,
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "label": "Meteors",
+      "description": "How many meteors are lit"
+    },
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 4,
+      "label": "Speed",
+      "description": "Travel-speed multiplier for every meteor"
+    },
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  },
+  "produced": {
+    "meteors": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

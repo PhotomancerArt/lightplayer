@@ -14,14 +14,18 @@
 //! workspace card is `studio/module/module-face/wiring-drawer-open`.
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_gradient_summary;
 use lpa_studio_core::{
     ControllerId, ProjectEditorOp, UiAction, UiBusChannelPreview, UiBusChannelView,
     UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace, UiPanelGroup, UiProductKind,
     UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::GradientConfig;
 
-use crate::app::node::node_story_fixtures::visual_preview_bytes;
+use crate::app::node::node_story_fixtures::{
+    control_preview_product, palette_cycle, sunset_gradient, visual_preview_bytes,
+};
 use crate::app::wiring::wiring_drawer::FlowChannelRow;
 
 use super::ModuleFace;
@@ -53,6 +57,7 @@ fn channel(name: &str, kind: &str) -> UiBusChannelView {
         primary_visual: false,
         contended: false,
         preview: None,
+        gradient: None,
         writers: Vec::new(),
         readers: Vec::new(),
     }
@@ -67,6 +72,17 @@ fn visual_channel_preview() -> UiBusChannelPreview {
             revision: 104,
             bytes: visual_preview_bytes(32, 32).into(),
         },
+        tracking: UiProductTrackingState::Tracking,
+        frame: UiProductPreviewFrame::VISUAL_DEFAULT,
+    }
+}
+
+/// A control channel's value box: the fixture's lamp layout, from the same
+/// preview payload the visual rows carry with the control family on it.
+fn control_channel_preview() -> UiBusChannelPreview {
+    UiBusChannelPreview {
+        kind: UiProductKind::Control,
+        preview: control_preview_product("output").preview,
         tracking: UiProductTrackingState::Tracking,
         frame: UiProductPreviewFrame::VISUAL_DEFAULT,
     }
@@ -166,6 +182,32 @@ fn states_bus_view() -> UiBusView {
     }
 }
 
+/// The output half of a sign's scope: the visual the fixture samples, and
+/// the control product it renders for the hardware output. Both value boxes
+/// show their picture — pixels and lamps — because both are products in the
+/// tracked preview stream.
+fn output_bus_view() -> UiBusView {
+    UiBusView {
+        channels: vec![
+            UiBusChannelView {
+                value: Some("visual product #5:0".to_string()),
+                primary_visual: true,
+                preview: Some(visual_channel_preview()),
+                writers: vec![site("Playlist", Some("output"), UiBusSiteOrigin::Default)],
+                readers: vec![site("Fixture", Some("input"), UiBusSiteOrigin::Authored)],
+                ..channel("visual.out", "Color")
+            },
+            UiBusChannelView {
+                value: Some("control product #7:0".to_string()),
+                preview: Some(control_channel_preview()),
+                writers: vec![site("Fixture", Some("output"), UiBusSiteOrigin::Default)],
+                readers: vec![site("Output", Some("input"), UiBusSiteOrigin::Default)],
+                ..channel("control.out", "Color")
+            },
+        ],
+    }
+}
+
 /// A module face that is nothing but its open wiring drawer: no hero, an
 /// empty panel, so the flow rows carry the story.
 fn drawer_only_face(wiring: UiBusView) -> UiModuleFace {
@@ -205,6 +247,42 @@ pub(crate) fn fyeah_sign() -> Element {
 pub(crate) fn states() -> Element {
     rsx! {
         DrawerCard { face: drawer_only_face(states_bus_view()) }
+    }
+}
+
+#[story(
+    label = "Product Channels",
+    description = "The two product channels of a sign's scope, side by side: `visual.out` shows its pixels, `control.out` shows the fixture's lamp layout. A control channel is a picture too — its value box renders the same lamps the fixture card does, instead of the `control product #7:0` string the flow view used to fall back to."
+)]
+pub(crate) fn product_channels() -> Element {
+    rsx! {
+        DrawerCard { face: drawer_only_face(output_bus_view()) }
+    }
+}
+
+#[story(
+    description = "Palette channels in the flow view: a held palette and a cycle's member set draw in their value boxes, for the same reason product channels draw their pixels — the value box shows what is on the channel. The summary line under each strip carries the words the box has no room to spell."
+)]
+pub(crate) fn gradient_channels() -> Element {
+    rsx! {
+        DrawerCard { face: drawer_only_face(gradient_bus_view()) }
+    }
+}
+
+/// A palette-carrying scope: one held palette, one cycle.
+fn gradient_bus_view() -> UiBusView {
+    let palette_channel = |name: &str, config: GradientConfig| UiBusChannelView {
+        value: Some(format_gradient_summary(&config)),
+        gradient: Some(config),
+        writers: vec![site("Palette", Some("output"), UiBusSiteOrigin::Authored)],
+        readers: vec![site("Plasma", Some("palette"), UiBusSiteOrigin::Authored)],
+        ..channel(name, "Color")
+    };
+    UiBusView {
+        channels: vec![
+            palette_channel("palette", GradientConfig::Static(sunset_gradient())),
+            palette_channel("palette.cycle", palette_cycle()),
+        ],
     }
 }
 

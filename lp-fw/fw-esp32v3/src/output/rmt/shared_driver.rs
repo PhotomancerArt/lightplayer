@@ -23,8 +23,10 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use esp_hal::interrupt::{InterruptHandler, Priority};
+use esp_hal::peripherals::{CPU_CTRL, Interrupt};
 use esp_hal::rmt::Rmt;
-use esp_hal::time::{Duration, Rate};
+use esp_hal::system::{Cpu, CpuControl, Stack};
+use esp_hal::time::{Duration, Instant, Rate};
 use lp_ws281x::Ws281xDriver;
 
 use super::v3_rmt::{TX_CHANNELS, V3Rmt};
@@ -38,7 +40,14 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 
 /// A frame that has not completed within this long has hung; abort it and
 /// report rather than spinning forever. The longest frame the output provider
-/// can ask for (256 LEDs) is ~7.7 ms on the wire.
+/// can ask for (`WS281X_MAX_LEDS_PER_CHANNEL` = 1024 LEDs) is ~31 ms on the
+/// wire, so a healthy frame always finishes inside this deadline — which
+/// matters more now that the wait is deferred to the next frame's write: the
+/// deadline still runs from `start`, and by wait time most of it has already
+/// elapsed in wall-clock terms. In the dual-core shape `start` is a mailbox
+/// post and a queued second-wave frame begins a wave (~9 ms at 300 LEDs)
+/// late by design — still comfortably inside the budget; re-derive both
+/// margins if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.
@@ -52,6 +61,133 @@ pub static DRIVER: Ws281xDriver<V3Rmt, TX_CHANNELS> = Ws281xDriver::new(V3Rmt::n
 /// case, and a handler swapped while a frame is in flight loses that frame's
 /// refills.
 static ISR_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// Set (from core 1, `Release`) once the RMT handler is bound into the APP
+/// core's interrupt matrix. This is THE dual-core flag: the admission cap and
+/// the provider's flush behaviour key off it, and `false` means the firmware
+/// runs exactly the single-core (M4) semantics — barrier flush, cap 2, ISR on
+/// the PRO core.
+static ISR_ON_APP_CORE: AtomicBool = AtomicBool::new(false);
+
+/// Is the RMT ISR serviced by the dedicated APP core this boot?
+///
+/// Constant after boot: it is set once, before the RMT driver exists, and
+/// never cleared.
+pub fn isr_on_app_core() -> bool {
+    ISR_ON_APP_CORE.load(Ordering::Acquire)
+}
+
+/// How long [`start_app_core_isr`] waits for core 1 to report its bind. The
+/// core has ~nothing to do before setting the flag; this expiring means the
+/// core never really started, and the caller falls back to single-core.
+const APP_CORE_BIND_TIMEOUT: Duration = Duration::from_millis(10);
+
+/// Everything core 1 ever runs: bind the RMT and doorbell handlers, report,
+/// then schedule wire transmissions forever.
+///
+/// This executes ON the APP core — which is the entire point:
+/// `interrupt::bind_handler` maps the peripheral source into the **calling**
+/// core's interrupt matrix, and there is no remote-core form of the mapping
+/// call in esp-hal. From here on the APP core services every RMT interrupt
+/// AND runs the wire pusher (`wire_pusher::run` — admission, slot binding,
+/// GPIO-matrix re-mux, frame starts) while the PRO core renders. Nothing on
+/// this core takes a critical section across work, allocates, or prints;
+/// the one interrupt mask is the pusher's two-instruction idle window
+/// (`wire_pusher::idle_once`), which cannot blow an 80 µs refill deadline.
+///
+/// ⚠️ This function must NEVER return: esp-hal parks a returned core-1 entry
+/// with a **hardware stall** (`internal_park_core`), and a stalled core
+/// services no interrupts — the wires would go dark with no error anywhere.
+/// `wire_pusher::run` is `-> !` for exactly this reason.
+fn app_core_main() {
+    esp_hal::interrupt::bind_handler(
+        Interrupt::RMT,
+        InterruptHandler::new(rmt_isr, Priority::max()),
+    );
+    super::wire_pusher::bind_doorbell();
+    ISR_ON_APP_CORE.store(true, Ordering::Release);
+    super::wire_pusher::run();
+}
+
+/// Run `f` with the APP core hardware-stalled. **Required around every flash
+/// write/erase** (littlefs's storage adapter wraps its write paths in this).
+///
+/// Why: programming SPI flash disables the flash cache for the duration
+/// (esp-storage's ROM-function window), and the classic ESP32 gives that
+/// window no protection from the *other* core — a second core touching flash
+/// mid-window reads garbage or faults, and the write itself can fail. That is
+/// exactly how the first upload attempted under the dual-core deployment
+/// crashed the board (2026-08-05: littlefs writes returned `I/O error` on a
+/// healthy filesystem; the render-loaded variant crashed hard enough to wedge
+/// the CH340K). The stall is the same mechanism esp-hal parks cores with — a
+/// hardware clock-gate, resumed exactly where it stopped.
+///
+/// Register values mirror esp-hal 1.1.1 `soc/esp32/cpu_control.rs::
+/// internal_park_core` (MIT/Apache-2.0): `SW_CPU_STALL.sw_stall_appcpu_c1 =
+/// 0x21` + `OPTIONS0.sw_stall_appcpu_c0 = 0x02` stalls; zeros resume.
+///
+/// Consequences while stalled: RMT refills pend unserviced, so a frame in
+/// flight during a flash write ends on its guard word — one torn frame per
+/// write burst, the exact degradation the guard exists to provide. No
+/// deadlock: the write path runs on the PRO core, which is the caller.
+///
+/// A no-op in the single-core fallback (nothing to stall; writes were always
+/// safe there).
+pub fn with_app_core_stalled<R>(f: impl FnOnce() -> R) -> R {
+    use esp_hal::peripherals::LPWR;
+    if !isr_on_app_core() {
+        return f();
+    }
+    LPWR::regs()
+        .sw_cpu_stall()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c1().bits(0x21) });
+    LPWR::regs()
+        .options0()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c0().bits(0x02) });
+    let result = f();
+    LPWR::regs()
+        .sw_cpu_stall()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c1().bits(0) });
+    LPWR::regs()
+        .options0()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c0().bits(0) });
+    result
+}
+
+/// Start the APP core with [`app_core_main`] and wait (briefly) for its bind.
+///
+/// Returns whether the dual-core deployment is live; on `false` the caller
+/// keeps full single-core (M4) behaviour — [`install_isr`] then binds on the
+/// PRO core as before, so a board whose second core will not start still
+/// drives its wires. Call exactly once at boot, before the RMT driver is
+/// constructed.
+pub fn start_app_core_isr(cpu_ctrl: CPU_CTRL<'static>) -> bool {
+    /// Core 1's stack: ISR frames plus the `waiti` loop, nothing else, so
+    /// 4 KiB is generous. A `static` in .bss — this DRAM is the standing
+    /// price of the dedicated core (the m6 compact-mappings relief is what
+    /// pays for it at dome scale; see the plan).
+    static mut APP_CORE_STACK: Stack<4096> = Stack::new();
+
+    let mut cpu_control = CpuControl::new(cpu_ctrl);
+    // SAFETY: the one and only reference ever taken to the stack static —
+    // this function runs once at boot, and the core it hands the stack to
+    // runs forever.
+    let stack = unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) };
+    match cpu_control.start_app_core(stack, app_core_main) {
+        Ok(guard) => {
+            // Dropping the guard would hardware-stall the core mid-ISR
+            // forever after; the core is deliberately permanent.
+            core::mem::forget(guard);
+            let started = Instant::now();
+            while !isr_on_app_core() && started.elapsed() < APP_CORE_BIND_TIMEOUT {}
+            isr_on_app_core()
+        }
+        Err(error) => {
+            esp_println::println!("[INIT] APP core start failed ({error:?})");
+            false
+        }
+    }
+}
 
 /// The RMT interrupt entry point: a trampoline and nothing else.
 ///
@@ -70,9 +206,26 @@ static ISR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[esp_hal::ram]
 extern "C" fn rmt_isr() {
     DRIVER.on_interrupt();
+    // A completion this pass published may unblock a queued wire; flag the
+    // pusher so its idle path cannot sleep through it. A no-op cost in the
+    // single-core fallback (nothing ever reads the flag there).
+    super::wire_pusher::note_wake();
 }
 
-/// Bind [`rmt_isr`] at the highest priority esp-hal can dispatch, exactly once.
+/// Route the RMT interrupt to [`rmt_isr`], exactly once.
+///
+/// Two shapes, decided by [`isr_on_app_core`]:
+///
+/// * **Dual-core (the default deployment).** Core 1 already bound the handler
+///   into its own matrix in [`app_core_main`]; the only thing left is
+///   hygiene — make sure the PRO core's matrix does not also claim the
+///   source. ⚠️ `rmt.set_interrupt_handler` must NOT be called in this shape,
+///   here or anywhere else: its first act is disabling the RMT mapping on
+///   every *other* core, which would silently unmap core 1 and kill every
+///   refill. That foot-gun is the reason this function no longer uses it in
+///   the dual-core path.
+/// * **Single-core fallback** (core 1 failed to start): the pre-dual-core
+///   bind on the current (PRO) core, unchanged M4 behaviour.
 pub fn install_isr(rmt: &mut Rmt<'_, esp_hal::Blocking>) {
     if ISR_INSTALLED
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -80,7 +233,12 @@ pub fn install_isr(rmt: &mut Rmt<'_, esp_hal::Blocking>) {
     {
         return;
     }
-    rmt.set_interrupt_handler(InterruptHandler::new(rmt_isr, Priority::max()));
+    if isr_on_app_core() {
+        esp_hal::interrupt::disable(Cpu::ProCpu, Interrupt::RMT);
+        let _ = rmt;
+    } else {
+        rmt.set_interrupt_handler(InterruptHandler::new(rmt_isr, Priority::max()));
+    }
 }
 
 /// Emit the per-channel WS281x counters, at most once per
@@ -161,6 +319,35 @@ pub mod telemetry {
             .is_err()
         {
             return;
+        }
+
+        // Per-wire attribution first: the `[WS281X]` per-slot lines aggregate
+        // every wire that shared the slot (slot 0 sums wires 0 and 4 at five
+        // wires), and an 8-wire run is unreadable without the per-wire view.
+        // A NEW line kind, not new fields — the per-slot prefix is
+        // position-greppable by the capacity-matrix scripts and must not
+        // shift. Emitted only for wires that have posted, so the four-wire
+        // steady state prints exactly four.
+        for wire in 0..TX_CHANNELS {
+            let stats = crate::output::rmt::wire_pusher::MAILBOXES[wire].wire_stats();
+            if stats.posted == 0 {
+                continue;
+            }
+            esp_println::println!(
+                "[WS281X-WIRE] t_ms={} wire={} posted={} sent={} torn={} waved={} mux={} \
+                 aborted={} cancelled={} failed={} queue_wait_max_us={}",
+                now_ms,
+                wire,
+                stats.posted,
+                stats.transmitted,
+                stats.torn,
+                stats.waved,
+                stats.takeovers,
+                stats.aborted,
+                stats.cancelled,
+                stats.start_failed,
+                stats.queue_wait_max_us,
+            );
         }
 
         for ch in 0..TX_CHANNELS as u8 {

@@ -6,15 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiAction, UiControlProductPreview,
-    UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame,
-    UiProductTrackingState,
+    ControlDisplayLayout, UiAction, UiControlProductPreview, UiProducedProduct, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
 };
 use wasm_bindgen::{Clamped, JsCast};
 
-use crate::app::node::map_view::{
-    MapArrowsOverlay, MapViewOptions, neutral_lamp_rgb, universe_rgb, wiring_arrow_overlay,
-};
+use crate::app::node::lamp_view::{LampView, control_sample_layout_has_rgb};
 use crate::app::node::{BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment};
 
 #[component]
@@ -81,11 +78,36 @@ pub(crate) fn ProductPreview(
     frame: UiProductPreviewFrame,
     focus_action: Option<UiAction>,
     on_action: Option<EventHandler<UiAction>>,
-    /// Mapping view options for control lamp layouts (fixture face passes
-    /// its toggles; everywhere else keeps the default live look).
-    #[props(default)]
-    map_view: MapViewOptions,
+    /// Colour a control product's lamps from the live frame (the fixture
+    /// face passes its toggle; everywhere else keeps the live look). Off
+    /// paints the neutral lamp colour — the layout without the output.
+    #[props(default = true)]
+    live: bool,
+    /// The clock's live effective seconds ("42.35"), when the caller has a
+    /// reading — turns a time product's band into a counter.
+    #[props(default = None)]
+    time_seconds: Option<String>,
 ) -> Element {
+    // A time product is metadata-only BY DESIGN (nothing to draw behind the
+    // handle — the phasor cards below are its real face), so it never gets
+    // the aspect-framed hero the pictorial products fill (a full-width box
+    // of nothing — G2 gate feedback). It keeps the compact caption band;
+    // the clock face's own hero is the tape transport instrument beneath
+    // the row (the interim seconds counter died with it — plan
+    // 2026-08-04-2355-clock-tape-hero, P3).
+    if kind == UiProductKind::Time && matches!(preview, UiProductPreview::MetadataOnly) {
+        return rsx! {
+            div { class: "ux-produced-product-metadata",
+                strong { class: "tw:text-sm tw:text-strong-foreground",
+                    {metadata_only_title(kind)}
+                }
+                span { class: "tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                    {metadata_only_detail(kind)}
+                }
+            }
+        };
+    }
+
     let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
     let overlay = product_tracking_overlay(kind, tracking);
@@ -102,7 +124,7 @@ pub(crate) fn ProductPreview(
                     ProductPreviewCanvas { width, height, revision, bytes }
                 },
                 UiProductPreview::ControlNative(preview) => rsx! {
-                    ControlProductPreview { preview, map_view }
+                    ControlProductPreview { preview, live }
                 },
                 UiProductPreview::Pending => rsx! {
                     ProductSkeleton {
@@ -142,8 +164,8 @@ pub(crate) fn ProductPreview(
                     ProductSkeleton {
                         kind,
                         tone: ProductSkeletonTone::Quiet,
-                        title: "Metadata only",
-                        detail: "Studio does not render this product type yet.",
+                        title: metadata_only_title(kind),
+                        detail: metadata_only_detail(kind),
                         show_text: true,
                     }
                 },
@@ -160,6 +182,26 @@ pub(crate) fn ProductPreview(
     }
 }
 
+/// Metadata-only heading. A **time** product is metadata-only by design, not
+/// by omission: there is nothing to draw behind the handle, and the way to
+/// look at it is the clock face's phasor listing. Saying "Studio does not
+/// render this yet" there would report a gap that is not one.
+fn metadata_only_title(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => UiProductKind::Time.detail_label(),
+        _ => "Metadata only",
+    }
+}
+
+fn metadata_only_detail(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => {
+            "A queryable timebase: seconds, this tick's delta, and the phasors riding it."
+        }
+        _ => "Studio does not render this product type yet.",
+    }
+}
+
 fn product_frame_class(kind: UiProductKind) -> &'static str {
     match kind {
         UiProductKind::Visual | UiProductKind::Control => {
@@ -173,9 +215,9 @@ fn product_frame_class(kind: UiProductKind) -> &'static str {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ControlProductPreview(
     preview: UiControlProductPreview,
-    #[props(default)] map_view: MapViewOptions,
+    #[props(default = true)] live: bool,
 ) -> Element {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return rsx! {
             ProductMessage {
                 tone: ProductMessageTone::Warning,
@@ -193,41 +235,16 @@ fn ControlProductPreview(
         };
     }
 
-    let arrows = map_view
-        .arrows
-        .then(|| wiring_arrow_overlay(layout))
-        .unwrap_or_default();
-    let lamps = control_lamp_render(&preview, map_view);
+    let empty = layout.lamps.is_empty();
     rsx! {
         div { class: "ux-produced-product-control-layout",
             // Inset wrapper pulls the whole lamp field off the frame edges so
             // edge-mapped lamps read fully instead of half-clipping (M3 gate:
             // "zoom it out a bit"). Geometry inside stays texture-faithful.
             div { class: "ux-map-inset",
-                for (index, lamp) in lamps.iter().enumerate() {
-                    span {
-                        key: "{index}",
-                        class: "ux-produced-product-control-lamp",
-                        style: "{lamp.style}",
-                    }
-                }
-                MapArrowsOverlay { overlay: arrows }
-                // Numbers are a separate layer: the lamp elements screen-blend
-                // against the black frame, which would wash dark glyphs out.
-                if map_view.numbers {
-                    for (index, lamp) in lamps.iter().enumerate() {
-                        if let Some(number) = lamp.number.as_ref() {
-                            span {
-                                key: "num-{index}",
-                                class: "ux-map-lamp-num",
-                                style: "{lamp.position_style}",
-                                "{number}"
-                            }
-                        }
-                    }
-                }
+                LampView { preview: preview.clone(), live }
             }
-            if layout.lamps.is_empty() {
+            if empty {
                 ProductMessage {
                     tone: ProductMessageTone::Warning,
                     message: "Control product display layout is empty.".to_string(),
@@ -477,7 +494,7 @@ fn product_tracking_overlay(
 
 fn preview_frame_style(preview: &UiProductPreview, frame: UiProductPreviewFrame) -> String {
     if let UiProductPreview::ControlNative(control) = preview
-        && let Some(ControlDisplayLayout::Layout2d(layout)) = control.display_layout.as_ref()
+        && let Some(ControlDisplayLayout::Layout2d(layout)) = control.display_layout.as_deref()
     {
         return format!(
             "aspect-ratio: {} / {};",
@@ -486,112 +503,6 @@ fn preview_frame_style(preview: &UiProductPreview, frame: UiProductPreviewFrame)
         );
     }
     format!("aspect-ratio: {} / {};", frame.width, frame.height)
-}
-
-fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -> bool {
-    preview.sample_layout.spans.iter().any(|span| {
-        matches!(
-            span.encoding,
-            ControlSampleEncoding::RgbPixels { count, .. } if count > 0
-        )
-    })
-}
-
-struct ControlLampRender {
-    style: String,
-    position_style: String,
-    number: Option<String>,
-}
-
-fn control_lamp_render(
-    preview: &UiControlProductPreview,
-    map_view: MapViewOptions,
-) -> Vec<ControlLampRender> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
-        return Vec::new();
-    };
-    layout
-        .lamps
-        .iter()
-        .map(|lamp| {
-            // Fill precedence: live output > universe color > neutral.
-            let [r, g, b] = if map_view.live {
-                control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
-            } else if map_view.universes {
-                universe_rgb(lamp.lamp_index)
-            } else {
-                neutral_lamp_rgb()
-            };
-            let diameter = (lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
-            let position_style = format!(
-                "left: {:.3}%; top: {:.3}%;",
-                lamp.center[0].clamp(0.0, 1.0) * 100.0,
-                lamp.center[1].clamp(0.0, 1.0) * 100.0,
-            );
-            let style = format!(
-                "--lamp-r: {r}; --lamp-g: {g}; --lamp-b: {b}; {position_style} width: max(5px, {diameter:.3}%); height: max(5px, {diameter:.3}%);"
-            );
-            ControlLampRender {
-                style,
-                position_style,
-                number: map_view
-                    .numbers
-                    .then(|| (lamp.lamp_index + 1).to_string()),
-            }
-        })
-        .collect()
-}
-
-/// Live lamp colors indexed by wiring index — the same sample decode the
-/// display renderer uses, packaged for the mapping editor's live view.
-pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
-        return Vec::new();
-    };
-    let len = layout
-        .lamps
-        .iter()
-        .map(|lamp| lamp.lamp_index as usize + 1)
-        .max()
-        .unwrap_or(0);
-    let mut colors = vec![[0_u8; 3]; len];
-    for lamp in &layout.lamps {
-        if let Some(rgb) = control_rgb_at_sample(preview, lamp.sample_start) {
-            colors[lamp.lamp_index as usize] = rgb;
-        }
-    }
-    colors
-}
-
-fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
-    let span = preview.sample_layout.spans.iter().find(|span| {
-        matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })
-            && sample_start >= span.start
-            && sample_start.saturating_add(3) <= span.start.saturating_add(span.len)
-            && (sample_start - span.start).is_multiple_of(3)
-    })?;
-    let color_order = match span.encoding {
-        ControlSampleEncoding::RgbPixels { color_order, .. } => color_order,
-        ControlSampleEncoding::Raw => return None,
-    };
-    let sample = |offset: u32| -> Option<u8> {
-        let index = sample_start.checked_add(offset)? as usize;
-        let byte_index = index.checked_mul(2)?;
-        let lo = *preview.bytes.get(byte_index)?;
-        let hi = *preview.bytes.get(byte_index + 1)?;
-        Some((u16::from_le_bytes([lo, hi]) >> 8) as u8)
-    };
-    let a = sample(0)?;
-    let b = sample(1)?;
-    let c = sample(2)?;
-    Some(match color_order {
-        ColorOrder::Rgb => [a, b, c],
-        ColorOrder::Grb => [b, a, c],
-        ColorOrder::Rbg => [a, c, b],
-        ColorOrder::Gbr => [c, a, b],
-        ColorOrder::Brg => [b, c, a],
-        ColorOrder::Bgr => [c, b, a],
-    })
 }
 
 fn product_skeleton_class(kind: UiProductKind, tone: ProductSkeletonTone) -> &'static str {

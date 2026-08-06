@@ -98,21 +98,21 @@ pub struct CodeRegion {
 }
 
 impl CodeRegion {
-    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + **32 KiB**, I-bus
-    /// image `0x400B_0000..0x400B_8000`. Sits inside esp-hal's `dram2_seg`
+    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + **24 KiB**, I-bus
+    /// image `0x400B_2000..0x400B_8000`. Sits inside esp-hal's `dram2_seg`
     /// free span and clear of the ROM data/stack reservations lower in SRAM1
     /// (the last of them, `reserved_rom_stack_app`, ends exactly at
     /// `dram2_seg`'s origin `0x3FFE_7E30`); hardware-proven by the experiment
     /// repo's payload runner, and modeled exactly by `lp-xt-emu`'s
     /// `BoardProfile::esp32()`.
     ///
-    /// # Why 32 KiB and not the original 92 KiB
+    /// # Why 24 KiB (was 32 KiB until 2026-08-04, 92 KiB before 2026-08-02)
     ///
     /// The 92 KiB was picked as "a comfortable span", never measured, and it
     /// was expensive: this region is the sole reason `dram2_seg` cannot join
-    /// the heap, on a chip whose entire heap is 110 KB and whose measured
-    /// binding constraint is a ~65 KB *compile working set*
-    /// (`docs/adr/2026-08-01-esp32v3-flash-budget.md`).
+    /// the heap, on a chip whose measured binding constraint is main-heap
+    /// residency (`docs/adr/2026-08-01-esp32v3-flash-budget.md`, and the
+    /// 2026-08-04 dome bracket: 1500 LEDs is ~8 KB short of the arena).
     ///
     /// `tests/xt_classic_codemem_corpus.rs` measures the real cost by
     /// compiling every shader in `examples/` and `projects/` through the
@@ -126,21 +126,23 @@ impl CodeRegion {
     /// | + one keep-last-good recompile copy | **16,776 B** |
     ///
     /// Those are device figures, not a host estimate of them: the classic
-    /// reported 2,444 B for `examples/shader-oracle` and M3 measured 2,032 B
-    /// for `quad-strips-v3`, and the test reproduces both exactly.
+    /// reported 2,444 B for `examples/shader-oracle`, M3 measured 2,032 B for
+    /// `quad-strips-v3`, and the 2026-08-04 dome walk measured 2,116 B for
+    /// `zook-dome-1500` — the corpus test reproduces all of them exactly.
     ///
     /// 16,776 B is the peak model, because `shader_node.rs` holds the old
     /// program while the new one compiles ("Old + new coexist for the
-    /// compile duration"). 32 KiB is **1.95×** that, **5.03×** the largest
-    /// single real shader — a user shader five times larger than anything in
-    /// this repo still compiles — and about **9.8 shaders at the corpus
-    /// mean**. The remaining 64 KiB goes to the heap (`fw-esp32v3`'s
-    /// `main.rs`).
+    /// compile duration"). 24 KiB is **1.46×** that, and still holds the
+    /// peak model *plus one more largest-in-repo shader* (23,292 B) — the
+    /// corpus test's guard asserts exactly that headroom, so a shader
+    /// growing past it fails the suite rather than the field. The freed
+    /// 8 KiB (72 KiB total) goes to the heap (`fw-esp32v3`'s `main.rs`),
+    /// where the dome measurements say every byte matters.
     ///
-    /// What 32 KiB gives up honestly: the old 92 KiB could hold the entire
-    /// 27-shader corpus at once (90,400 B). This cannot. No project in the
-    /// repo has more than two shader nodes, and the heap those bytes buy is
-    /// the chip's actual binding constraint, so that is the trade taken.
+    /// What shrinking gives up honestly: 32 KiB was 5× the largest single
+    /// shader; this is 3.8×. `[JIT]` telemetry (`peak`, `peak_spans`,
+    /// `fails`) is the field tripwire, and [`ArenaStats::alloc_failures`]
+    /// nonzero is the signal a shrink went too far.
     ///
     /// Nothing here is a hard bound: a shader is unbounded in principle, and
     /// [`CodeMemError::TooLarge`] is the real backstop — a project whose
@@ -150,7 +152,7 @@ impl CodeRegion {
     /// corpus test is what will say so.
     pub const ESP32_DEFAULT: CodeRegion = CodeRegion {
         dbus_base: 0x3FFE_8000,
-        len_bytes: 0x0000_8000,
+        len_bytes: 0x0000_6000,
     };
 
     /// D-bus end (exclusive) of `dram2_seg`, and so of the span the region is
@@ -251,7 +253,7 @@ impl CodeRegion {
 // Pin the default so a change that breaks emulator parity is loud; the
 // emulator's classic profile derives 0x400A_1000 from the same numbers
 // (cross-checked against `lp-xt-emu` itself in `tests/xt_classic_profile.rs`).
-const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400B_0000);
+const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400B_2000);
 const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_end() == 0x400B_8000);
 // The mirror rule round-trips at both region ends.
 const _: () = {
@@ -268,7 +270,7 @@ const _: () = {
     let (heap_base, heap_len) = r.reclaimable_heap_span();
     assert!(heap_base == r.dbus_end());
     assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
-    assert!(heap_len == 0x0001_0000); // 64 KiB returned to the allocator
+    assert!(heap_len == 0x0001_2000); // 72 KiB returned to the allocator
 };
 // The reclaimed span must not be able to ABUT the `dram_seg` arena, which is
 // the firmware's other heap region. Adjacent regions are indistinguishable
@@ -641,15 +643,16 @@ mod tests {
     fn default_region_is_the_runner_region() {
         let r = CodeRegion::ESP32_DEFAULT;
         r.validate();
-        // 32 KiB at D-bus 0x3FFE_8000 since 2026-08-02 (was 92 KiB, I-bus
-        // base 0x400A_1000). The D-bus base is unchanged, so shrinking moved
-        // the I-bus BASE up while the I-bus END stayed put — that asymmetry
-        // is the mirror, and it is the thing most worth pinning here.
-        assert_eq!(r.ibus_base(), 0x400B_0000);
+        // 24 KiB at D-bus 0x3FFE_8000 since 2026-08-04 (32 KiB from
+        // 2026-08-02, 92 KiB / I-bus base 0x400A_1000 before that). The
+        // D-bus base is unchanged, so shrinking moved the I-bus BASE up
+        // while the I-bus END stayed put — that asymmetry is the mirror,
+        // and it is the thing most worth pinning here.
+        assert_eq!(r.ibus_base(), 0x400B_2000);
         assert_eq!(r.ibus_end(), 0x400B_8000);
         // Word 0 writes through the D-bus LAST word; the last word writes
         // through the D-bus base — the descending walk.
-        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFE_FFFC);
+        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFE_DFFC);
         assert_eq!(r.dbus_write_addr(r.ibus_end() - 4), 0x3FFE_8000);
     }
 
@@ -661,8 +664,8 @@ mod tests {
         let r = CodeRegion::ESP32_DEFAULT;
         let (base, len) = r.reclaimable_heap_span();
         assert_eq!(base, r.dbus_end());
-        assert_eq!(base, 0x3FFF_0000);
-        assert_eq!(len, 64 * 1024);
+        assert_eq!(base, 0x3FFE_E000);
+        assert_eq!(len, 72 * 1024);
         assert_eq!(base + len, CodeRegion::ESP32_DRAM2_END);
         // Nothing of the region is inside the heap span.
         assert!(r.dbus_base + r.len_bytes <= base);
