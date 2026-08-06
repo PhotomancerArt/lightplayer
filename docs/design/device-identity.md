@@ -178,6 +178,19 @@ additive, old rows parse as legacy (`hardware_id: None`).
   D41 confirm-sheet copy changes to match ("erases its projects — the
   board stays remembered"). Re-flash lands on the same card, same
   name, same association history.
+- **Forget must revoke the port grant, not just the row** (G2 walk,
+  2026-08-05). Silicon-anchored identity is re-derivable by
+  construction, so a registry-only forget is undone by the next page
+  load: the Web Serial grant outlives the page, the app re-enumerates
+  the granted port, auto-probes, re-derives the same `dev_` uid, and
+  the sighting write recreates the deleted row. `HomeOp::ForgetDevice`
+  therefore disconnects the live session, revokes the grant through
+  `LinkProvider::forget_endpoint` (`SerialPort.forget()`), and only
+  then deletes the row. A grant is nameable only through a live
+  endpoint — no pre-connect mapping from grant to board exists — so an
+  OFFLINE device is registry-only and any grant it holds survives.
+  That is harmless on its own: a grant with no row re-registers only
+  if the user reconnects that board.
 - **Blank/erased/WLED boards are recognizable** the moment a MAC is
   read (A2): the wizard can say "This board was **Porch sign** — it's
   currently blank / running WLED." Adopt verdicts enrich accordingly

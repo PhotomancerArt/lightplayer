@@ -98,6 +98,31 @@ export async function closePort(id) {
   // released the reader/writer, so no stream stays held.
 }
 
+// Revoke the persistent grant behind a session's port
+// (`SerialPort.forget()`, Chrome 103+). Unlike `closePort`, the session
+// entry is deleted on purpose: the grant no longer exists, so no flow may
+// reopen through this id. Returns whether the grant was actually revoked —
+// `false` means it survives (unknown id, or a browser without `forget()`).
+export async function forgetPort(id) {
+  const session = sessions.get(id);
+  if (!session) {
+    return false;
+  }
+  sessions.delete(id);
+  try {
+    // Best-effort stream release: a wedged reader/writer must not keep
+    // the grant alive — revoking is the whole point of this call.
+    await session.close();
+  } catch {
+    // fall through to forget()
+  }
+  if (typeof session.port?.forget !== "function") {
+    return false;
+  }
+  await session.port.forget();
+  return true;
+}
+
 export async function releasePort(id) {
   const session = sessions.get(id);
   if (!session) {
