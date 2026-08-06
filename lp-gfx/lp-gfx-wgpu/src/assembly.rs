@@ -491,62 +491,10 @@ fn function_signature(segment: &str) -> Option<(String, String)> {
     Some(((*name).to_string(), signature))
 }
 
-/// Blank out `//` and `/* */` comments and `#` preprocessor lines
-/// (byte-for-byte replacement with spaces, newlines preserved).
-pub(crate) fn strip_comments_and_directives(src: &str) -> String {
-    let bytes = src.as_bytes();
-    let mut out = bytes.to_vec();
-    let mut i = 0;
-    let mut at_line_start = true;
-    while i < out.len() {
-        match out[i] {
-            b'/' if i + 1 < out.len() && out[i + 1] == b'/' => {
-                while i < out.len() && out[i] != b'\n' {
-                    out[i] = b' ';
-                    i += 1;
-                }
-            }
-            b'/' if i + 1 < out.len() && out[i + 1] == b'*' => {
-                out[i] = b' ';
-                out[i + 1] = b' ';
-                i += 2;
-                while i < out.len() && !(out[i] == b'*' && i + 1 < out.len() && out[i + 1] == b'/')
-                {
-                    if out[i] != b'\n' {
-                        out[i] = b' ';
-                    }
-                    i += 1;
-                }
-                if i + 1 < out.len() {
-                    out[i] = b' ';
-                    out[i + 1] = b' ';
-                    i += 2;
-                }
-            }
-            b'#' if at_line_start => {
-                while i < out.len() && out[i] != b'\n' {
-                    out[i] = b' ';
-                    i += 1;
-                }
-            }
-            b'\n' => {
-                at_line_start = true;
-                i += 1;
-                continue;
-            }
-            b if b.is_ascii_whitespace() => {
-                i += 1;
-                continue;
-            }
-            _ => {
-                at_line_start = false;
-                i += 1;
-                continue;
-            }
-        }
-    }
-    String::from_utf8(out).expect("comment stripping is byte-for-byte on ASCII structure")
-}
+// Comment/directive stripping lives beside the shared sampler2D declaration
+// recognizer (`lps_shared::sampler2d_decl`), which strips internally — one
+// implementation, so this pass and the recognizer see the same offsets.
+pub(crate) use lps_shared::strip_comments_and_directives;
 
 fn strip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
     let rest = s.strip_prefix(keyword)?;
