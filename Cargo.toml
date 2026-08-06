@@ -47,6 +47,9 @@ members = [
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -135,6 +138,9 @@ default-members = [
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",

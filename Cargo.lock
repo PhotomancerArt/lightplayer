@@ -5474,6 +5474,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-cloud-domain"
+version = "40.0.0"
+dependencies = [
+ "lp-cloud-store-mem",
+ "lpc-cloud-api",
+ "lpc-history",
+]
+
+[[package]]
+name = "lp-cloud-store-mem"
+version = "40.0.0"
+dependencies = [
+ "lp-cloud-domain",
+ "lpc-cloud-api",
+ "lpc-history",
+]
+
+[[package]]
 name = "lp-collection"
 version = "1.0.0"
 dependencies = [
