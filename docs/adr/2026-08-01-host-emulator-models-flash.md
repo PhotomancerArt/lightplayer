@@ -89,7 +89,18 @@ default; `LP_XT_BUILTINS_F32` is deleted.
 `xtlpn.q32` 849/849 (6385/6385). The largest compilable shader no longer depends
 on the size of the builtins — the error message that used to name the builtins'
 footprint now names the shader's own size. The classic-ESP32 f32 question is
-correctly reframed as a flash-budget and unprobed-LX6-FPU question. And the
+correctly reframed as a flash-budget and unprobed-LX6-FPU question.
+
+> **Both halves answered 2026-08-06.** Flash: `float-f32` costs the classic
+> **+63,472 B** against 1,191,920 B of remaining headroom, so the budget was
+> never the constraint it was framed as. FPU: probed, and the LX6 agrees with
+> the LX7 on all 5 630 conformance vectors and on the estimate ROMs byte for
+> byte — see the §10 amendment in
+> `2026-07-31-xtensa-fp-behavior-contract.md`. `float-f32` is on by default in
+> `fw-esp32v3` as of that date. The residual cost turned out to be neither
+> flash nor numerics but **speed**: ~17 % slower than Q32 at 1500 LEDs.
+
+And the
 SRAM→flash call reach is now testable, which `lp-xt/lp-xt-emu/tests/call_range.rs`
 does.
 
