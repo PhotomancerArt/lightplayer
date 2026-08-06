@@ -107,6 +107,10 @@ PROVISION                        see §3
   —ProjectGenerated→             PROVISION             [WriteRegistry?, PushProject] (phase: Pushing)
   —PushCompleted→                DEVICE_HOME           [OpenDeviceHome]
                                  (each of the three is inert out of phase — one click, one generate)
+  —CloseRequested→               CLOSED(LeftConnected)               when needs_connect
+                                 (the flash ALREADY LANDED: no ReleasePort, nothing marked —
+                                  the board is alive and stays on the roster with its port)
+  —CloseRequested→               CLOSED(Cancelled)                   otherwise (the sim holds no port)
 DEVICE_HOME                      the editor lensed to the device, project running (§5)
 CLOSED                           terminal
 ```
@@ -114,10 +118,12 @@ CLOSED                           terminal
 ### Cross-cutting
 
 - `CloseRequested` anywhere outside FLASHING / FLASH_FAILED /
-  ABANDON_GUARD → `CLOSED(Cancelled)`, no guard, state discarded (nothing
-  was written before FLASHING; adopt writes nothing). It releases the port
-  when one was granted. DEVICE_HOME and CLOSED ignore it — the card owns
-  the surface from there.
+  ABANDON_GUARD / PROVISION → `CLOSED(Cancelled)`, no guard, state
+  discarded (nothing was written before FLASHING; adopt writes nothing).
+  It releases the port when one was granted. **PROVISION is the
+  exception**: by then the flash has landed, so ✕ there is
+  `CLOSED(LeftConnected)` and the port is KEPT — see §7.12. DEVICE_HOME
+  and CLOSED ignore it — the card owns the surface from there.
 - `PortLost` in any hardware state that holds a port (PROBING through
   PROVISION) → CONNECT_INTRO with a hint; during FLASHING or ABANDON_GUARD
   it presents as a flash failure; at FLASH_FAILED it is inert.
@@ -128,15 +134,22 @@ CLOSED                           terminal
   assuming it.
 - Wizard state is not persisted across refresh (alpha posture); a refresh
   mid-flash lands on the incomplete-flash card state.
-- `WriteRegistry` is emitted only when the flow holds a resolved hardware
-  uid AND the target `can_rename` — the simulator names nothing (§3).
-  `RecordSighting` is likewise conditional on a hardware uid: a board
-  anchored to nothing is adoptable, it is just not remembered.
+- `WriteRegistry` is emitted whenever the target `can_rename` — the
+  simulator names nothing (§3). Its `hardware_uid` is **advisory**: the
+  uid the PROBE anchored, when it anchored one. A blank board probed in
+  its boot loop anchors nothing, and the flash in between is exactly what
+  gives it an identity, so the EXECUTOR addresses the row with the bound
+  session's currently resolved uid and falls back to the probe's (§8).
+  Neither available = no row, said out loud. `RecordSighting` still needs
+  a probed uid: a board anchored to nothing is adoptable, it is just not
+  remembered.
 - **CLOSED carries a reason**: `Cancelled` (nothing was written),
   `IncompleteFlash` (the board's card is marked — it needs re-flashing),
-  and `Adopted` (§5). Only the first two release the port; adopting a
-  board and then dropping its session would contradict the one thing
-  adopt promises.
+  `Adopted` (§5), and `LeftConnected` (§7.12 — ✕ after the flash landed).
+  Only the first two release the port: a board that is flashed, adopted,
+  or both has earned its place on the roster, and dropping its session on
+  the way out is how it ends up reading "not connected" one frame after
+  it was set up.
 
 ## 3 · Provision step (shared)
 
@@ -288,6 +301,35 @@ Recorded so the two can be reconciled rather than silently diverge:
     editor →"). The full setup path is untouched: creating a project and
     then landing in the editor with it running is the ratified north star,
     and the difference is exactly that adopt creates nothing.
+12. **✕ at PROVISION keeps the port.** flow-spec's close rule ("nothing
+    was written before FLASHING, so ✕ releases and discards") is right up
+    to the flash and wrong after it. The G2 walk (2026-08-05) closed the
+    wizard at PROVISION on a board that had JUST been flashed
+    successfully, and the board went straight to "not connected" — with a
+    Reconnect that then had to re-open a port the app had released a
+    second earlier. The flash landed; the board is alive and running our
+    firmware; it belongs on the roster. So PROVISION's ✕ is
+    `CLOSED(LeftConnected)` with no commands at all, and the card simply
+    drops the wizard's body for its own (usually Connected-empty: flashed,
+    nothing on it yet). The simulator, which holds no port, keeps the
+    plain `CLOSED(Cancelled)`.
+13. **The provisioning name is written under the identity the FLASH gave
+    the board.** `WriteRegistry` used to be emitted only when the PROBE
+    had anchored a uid. A blank board probed in its boot loop anchors
+    none — so on the G2 walk the name the user typed was written nowhere,
+    and the push one command later refused the board with "no named
+    device is connected" (the push gate reads the session identity's
+    NAME). The reducer now always asks for the write and passes the
+    probe's uid as advisory; the executor, which can see the live
+    session, addresses the row with whatever identity the board actually
+    has by then. Two follow-on repairs live in the controller, not the
+    machine: the provision commands wait for the board to be back
+    (`wait_ready`, idempotent and bounded by the link layer's own
+    deadline) before writing or pushing, and the name is applied to the
+    session's cached identity directly — because the post-write refresh
+    CLEARS the reconcile state before re-reading, so a re-read that
+    cannot run would otherwise leave the board with no identity at all,
+    one command before the push demands one.
 
 ## 8 · Command → existing machinery
 
@@ -301,7 +343,7 @@ nothing. Each `SetupCommand` names machinery that already exists:
 | `ReleasePort` | `DeviceOp::DisconnectDevice { target }` |
 | `Flash` | `DeviceOp::ProvisionFirmware { target, setup_name: None, board_id }` — `setup_name` is `None` because naming is a Provision-time registry write |
 | `GenerateProject` | `CatalogOp::GenerateForBoard { board_id }` |
-| `WriteRegistry` | `CatalogOp::UpsertRegisteredDevice(..)` (merge upsert) |
+| `WriteRegistry` | `CatalogOp::UpsertRegisteredDevice(..)` (merge upsert), addressed by the bound session's resolved uid, else the command's advisory probe uid; neither = `SetupDispatch::Skip` and a log line |
 | `RecordSighting` | `CatalogOp::UpsertRegisteredDevice(..)` with no association (sight-only) |
 | `PushProject` | `DeployOp::PushProject { key, target }` |
 | `OpenDeviceHome` | `StudioController::attach_lens` on the target's session |

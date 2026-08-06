@@ -3744,6 +3744,18 @@ impl StudioController {
     ) -> (UiNotices, Option<crate::SetupEvent>) {
         use crate::{SetupCommand, SetupDispatch, SetupEvent};
 
+        // Provisioning WRITES TO THE BOARD, so the board has to be back
+        // first. The flash's own reattach normally leaves it Ready and
+        // absorbed, but a board still finishing its boot (or a reattach
+        // that landed a beat late) would otherwise be addressed with no
+        // identity at all — which is how a typed name reached nothing and
+        // the push refused "no named device is connected".
+        if matches!(
+            command,
+            SetupCommand::WriteRegistry { .. } | SetupCommand::PushProject { .. }
+        ) {
+            self.settle_setup_device(&updates).await;
+        }
         let context = self.setup_executor_context();
         match crate::dispatch_for(command, &context) {
             SetupDispatch::Device(DeviceOp::OpenProvider { provider_id }) => {
@@ -3789,7 +3801,38 @@ impl StudioController {
                         return (UiNotices::new(), None);
                     }
                     if let Some(device_id) = self.setup_device {
+                        // Held across the refresh on purpose: the refresh
+                        // CLEARS the reconcile state before it re-reads
+                        // (`clear_reconcile`), and a re-read that cannot
+                        // run leaves the session with no identity at all.
+                        let previous = self.device_sync_for(device_id).cloned();
                         self.refresh_device_sync_for(device_id).await;
+                        // The row we just wrote IS the naming truth (D34),
+                        // and the push gate reads the SESSION's copy of
+                        // it. The pull above re-resolves everything and
+                        // normally lands the same name — but it needs the
+                        // wire, and a pull that cannot run (or fails, and
+                        // then records `identity: None`) would leave the
+                        // board nameless one command before the push
+                        // demands a name. So the write is applied to the
+                        // session directly, from what we know we wrote.
+                        if let SetupCommand::WriteRegistry {
+                            name, hardware_uid, ..
+                        } = command
+                        {
+                            // The SAME uid the executor addressed the row
+                            // with — read off the context built BEFORE the
+                            // dispatch, because a pull that failed just
+                            // above has by now recorded `identity: None`
+                            // and re-reading it would stamp nothing.
+                            let uid = context
+                                .resolved_uid
+                                .clone()
+                                .or_else(|| hardware_uid.clone());
+                            if let Some(uid) = uid {
+                                self.stamp_setup_identity(device_id, &uid, name, previous);
+                            }
+                        }
                     }
                     (UiNotices::new(), None)
                 }
@@ -3809,15 +3852,35 @@ impl StudioController {
                 self.mark_setup_flash_incomplete();
                 (UiNotices::new(), None)
             }
+            // Nothing to run, and a reason worth saying out loud: an
+            // un-anchored board cannot be remembered, so its name lives
+            // only as long as the session does.
+            SetupDispatch::Skip { reason } => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("setup: skipped {} — {reason}", command.label()),
+                ));
+                (UiNotices::new(), None)
+            }
             // `Home` is never produced by `dispatch_for` today; a future
             // command that maps to one lands here rather than silently.
             SetupDispatch::Home(_) => (UiNotices::new(), None),
         }
     }
 
-    /// What the executor needs that a command does not carry.
+    /// What the executor needs that a command does not carry: the card key
+    /// ops address, and the uid the bound session's identity resolves to
+    /// right now (which is what a registry write is addressed with when
+    /// the probe anchored none — see `SetupCommand::WriteRegistry`).
     fn setup_executor_context(&self) -> crate::SetupExecutorContext {
-        let context = crate::SetupExecutorContext::new((self.now_secs)());
+        let context = crate::SetupExecutorContext::new((self.now_secs)()).with_resolved_uid(
+            self.setup_device.and_then(|id| {
+                self.device_sync_for(id)
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.uid.clone())
+            }),
+        );
         match self
             .setup
             .as_ref()
@@ -3825,6 +3888,90 @@ impl StudioController {
         {
             Some(card_key) => context.with_card_key(card_key),
             None => context,
+        }
+    }
+
+    /// Put the name the setup flow just wrote to the registry onto the
+    /// bound session's cached identity, under the uid the row was written
+    /// with.
+    ///
+    /// The registry is the naming truth (D34) and the session's copy is
+    /// what every gate downstream reads — including the push's
+    /// "carries a NAMED identity". Re-reading it through a pull is the
+    /// thorough path and runs first; this is the part that does not need
+    /// the wire, so a pull that could not run (or that failed, and
+    /// recorded `identity: None` for its trouble) cannot leave a board
+    /// nameless one command before the push demands a name.
+    ///
+    /// `previous` is the sync from BEFORE that refresh, and it is not
+    /// belt-and-braces: `refresh_device_sync_for` clears the reconcile
+    /// state before it re-reads, so a re-read that could not run (the
+    /// board still finishing its reboot, the protocol not attached yet)
+    /// leaves the session with NO identity — and the push one command
+    /// later refuses a board it can see. The classification in `previous`
+    /// is a moment old and nothing on the board changed in between; the
+    /// alternative is discarding a device's identity because a read did
+    /// not happen.
+    ///
+    /// Never invents a sync from nothing: a board nobody has ever read
+    /// gets no content classification here.
+    fn stamp_setup_identity(
+        &mut self,
+        device_id: crate::RuntimeId,
+        uid: &str,
+        name: &str,
+        previous: Option<DeviceSyncState>,
+    ) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let Some(session) = self.device_session_by_id(device_id) else {
+            return;
+        };
+        let Some(mut sync) = session.device_sync().cloned().or(previous) else {
+            return;
+        };
+        sync.identity = Some(crate::app::places::DeviceIdentity {
+            uid: uid.to_string(),
+            name: name.to_string(),
+        });
+        session.set_device_sync(Some(sync));
+        self.mark_dirty();
+    }
+
+    /// Wait for the bound board to be BACK — Ready, and its copy absorbed
+    /// — before provisioning writes to it or pushes.
+    ///
+    /// Bounded by the link layer's own readiness deadline:
+    /// [`lpa_link::DeviceSession::wait_ready`] drives the readiness engine
+    /// until the state leaves `Booting` or that deadline expires, and is
+    /// idempotent outside `Booting` (so on the ordinary path — where the
+    /// flash's own reattach already landed — this returns immediately and
+    /// costs nothing). A board that never comes back is left to the
+    /// push's own refusal rather than a second error voice.
+    async fn settle_setup_device(&mut self, updates: &UxUpdateSink) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        let state = match self.hardware_session_for(device_id) {
+            Some(session) => Some(session.wait_ready().await),
+            None => None,
+        };
+        if !matches!(state, Some(DeviceState::Ready { .. })) {
+            return;
+        }
+        // Ready, but nothing absorbed: the post-flash pull is what turns
+        // a hello into a resolved identity, and the registry write and
+        // the push both address the board through it.
+        if self
+            .device_sync_for(device_id)
+            .and_then(|sync| sync.identity.as_ref())
+            .is_none()
+        {
+            self.refresh_device_sync_for(device_id).await;
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
         }
     }
 
@@ -8820,6 +8967,171 @@ mod tests {
             Some(card.identity_key()),
             "the wizard rides the merged card"
         );
+    }
+
+    /// A studio with a memory library, plus the store behind it so a test
+    /// can read what the flow wrote.
+    fn studio_with_library() -> (StudioController, crate::app::library::LibraryStore) {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [9u8; 16]),
+            Rc::new(|| "2026-08-05-0900".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 1_800_000_000.0),
+        )));
+        block_on_ready(studio.settle_library());
+        (studio, store)
+    }
+
+    /// Give the bound session the identity a post-flash hello resolves:
+    /// a uid from silicon, and NO name (the name is what provisioning is
+    /// about to write).
+    fn absorb_identity(studio: &mut StudioController, device_id: crate::RuntimeId, uid: &str) {
+        let session = studio
+            .pool
+            .device_session_mut(device_id)
+            .expect("the bound session");
+        session.set_device_sync(Some(crate::app::places::DeviceSyncState {
+            identity: Some(crate::app::places::DeviceIdentity {
+                uid: uid.to_string(),
+                name: String::new(),
+            }),
+            content: crate::app::places::DeviceContent::Empty,
+        }));
+    }
+
+    #[test]
+    fn provisioning_names_the_board_under_the_identity_the_flash_gave_it() {
+        // G2 blank-C6 walk, 2026-08-05: a blank board probed in its boot
+        // loop anchors NO uid, so the reducer's old "write the registry
+        // only when the probe carried one" meant the name the user typed
+        // was written nowhere — and the push then refused the board with
+        // "no named device is connected". The identity the FLASH gave the
+        // board (its post-flash hello) is what the row is addressed with.
+        let (mut studio, store) = studio_with_library();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let device_id = grant_a_port(&mut studio);
+        // A probe that anchored nothing — the case that used to lose the name.
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+            flow.handle(crate::SetupEvent::NameEdited {
+                name: "Porch sign".to_string(),
+            });
+        }
+        // …and the flash's reattach absorbed the board's identity.
+        absorb_identity(&mut studio, device_id, "dev_fromthehello");
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .expect("provisioning runs");
+
+        let rows = crate::app::places::DeviceRegistry::new(store.fs_handle())
+            .list()
+            .expect("the registry is readable");
+        let row = rows
+            .iter()
+            .find(|row| row.uid == "dev_fromthehello")
+            .unwrap_or_else(|| panic!("the board is remembered; got {rows:?}"));
+        assert_eq!(row.name, "Porch sign", "under the name the user typed");
+        assert_eq!(
+            row.board_id.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
+        // …and the SESSION carries that name, which is what the push gate
+        // reads. Without this the push refuses a board it can see.
+        assert_eq!(
+            studio
+                .device_sync_for(device_id)
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.name.as_str()),
+            Some("Porch sign"),
+        );
+    }
+
+    #[test]
+    fn a_board_no_identity_anchors_provisions_without_a_registry_row() {
+        // The other side of the same seam: neither the probe nor the
+        // session can name the board, so no row is invented — the flow
+        // carries on rather than writing garbage under an empty uid.
+        let (mut studio, store) = studio_with_library();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+        }
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .expect("provisioning runs");
+
+        assert!(
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .list()
+                .expect("the registry is readable")
+                .is_empty(),
+            "a board anchored to nothing is remembered by nothing"
+        );
+    }
+
+    #[test]
+    fn closing_at_provision_leaves_the_flashed_board_connected() {
+        // G2 walk: ✕ after a successful flash released the port, and the
+        // board that had just been set up read "not connected" on the very
+        // next frame. The session — and its card — stay.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let device_id = grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+        }
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::Provision,
+        );
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::CloseRequested,
+        ))))
+        .expect("closing is not an error");
+
+        assert!(studio.setup.is_none(), "the flow is over");
+        assert!(
+            studio.pool.device_session(device_id).is_some(),
+            "the board keeps its session"
+        );
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "and its card is still on the grid; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        assert!(home.setup.is_none(), "with its own body back");
     }
 
     #[test]

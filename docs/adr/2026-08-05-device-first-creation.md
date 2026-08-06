@@ -168,6 +168,23 @@ machine's own command rather than through the open-anything lane.
   (`AdoptAndOpen`, "Open in the editor →"), so nobody loses the shortcut.
   The full flash+provision path is untouched: PROVISION → DEVICE_HOME with
   the project running is still the north star.
+- **Provisioning names the board under the identity the FLASH gave it**
+  (G2 blank-C6 walk, 2026-08-05). The registry write was gated on the
+  PROBE having anchored a uid, which a blank board in its boot loop never
+  has — so the name the user typed was written nowhere and the push
+  refused the board for having none. The uid on the command is advisory
+  now; the executor addresses the row with the live session's resolved
+  identity. Two consequences worth remembering: the reducer stays pure by
+  NOT pretending to know an identity only the wire has, and
+  `refresh_device_sync_for` clears a session's reconcile state before it
+  re-reads — so any caller that needs the identity to survive a failed
+  read must carry it across, which provisioning now does.
+- **A close after the flash keeps the port** (same walk). ✕ at PROVISION
+  ends the flow with `CLOSED(LeftConnected)` and no commands: the board
+  is flashed, alive, and on the roster, and releasing its port left a
+  just-set-up board reading "not connected" with a Reconnect that had to
+  re-open what the app had just dropped. Only `Cancelled` and
+  `IncompleteFlash` release now.
 - **The wizard is a state of the device card, not a card of its own** (G2,
   same day). One physical board renders as exactly one card at every moment
   of the flow: standalone in the entry slot while nothing is attached and

@@ -29,11 +29,20 @@ pub enum SetupCommand {
     /// Generate and install the first project for `board_id`.
     GenerateProject { board_id: String },
     /// Write the device's name and board under its resolved identity.
-    /// Emitted only when the flow holds a hardware uid AND the target can
-    /// be renamed — there is no stamp step, and an anonymous board is
-    /// remembered by nothing.
+    /// Emitted whenever the target can be renamed — there is no stamp
+    /// step; the name IS the registry row.
+    ///
+    /// `hardware_uid` is **advisory**: the uid the PROBE anchored, when it
+    /// anchored one. A blank board probed in its boot loop anchors
+    /// nothing (no hello, no efuse read yet), and the flash that follows
+    /// is exactly what gives the board an identity — so the executor
+    /// prefers the session's CURRENTLY resolved uid and falls back to
+    /// this one (G2 blank-C6 walk, 2026-08-05: the reducer refusing to
+    /// emit on a uid-less probe is why a typed name never landed, and the
+    /// push then refused a board with no name). The reducer stays pure by
+    /// not pretending to know an identity that only the wire has.
     WriteRegistry {
-        hardware_uid: String,
+        hardware_uid: Option<String>,
         hardware_origin: Option<String>,
         name: String,
         board_id: String,
