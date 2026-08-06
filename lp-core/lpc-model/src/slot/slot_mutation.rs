@@ -894,7 +894,7 @@ pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
         },
         // Fixed-size arrays accept up to the declared length: the declared
         // size is the maximum, and a shorter value's absent tail is
-        // type-default (color.md §5 count-bounded storage).
+        // type-default (fixed sizes are maxima, not required lengths).
         (LpValue::Array(values), LpType::Array(item_ty, len)) => {
             values.len() <= *len
                 && values

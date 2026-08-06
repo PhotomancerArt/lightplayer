@@ -13,27 +13,26 @@
 //! time, so re-authoring `step_seconds` changes the rate from that instant
 //! without resetting anything.
 //!
-//! # Two surfaces, deliberately different
+//! # One representation everywhere
 //!
-//! Every type here has two encodings and they do **not** match:
+//! Every surface — [`crate::LpValue`] storage, wire, serde JSON, and the
+//! def codec — carries the SAME shape (`docs/design/color.md` §5; ADR
+//! 2026-08-05-gradient-stops-string-storage): snake-case token strings for
+//! `space`/`method`, and the stop list as one compact
+//! [stops literal](stops_string) (`"#000 #f80@.5 (0.211,-0.017,-0.039)"`).
+//! Metadata stays structural; the part that scales with content is one
+//! string. This is what keeps a whole `GradientConfig` a few hundred wire
+//! bytes instead of the ~17.7 KiB the original padded-array recipe cost —
+//! larger than an entire project-read frame.
 //!
-//! - **serde** (authored JSON, wire) — human-friendly: enums are snake-case
-//!   strings, `stops` is a variable-length array of exactly what was
-//!   authored.
-//! - **[`crate::LpValue`] / [`crate::LpType`]** — the ratified fixed-shape
-//!   storage recipe from `docs/design/color.md` §5: enums are `I32` tags,
-//!   collections are max-sized arrays plus an explicit `count`, padding is
-//!   never read. Shaders and the GPU layout logic depend on that fixed
-//!   shape; authors should never have to type it.
+//! The `LpValue` conversion is written by hand for the same reason
+//! [`crate::PhasorConfig`]'s is (`#[derive(SlotValue)]` infers `LpType`s
+//! only for a fixed scalar whitelist), and serde is hand-written because
+//! printing the literal is space-dependent (hex is confined to the
+//! sRGB-shaped spaces).
 //!
-//! The conversion between the two is the whole of [`gradient`] and
-//! [`gradient_config`]; it is written by hand for the same reason
-//! [`crate::PhasorConfig`]'s is (`#[derive(SlotValue)]` infers `LpType`s only
-//! for a fixed scalar whitelist, and neither a string-leaf enum member nor a
-//! fixed array of structs is on it).
-//!
-//! See `docs/design/color.md` §4 (authoring spaces), §5 (storage recipes),
-//! §6 (interpolation), and §7 (where conversion happens).
+//! See `docs/design/color.md` §4 (authoring spaces), §5 (storage recipe +
+//! literal grammar), §6 (interpolation), and §7 (where conversion happens).
 
 pub mod gradient;
 pub mod gradient_config;

@@ -361,7 +361,7 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
 /// `GradientConfig` — a STRUCT, where every other panel command carries a
 /// scalar. The engine's `resolve_gradient_config` takes a driven config
 /// whole (never as a partial overlay), so what has to round-trip is the
-/// entire record: kind tag, count-bounded set, count, and both timings.
+/// entire record: kind tag, the gradient set, and both timings.
 #[test]
 fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
     let (mut server, project_path) = server_with_palette_shader_project("panel-palette-write");
@@ -412,8 +412,8 @@ fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
 /// the whole read: the probe echoes the held channel value raw inside one
 /// event, and a padded `GradientConfig` (~17.7 KiB) alone exceeded
 /// `PROJECT_READ_FRAME_MAX_BYTES` ("project-read event exceeded frame
-/// budget of 16384 bytes"). The count-bounded storage form is what keeps
-/// this passing.
+/// budget of 16384 bytes"). The stops-literal storage form (ADR
+/// 2026-08-05-gradient-stops-string-storage) is what keeps this passing.
 #[test]
 fn a_gradient_panel_write_survives_a_wire_project_read() {
     let (mut server, project_path) = server_with_palette_shader_project("panel-palette-wire-read");

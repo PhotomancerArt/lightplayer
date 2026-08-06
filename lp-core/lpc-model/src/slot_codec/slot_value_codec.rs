@@ -80,8 +80,8 @@ where
         (LpType::Mat4x4, LpValue::Mat4x4(matrix)) => write_matrix(value, matrix),
         // A fixed-size array value may carry FEWER elements than the type's
         // declared length: the declared size is the maximum, and the absent
-        // tail is type-default (color.md §5 — a count-bounded gradient set
-        // must not pad ~17 KiB of dead stops onto disk and wire).
+        // tail is type-default — a value never pads dead entries onto disk
+        // or wire just to reach a declared maximum.
         (LpType::Array(item_ty, len), LpValue::Array(items)) if items.len() <= *len => {
             write_lp_array(value, item_ty, items)
         }
@@ -392,7 +392,7 @@ where
 
     // Fixed-size arrays accept UP TO the declared length: the declared size
     // is the maximum, and a shorter value's absent tail is type-default
-    // (color.md §5 count-bounded storage).
+    // (fixed sizes are maxima, not required lengths).
     if let Some(expected_len) = expected_len
         && items.len() > expected_len
     {
@@ -867,14 +867,14 @@ mod tests {
         assert!(error.message().contains("payload"));
     }
 
-    /// The def-file seam of the count-bounded gradient storage (color.md
-    /// §5): a `GradientConfig` value carries fewer `set`/`stops` entries
-    /// than the type's fixed maximum, and the shape-driven codec must write
-    /// it into authored JSON and read that JSON back unchanged — this is
+    /// The def-file seam of the gradient storage (color.md §5): a
+    /// `GradientConfig` value — token metadata, a variable-length `set`,
+    /// and one stops literal per gradient — must write into authored JSON
+    /// and read back unchanged through the shape-driven codec. This is
     /// exactly the inline `consumed[<name>].gradient.some` slot a palette
     /// pick edits.
     #[test]
-    fn slot_value_codec_round_trips_a_count_bounded_gradient_config() {
+    fn slot_value_codec_round_trips_a_gradient_config() {
         use crate::{Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, ToLpValue};
 
         let config = GradientConfig::Cycle {

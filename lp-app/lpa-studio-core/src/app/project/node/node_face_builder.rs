@@ -594,10 +594,10 @@ fn phasor_period_control(
 ///
 /// An ABSENT `gradient` option still gets a control, seeded with
 /// `GradientConfig::default()` — exactly what the engine runs the slot on.
-/// This is the realistic authored case: inline gradient configs spell the
-/// fixed `LpValue` recipe (`color.md` §5, M4-P5), so hand-authored palette
-/// slots arrive with the option absent and the swatch is how the first
-/// palette gets picked at all. The first pick's `AssignValue` at `…gradient.some`
+/// This is the realistic authored case: most palette slots are authored
+/// with just a `default_bind` and no inline `gradient`, so the option
+/// arrives absent and the swatch is how the first palette gets picked at
+/// all. The first pick's `AssignValue` at `…gradient.some`
 /// materializes the option (the overlay's ensure-present rule).
 fn palette_swatch_control(
     entry: &UiConfigSlot,
@@ -2330,10 +2330,10 @@ mod tests {
         assert_eq!(control.value.display, "oklab \u{b7} linear \u{b7} 3 stops");
     }
 
-    /// The realistic authored case: inline gradient configs spell the fixed
-    /// `LpValue` recipe (M4-P5 decision b), so a hand-authored palette slot
-    /// arrives with the `gradient` option ABSENT — and still gets its
-    /// swatch, seeded with the same default the engine runs the slot on.
+    /// The realistic authored case: a hand-authored palette slot usually
+    /// arrives with the `gradient` option ABSENT (just a `default_bind`) —
+    /// and still gets its swatch, seeded with the same default the engine
+    /// runs the slot on.
     /// The first pick's `AssignValue` at `…gradient.some` materializes the
     /// option (the overlay's ensure-present rule).
     #[test]
