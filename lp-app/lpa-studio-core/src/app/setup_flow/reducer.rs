@@ -205,6 +205,22 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
             }
             Some(board_id) => SetupStep::go(enter_provision(context, board_id, pick.probe)),
         },
+        // The board question got answered somewhere else while the picker
+        // was still asking it (G1b ruling 6): an "Open in sim" landed a
+        // project on the simulator, and the project's advisory `target`
+        // came with it. The flow is DONE rather than short-cut — its
+        // PROVISION step generates a starter project and pushes it, which
+        // here would overwrite the project the user just opened, while
+        // everything setup exists to produce is already true.
+        //
+        // Two ways this stays put, and neither is a kind check (R2):
+        // a target that still `needs_flash` is not set up by a project
+        // landing elsewhere — it has no firmware yet — and a board that
+        // could not be inferred leaves the picker the only way to answer.
+        (SetupState::BoardPick(pick), SetupEvent::SetUpElsewhere { board_id }) => match board_id {
+            Some(_) if !caps.needs_flash => SetupStep::go(closed(CloseReason::SetUpElsewhere)),
+            _ => SetupStep::go(SetupState::BoardPick(pick)),
+        },
         (SetupState::BoardPick(_), SetupEvent::Back) => SetupStep::with(
             // On a no-connect target BOARD_PICK is the entry state, so
             // "back" leaves the flow (design §7.1).
@@ -775,6 +791,13 @@ mod tests {
             SetupEventKind::CloseRequested => SetupEvent::CloseRequested,
             SetupEventKind::KeepFlashing => SetupEvent::KeepFlashing,
             SetupEventKind::Abandon => SetupEvent::Abandon,
+            // Deliberately carries a board: on the HARDWARE context this
+            // table walks, even a fully-inferred board must leave the
+            // flow where it is — a board with no firmware on it is not
+            // set up by a project landing on the simulator.
+            SetupEventKind::SetUpElsewhere => SetupEvent::SetUpElsewhere {
+                board_id: Some(S3.to_string()),
+            },
         }
     }
 
@@ -1318,6 +1341,80 @@ mod tests {
             );
             assert_eq!(step.state.kind(), SetupStateKind::Closed, "{event:?}");
             assert!(step.commands.is_empty(), "{event:?} holds no port");
+        }
+    }
+
+    // ---- set up by another route (G1b ruling 6) ----------------------------
+
+    #[test]
+    fn a_board_the_landing_could_infer_ends_the_picker() {
+        let step = reduce(
+            &simulator(),
+            SetupState::BoardPick(BoardPickState::default()),
+            SetupEvent::SetUpElsewhere {
+                board_id: Some(C6.to_string()),
+            },
+        );
+        assert_eq!(step.state, closed(CloseReason::SetUpElsewhere));
+        assert!(
+            step.commands.is_empty(),
+            "the landing already did the work; there is nothing to ask for"
+        );
+    }
+
+    #[test]
+    fn a_landing_that_infers_no_board_leaves_the_picker_asking() {
+        let picker = SetupState::BoardPick(BoardPickState::default());
+        let step = reduce(
+            &simulator(),
+            picker.clone(),
+            SetupEvent::SetUpElsewhere { board_id: None },
+        );
+        assert_eq!(
+            step.state, picker,
+            "an untargeted project answers nothing, so the picker still asks"
+        );
+        assert!(step.commands.is_empty());
+    }
+
+    #[test]
+    fn a_target_that_still_needs_firmware_is_not_set_up_by_someone_elses_landing() {
+        // The capability, not the kind (R2): a blank board mid-flow keeps
+        // its picker no matter what lands on the simulator next door.
+        let picker = SetupState::BoardPick(BoardPickState {
+            probe: Some(blank()),
+            selected: None,
+            replaces_firmware: false,
+        });
+        let step = reduce(
+            &hardware(),
+            picker.clone(),
+            SetupEvent::SetUpElsewhere {
+                board_id: Some(C6.to_string()),
+            },
+        );
+        assert_eq!(step.state, picker);
+        assert!(step.commands.is_empty());
+    }
+
+    #[test]
+    fn a_landing_after_the_board_pick_is_inert() {
+        // PROVISION is already past the question, and the states beyond it
+        // are terminal. Only the picker has anything to stand down.
+        for kind in SetupStateKind::ALL {
+            if kind == SetupStateKind::BoardPick {
+                continue;
+            }
+            let state = state_of(kind);
+            let step = reduce(
+                &simulator(),
+                state.clone(),
+                SetupEvent::SetUpElsewhere {
+                    board_id: Some(C6.to_string()),
+                },
+            );
+            assert_eq!(step.state, state, "{} must be inert", kind.label());
+            assert!(step.commands.is_empty(), "{}", kind.label());
         }
     }
 

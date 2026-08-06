@@ -941,7 +941,7 @@ pub(crate) fn DeviceCard(
                         // shell wordmark uses (the hash may not change).
                         a {
                             class: "{grow_button_class(transport_label.is_empty())} tw:no-underline",
-                            href: "/",
+                            href: "/devices",
                             title: "Back to the gallery",
                             aria_label: "Shrink {card.name} back to the gallery",
                             onclick: move |_| {
