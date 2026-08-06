@@ -311,7 +311,7 @@ fn VersionFooter(repo: String) -> Element {
             if cfg!(feature = "stories") {
                 a {
                     class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
-                    href: "#/stories",
+                    href: "/stories",
                     onclick: move |event| {
                         // App() only checks the story-book hash at mount, so
                         // set the hash and reload to enter it.

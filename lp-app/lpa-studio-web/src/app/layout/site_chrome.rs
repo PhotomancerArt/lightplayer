@@ -50,18 +50,18 @@ pub fn SiteChrome(
             nav { class: "tw:flex tw:items-center tw:gap-1",
                 NavTab {
                     label: "Studio",
-                    href: "#/",
+                    href: "/",
                     active: section == SiteSection::Studio,
                     on_action,
                 }
                 NavTab {
                     label: "Boards",
-                    href: "#/boards",
+                    href: "/boards",
                     active: section == SiteSection::Boards,
                 }
                 NavTab {
                     label: "Docs",
-                    href: "#/docs",
+                    href: "/docs",
                     active: section == SiteSection::Docs,
                 }
             }
@@ -163,13 +163,13 @@ fn ToolsMenu() -> Element {
                 icon: StudioIconName::MapArrows,
                 title: "Mapping editor",
                 detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
-                href: "#/mapping",
+                href: "/mapping",
             }
             ToolCard {
                 icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
                 title: "Board editor",
                 detail: "Draw and edit the board diagrams behind the catalog.",
-                href: "#/boards/edit",
+                href: "/boards/edit",
             }
         }
     }

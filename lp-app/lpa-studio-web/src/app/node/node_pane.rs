@@ -259,7 +259,7 @@ fn NodeUnsupportedBody(
             // catalog, so a plain anchor is the whole mechanism.
             a {
                 class: "tw:text-xs tw:font-bold tw:text-status-error-foreground tw:underline tw:underline-offset-4 tw:opacity-80 tw:transition-opacity tw:hover:opacity-100",
-                href: "#/boards",
+                href: "/boards",
                 "See supported boards"
             }
         }

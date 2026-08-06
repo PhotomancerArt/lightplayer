@@ -12,7 +12,7 @@ use crate::app::home::setup_wizard::SetupWizardCard;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
-/// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
+/// The gallery home screen (roadmap M4, unconditional at `/` since M5):
 /// a map of everywhere the user's light lives. The runtime roster leads
 /// the page (SDI addendum: Home reads window-switcher-first,
 /// library-second); the two entry cards open the setup wizard, which asks

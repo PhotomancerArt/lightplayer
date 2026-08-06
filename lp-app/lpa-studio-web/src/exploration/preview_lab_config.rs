@@ -1,7 +1,7 @@
 //! Configuration model + URL parsing for the preview lab (PoC A).
 //!
 //! The lab is driven either from its in-page controls or from URL parameters
-//! (`#/preview-lab?cards=10&workers=2&fps=15&size=128&project=basic&autostart=1`),
+//! (`/preview-lab?cards=10&workers=2&fps=15&size=128&project=basic&autostart=1`),
 //! which is how automated measurement sweeps select configurations.
 
 /// Example project selectable per lab run. All examples publish their visual
@@ -125,14 +125,19 @@ impl LabConfig {
         1_000.0 / self.fps.max(1) as f64
     }
 
-    /// Parse the lab hash route, e.g.
-    /// `#/preview-lab?cards=10&workers=2&fps=15&size=128&project=basic&autostart=1`.
+    /// Parse the lab route from `pathname + search`, e.g.
+    /// `/preview-lab?cards=10&workers=2&fps=15&size=128&project=basic&autostart=1`.
+    /// (A legacy `#/preview-lab?…` link reaches this shape through the
+    /// router's boot shim.)
     ///
-    /// Returns `None` when the hash is not the lab route; unknown or invalid
+    /// Returns `None` when the URL is not the lab route; unknown or invalid
     /// parameters fall back to defaults.
-    pub fn parse_hash(hash: &str) -> Option<Self> {
-        let route = hash.strip_prefix("#/preview-lab")?;
-        let query = route.strip_prefix('?').unwrap_or("");
+    pub fn parse_url(url: &str) -> Option<Self> {
+        let route = url.strip_prefix("/preview-lab")?;
+        let query = route
+            .trim_start_matches('/')
+            .strip_prefix('?')
+            .unwrap_or("");
         let mut config = Self::default();
         for (key, value) in query.split('&').filter_map(|part| part.split_once('=')) {
             match key {
@@ -179,9 +184,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_full_lab_hash() {
-        let config = LabConfig::parse_hash(
-            "#/preview-lab?cards=40&workers=4&fps=20&size=64&project=fyeah-sign&tier=gpu&autostart=1",
+    fn parses_a_full_lab_url() {
+        let config = LabConfig::parse_url(
+            "/preview-lab?cards=40&workers=4&fps=20&size=64&project=fyeah-sign&tier=gpu&autostart=1",
         )
         .expect("lab route");
 
@@ -209,20 +214,20 @@ mod tests {
 
     #[test]
     fn bare_route_uses_defaults() {
-        let config = LabConfig::parse_hash("#/preview-lab").expect("lab route");
+        let config = LabConfig::parse_url("/preview-lab").expect("lab route");
         assert_eq!(config, LabConfig::default());
     }
 
     #[test]
     fn non_lab_routes_do_not_parse() {
-        assert!(LabConfig::parse_hash("#/stories/base/icon/overview").is_none());
-        assert!(LabConfig::parse_hash("").is_none());
+        assert!(LabConfig::parse_url("/stories/base/icon/overview").is_none());
+        assert!(LabConfig::parse_url("").is_none());
     }
 
     #[test]
     fn invalid_values_fall_back_to_defaults() {
         let config =
-            LabConfig::parse_hash("#/preview-lab?cards=zero&fps=999&project=nope").expect("route");
+            LabConfig::parse_url("/preview-lab?cards=zero&fps=999&project=nope").expect("route");
         assert_eq!(config.cards, LabConfig::default().cards);
         assert_eq!(config.fps, 60); // clamped
         assert_eq!(config.project, LabProject::Basic);
