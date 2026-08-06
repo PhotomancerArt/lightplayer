@@ -396,7 +396,10 @@ mod tests {
             play_meta_text(&sim, PlayLiveness::Live, true, NOW).as_deref(),
             Some("60 fps from simulator")
         );
-        assert_eq!(pill_family_class(PlayLiveness::Live, true), "ux-play-pill-sim");
+        assert_eq!(
+            pill_family_class(PlayLiveness::Live, true),
+            "ux-play-pill-sim"
+        );
         // Stopped frames outrank identity: a stalled sim goes amber like
         // any other stalled engine.
         assert_eq!(
