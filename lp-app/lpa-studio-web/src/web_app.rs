@@ -639,6 +639,10 @@ pub fn App() -> Element {
     let on_action = EventHandler::new(on_action);
     let section = match &current_route {
         StudioRoute::Home => SiteSection::Home,
+        // Explicit, not the catch-all: `#/` must light the Devices tab
+        // (a catch-all once carried it and silently stopped when lens
+        // routes moved to Session — G3 finding).
+        StudioRoute::Devices => SiteSection::Devices,
         StudioRoute::Projects => SiteSection::Projects,
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,

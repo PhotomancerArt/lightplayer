@@ -43,12 +43,12 @@ use crate::base::{
 };
 use crate::router::StudioRoute;
 
-/// Which nav tab renders as the current section. Home has no tab (the
-/// logo is its affordance) but is still a section the chrome can be "at"
-/// — no tab lights up there. Session is the editor lens fronted: no tab
-/// lights either, because the active session CHIP is the current-place
-/// marker there (D15 — the chip is the editor's representation in the
-/// nav).
+/// Which nav tab renders as the current section. Home has no tab — the
+/// LOGO is its affordance, and at Home the logo wears the you're-here
+/// underline in a tab's stead (G3 feedback). Session is the editor lens
+/// fronted: no tab lights, because the active session CHIP is the
+/// current-place marker there (D15 — the chip is the editor's
+/// representation in the nav).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
     Home,
@@ -84,8 +84,13 @@ pub fn SiteChrome(
         // `tw:@container`: the collapse below responds to the BAR's own
         // width, not the viewport, so an embedded/narrow mount behaves.
         header { class: "tw:@container tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
-            // Brand lockup — the way to Home (see module docs).
-            LogoLockup { href: "#/home".to_string() }
+            // Brand lockup — the way to Home (see module docs). At Home it
+            // wears the tabs' you're-here underline (G3 feedback: the logo
+            // IS Home's tab, so it marks the place like one).
+            span {
+                class: if section == SiteSection::Home { LOGO_HOME_ACTIVE_WRAP } else { "tw:flex tw:flex-none" },
+                LogoLockup { href: "#/home".to_string() }
+            }
             // Primary family: your things, by the brand, full weight.
             nav { class: "tw:flex tw:items-center tw:gap-1",
                 NavTab {
@@ -510,6 +515,12 @@ const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:p
 /// Secondary-family idle: reduced weight and dimmed, full strength on
 /// hover.
 const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
+
+/// The lockup's wrapper at Home: the tabs' accent underline under the
+/// brand — the logo IS Home's tab, so at Home it marks the place like
+/// one. The offset differs from the tabs' because the lockup's box is
+/// shorter; both land the bar on the header's border line.
+const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 
 /// ⋯ menu section/session row, idle.
 const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
