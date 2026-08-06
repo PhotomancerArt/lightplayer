@@ -70,7 +70,7 @@ pub(crate) fn narrow() -> Element {
 
 #[story(
     label = "Narrow, ⋯ menu open",
-    description = "The folded secondary family: same items, active state marked in the menu (Docs is current here)."
+    description = "The ONE merged \u{22ef} menu (G3 ruling): Sections, Sessions, and Tools groups in a single popup; active section marked (Docs is current here)."
 )]
 pub(crate) fn narrow_menu_open() -> Element {
     rsx! {
@@ -81,7 +81,7 @@ pub(crate) fn narrow_menu_open() -> Element {
 }
 
 #[story(
-    description = "The session strip (D15/D16) across counts and widths: one lensed-here sim; three sessions with the lens elsewhere (washed chip) and a behind device; five sessions overflowing into +n; a long name ellipsizing. Wide frames show chips, the md frame folds to two + n, the narrow frame is the count chip."
+    description = "The session strip (D15/D16) across counts and widths: one lensed-here sim; three sessions with the lens elsewhere (washed chip) and a behind device; five sessions (the overflow lives in the \u{22ef} menu); a long name ellipsizing. Wide frames show chips, the md frame folds to two, the narrow frame folds every session into the \u{22ef} menu."
 )]
 pub(crate) fn session_strip_states() -> Element {
     rsx! {
@@ -112,8 +112,8 @@ pub(crate) fn session_strip_states() -> Element {
 }
 
 #[story(
-    label = "Session flyout open",
-    description = "The narrow count chip's flyout: every session in menu grammar, here-row bold, statuses marked."
+    label = "Narrow \u{22ef} with sessions",
+    description = "The merged menu with a session group: five sessions in menu grammar, here-row bold, statuses marked, tools below."
 )]
 pub(crate) fn session_flyout_open() -> Element {
     rsx! {
@@ -198,7 +198,7 @@ fn strip_frame(
                 section: SiteSection::Devices,
                 sessions,
                 on_editor,
-                session_flyout_open: flyout_open,
+                overflow_menu_open: flyout_open,
                 VersionChipPreview { chip: branch_chip() }
             }
         }
@@ -230,12 +230,12 @@ fn branch_chip() -> BuildChip {
     }
 }
 
-fn frame(width: u32, section: SiteSection, chip: BuildChip, nav_menu_open: bool) -> Element {
+fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> Element {
     rsx! {
         div {
             class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
             style: "max-width: {width}px;",
-            SiteChrome { section, nav_menu_open,
+            SiteChrome { section, overflow_menu_open: menu_open,
                 VersionChipPreview { chip }
             }
         }
