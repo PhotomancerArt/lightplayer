@@ -1,12 +1,17 @@
 //! Produced scalar or structured values.
 
+use lpc_model::GradientConfig;
+
 use crate::{
     UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
     UiSlotShape, UiSlotUnit,
 };
 
 /// A non-product output rendered as a compact value box.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// `PartialEq` but not `Eq`: a palette reading carries float stops (as every
+/// other float-bearing view DTO does).
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedValue {
     /// Stable slot-path key of the produced slot (e.g. `active_entry`),
     /// empty for hand-built rows. Kind-face derivations key on this — the
@@ -20,6 +25,12 @@ pub struct UiProducedValue {
     /// Per-field `(name, formatted value)` rows for composite values; empty
     /// for scalars, which render `value` as the stat hero instead.
     pub fields: Vec<(String, String)>,
+    /// The palette this value holds, when it is a gradient record — the
+    /// probe row draws strips from it instead of listing `space`/`method`/
+    /// `count`/`stops` as struct fields (M4 P2). Same posture as
+    /// [`crate::UiBusChannelPreview`] on a bus channel: the picture, not a
+    /// debug string.
+    pub gradient: Option<GradientConfig>,
     /// Optional type, unit, or runtime detail.
     pub detail: Option<String>,
     /// Structured unit metadata for value presentation.
@@ -38,6 +49,7 @@ impl UiProducedValue {
         Self {
             key: String::new(),
             fields: Vec::new(),
+            gradient: None,
             label: label.into(),
             value: value.into(),
             detail: None,

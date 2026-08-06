@@ -2,7 +2,8 @@
 //!
 //! Every scalar, vector, and matrix value kind resolves to an editor when
 //! the slot is editable and addressed, and the specialized hints (`Xy`,
-//! `Dimensions`, `Affine2d`, `Power`) resolve to their rich editors (M4).
+//! `Dimensions`, `Affine2d`, `Power`, `Gradient`) resolve to their rich
+//! editors (M4) — `Gradient` read-only until the palette widget lands.
 //! Composite bodies (`Array`, `Struct`, `Enum`) stay with the composite
 //! gesture machinery (M3 P4) unless a specialized hint claims the struct;
 //! `Resource` and `Product` references are explicitly read-only displays.
@@ -14,11 +15,12 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_dimensions_field::dimensions_parts;
+use crate::app::node::slot_gradient_field::gradient_parts;
 use crate::app::node::slot_power_field::power_parts;
 use crate::app::node::{
     Affine2dSlotField, BoolSlotField, DimensionsSlotField, DropdownSlotField, FloatSlotField,
-    IntSlotField, MatrixSlotField, PowerSlotField, SliderSlotField, StringSlotField, UIntSlotField,
-    VectorSlotField, XySlotField,
+    GradientSlotField, IntSlotField, MatrixSlotField, PowerSlotField, SliderSlotField,
+    StringSlotField, UIntSlotField, VectorSlotField, XySlotField,
 };
 
 #[component]
@@ -139,6 +141,19 @@ pub fn SlotValueEditor(
             on_action,
             NumberBounds::default(),
         ),
+        // A palette renders as the palette (M4 P2) — read-only here; the
+        // picker and the live cycle are the panel widget's job (P3). A
+        // value that does not parse as a gradient record falls back to the
+        // generic display rather than drawing an empty strip.
+        UiSlotEditorHint::Gradient => match &value.kind {
+            kind if gradient_parts(kind).is_some() => {
+                let kind = kind.clone();
+                rsx! {
+                    GradientSlotField { kind, state }
+                }
+            }
+            _ => fallback_value(value, state),
+        },
     }
 }
 

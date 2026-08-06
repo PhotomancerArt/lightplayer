@@ -38,7 +38,7 @@ mod value_ref;
 mod value_slot;
 
 pub use enum_slot::{EnumSlot, SlottedEnum, SlottedEnumMut};
-pub use panel_hint::PanelHint;
+pub use panel_hint::{PANEL_HINT_SHAPE_NAME, PanelHint};
 pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotCustomAccess, SlotDataAccess, SlotEnumAccess,
     SlotOptionAccess, SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,

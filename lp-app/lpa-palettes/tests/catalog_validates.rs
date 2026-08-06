@@ -16,6 +16,50 @@ fn every_palette_passes_gradient_validate() {
     }
 }
 
+/// Every catalog file's stops literal must be CANONICAL: parsing it and
+/// re-printing reproduces the file's own string byte-for-byte, so hand
+/// edits that drift from the canonical printer are caught here rather than
+/// shipping (ADR 2026-08-05-gradient-stops-string-storage). Walks the
+/// asset tree directly so the FILE text is what is checked, not just the
+/// parsed structs.
+#[test]
+fn every_catalog_stops_literal_is_canonical() {
+    fn walk(dir: &std::path::Path, checked: &mut usize) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                walk(&path, checked);
+            } else if path.extension().is_some_and(|ext| ext == "json") {
+                let text = std::fs::read_to_string(&path).expect("read palette file");
+                let value: serde_json::Value =
+                    serde_json::from_str(&text).expect("parse palette file");
+                let gradient = &value["gradient"];
+                let space = lpc_model::Colorspace::parse(gradient["space"].as_str().unwrap())
+                    .expect("known space token");
+                let literal = gradient["stops"].as_str().unwrap_or_else(|| {
+                    panic!("{}: stops must be a string literal", path.display())
+                });
+                let stops = lpc_model::parse_stops(literal)
+                    .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                assert_eq!(
+                    lpc_model::print_stops(space, &stops),
+                    literal,
+                    "{}: stops literal is not canonical",
+                    path.display()
+                );
+                *checked += 1;
+            }
+        }
+    }
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/palettes");
+    let mut checked = 0;
+    walk(&root, &mut checked);
+    assert!(
+        checked >= 25,
+        "expected the catalog files, checked {checked}"
+    );
+}
+
 #[test]
 fn palette_ids_are_unique() {
     let palettes = all_palettes();

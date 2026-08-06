@@ -344,6 +344,8 @@ pub enum StaticValueEditorHint {
     Affine2d,
     /// Lamp type + supply budget pair (`FixturePower`-shaped struct).
     Power,
+    /// A `Gradient` or `GradientConfig` palette value.
+    Gradient,
     Resource,
     RuntimeBufferResource,
     VisualProduct,
@@ -365,6 +367,7 @@ impl StaticValueEditorHint {
             Self::Dimensions => ValueEditorHint::Dimensions,
             Self::Affine2d => ValueEditorHint::Affine2d,
             Self::Power => ValueEditorHint::Power,
+            Self::Gradient => ValueEditorHint::Gradient,
             Self::Resource => ValueEditorHint::Resource,
             Self::RuntimeBufferResource => ValueEditorHint::RuntimeBufferResource,
             Self::VisualProduct => ValueEditorHint::VisualProduct,
