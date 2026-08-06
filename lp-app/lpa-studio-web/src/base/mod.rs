@@ -7,6 +7,16 @@
 pub mod code_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod code_editor_stories;
+#[cfg_attr(
+    not(feature = "stories"),
+    allow(
+        dead_code,
+        reason = "rendered by its stories today; the docs `code-figure` embed lands in a later phase"
+    )
+)]
+pub mod code_figure;
+#[cfg(feature = "stories")]
+pub(crate) mod code_figure_stories;
 pub mod detail_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod detail_popover_stories;
@@ -35,6 +45,7 @@ pub use code_editor::{
     CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
     CodeEditorLanguage,
 };
+pub use code_figure::{CodeFigure, CodeHighlight, CodeHighlightTone};
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_card_class,
     detail_popover_section_class,
