@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod bus;
 pub mod device;
+pub mod docs_host;
 pub mod home;
 pub mod library;
 pub mod node;

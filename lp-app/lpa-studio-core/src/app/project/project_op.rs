@@ -12,6 +12,17 @@ pub enum ProjectOp {
         handle_id: u32,
     },
     LoadDemoProject,
+    /// Docs-sim bootstrap (interactive docs): connect this controller's
+    /// browser-worker sim if absent, put the lens on it, and push a
+    /// compiled-in example **directly** via deploy files — never through
+    /// the library. No catalog transaction, no OPFS seeding: a docs page
+    /// booting its leased [`crate::DocsSimHost`] must not plant cards in
+    /// the user's gallery. Dispatched only by the docs host (no UI
+    /// affordance); re-dispatching on a live sim is the docs "reset"
+    /// (a pristine re-deploy).
+    OpenDocsExample {
+        example_id: String,
+    },
     RefreshProject,
     DisconnectProject,
     /// Detach the editor lens (runtime-pool P3): the mirror drops, every
@@ -79,6 +90,11 @@ impl ControllerOp for ProjectOp {
             Self::LoadDemoProject => ActionMeta::new(
                 "Load demo project",
                 "Upload and run the built-in demo project.",
+                ActionPriority::Secondary,
+            ),
+            Self::OpenDocsExample { .. } => ActionMeta::new(
+                "Open docs example",
+                "Run a compiled-in example on this docs page's simulator.",
                 ActionPriority::Secondary,
             ),
             Self::RefreshProject => ActionMeta::new(
@@ -151,7 +167,9 @@ impl ControllerOp for ProjectOp {
             Self::OpenDeviceProject { .. } => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,
             },
-            Self::LoadDemoProject => ActionClass::Foreground {
+            // The docs bootstrap may run a full worker connect + deploy,
+            // same budget shape as the demo load.
+            Self::LoadDemoProject | Self::OpenDocsExample { .. } => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,
             },
             // Editing ops share the project-editor quiet-gap budget (D5:
@@ -213,6 +231,9 @@ mod tests {
         // + attach before the mirror opens — the load budget fits
         for op in [
             ProjectOp::LoadDemoProject,
+            ProjectOp::OpenDocsExample {
+                example_id: "examples/plasma".to_string(),
+            },
             ProjectOp::OpenDeviceProject { uid: None },
             ProjectOp::OpenDeviceProject {
                 uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),

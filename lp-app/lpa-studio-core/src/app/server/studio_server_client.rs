@@ -84,9 +84,28 @@ impl StudioServerClient {
     }
 
     pub async fn load_demo_project(&mut self) -> Result<LoadedDemoProject, UiError> {
+        self.load_deployed_files(
+            DEMO_PROJECT_STORAGE_ID,
+            DEMO_PROJECT_ID,
+            demo_project_deploy_files(),
+        )
+        .await
+    }
+
+    /// Deploy a file set as a project and load it: the storeless
+    /// load-as-push. `storage_id` is the runtime's project storage dir,
+    /// `display_id` the identity Studio shows (an example id for the demo
+    /// and the docs sims). The docs host rides this so its examples never
+    /// touch the library.
+    pub async fn load_deployed_files(
+        &mut self,
+        storage_id: &str,
+        display_id: &str,
+        files: Vec<lpa_client::ProjectDeployFile>,
+    ) -> Result<LoadedDemoProject, UiError> {
         let deploy = self
             .client
-            .deploy_project_files(DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files())
+            .deploy_project_files(storage_id, files)
             .await
             .map_err(map_client_error)?;
         let handle = deploy.value;
@@ -95,9 +114,9 @@ impl StudioServerClient {
             .project_inventory_read(handle)
             .await
             .map_err(map_client_error)?;
-        // The demo's display identity (`DEMO_PROJECT_ID`) is not its server
-        // filesystem path — resolve the real path by handle so server-root
-        // file reads (asset editor base bodies) can target it.
+        // The display identity (`display_id`) is not the server filesystem
+        // path — resolve the real path by handle so server-root file reads
+        // (asset editor base bodies) can target it.
         let loaded = self
             .client
             .project_list_loaded()
@@ -114,7 +133,7 @@ impl StudioServerClient {
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedDemoProject {
-            project_id: DEMO_PROJECT_ID.to_string(),
+            project_id: display_id.to_string(),
             handle_id: handle.id(),
             fs_root,
             inventory: ProjectInventorySummary::from(&inventory.value),
