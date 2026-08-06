@@ -40,9 +40,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorReading, UiTimebaseState};
 
-use crate::app::node::{NodeCardSection, ProducedProductView};
+use crate::app::node::slot_edit_actions::slot_clear_action;
+use crate::app::node::{
+    BindingChip, BindingChipDirection, NodeCardSection, ProducedProductView, SlotDetailButton,
+};
+use crate::base::{IconActionButton, IconMenuTone, StudioIconName};
 
 use super::phasor_trace::PhasorTraceDriver;
+use super::tape_transport::TapeTransport;
 
 /// Monotonic per-face id base for trace canvases (one driver per face; one
 /// canvas per card, addressed `{base}-{index}`).
@@ -74,14 +79,74 @@ pub fn ClockFace(
 
     rsx! {
         NodeCardSection { label: "output", first: true,
-            div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
-                // The hero is the SECONDS COUNTER — the number a scrub or
-                // speed change visibly moves ("Time product" as a caption
-                // did nothing; PR review). The Delta row stays dead.
-                ProducedProductView {
-                    product: face.product.clone(),
-                    on_action,
-                    time_seconds: face.seconds.clone(),
+            div { class: "tw:grid tw:min-w-0 tw:justify-items-stretch tw:gap-2 tw:p-2",
+                if let Some(transport) = face.transport.clone() {
+                    // The tape IS the time product's face, so it carries the
+                    // product chrome itself — name, publish chip, the
+                    // debug-override `clear`, and the same detail affordance
+                    // every slot surface has — in a slim header instead of a
+                    // boxed pane ("a big Time product box that does
+                    // nothing"; "the clear should be in the header with the
+                    // detail popup" — G1 feedback, 2026-08-05).
+                    {
+                        let override_targets: Vec<_> = [
+                            transport.running_override.clone(),
+                            transport.rate_override.clone(),
+                            transport.scrub_override.clone(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        rsx! {
+                            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                                strong {
+                                    class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                                    title: face.product.detail.clone().unwrap_or_default(),
+                                    "{face.product.name}"
+                                }
+                                if let Some(endpoint) = face.product.binding.bindings.bus_target.clone() {
+                                    BindingChip {
+                                        endpoint,
+                                        direction: BindingChipDirection::Publishes,
+                                    }
+                                }
+                                span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                                    // Same 32px box family as the detail
+                                    // button beside it (G1: the text
+                                    // button read as a one-off).
+                                    if !override_targets.is_empty() && on_action.is_some() {
+                                        IconActionButton {
+                                            icon: StudioIconName::Revert,
+                                            label: "Clear transport overrides",
+                                            title: "Clear this transport's debug overrides \u{2014} session only",
+                                            tone: IconMenuTone::Attention,
+                                            on_press: move |_| {
+                                                if let Some(handler) = on_action {
+                                                    for address in override_targets.clone() {
+                                                        handler.call(slot_clear_action(address));
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                    SlotDetailButton {
+                                        label: face.product.name.clone(),
+                                        aspects: face.product.visible_aspects(),
+                                        on_action,
+                                        authoring: face.product.authoring.clone(),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TapeTransport { transport, on_action }
+                } else {
+                    // No transport rows yet (unread project): the compact
+                    // product pane stands in until the first read lands.
+                    ProducedProductView {
+                        product: face.product.clone(),
+                        on_action,
+                    }
                 }
             }
         }
@@ -161,10 +226,21 @@ fn PhasorTraceCard(
         div { class: card_class,
             // The canvas inherits its stroke color from `color` (B/W trace
             // tone); painting is imperative from the face's rAF driver —
-            // never through the vdom.
+            // never through the vdom. `ux-box-sized-canvas` declares that
+            // this canvas's backing store tracks its CSS box, which the
+            // story-capture ready gate asserts before it shoots.
+            //
+            // The BOX is inline rather than tailwind classes, and that is
+            // load-bearing: the driver sizes the backing store from this
+            // element's box, and an unstyled canvas takes its box from the
+            // `width`/`height` attributes the driver writes — which at
+            // dpr > 1 feeds itself and grows the element every frame until
+            // the stylesheet lands. Inline declarations apply on the first
+            // layout, before the stylesheet the wasm bundle injects.
             canvas {
                 id: "{canvas_id}",
-                class: "tw:block tw:h-[42px] tw:w-full tw:text-strong-foreground",
+                style: "display:block;width:100%;height:42px",
+                class: "ux-box-sized-canvas tw:text-strong-foreground",
                 onmounted: move |_| driver.canvas_mounted(index),
             }
             div { class: "tw:grid tw:min-w-0 tw:gap-px tw:px-1.5 tw:pb-1 tw:pt-0.5",

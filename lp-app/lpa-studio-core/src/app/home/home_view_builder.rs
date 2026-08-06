@@ -76,6 +76,10 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The board the sim claims to be (vision D4), inherited from the
+    /// project it runs — `vendor/product`, the registry's vocabulary.
+    /// `None` = no board known, the ordinary default.
+    pub board_id: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
 }
@@ -228,6 +232,7 @@ pub fn build_home_view(
             opening,
             issue,
             backup: None,
+            setup: None,
         };
     };
 
@@ -257,6 +262,7 @@ pub fn build_home_view(
         // The controller overlays a finished backup after the build (it is
         // controller state, not library/roster evidence).
         backup: None,
+        setup: None,
     }
 }
 
@@ -361,6 +367,39 @@ fn assemble_roster(
     (connections, devices)
 }
 
+/// Give the card an open setup flow is bound to the roster's LEADING
+/// position and report its [`UiDeviceCard::identity_key`] — the key the
+/// wizard's body takeover rides (G2 ruling, 2026-08-05: the wizard is a
+/// state of the device card, not a card of its own).
+///
+/// `session_key` is the flow's binding: the bound session's `RuntimeId`
+/// rendering on the hardware path, the sim's reserved card key on the sim
+/// path. It is matched against `session_key` FIRST because that is the
+/// thread that does not move — a board's `identity_key` becomes its uid
+/// the instant identity lands mid-flow, and a takeover keyed by the uid
+/// would lose its card at exactly that moment. The sim card carries no
+/// session key, so its reserved `identity_key` is the second rung.
+///
+/// `None` (no flow, or a flow with nothing attached yet) leaves the roster
+/// exactly as assembled: the wizard renders standalone in the entry-cards
+/// slot, because there is no card to be the body of.
+pub(crate) fn pin_setup_card(
+    devices: &mut Vec<UiDeviceCard>,
+    session_key: Option<&str>,
+) -> Option<String> {
+    let session_key = session_key?;
+    let index = devices.iter().position(|card| {
+        card.session_key.as_deref() == Some(session_key) || card.identity_key() == session_key
+    })?;
+    let card = devices.remove(index);
+    let key = card.identity_key().to_string();
+    // Ahead of everything, including the sim's own pin: a card mid-setup
+    // is the one the user is looking at, and a leading slot is what keeps
+    // it from hopping columns as facts (and other cards) land.
+    devices.insert(0, card);
+    Some(key)
+}
+
 /// The live sim card (D36): the shared card grammar in the sim
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
@@ -383,6 +422,8 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         hardware: None,
         detected_chip: None,
+        // D4: the sim's inherited board — the one card that carries this
+        board_id: sim.board_id.clone(),
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -487,6 +528,8 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        // a device's board is a REGISTRY fact, read there (see the field doc)
+        board_id: None,
         port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
@@ -535,6 +578,11 @@ fn package_card(
 ) -> Result<UiPackageCard, crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
+    // Advisory board target (vision D3): straight passthrough from the
+    // container manifest, same seam `provenance`/`on_device` use — no
+    // catalog lookup here, that's the web renderer's job.
+    let target =
+        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?.target;
 
     let last_saved_at = handle
         .history
@@ -566,6 +614,7 @@ fn package_card(
         open_elsewhere: false,  // stamped by the hydration pass
         connected_device: None, // stamped by the D28 pairing at view build
         running_in_sim: false,  // stamped by the D28 sim arm at view build
+        target,
         health: summary.health,
     })
 }
@@ -584,6 +633,8 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
         open_elsewhere: false,
         connected_device: None,
         running_in_sim: false,
+        // A degraded package's manifest may be unreadable; no target claim.
+        target: None,
         health: summary.health,
     }
 }
@@ -658,6 +709,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
+        board_id: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -889,6 +941,7 @@ mod tests {
             devices: Vec::new(),
             sim: Some(HomeSimEvidence {
                 project,
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         }
@@ -956,6 +1009,45 @@ mod tests {
             .unwrap();
         assert_eq!(scratch.provenance, None);
         assert_eq!(scratch.kind, "Module");
+    }
+
+    /// P02: the advisory `target` passes through from the container
+    /// manifest to the card, and stays `None` for an untargeted project
+    /// (the common case — `store.create` writes no `target`).
+    #[test]
+    fn package_cards_carry_advisory_target() {
+        let store = store();
+        store.create("Untargeted", 1.0).unwrap();
+        store
+            .install_package(
+                "Targeted",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":4,"name":"Targeted","target":"espressif/esp32-c6-devkitc-1"}"#
+                        .to_vec(),
+                )],
+                PackageProvenance::Created,
+                2.0,
+            )
+            .unwrap();
+
+        let view = view_of(&store);
+        let targeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-targeted")
+            .unwrap();
+        assert_eq!(
+            targeted.target.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
+
+        let untargeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-untargeted")
+            .unwrap();
+        assert_eq!(untargeted.target, None);
     }
 
     #[test]
@@ -1034,6 +1126,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
             UiDeviceCard {
                 port_label: None,
@@ -1050,6 +1143,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -1454,6 +1548,7 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         };

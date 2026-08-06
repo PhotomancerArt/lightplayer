@@ -219,6 +219,45 @@ pub static METEOR_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/zook-dome` — a real 16' geodesic dome: 1500 LEDs as five
+/// 300-lamp channels, mapped top-down from the builder's wiring sketch
+/// (`scripts/zook-dome/`). The mapping-scale example: rings from the apex
+/// cross all five channels with no per-channel configuration.
+pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/zook-dome/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/zook-dome/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/zook-dome/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/zook-dome/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/zook-dome/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/zook-dome/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/zook-dome/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/zook-dome/fixture.map2d.json"),
+    ),
+];
+
 /// The gallery's *Examples* section, in order — the demo first, then the
 /// single-effect modules.
 static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
@@ -245,6 +284,12 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Plasma Grid",
         kind: "Module",
         files: PLASMA_GRID_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/zook-dome",
+        name: "Zook dome",
+        kind: "Module",
+        files: ZOOK_DOME_FILES,
     },
 ];
 

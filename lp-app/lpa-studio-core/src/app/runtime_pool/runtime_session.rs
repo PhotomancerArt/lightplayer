@@ -248,6 +248,22 @@ pub struct RuntimeSession {
     /// on device sessions — their loaded project is reconcile-bundle
     /// evidence (`device_sync`), never this field.
     sim_loaded_project: Option<SimLoadedProject>,
+    /// The board the SIM session claims to be (gallery-rework vision D4),
+    /// in the registry's `vendor/product` vocabulary — the same strings as
+    /// `RegisteredDevice.board_id` and `ProjectManifest.target`.
+    ///
+    /// Advisory context ONLY: nothing about the worker changes, exactly as
+    /// the registry's `board_id` changes nothing about a device. It feeds
+    /// the card's "as \<board\>" line and the output face's pin diagram.
+    ///
+    /// INHERITED from the project the sim runs: load-as-push sets it from
+    /// that project's manifest `target`, so the persisted fact lives in
+    /// `project.json` and is re-derived on every load (the sim itself
+    /// persists nothing — D22, its card exists only while the session
+    /// does). It is also settable directly, for the moment at sim
+    /// (re)creation before any project has landed. `None` — no board known
+    /// — is the ordinary default.
+    sim_board_id: Option<String>,
     /// The per-device console tail (D42): the last [`CONSOLE_TAIL_LEN`]
     /// stamped lines this session's drains produced. The card's console
     /// strip + tab render this; it dies with the session (the console is
@@ -276,6 +292,7 @@ impl RuntimeSession {
             last_refresh_completed_at: None,
             heartbeat_device_state: None,
             sim_loaded_project: None,
+            sim_board_id: None,
             console_tail: VecDeque::new(),
         }
     }
@@ -347,6 +364,23 @@ impl RuntimeSession {
         }
     }
 
+    /// The board manifest's measured total-LED envelope from the hello, when
+    /// the device reported one (a SOFT limit — evidence, never a refusal).
+    pub fn total_led_budget(&self) -> Option<u32> {
+        match self.device_state() {
+            Some(DeviceState::Ready { hello }) => hello.hardware.total_led_budget,
+            _ => None,
+        }
+    }
+
+    /// The latest heartbeat-reported per-wire output status, if one has
+    /// arrived on this session yet.
+    pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::output_wire_status)
+    }
+
     /// The project this SIM session runs, when one has been pushed onto it
     /// (`None` on device sessions and on a sim with nothing loaded).
     pub fn sim_loaded_project(&self) -> Option<&SimLoadedProject> {
@@ -359,6 +393,21 @@ impl RuntimeSession {
     pub fn set_sim_loaded_project(&mut self, project: Option<SimLoadedProject>) {
         if self.is_sim() {
             self.sim_loaded_project = project;
+        }
+    }
+
+    /// The board this SIM session claims to be (see [`Self::sim_board_id`]'s
+    /// field doc). Always `None` on device sessions — a device's board is
+    /// the registry's `board_id`, never this.
+    pub fn sim_board_id(&self) -> Option<&str> {
+        self.sim_board_id.as_deref()
+    }
+
+    /// Give the SIM session a board identity (D4), or clear it. Ignored on
+    /// device sessions. Advisory: no engine or worker behavior follows.
+    pub fn set_sim_board_id(&mut self, board_id: Option<String>) {
+        if self.is_sim() {
+            self.sim_board_id = board_id;
         }
     }
 

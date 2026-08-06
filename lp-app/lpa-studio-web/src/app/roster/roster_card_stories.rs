@@ -42,7 +42,9 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
-#[story(description = "Green filled edge: running the local project's tip.")]
+#[story(
+    description = "Green filled edge: running the local project's tip. The hero strip (gallery-rework P05, vision D12) is the card's default identity treatment now — the project's art under the title bar with its name pill bottom-left, replacing the small in-body chip."
+)]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
 }
@@ -128,7 +130,7 @@ fn operation_pushing() -> Element {
 }
 
 #[story(
-    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′)."
+    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′). No project means no hero strip (gallery-rework P05) — the body's own \"nothing loaded\" status line carries the empty case."
 )]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
@@ -436,20 +438,50 @@ fn in_use_elsewhere() -> Element {
 }
 
 #[story(
-    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired)."
+    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired). The hero strip dims to match (gallery-rework P05) — last-known art, not current, per the project chip's identity-not-health contract; no live preview lease for an offline card."
 )]
 fn offline() -> Element {
     sheet(vec![card(offline_state(), true)])
 }
 
 #[story(
-    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session."
+    description = "Gallery-rework P05 gate: the hero strip's three device-card states side by side — Running (live art + name pill), Offline (dimmed, last-known art — identity, not health), and Connected-empty (no project, so no strip; the status line's \"nothing loaded\" carries it)."
+)]
+fn hero_strip_states() -> Element {
+    sheet(vec![
+        card(RosterCardState::RunningUpToDate, true),
+        card(offline_state(), true),
+        card(RosterCardState::ConnectedEmpty, false),
+    ])
+}
+
+#[story(
+    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session. The sim wears the same hero strip (gallery-rework P05) — no special-casing in the renderer."
 )]
 fn simulator_runtime() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
                 card: sim_card(true),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Gallery-rework P04 (vision D4): the sim with a BOARD identity — it inherited the running project's advisory `target`, so the card's fact line says \"as ESP32-C6 (Seeed XIAO)\" under the status line. Advisory only: nothing about the worker changes, and a sim running an untargeted project (every other sim story here) shows no such line at all."
+)]
+fn simulator_as_board() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
                 on_action: |_| {},
@@ -927,6 +959,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -956,6 +989,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 

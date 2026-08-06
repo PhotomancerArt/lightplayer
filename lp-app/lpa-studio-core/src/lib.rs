@@ -42,25 +42,28 @@ pub use app::device::{
     ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
 pub use app::home::{
-    CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID,
-    HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard,
-    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
+    CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
+    GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
+    HomePoolEvidence, HomeSimEvidence, SetupSession, UiCardConnection, UiDeviceCard,
+    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
+    UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiConfigSlot, UiConfigSlotBody,
-    UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace,
-    UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin,
-    UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
-    UiPanelTarget, UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
-    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
-    UiTimebaseState, phasor_rate_display, phasor_speed_display,
+    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot,
+    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiFixtureFace,
+    UiFixturePower, UiLedBudget, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
+    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
+    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPhasorReading,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    phasor_speed_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -109,6 +112,13 @@ pub use app::settings::{
     DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
     UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
+};
+pub use app::setup_flow::{
+    BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
+    ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities, SetupCommand, SetupContext,
+    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupGesture,
+    SetupState, SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
+    derive_device_name, dispatch_for, known_device_for, month_day_label, unique_device_name,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
