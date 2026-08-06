@@ -66,6 +66,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = closePort)]
     fn js_close(id: u32) -> Promise;
+
+    #[wasm_bindgen(js_name = forgetPort)]
+    fn js_forget_port(id: u32) -> Promise;
 }
 
 pub fn is_supported() -> bool {
@@ -156,6 +159,15 @@ pub async fn reset_and_read(
     Ok(BrowserSerialResetResult {
         logs: reflect_string_array(&value, "logs")?,
     })
+}
+
+/// Revoke the persistent Web Serial grant behind a port session
+/// (`SerialPort.forget()`, Chrome 103+) and drop the JS session entry.
+/// `Ok(false)` = the grant SURVIVES: the id is unknown, or the browser has
+/// no `forget()` — callers decide whether that deserves a warning.
+pub async fn forget(id: u32) -> Result<bool, LinkError> {
+    let value = JsFuture::from(js_forget_port(id)).await.map_err(js_error)?;
+    Ok(value.as_bool().unwrap_or(false))
 }
 
 pub async fn close(id: u32) -> Result<(), LinkError> {

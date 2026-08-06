@@ -117,10 +117,12 @@ pub fn EditorCanvas(
     view_opts: Signal<EditorViewOptions>,
     viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
-    /// Live lamp colors indexed by wiring index (host feed); rendered when
-    /// `view_opts.live` is on, falling back per-lamp when absent.
-    #[props(default)]
-    live_colors: Vec<[u8; 3]>,
+    /// Live lamp colors indexed by wiring index (host feed, written by
+    /// [`super::map_editor::MapEditor`]). A color frame must NOT re-render
+    /// this component: the VDOM owns each lamp's palette `fill` attribute,
+    /// and a post-render effect overrides via inline `style` — per-frame
+    /// colors are direct DOM writes, never a 1500-node diff.
+    live_feed: Signal<Vec<[u8; 3]>>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
     /// Host-owned reference image, rendered doc-space at the origin between
@@ -155,21 +157,31 @@ pub fn EditorCanvas(
     #[cfg(target_arch = "wasm32")]
     let resize_observer =
         use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<CanvasResizeObserver>)));
-    // Keep-last-good live colors: an apply round-trip (undo, upload, any
-    // committed edit) makes the engine re-resolve, and the host's color
-    // feed goes empty for a frame or two — falling back to the object
-    // palette there reads as the display "dropping out of live mode".
-    // Bridge the gap with the last non-empty feed; the live toggle itself
-    // still gates rendering, so switching live off stays immediate.
-    let live_cache = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::<[u8; 3]>::new())));
-    if !live_colors.is_empty() {
-        *live_cache.borrow_mut() = live_colors.clone();
+    // One id per mounted canvas so the live-color effect scopes its DOM
+    // writes to THIS editor (face + page can mount simultaneously).
+    let canvas_dom_id = use_hook(|| {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("lpme-canvas-{id}")
+    });
+
+    // Live colors as direct DOM writes (P2 of the view/edit-split plan):
+    // subscribe to the feed and the session (a doc edit rebuilds the lamp
+    // nodes, so the override must re-apply after that render), then write
+    // inline `style` fills. The VDOM owns the `fill` ATTRIBUTE (palette /
+    // universe); this effect owns inline style ONLY — one writer per
+    // surface, so the two never fight.
+    {
+        let canvas_dom_id = canvas_dom_id.clone();
+        use_effect(move || {
+            let colors = live_feed();
+            let live_on = view_opts().live;
+            // Subscribe to session so a doc-edit re-render re-applies the
+            // overrides to the rebuilt nodes.
+            let _revision_witness = session.read().doc().objects.len();
+            apply_live_fills(&canvas_dom_id, live_on, &colors);
+        });
     }
-    let live_colors = if live_colors.is_empty() {
-        live_cache.borrow().clone()
-    } else {
-        live_colors
-    };
 
     let cam = camera();
     let opts = view_opts();
@@ -212,15 +224,15 @@ pub fn EditorCanvas(
     // polyline run, which lamps alone leave to inference.
     let repeat_center: Option<[f32; 2]> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
-        .and_then(|object| match &object.shape {
+        .and_then(|path| path.resolve(doc))
+        .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => Some(repeat.center),
             _ => None,
         });
     let ghost_outlines: Vec<Vec<[f32; 2]>> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
-        .and_then(|object| match &object.shape {
+        .and_then(|path| path.resolve(doc))
+        .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => {
                 let path = editable_path(&repeat.shape)?;
                 Some(
@@ -240,6 +252,44 @@ pub fn EditorCanvas(
         lamps: Vec::new(),
         spans: Vec::new(),
     });
+    // Tessellation context (selection/tree ADR): a selected or scoped
+    // repeat renders instance-by-instance — a distinct hue per span so the
+    // tessellation reads at a glance — and while DESCENDED, non-primary
+    // instances are inert live previews (the primary is the only handle).
+    let tessellating: std::collections::BTreeSet<usize> = selection
+        .paths()
+        .map(|path| path.object)
+        .filter(|object| {
+            matches!(
+                doc.objects.get(*object).map(|o| &o.shape),
+                Some(Map2dShape::Repeat(_))
+            )
+        })
+        .collect();
+    let scoped_object: Option<usize> = selection.scope().map(|scope| scope.object);
+    // Per-span instance ordinals for the tessellating objects (spans are in
+    // wiring order, so the ordinal among an object's spans IS the instance).
+    let span_instances: Vec<(u32, u32, usize)> = {
+        let mut ordinals = std::collections::BTreeMap::<u32, usize>::new();
+        resolved
+            .spans
+            .iter()
+            .filter(|span| tessellating.contains(&(span.object as usize)))
+            .map(|span| {
+                let ordinal = ordinals.entry(span.object).or_insert(0);
+                let instance = *ordinal;
+                *ordinal += 1;
+                (span.start, span.count, instance)
+            })
+            .collect()
+    };
+    let instance_of = |lamp_index: u32| -> Option<usize> {
+        let slot = span_instances.partition_point(|(start, count, _)| start + count <= lamp_index);
+        span_instances
+            .get(slot)
+            .filter(|(start, _, _)| *start <= lamp_index)
+            .map(|(_, _, instance)| *instance)
+    };
     // Lamp screen size is CAPPED: proportional at fit zoom, but circles stop
     // growing past ~11px screen radius as you zoom in — near-coincident
     // lamps (out-and-back wiring runs) separate visually instead of staying
@@ -284,12 +334,12 @@ pub fn EditorCanvas(
     let show_numbers = opts.numbers && cam.scale * radius >= 5.0;
 
     // Selection visuals: bbox of the selected objects' lamps.
-    let selection_bounds = (!selection.objects.is_empty())
+    let selection_bounds = (!selection.is_empty())
         .then(|| {
             let sel_positions: Vec<[f32; 2]> = resolved
                 .lamps
                 .iter()
-                .filter(|lamp| selection.objects.contains(&(lamp.object as usize)))
+                .filter(|lamp| selection.object_selected(lamp.object as usize))
                 .map(|lamp| lamp.pos)
                 .collect();
             bounds_of_points(&sel_positions)
@@ -302,9 +352,9 @@ pub fn EditorCanvas(
     // repeat, whose other instances follow the drag on the next resolve.
     let vertex_points: Vec<[f32; 2]> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
+        .and_then(|path| path.resolve(doc))
         .filter(|_| tool_is_select)
-        .and_then(|object| editable_path(&object.shape))
+        .and_then(editable_path)
         .map(|path| path.points.clone())
         .unwrap_or_default();
     let selected_vertex = selection.vertex;
@@ -362,6 +412,7 @@ pub fn EditorCanvas(
 
     rsx! {
         svg {
+            id: "{canvas_dom_id}",
             class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
             onmounted: move |evt| {
                 #[cfg(target_arch = "wasm32")]
@@ -703,46 +754,58 @@ pub fn EditorCanvas(
                 for lamp in resolved
                     .lamps
                     .iter()
-                    .filter(|lamp| !selection.objects.contains(&(lamp.object as usize)))
+                    .filter(|lamp| !selection.object_selected(lamp.object as usize))
                     .chain(
                         resolved
                             .lamps
                             .iter()
-                            .filter(|lamp| selection.objects.contains(&(lamp.object as usize))),
+                            .filter(|lamp| selection.object_selected(lamp.object as usize)),
                     )
                 {
                     {
                         let object_index = lamp.object as usize;
-                        let selected = selection.objects.contains(&object_index);
-                        // Fill precedence mirrors the display renderer:
-                        // live output > universe color > object palette.
-                        let fill = opts
-                            .live
-                            .then(|| live_colors.get(lamp.index as usize))
-                            .flatten()
-                            .map(|[r, g, b]| format!("rgb({r} {g} {b})"))
-                            .unwrap_or_else(|| {
-                                if opts.universes {
-                                    let [r, g, b] = universe_rgb(lamp.index);
-                                    format!("rgb({r} {g} {b})")
-                                } else {
-                                    object_color(object_index).to_string()
-                                }
-                            });
+                        let selected = selection.object_selected(object_index);
+                        // Instance-by-instance rendering for a selected /
+                        // scoped repeat; while scoped, instance 0 (the
+                        // authored primary) is the only interactive geometry
+                        // — the rest are inert live previews.
+                        let instance = tessellating
+                            .contains(&object_index)
+                            .then(|| instance_of(lamp.index))
+                            .flatten();
+                        let inert =
+                            scoped_object == Some(object_index) && instance.is_some_and(|i| i > 0);
+                        // The ATTRIBUTE fill is the non-live look (instance
+                        // hue > universe color > object palette); live output
+                        // rides an inline-style override written by the
+                        // live-color effect, so color frames never re-render
+                        // this tree.
+                        let fill = if let Some(instance) = instance {
+                            OBJECT_COLORS[(object_index + instance) % OBJECT_COLORS.len()]
+                                .to_string()
+                        } else if opts.universes {
+                            let [r, g, b] = universe_rgb(lamp.index);
+                            format!("rgb({r} {g} {b})")
+                        } else {
+                            object_color(object_index).to_string()
+                        };
                         rsx! {
                             circle {
                                 key: "l{lamp.index}",
+                                "data-lamp": "{lamp.index}",
                                 cx: "{lamp.pos[0]}",
                                 cy: "{lamp.pos[1]}",
                                 r: "{radius}",
                                 fill,
-                                stroke: if selected { SELECTION_COLOR } else { "#000" },
-                                stroke_width: if selected {
+                                opacity: if inert { "0.6" } else { "1" },
+                                pointer_events: if inert { "none" } else { "auto" },
+                                stroke: if selected && !inert { SELECTION_COLOR } else { "#000" },
+                                stroke_width: if selected && !inert {
                                     "{(radius * 0.28).clamp(0.6, 2.4)}"
                                 } else {
                                     "{(radius * 0.12).clamp(0.2, 1.5)}"
                                 },
-                                cursor: if tool_is_select { "move" } else { "crosshair" },
+                                cursor: if inert { "default" } else if tool_is_select { "move" } else { "crosshair" },
                                 onpointerdown: move |evt| {
                                     if secondary_button(&evt) {
                                         return;
@@ -752,8 +815,19 @@ pub fn EditorCanvas(
                                         select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     }
                                 },
+                                ondoubleclick: move |evt| {
+                                    // Double-click descends into the group
+                                    // under the cursor (selection/tree ADR);
+                                    // a leaf object no-ops.
+                                    evt.stop_propagation();
+                                    let mut s = session.write();
+                                    if !s.selection.object_selected(object_index) {
+                                        s.selection.select_only(object_index);
+                                    }
+                                    s.descend();
+                                },
                             }
-                            if hit_radius > radius * 1.15 {
+                            if hit_radius > radius * 1.15 && !inert {
                                 circle {
                                     key: "lh{lamp.index}",
                                     class: "lpme-lamp-hit",
@@ -769,6 +843,14 @@ pub fn EditorCanvas(
                                             evt.stop_propagation();
                                             select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                         }
+                                    },
+                                    ondoubleclick: move |evt| {
+                                        evt.stop_propagation();
+                                        let mut s = session.write();
+                                        if !s.selection.object_selected(object_index) {
+                                            s.selection.select_only(object_index);
+                                        }
+                                        s.descend();
                                     },
                                 }
                             }
@@ -1005,11 +1087,21 @@ fn select_and_start_move(
         s.selection.toggle(object_index);
         return;
     }
+    // Scoped editing: while descended inside this object's group, a click
+    // on the primary geometry keeps the descended selection (grabbing the
+    // sub-object must not pop the scope) and just arms the write-through
+    // move.
+    let scoped_here = s
+        .selection
+        .single()
+        .is_some_and(|path| !path.is_root() && path.object == object_index);
     let mut collapse = None;
-    if !s.selection.objects.contains(&object_index) {
-        s.selection.select_only(object_index);
-    } else if s.selection.objects.len() > 1 {
-        collapse = Some(object_index);
+    if !scoped_here {
+        if !s.selection.object_selected(object_index) {
+            s.selection.select_only(object_index);
+        } else if s.selection.len() > 1 {
+            collapse = Some(object_index);
+        }
     }
     s.selection.vertex = None;
     s.begin_gesture();
@@ -1127,6 +1219,53 @@ fn event_doc_point(
 ) -> [f32; 2] {
     let view = event_view_point(anchor, evt);
     camera.peek().view_to_doc(view)
+}
+
+/// Write (or clear) per-lamp live-color overrides as inline styles on the
+/// mounted canvas's `[data-lamp]` circles. Direct DOM only — the whole
+/// point is that a 60Hz color feed costs zero VDOM work. Inline style beats
+/// the `fill` attribute per SVG presentation rules; clearing the style
+/// restores the palette without this code knowing what the palette was.
+fn apply_live_fills(canvas_dom_id: &str, live_on: bool, colors: &[[u8; 3]]) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Ok(lamps) = document.query_selector_all(&format!("#{canvas_dom_id} [data-lamp]"))
+        else {
+            return;
+        };
+        use wasm_bindgen::JsCast;
+        for slot in 0..lamps.length() {
+            let Some(element) = lamps
+                .item(slot)
+                .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+            else {
+                continue;
+            };
+            let color = (live_on && !colors.is_empty())
+                .then(|| {
+                    element
+                        .get_attribute("data-lamp")
+                        .and_then(|index| index.parse::<usize>().ok())
+                        .and_then(|index| colors.get(index))
+                })
+                .flatten();
+            match color {
+                Some([r, g, b]) => {
+                    let _ = element.set_attribute("style", &format!("fill: rgb({r} {g} {b})"));
+                }
+                None => {
+                    let _ = element.remove_attribute("style");
+                }
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (canvas_dom_id, live_on, colors);
+    }
 }
 
 fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>) -> [f32; 2] {
