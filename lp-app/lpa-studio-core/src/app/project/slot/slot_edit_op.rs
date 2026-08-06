@@ -152,7 +152,7 @@ mod tests {
         ProjectSlotAddress::new(
             ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
-            SlotPath::parse("controls.rate").unwrap(),
+            SlotPath::parse("transport.rate").unwrap(),
         )
     }
 

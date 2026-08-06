@@ -12,5 +12,6 @@ pub mod roster;
 pub mod runtime_pool;
 pub mod server;
 pub mod settings;
+pub mod setup_flow;
 pub mod share;
 pub mod studio;

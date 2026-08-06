@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn constructors_split_path_from_op() {
-        let path = SlotPath::parse("controls.rate").unwrap();
+        let path = SlotPath::parse("transport.rate").unwrap();
         let edit = SlotEdit::assign_value(path.clone(), LpValue::F32(2.0));
 
         assert_eq!(edit.path(), &path);

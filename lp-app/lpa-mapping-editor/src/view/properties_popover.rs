@@ -14,9 +14,56 @@ use lpc_mapping::{
 
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
+use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::CanvasDrag;
 
 const POPOVER_WIDTH: f32 = 236.0;
+
+/// What the stored popover anchor is keyed to: it may move only when the
+/// SELECTION IDENTITY or the camera moves — never because a property edit
+/// reshaped the selection's bbox (the G2 stepper defect).
+#[derive(Clone, PartialEq)]
+struct AnchorKey {
+    paths: Vec<ShapePath>,
+    camera: [f32; 3],
+}
+
+#[derive(Clone, PartialEq)]
+struct StoredAnchor {
+    key: AnchorKey,
+    position: [f32; 2],
+}
+
+/// The anchor policy, pure for tests: reuse the stored position (re-clamped
+/// to the viewport) while the key stands; compute fresh from the selection
+/// bbox otherwise.
+fn resolve_anchor(
+    stored: Option<&StoredAnchor>,
+    key: &AnchorKey,
+    bounds: lpc_mapping::Bounds2d,
+    cam: &Camera,
+    viewport: [f32; 2],
+) -> [f32; 2] {
+    if let Some(stored) = stored
+        && stored.key == *key
+    {
+        return clamp_anchor(stored.position, viewport);
+    }
+    let right = cam.doc_to_view([bounds.min_x + bounds.width, bounds.min_y]);
+    let left = cam.doc_to_view([bounds.min_x, bounds.min_y]);
+    let mut x = right[0] + 22.0;
+    if x + POPOVER_WIDTH > viewport[0] - 10.0 {
+        x = left[0] - POPOVER_WIDTH - 22.0;
+    }
+    clamp_anchor([x, right[1]], viewport)
+}
+
+fn clamp_anchor(position: [f32; 2], viewport: [f32; 2]) -> [f32; 2] {
+    [
+        position[0].clamp(10.0, (viewport[0] - POPOVER_WIDTH - 10.0).max(10.0)),
+        position[1].clamp(10.0, (viewport[1] - 120.0).max(10.0)),
+    ]
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -27,9 +74,11 @@ pub fn PropertiesPopover(
     drag: Signal<Option<CanvasDrag>>,
     on_committed: EventHandler<()>,
 ) -> Element {
+    // Hook order: created before any early return.
+    let mut stored_anchor = use_signal(|| None::<StoredAnchor>);
     let session_read = session.read();
     let selection = session_read.selection.clone();
-    if selection.objects.is_empty() || drag().is_some() {
+    if selection.is_empty() || drag().is_some() {
         return rsx! {};
     }
     let doc = session_read.doc();
@@ -40,7 +89,7 @@ pub fn PropertiesPopover(
             resolved
                 .lamps
                 .iter()
-                .filter(|lamp| selection.objects.contains(&(lamp.object as usize)))
+                .filter(|lamp| selection.object_selected(lamp.object as usize))
                 .map(|lamp| lamp.pos)
                 .collect()
         })
@@ -49,21 +98,79 @@ pub fn PropertiesPopover(
         return rsx! {};
     };
 
-    // Anchor right of the bbox; flip left / clamp inside the viewport.
     let cam = camera();
     let [viewport_width, viewport_height] = viewport().unwrap_or([1200.0, 800.0]);
-    let right = cam.doc_to_view([bounds.min_x + bounds.width, bounds.min_y]);
-    let left = cam.doc_to_view([bounds.min_x, bounds.min_y]);
-    let mut x = right[0] + 22.0;
-    if x + POPOVER_WIDTH > viewport_width - 10.0 {
-        x = left[0] - POPOVER_WIDTH - 22.0;
+    // STABLE anchor: computed when the selection identity or camera moves,
+    // reused (re-clamped only) across doc edits — a count stepper that
+    // reshapes the selection bbox must not move the box out from under a
+    // double-click (G2 defect, 2026-08-05).
+    let anchor_key = AnchorKey {
+        paths: selection.paths().cloned().collect(),
+        camera: [cam.x, cam.y, cam.scale],
+    };
+    let [x, y] = resolve_anchor(
+        stored_anchor.peek().as_ref(),
+        &anchor_key,
+        bounds,
+        &cam,
+        [viewport_width, viewport_height],
+    );
+    if stored_anchor
+        .peek()
+        .as_ref()
+        .is_none_or(|stored| stored.key != anchor_key || stored.position != [x, y])
+    {
+        stored_anchor.set(Some(StoredAnchor {
+            key: anchor_key,
+            position: [x, y],
+        }));
     }
-    let x = x.clamp(10.0, (viewport_width - POPOVER_WIDTH - 10.0).max(10.0));
-    let y = right[1].clamp(10.0, (viewport_height - 120.0).max(10.0));
 
     let lamp_total = selected_positions.len();
-    let single = selection.single();
+    // The popover presents the SELECTED NODE: its fields at the selection's
+    // depth, with a breadcrumb standing in for the name row when descended
+    // (the breadcrumb replaces inline recursion — selection/tree ADR).
+    let single_path = selection.single().cloned();
+    let single = single_path.as_ref().map(|path| path.object);
+    let base_depth = single_path
+        .as_ref()
+        .map(|path| path.descent.len())
+        .unwrap_or(0);
     let object = single.and_then(|index| doc.objects.get(index).cloned());
+    let selected_shape = single_path
+        .as_ref()
+        .and_then(|path| path.resolve(doc))
+        .cloned();
+    // Breadcrumb labels root→selected: (label, path to select when clicked;
+    // None = the current node, not clickable).
+    let crumbs: Vec<(String, Option<ShapePath>)> = single_path
+        .as_ref()
+        .filter(|path| !path.is_root())
+        .map(|path| {
+            let mut crumbs = Vec::new();
+            for level in 0..=path.descent.len() {
+                let ancestor = ShapePath {
+                    object: path.object,
+                    descent: path.descent[..level].to_vec(),
+                };
+                let label = if level == 0 {
+                    object
+                        .as_ref()
+                        .map(|object| object.name.clone())
+                        .unwrap_or_default()
+                } else {
+                    ancestor
+                        .resolve(doc)
+                        .map(shape_kind_label)
+                        .unwrap_or("?")
+                        .to_string()
+                };
+                let target = (level < path.descent.len()).then_some(ancestor);
+                crumbs.push((label, target));
+            }
+            crumbs
+        })
+        .unwrap_or_default();
     // The object's whole lamp range, strands merged: a repeat resolves to one
     // span per instance, so `spans[index]` would report only its first strand.
     let span = single.and_then(|index| {
@@ -71,7 +178,7 @@ pub fn PropertiesPopover(
             .as_ref()
             .and_then(|resolved| resolved.object_span(index as u32))
     });
-    let count_summary = selection.objects.len();
+    let count_summary = selection.len();
     let object_total = doc.objects.len();
     drop(session_read);
 
@@ -92,25 +199,51 @@ pub fn PropertiesPopover(
             style: "left: {x}px; top: {y}px; width: {POPOVER_WIDTH}px;",
             // Keep canvas shortcuts out of field typing.
             onkeydown: move |evt| evt.stop_propagation(),
-            if let (Some(index), Some(object)) = (single, object) {
+            if let (Some(index), Some(object), Some(selected_shape)) =
+                (single, object, selected_shape)
+            {
                 div { class: "lpme-pop-head",
-                    input {
-                        class: "lpme-pop-name",
-                        r#type: "text",
-                        value: "{object.name}",
-                        oninput: move |evt| {
-                            let value = evt.value();
-                            session.write().edit_uncommitted(move |doc| {
-                                if let Some(object) = doc.objects.get_mut(index) {
-                                    object.name = value;
+                    if crumbs.is_empty() {
+                        input {
+                            class: "lpme-pop-name",
+                            r#type: "text",
+                            value: "{object.name}",
+                            oninput: move |evt| {
+                                let value = evt.value();
+                                session.write().edit_uncommitted(move |doc| {
+                                    if let Some(object) = doc.objects.get_mut(index) {
+                                        object.name = value;
+                                    }
+                                });
+                            },
+                            onchange: move |_| commit(),
+                        }
+                        span { class: "lpme-pop-kind", {shape_kind_label(&object.shape)} }
+                    } else {
+                        // Descended: the crumb trail names the scope chain;
+                        // clicking an ancestor ascends to it (rename lives
+                        // on the root selection).
+                        span { class: "lpme-pop-crumbs",
+                            for (slot, (label, target)) in crumbs.into_iter().enumerate() {
+                                if slot > 0 {
+                                    span { class: "lpme-pop-crumb-sep", "▸" }
                                 }
-                            });
-                        },
-                        onchange: move |_| commit(),
+                                if let Some(target) = target {
+                                    button {
+                                        class: "lpme-pop-crumb",
+                                        onclick: move |_| {
+                                            session.write().selection.select_only_path(target.clone());
+                                        },
+                                        "{label}"
+                                    }
+                                } else {
+                                    span { class: "lpme-pop-crumb-here", "{label}" }
+                                }
+                            }
+                        }
                     }
-                    span { class: "lpme-pop-kind", {shape_kind_label(&object.shape)} }
                 }
-                {shape_fields(session, on_committed, index, object.shape.clone(), 0)}
+                {shape_fields(session, on_committed, index, selected_shape, base_depth)}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
                         "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
@@ -210,7 +343,7 @@ pub fn PropertiesPopover(
     }
 }
 
-fn shape_kind_label(shape: &Map2dShape) -> &'static str {
+pub(crate) fn shape_kind_label(shape: &Map2dShape) -> &'static str {
     match shape {
         Map2dShape::Grid(_) => "grid",
         Map2dShape::Ring(_) => "ring",
@@ -227,7 +360,7 @@ fn shape_kind_label(shape: &Map2dShape) -> &'static str {
 /// [`shape_at_depth`] so an inner edit lands on the boxed shape rather than
 /// the wrapper.
 fn shape_fields(
-    session: Signal<MapEditorSession>,
+    mut session: Signal<MapEditorSession>,
     on_committed: EventHandler<()>,
     index: usize,
     shape: Map2dShape,
@@ -331,11 +464,24 @@ fn shape_fields(
                     apply: FieldApply::RepeatCenterX }
                 NumberField { session, on_committed, index, depth, label: "center y", value: repeat.center[1], min: -100000.0, is_int: false,
                     apply: FieldApply::RepeatCenterY }
+                // The inner shape's fields live one descent down — the
+                // breadcrumb replaces inline recursion (selection/tree ADR):
+                // entering the group selects the sub-object and this popover
+                // re-renders showing its fields.
                 div { class: "lpme-field",
                     label { "repeats" }
-                    span { class: "lpme-field-static", "{inner_kind}" }
+                    button {
+                        class: "lpme-pop-descend",
+                        title: "edit the repeated sub-object (double-click on canvas does the same)",
+                        onclick: move |_| {
+                            session.write().selection.select_only_path(ShapePath {
+                                object: index,
+                                descent: vec![0; depth + 1],
+                            });
+                        },
+                        "{inner_kind} ▸"
+                    }
                 }
-                {shape_fields(session, on_committed, index, inner, depth + 1)}
             }
         }
     }
@@ -614,5 +760,87 @@ fn RingCountsField(
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_mapping::Bounds2d;
+
+    fn key(paths: Vec<ShapePath>) -> AnchorKey {
+        AnchorKey {
+            paths,
+            camera: [0.0, 0.0, 1.0],
+        }
+    }
+
+    fn bounds(width: f32) -> Bounds2d {
+        Bounds2d {
+            min_x: 100.0,
+            min_y: 100.0,
+            width,
+            height: 50.0,
+        }
+    }
+
+    /// The G2 stepper defect: a doc edit that reshapes the bbox must not
+    /// move the box while the selection (and camera) stand still.
+    #[test]
+    fn unchanged_selection_keeps_the_stored_anchor_across_bbox_changes() {
+        let key = key(vec![ShapePath::root(0)]);
+        let camera = Camera::new();
+        let viewport = [1200.0, 800.0];
+        let first = resolve_anchor(None, &key, bounds(200.0), &camera, viewport);
+        let stored = StoredAnchor {
+            key: key.clone(),
+            position: first,
+        };
+        // The count stepper grew the selection bbox; the anchor stays put.
+        let second = resolve_anchor(Some(&stored), &key, bounds(600.0), &camera, viewport);
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn a_new_selection_re_anchors() {
+        let old_key = key(vec![ShapePath::root(0)]);
+        let camera = Camera::new();
+        let viewport = [1200.0, 800.0];
+        let first = resolve_anchor(None, &old_key, bounds(200.0), &camera, viewport);
+        let stored = StoredAnchor {
+            key: old_key,
+            position: first,
+        };
+        let new_key = key(vec![ShapePath::root(0).child(0)]);
+        let fresh = resolve_anchor(Some(&stored), &new_key, bounds(600.0), &camera, viewport);
+        assert_ne!(fresh, first, "a different selection computes fresh");
+    }
+
+    #[test]
+    fn a_camera_move_re_anchors_and_clamping_keeps_the_box_in_view() {
+        let paths = vec![ShapePath::root(1)];
+        let camera = Camera::new();
+        let viewport = [1200.0, 800.0];
+        let stored = StoredAnchor {
+            key: key(paths.clone()),
+            position: [1500.0, -50.0],
+        };
+        // Same selection, moved camera: fresh anchor.
+        let moved = AnchorKey {
+            paths,
+            camera: [40.0, 0.0, 1.0],
+        };
+        let fresh = resolve_anchor(Some(&stored), &moved, bounds(200.0), &camera, viewport);
+        assert!(fresh[0] <= viewport[0] - POPOVER_WIDTH - 10.0);
+        // And a stored anchor outside the viewport re-clamps without moving
+        // its key.
+        let clamped = resolve_anchor(
+            Some(&stored),
+            &stored.key.clone(),
+            bounds(200.0),
+            &camera,
+            viewport,
+        );
+        assert_eq!(clamped, clamp_anchor([1500.0, -50.0], viewport));
     }
 }

@@ -2754,13 +2754,24 @@ impl ProjectController {
             };
             let (state, phasors) = match controller.sync.as_ref().and_then(|s| s.timebase(&product))
             {
-                Some(crate::UiTimebaseRead::Live { phasors, .. }) => (
-                    crate::UiTimebaseState::Live,
-                    phasors
-                        .iter()
-                        .flat_map(|row| controller.ui_phasor_readings(row))
-                        .collect(),
-                ),
+                Some(crate::UiTimebaseRead::Live {
+                    seconds, phasors, ..
+                }) => {
+                    // The transport block's numeric seconds is probe-only —
+                    // `clock_transport` (node_face_builder.rs) has no probe
+                    // access, so it seeds `0.0`; this decoration pass is the
+                    // one place that can fill in the real number (P2).
+                    if let Some(transport) = clock.transport.as_mut() {
+                        transport.seconds = *seconds;
+                    }
+                    (
+                        crate::UiTimebaseState::Live,
+                        phasors
+                            .iter()
+                            .flat_map(|row| controller.ui_phasor_readings(row))
+                            .collect(),
+                    )
+                }
                 Some(crate::UiTimebaseRead::Unknown) => {
                     (crate::UiTimebaseState::Unknown, Vec::new())
                 }
@@ -3552,6 +3563,21 @@ impl ProjectController {
             uid: fields.uid,
             name: fields.name,
         })
+    }
+
+    /// The open library package's advisory board `target` (vision D3/P02),
+    /// read straight from its container manifest. `None` when no library
+    /// package backs the running project, when the manifest fails to parse,
+    /// or — the common case — when the project names no board.
+    ///
+    /// The SIM's board identity is inherited from this (vision D4): the
+    /// manifest is where that fact persists, so a reload re-derives it.
+    pub fn active_target(&self) -> Option<String> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        crate::app::library::package_manifest::read_manifest(&*view)
+            .ok()?
+            .target
     }
 
     /// The `prj_…` uid of the open library package, when the running
@@ -10018,6 +10044,83 @@ mod tests {
         assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unknown);
     }
 
+    /// Plan 2026-08-04-2355-clock-tape-hero, P2: the transport block's
+    /// numeric `seconds` is probe-only — `clock_transport`
+    /// (node_face_builder.rs) has no probe access, so it always seeds
+    /// `0.0`. This decoration pass is the one place that can fill in the
+    /// real number, from the SAME cached `Live` read the phasor listing
+    /// already consults.
+    #[test]
+    fn apply_clock_faces_copies_the_probes_seconds_into_the_transport_block() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let product = lpc_model::TimeProduct::new(lpc_model::NodeId::new(2), 0);
+        let product_ref = crate::UiProductRef::from_time_product(product);
+        let node_address = ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap();
+        let transport_address = |field: &str| {
+            ProjectSlotAddress::new(
+                node_address.clone(),
+                ProjectSlotRoot::def(),
+                SlotPath::parse(&format!("transport.{field}")).unwrap(),
+            )
+        };
+        let clock_node = || {
+            let mut face = crate::UiClockFace::new(
+                crate::UiProducedProduct::time("Product").with_product(product_ref),
+            );
+            face.transport = Some(crate::UiClockTransport {
+                seconds: 0.0,
+                running: true,
+                rate: 1.0,
+                scrub_offset_seconds: 0.0,
+                running_address: Some(transport_address("running")),
+                rate_address: Some(transport_address("rate")),
+                scrub_address: Some(transport_address("scrub_offset_seconds")),
+                running_override: None,
+                rate_override: None,
+                scrub_override: None,
+            });
+            let mut node = crate::UiNodeView::new(
+                crate::UiNodeHeader::new("Clock", "Clock", "/demo.module/clock.clock"),
+                vec![crate::UiNodeTab::main(Vec::new())],
+            );
+            node.face = Some(crate::UiNodeFace::Clock(face));
+            vec![node]
+        };
+        let transport = |nodes: &[crate::UiNodeView]| {
+            let Some(crate::UiNodeFace::Clock(face)) = &nodes[0].face else {
+                panic!("clock face");
+            };
+            face.transport.clone().expect("transport block present")
+        };
+
+        // No probe read cached yet: the builder's placeholder survives.
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(transport(&nodes).seconds, 0.0);
+
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 42.35,
+                delta_seconds: 0.033,
+                phasors: Vec::new(),
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        let after = transport(&nodes);
+        assert_eq!(after.seconds, 42.35, "the probe's seconds lands in the DTO");
+        // Everything else the builder set stays untouched — this pass only
+        // ever writes `seconds`.
+        assert!(after.running);
+        assert_eq!(after.rate, 1.0);
+        assert_eq!(after.scrub_offset_seconds, 0.0);
+    }
+
     /// P7 item 3: the picker knows which channels carry a HANDLE, so it can
     /// mark a pick that could only earn a Warn — without moving `time` off
     /// the head of the list or refusing anything.
@@ -10592,7 +10695,7 @@ mod tests {
     }
 
     fn overlay_slot_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn overlay_with_rate_edit() -> ProjectOverlay {

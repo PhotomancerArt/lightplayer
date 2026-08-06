@@ -14,6 +14,7 @@ use lpc_mapping::{Map2dDoc, bounds_of_points, resolve};
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
 use crate::view::object_list::ObjectList;
@@ -84,6 +85,10 @@ pub fn MapEditor(
     #[props(default)]
     initial_camera: Option<[f32; 3]>,
     #[props(default)] initial_selection: Vec<usize>,
+    /// Stories: descend into the (single) initial selection after seeding,
+    /// so scoped-state captures are deterministic.
+    #[props(default = false)]
+    initial_descend: bool,
     #[props(default)] initial_draft: Vec<[f32; 2]>,
     #[props(default)] initial_view: Option<EditorViewOptions>,
     /// Host-owned view options (the fixture face's toggle bar drives the
@@ -112,7 +117,10 @@ pub fn MapEditor(
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
         for index in &initial_selection {
-            session.selection.objects.insert(*index);
+            session.selection.insert_path(ShapePath::root(*index));
+        }
+        if initial_descend {
+            session.descend();
         }
         if !initial_draft.is_empty() {
             session.tool = MapTool::Path {
@@ -138,6 +146,17 @@ pub fn MapEditor(
     // docked as a right-side pane that shrinks the view rather than
     // floating over it (M5 gate direction).
     let mut rail_open = use_signal(|| false);
+
+    // The live feed crosses into the canvas as a SIGNAL so a 60Hz color
+    // frame re-renders only this thin component, never the 1500-node lamp
+    // tree (P2 of the view/edit-split plan; the canvas applies colors as
+    // direct DOM writes). Keep-last-good lives here: an apply round-trip
+    // empties the host feed for a frame or two, and falling back to the
+    // palette would read as live mode dropping out.
+    let mut live_feed = use_signal(Vec::<[u8; 3]>::new);
+    if !live_colors.is_empty() && *live_feed.peek() != live_colors {
+        live_feed.set(live_colors.clone());
+    }
 
     // Re-seed when the host bumps the epoch (render-time guarded write).
     let mut seen_epoch = use_signal(|| doc_epoch);
@@ -206,14 +225,38 @@ pub fn MapEditor(
         });
     }
 
-    let tool_hint = match session.read().tool {
-        MapTool::Select => {
-            "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
-        }
-        MapTool::Grid => "click to drop a default grid — size it in the properties popover",
-        MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
-        MapTool::Path { .. } => {
-            "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+    // The hint teaches the group grammar exactly when it applies (G1
+    // feedback: double-click descend is undiscoverable without a prompt):
+    // a selected group invites entering; a descended selection explains
+    // write-through and the way out. Tool hints otherwise.
+    let tool_hint = {
+        let session_read = session.read();
+        let selected_group = matches!(session_read.tool, MapTool::Select)
+            && session_read.selection.single().is_some_and(|path| {
+                path.resolve(session_read.doc()).is_some_and(|shape| {
+                    crate::editor_core::shape_path::structural_child_count(shape) > 0
+                })
+            });
+        let descended = matches!(session_read.tool, MapTool::Select)
+            && session_read
+                .selection
+                .single()
+                .is_some_and(|path| !path.is_root());
+        match session_read.tool {
+            MapTool::Select if selected_group => {
+                "double-click enters the group — edit its sub-object with every instance live · esc leaves"
+            }
+            MapTool::Select if descended => {
+                "editing the sub-object — every instance follows · esc leaves the group"
+            }
+            MapTool::Select => {
+                "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
+            }
+            MapTool::Grid => "click to drop a default grid — size it in the properties popover",
+            MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
+            MapTool::Path { .. } => {
+                "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+            }
         }
     };
 
@@ -243,7 +286,7 @@ pub fn MapEditor(
                         view_opts,
                         viewport,
                         drag,
-                        live_colors,
+                        live_feed,
                         on_committed,
                         reference,
                     }
@@ -365,7 +408,8 @@ fn HelpFloat() -> Element {
                     ("⌘A", "select all"),
                     ("⌫", "delete selection"),
                     ("⏎", "finish path"),
-                    ("esc", "back out · clear · select tool"),
+                    ("dbl-click", "enter a group (edit its sub-object)"),
+                    ("esc", "back out · leave group · clear · select tool"),
                 ] {
                     div { class: "lpme-help-row",
                         span { class: "lpme-help-keys", "{keys}" }
@@ -486,12 +530,20 @@ fn handle_key(
         }
         Key::Escape => {
             let mut s = session.write();
-            // D6: never discard work wholesale — back out one path vertex,
-            // then clear selection, then fall back to the select tool.
+            // The ladder (D6 + the selection/tree ADR): back out one path
+            // vertex, then drop a vertex sub-selection, then ASCEND out of
+            // a descended group, then clear selection, then select tool.
             if s.path_backout() {
                 return;
             }
-            if !s.selection.is_empty() || s.selection.vertex.is_some() {
+            if s.selection.vertex.is_some() {
+                s.selection.vertex = None;
+                return;
+            }
+            if s.ascend() {
+                return;
+            }
+            if !s.selection.is_empty() {
                 s.selection.clear();
             } else {
                 s.tool = MapTool::Select;
