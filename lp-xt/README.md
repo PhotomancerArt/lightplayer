@@ -26,6 +26,13 @@ instruction model, emulator, and ELF loading that the shader compiler's
   the device generate byte-identical vectors instead of transferring them. Holds
   inputs only; the emulator's predictions live in
   `lp-xt-emu/tests/fixtures/fp/`, committed **before** any hardware run.
+- **`lp-xt-fp-harness`** — the rig that runs that corpus on real silicon and
+  prints the answers. Shared by `fw-esp32s3` (LX7) and `fw-esp32v3` (LX6), which
+  supply only a `BoardId`; it decides nothing, because classification is
+  `just fp-diff`'s job against goldens committed before any board ran. DEVICE-target
+  crate: in `members` but **not** `default-members` (it depends on `esp-println`,
+  so a host `cargo check` cannot build it) — both firmwares compile it for their
+  real target in their clippy harness loops.
 - **`lp-xt-elf`** — linked-ELF loader + guest-syscall host for `lp-xt-emu`,
   plus a feature-gated relocatable-object engine (`R_XTENSA_32` /
   `R_XTENSA_SLOT0_OP`; the future isa/xt builtins-link path).
