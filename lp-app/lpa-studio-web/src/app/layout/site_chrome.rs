@@ -1,14 +1,25 @@
 //! [`SiteChrome`]: the one top bar shared by every section of the app.
 //!
 //! Home, Devices, Projects, Explore, Boards, and Docs are sections of a
-//! single cohesive app; this bar is their common navigation (vision D1,
-//! spike `spikes/gallery-rework/index.html`; the original three-tab bar
-//! was gate-judged at spike PR #269, `spikes/top-bar/index.html`):
+//! single cohesive app; this bar is their common navigation — "chrome C"
+//! (vision D1/D11, gate-judged spike `spikes/gallery-rework/index.html`;
+//! the original three-tab bar was spike PR #269, `spikes/top-bar/`):
 //!
+//! - **Split weights.** The primary family (Devices, Projects — your
+//!   things) sits by the brand at full weight; the secondary family
+//!   (Explore, Boards, Docs — the world's things) rides the right
+//!   cluster, lighter, with no divider between the families.
 //! - **The brand lockup is the way to Home.** The logo links to `#/home`
-//!   — there is deliberately no Home tab (vision D11).
+//!   — there is deliberately no Home tab, and no Studio tab either (the
+//!   sections replaced it).
+//! - **Narrow widths collapse the secondary family** into a ⋯ menu (the
+//!   bar is a container; the cut is where three secondary tabs stop
+//!   fitting, not a viewport magic number). The brand word yields too —
+//!   the mark stays.
 //! - **The editors are tools, not sections.** The mapping editor and board
-//!   editor stay outside the tab row, reachable from the overflow menu.
+//!   editor stay outside the tab row, reachable from the tools overflow
+//!   menu — which stays distinct from the nav ⋯ menu (merge candidate if
+//!   the two read confusingly at G3).
 //!
 //! The chrome is presentational. Nav tabs are plain hash links: `web_app`
 //! owns the route signal and swaps only the body beneath this bar, so
@@ -18,7 +29,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::UiAction;
 
-use crate::base::{IconMenuButton, IconMenuTone, LogoLockup, StudioIcon, StudioIconName};
+use crate::base::{
+    IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
+};
 
 /// Which nav tab renders as the current section. Home has no tab (the
 /// logo is its affordance) but is still a section the chrome can be "at"
@@ -40,48 +53,115 @@ pub enum SiteSection {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SiteChrome(
     section: SiteSection,
-    /// Studio-app action hook. Present: the Studio tab ALSO dispatches the
-    /// lens detach (see [`NavTab`]). Absent only under stories, which mount
-    /// the chrome with no actor behind it.
+    /// Studio-app action hook. Present: the Devices tab ALSO dispatches
+    /// the lens detach (see [`NavTab`]). Absent only under stories, which
+    /// mount the chrome with no actor behind it.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
+    /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
+    #[props(default = false)]
+    nav_menu_open: bool,
     children: Element,
 ) -> Element {
     rsx! {
-        header { class: "tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
+        // `tw:@container`: the collapse below responds to the BAR's own
+        // width, not the viewport, so an embedded/narrow mount behaves.
+        header { class: "tw:@container tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
             // Brand lockup — the way to Home (see module docs).
             LogoLockup { href: "#/home".to_string() }
+            // Primary family: your things, by the brand, full weight.
             nav { class: "tw:flex tw:items-center tw:gap-1",
-                // Interim P07 bar: the new sections exist under the old
-                // three tabs until the chrome C layout lands (P08). The
-                // Studio tab stands in for every shell section.
                 NavTab {
-                    label: "Studio",
+                    label: "Devices",
                     href: "#/",
-                    active: matches!(
-                        section,
-                        SiteSection::Home
-                            | SiteSection::Devices
-                            | SiteSection::Projects
-                            | SiteSection::Explore
-                    ),
+                    active: section == SiteSection::Devices,
                     on_action,
                 }
                 NavTab {
-                    label: "Boards",
-                    href: "#/boards",
-                    active: section == SiteSection::Boards,
-                }
-                NavTab {
-                    label: "Docs",
-                    href: "#/docs",
-                    active: section == SiteSection::Docs,
+                    label: "Projects",
+                    href: "#/projects",
+                    active: section == SiteSection::Projects,
                 }
             }
             div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                // Secondary family: lighter, right cluster, no divider —
+                // inline while three tabs fit the bar…
+                nav { class: "tw:hidden tw:items-center tw:gap-1 tw:@min-[680px]:flex",
+                    NavTab {
+                        label: "Explore",
+                        href: "#/explore",
+                        active: section == SiteSection::Explore,
+                        secondary: true,
+                    }
+                    NavTab {
+                        label: "Boards",
+                        href: "#/boards",
+                        active: section == SiteSection::Boards,
+                        secondary: true,
+                    }
+                    NavTab {
+                        label: "Docs",
+                        href: "#/docs",
+                        active: section == SiteSection::Docs,
+                        secondary: true,
+                    }
+                }
+                // …and folded into the ⋯ menu when they don't.
+                div { class: "tw:@min-[680px]:hidden",
+                    NavOverflowMenu { section, initially_open: nav_menu_open }
+                }
                 {children}
                 ToolsMenu {}
             }
+        }
+    }
+}
+
+/// The narrow-width ⋯ menu holding the secondary nav family. Same items,
+/// same active state, menu grammar — deliberately separate from
+/// [`ToolsMenu`] (sections navigate this tab; tools open new ones).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NavOverflowMenu(section: SiteSection, #[props(default = false)] initially_open: bool) -> Element {
+    rsx! {
+        IconMenuButton {
+            icon: StudioIconName::More,
+            icon_size: 15,
+            label: "More sections".to_string(),
+            title: "More sections".to_string(),
+            tone: IconMenuTone::Quiet,
+            initially_open,
+            popup_class: NAV_POPUP_CLASS.to_string(),
+            NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
+            NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
+            NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
+        }
+    }
+}
+
+/// One row of the nav ⋯ menu: a plain hash link that closes the menu as
+/// it navigates (sections swap in place — without the close the popover
+/// would linger over the new body).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NavMenuItem(label: &'static str, href: &'static str, active: bool) -> Element {
+    let close = try_consume_context::<PopoverCloseHandle>();
+    let class = if active {
+        NAV_MENU_ITEM_ACTIVE
+    } else {
+        NAV_MENU_ITEM_IDLE
+    };
+    rsx! {
+        a {
+            class: "{class}",
+            href: "{href}",
+            aria_current: if active { "page" } else { "false" },
+            onclick: move |_| {
+                if let Some(mut close) = close {
+                    close.close();
+                }
+            },
+            "{label}"
         }
     }
 }
@@ -115,28 +195,36 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
 }
 
 /// One nav tab. Active: heading color + accent underline; inactive: subtle
-/// text that brightens on hover.
+/// text that brightens on hover. `secondary` is the lighter family
+/// treatment (reduced weight, dimmer at rest, full strength on
+/// hover/active — the spike's `.secondary`).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavTab(
     label: &'static str,
     href: &'static str,
     active: bool,
+    #[props(default = false)] secondary: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let class = if active { NAV_TAB_ACTIVE } else { NAV_TAB_IDLE };
+    let class = match (secondary, active) {
+        (false, true) => NAV_TAB_ACTIVE,
+        (false, false) => NAV_TAB_IDLE,
+        (true, true) => NAV_TAB_SECONDARY_ACTIVE,
+        (true, false) => NAV_TAB_SECONDARY_IDLE,
+    };
     rsx! {
         a {
             class: "{class}",
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
             onclick: move |_| {
-                // The Studio tab is the way home. Navigating to `#/` fires
+                // The Devices tab is the way home. Navigating to `#/` fires
                 // `hashchange`, which the route listener turns into the lens
                 // detach (runtime-pool P3: the editor closes, sessions keep
                 // running) — the same path as the browser back button. The
                 // click ALSO dispatches the detach directly: the D29 device
-                // editor lives at `#/` (no URL until M5), so a Studio click
+                // editor lives at `#/` (no URL until M5), so a Devices click
                 // there changes no hash and the listener never fires — the
                 // direct dispatch is its way home. Detaching an
                 // already-detached lens is a no-op, so the doubled dispatch
@@ -222,6 +310,20 @@ fn ToolCard(
 const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 /// Idle treatment: subtle text that brightens on hover.
 const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
+/// Secondary-family active: the same current-destination grammar, one
+/// weight lighter — the family reads quieter even when it is where you
+/// are.
+const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+/// Secondary-family idle: reduced weight and dimmed, full strength on
+/// hover.
+const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
+
+/// The nav ⋯ menu popup: compact text rows, not tool cards.
+const NAV_POPUP_CLASS: &str = "tw:grid tw:w-[164px] tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Nav ⋯ menu row, idle.
+const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+/// Nav ⋯ menu row, current section.
+const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
 
 const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 /// Rows are cards, not text links: fixed three-column grid so the title and

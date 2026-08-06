@@ -112,7 +112,10 @@ pub fn LogoLockup(
     let body = rsx! {
         LogoMark { size, animated: compact && !mono }
         if !compact {
-            span { class: "tw:max-[560px]:hidden tw:flex",
+            // The word yields at narrow widths; the mark stays. Container
+            // query when a container encloses the lockup (the site chrome
+            // bar), viewport fallback everywhere else.
+            span { class: "tw:max-[560px]:hidden tw:@max-[560px]:hidden tw:flex",
                 BrandWord { word_px, mono }
             }
         }
