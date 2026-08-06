@@ -2363,6 +2363,12 @@
       position: absolute;
     }
   }
+  .tw\:after\:inset-x-0 {
+    &::after {
+      content: var(--tw-content);
+      inset-inline: calc(var(--tw-spacing) * 0);
+    }
+  }
   .tw\:after\:inset-x-2\.5 {
     &::after {
       content: var(--tw-content);
@@ -2373,6 +2379,12 @@
     &::after {
       content: var(--tw-content);
       bottom: calc(11px * -1);
+    }
+  }
+  .tw\:after\:-bottom-\[14px\] {
+    &::after {
+      content: var(--tw-content);
+      bottom: calc(14px * -1);
     }
   }
   .tw\:after\:h-0\.5 {
