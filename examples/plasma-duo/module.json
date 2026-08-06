@@ -4,14 +4,20 @@
     "clock": {
       "ref": "./clock.json"
     },
-    "fixture": {
-      "ref": "./fixture.json"
-    },
-    "output": {
-      "ref": "./output.json"
-    },
     "shader": {
       "ref": "./shader.json"
+    },
+    "disc": {
+      "ref": "./disc.json"
+    },
+    "grid": {
+      "ref": "./grid.json"
+    },
+    "disc-out": {
+      "ref": "./disc-out.json"
+    },
+    "grid-out": {
+      "ref": "./grid-out.json"
     }
   },
   "provenance": {

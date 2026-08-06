@@ -77,6 +77,7 @@ pub const EMBED_NAMES: &[&str] = &[
     "panel",
     "code-figure",
     "open-in-studio",
+    "editor",
 ];
 
 /// Render a parsed `embed` fence, or `None` when the name is not
@@ -96,6 +97,16 @@ pub(crate) fn render_embed(embed: &MdEmbedRef) -> Option<Element> {
             None => problem("`hero-preview` needs an `example=<id>` argument."),
         }),
         "sim-canvas" => Some(render_sim_canvas(embed)),
+        // G1-round-2 (R3): the editable GLSL editor against the docs sim.
+        // Placeholder until the embed component lands in this round.
+        "editor" => Some(match arg(embed, "sim") {
+            Some(name) => rsx! {
+                div { class: "tw:mb-1.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4 tw:text-xs tw:text-muted-foreground tw:last:mb-0",
+                    "editor embed (sim={name}) — landing in this revision"
+                }
+            },
+            None => problem("`editor` needs a `sim=<name>` argument."),
+        }),
         "panel" => Some(render_panel(embed)),
         "code-figure" => Some(render_code_figure(embed)),
         "open-in-studio" => Some(match arg(embed, "example") {
