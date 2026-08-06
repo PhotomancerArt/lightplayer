@@ -53,6 +53,8 @@ holds the full context.
 | Item | Source ADR | Revisit trigger |
 |---|---|---|
 | Structured `ServerMsgBody::Log` frames from firmware (receive path live and mapped; nothing sends it — device logs are prefix-parsed serial text) | `2026-07-05-studio-logging-model` | Serial-text parsing breaks down or per-record metadata is needed |
+| Rotatable share tokens (today the project uid IS the permanent link; "unshare" = flip visibility) | `2026-08-06-cloud-service-architecture` | A real need to revoke a leaked URL without changing project visibility |
+| Postgres metastore adapter behind the same port (single-machine SQLite is deliberate) | `2026-08-06-cloud-service-architecture` | A genuine multi-instance need — scale or zero-downtime deploys with real users |
 | Host-process `lpa-server` stdout capture into the Studio console (terminal-only today) | `2026-07-05-studio-logging-model` | Host-process workflow needs in-console server logs |
 | Console filter persistence and text search (session-only, no search today) | `2026-07-05-studio-logging-model` | Console usage patterns make refiltering per session annoying |
 | Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |

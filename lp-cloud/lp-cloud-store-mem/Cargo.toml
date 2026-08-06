@@ -1,0 +1,16 @@
+[package]
+name = "lp-cloud-store-mem"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "In-memory adapters for every lp-cloud-domain port: the local-dev and test backend"
+
+[dependencies]
+lp-cloud-domain = { path = "../lp-cloud-domain" }
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+lpc-history = { path = "../../lp-core/lpc-history" }
+
+[lints]
+workspace = true

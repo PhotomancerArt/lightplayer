@@ -46,7 +46,7 @@ To run everything from source:
 
 ```bash
 # Clone the repo
-git clone https://github.com/light-player/lightplayer.git
+git clone https://github.com/PhotomancerArt/lightplayer.git
 cd lightplayer
 
 # Initialize your development environment
@@ -170,11 +170,11 @@ LightPlayer would not be possible without the amazing work of these projects:
   `no_std`)
 - **[Naga](https://github.com/gfx-rs/wgpu/tree/main/naga)** - Shader IR and **`glsl-in`** GLSL
   frontend (used by `lps-frontend`)
-- **[pp-rs](https://github.com/light-player/pp-rs)** - GLSL preprocessor fork, patched in
+- **[pp-rs](https://github.com/PhotomancerArt/pp-rs)** - GLSL preprocessor fork, patched in
   **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
   targets
 - **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL parser (
-  [forked](https://github.com/light-player/glsl-parser) for spans)
+  [forked](https://github.com/PhotomancerArt/glsl-parser) for spans)
 - **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfn
   built-in functions)
 - **[DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler)** - HLSL compiler (
