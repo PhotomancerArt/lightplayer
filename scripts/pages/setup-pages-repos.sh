@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-owner="${LIGHTPLAYER_PAGES_OWNER:-light-player}"
+owner="${LIGHTPLAYER_PAGES_OWNER:-PhotomancerArt}"
 source_repo="${LIGHTPLAYER_SOURCE_REPO:-lightplayer}"
 beta_repo="${LIGHTPLAYER_BETA_PAGES_REPO:-lightplayer-beta-pages}"
 demo_repo="${LIGHTPLAYER_DEMO_PAGES_REPO:-lightplayer-demo-pages}"

@@ -13,7 +13,7 @@ PHOTOMANCER_ROOT="$(cd "$LP2025_ROOT/.." && pwd)"
 
 if [ ! -d "$PHOTOMANCER_ROOT/lp-regalloc2" ]; then
   echo "Error: lp-regalloc2 not found at $PHOTOMANCER_ROOT/lp-regalloc2"
-  echo "Clone it: cd $PHOTOMANCER_ROOT && git clone https://github.com/light-player/lp-regalloc2.git"
+  echo "Clone it: cd $PHOTOMANCER_ROOT && git clone https://github.com/PhotomancerArt/lp-regalloc2.git"
   exit 1
 fi
 

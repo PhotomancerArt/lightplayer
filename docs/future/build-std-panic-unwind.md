@@ -26,7 +26,7 @@ that `build-std` rebuilds from source — producing:
 error[E0464]: multiple candidates for `rmeta` dependency `alloc`
 ```
 
-The local path patches of cranelift (`[patch."https://github.com/light-player/lp-cranelift"]`)
+The local path patches of cranelift (`[patch."https://github.com/PhotomancerArt/lp-cranelift"]`)
 only enable `hashbrown/default-hasher` without `alloc`, so the conflict disappears.
 
 The patch section header was accidentally commented out (`# [patch."https://..."]`),

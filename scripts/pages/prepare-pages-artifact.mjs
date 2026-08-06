@@ -127,7 +127,7 @@ function versionInfo(app) {
     // deploy workflows export APP_VERSION straight after checkout instead.
     version: process.env.APP_VERSION?.trim() || commandOrUnknown("scripts/print-app-version.sh"),
     source: {
-      repository: process.env.GITHUB_REPOSITORY ?? "light-player/lightplayer",
+      repository: process.env.GITHUB_REPOSITORY ?? "PhotomancerArt/lightplayer",
       ref: process.env.GITHUB_REF_NAME ?? commandOrUnknown("git", ["branch", "--show-current"]),
       sha: process.env.GITHUB_SHA ?? commandOrUnknown("git", ["rev-parse", "HEAD"]),
       dirty: isDirty(),
