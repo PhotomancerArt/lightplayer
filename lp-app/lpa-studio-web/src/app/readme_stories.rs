@@ -19,7 +19,7 @@ use lpa_studio_core::{
     UiViewContent,
 };
 
-use crate::app::home::HomeGallery;
+use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -58,11 +58,19 @@ fn studio_hero() -> Element {
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
-                home: readme_home_view(),
-                now_secs: Some(STORY_NOW),
-                has_ever_granted: Some(true),
-                on_action: |_| {},
+            div { class: "tw:grid tw:gap-10",
+                DevicesPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    has_ever_granted: Some(true),
+                    on_action: |_| {},
+                }
+                ProjectsPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+                ExplorePage { home: Some(readme_home_view()), on_action: |_| {} }
             }
         }
     }

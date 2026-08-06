@@ -1,6 +1,7 @@
 # ADR: One site chrome; boards and docs are in-app sections
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-08-05: chrome C — six sections,
+  split-weight nav families, logo → home, Studio tab retired)
 - **Date:** 2026-08-02
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -21,13 +22,29 @@ embedded nodes as the teaching strategy — both point at in-app.
 
 ## Decision
 
+> **Amended 2026-08-05** (gallery-product vision D1/D11, gate-judged
+> spike `spikes/gallery-rework/index.html`): the bar is now **chrome C**.
+> Six sections — Home, Devices, Projects, Explore, Boards, Docs — in two
+> weight families: the primary family (**Devices**, **Projects** — your
+> things) sits by the brand at full weight; the secondary family
+> (**Explore**, **Boards**, **Docs**) rides the right cluster at reduced
+> weight, no divider between them. The **Studio tab is retired** (Devices
+> is the `#/` landing and carries the direct lens-detach dispatch), the
+> **logo is the way to Home** (`#/home`; there is deliberately no Home
+> tab), and at narrow widths the secondary family **collapses into a ⋯
+> menu** — the bar is a `@container`, so the cut follows the bar's own
+> width. The bullets below record the original 2026-08-02 three-tab
+> decision; the structural rules (one bar, in-app sections, nothing
+> unloads, tools stay chromeless) all carry forward unchanged.
+
 - **One shared top bar** (`lpa-studio-web::app::layout::SiteChrome`) renders
   on the studio app, the boards catalog, and the docs section, with
   **Studio / Boards / Docs** nav tabs. Boards and docs are in-app sections,
-  not satellite pages.
+  not satellite pages. *(Amended: six sections, split weights — see above.)*
 - **The brand lockup is inert.** The logo (interim `LogoMark`, a WS2812
   pixel mark — placeholder until the commissioned logo lands) is reserved
   for a future landing/marketing page. Home is the Studio tab.
+  *(Amended: the lockup now links to `#/home` — this IS that page.)*
 - **The authoring tools stay chromeless.** The mapping editor and board
   editor are tools, not sections; they are reachable from the chrome's
   overflow menu.
@@ -62,14 +79,25 @@ embedded nodes as the teaching strategy — both point at in-app.
   than reintroducing a runtime-less mode.
 - The chrome's studio mode threads `on_action` so the Studio tab preserves
   the direct lens-detach dispatch (the D29 device editor lives at `#/` and
-  never fires `hashchange`).
+  never fires `hashchange`). *(Amended: the Devices tab carries this now,
+  for the same reason — it IS `#/`.)*
+- *(Amended, revised at G3 2026-08-05)* The chrome has **one ⋯ menu**,
+  at every width. Two separate overflow menus (nav ⋯ + tools ⋯) shipped
+  first with a merge-at-G3 note; G3 ruled the row of separate menus
+  clutter — "merge ALL the menus." The single ⋯ holds grouped Sections
+  (narrow widths only — they are inline tabs while they fit), the full
+  Sessions list (the narrow count chip died with this), and Tools. Rows
+  keep their own grammars: sections/sessions navigate in place and close
+  the menu, tool cards open a new tab.
 
 ## Alternatives Considered
 
 - **Satellite pages with a back-link:** rejected at the spike gate —
   fragments the product and blocks boards/docs from acting on app state.
 - **Logo as home link:** rejected — conflicts with a future landing page
-  and hides the home affordance.
+  and hides the home affordance. *(Reversed by the 2026-08-05 amendment:
+  `#/home` is that landing page, and the gallery-rework gate chose
+  logo-as-home over a Home tab.)*
 - **In-bar links to the tools:** rejected — tabs imply sections; the tools
   are editors.
 - **Sections as early-return pages with a reload between them** (the first
@@ -82,3 +110,5 @@ embedded nodes as the teaching strategy — both point at in-app.
 - Interactive docs architecture (live embedded nodes) — separate plan.
 - Boards "I have one of these" setup entry — future work.
 - Landing page; when it exists, the lockup may become its link.
+  *(Done 2026-08-05: `#/home` + lockup link, placeholder content until
+  the M3 landing pass.)*
