@@ -1,13 +1,14 @@
 ---
 status: fixed
 found: 2026-08-05      # how: report — palette shaders never previewed in browser Studio
-fixed: this change
+fixed: c6df42e1e          # PR #362
 area: lp-shader/lps-frontend (parse.rs sampler2D rewrite), lpc-model shader_header_gen
 class: config-masked-defect
 related:
   - docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
   - docs/design/lp-shader-texture-access.md
   - docs/adr/2026-08-04-palettes-are-values.md
+  - docs/adr/2026-08-05-sampler2d-authored-surface.md
 ---
 # The engine's generated palette header does not parse on the browser's frontend
 
