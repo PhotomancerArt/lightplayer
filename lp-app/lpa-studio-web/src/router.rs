@@ -122,8 +122,14 @@ pub(crate) enum StudioRoute {
     /// The in-app docs section (compiled-in `docs/user-guide/` articles).
     /// `page` deep-links one article by slug; `None` (and any unknown
     /// slug — the page's concern, not the router's) lands on the guide's
-    /// landing article.
-    Docs { page: Option<String> },
+    /// landing article. `anchor` deep-links a heading inside the article
+    /// (`#/docs/<slug>#<anchor>` — the whole string is `location.hash`,
+    /// so the anchor rides INSIDE the routed hash and the docs page does
+    /// the scrolling; the browser's native fragment scroll never sees it).
+    Docs {
+        page: Option<String>,
+        anchor: Option<String>,
+    },
 }
 
 #[cfg_attr(
@@ -183,8 +189,33 @@ impl StudioRoute {
             }
             Some("docs") => {
                 let rest: Vec<&str> = segments.collect();
-                StudioRoute::Docs {
-                    page: (rest.len() == 1).then(|| rest[0].to_string()),
+                match rest.as_slice() {
+                    [] => StudioRoute::Docs {
+                        page: None,
+                        anchor: None,
+                    },
+                    // One segment; a trailing `#anchor` (help links) is
+                    // split off the slug. An empty anchor (`slug#`) reads
+                    // as no anchor.
+                    [only] => {
+                        let (slug, anchor) = match only.split_once('#') {
+                            Some((slug, anchor)) => (slug, Some(anchor)),
+                            None => (*only, None),
+                        };
+                        let page = (!slug.is_empty()).then(|| slug.to_string());
+                        // An anchor without a page has nothing to scroll.
+                        let anchor = page
+                            .is_some()
+                            .then_some(anchor)
+                            .flatten()
+                            .filter(|anchor| !anchor.is_empty())
+                            .map(str::to_string);
+                        StudioRoute::Docs { page, anchor }
+                    }
+                    _ => StudioRoute::Docs {
+                        page: None,
+                        anchor: None,
+                    },
                 }
             }
             Some("stories") => {
@@ -218,8 +249,15 @@ impl StudioRoute {
             StudioRoute::Boards { board: None } => "#/boards".to_string(),
             StudioRoute::Boards { board: Some(board) } => format!("#/boards/{board}"),
             StudioRoute::BoardEditor => "#/boards/edit".to_string(),
-            StudioRoute::Docs { page: None } => "#/docs".to_string(),
-            StudioRoute::Docs { page: Some(page) } => format!("#/docs/{page}"),
+            StudioRoute::Docs { page: None, .. } => "#/docs".to_string(),
+            StudioRoute::Docs {
+                page: Some(page),
+                anchor: None,
+            } => format!("#/docs/{page}"),
+            StudioRoute::Docs {
+                page: Some(page),
+                anchor: Some(anchor),
+            } => format!("#/docs/{page}#{anchor}"),
         }
     }
 
@@ -519,9 +557,17 @@ mod tests {
                 board: Some("domraem/dom-z-102".to_string()),
             },
             StudioRoute::BoardEditor,
-            StudioRoute::Docs { page: None },
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            },
             StudioRoute::Docs {
                 page: Some("brightness-and-smooth-fades".to_string()),
+                anchor: None,
+            },
+            StudioRoute::Docs {
+                page: Some("what-is-a-shader".to_string()),
+                anchor: Some("the-reveal".to_string()),
             },
         ];
         for route in routes {
@@ -653,11 +699,42 @@ mod tests {
     fn docs_junk_depth_reads_as_the_landing_page() {
         assert_eq!(
             StudioRoute::parse("#/docs/a/b"),
-            StudioRoute::Docs { page: None }
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            }
         );
         assert_eq!(
             StudioRoute::parse("#/docs/"),
-            StudioRoute::Docs { page: None }
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            }
+        );
+    }
+
+    #[test]
+    fn docs_anchor_splits_off_the_slug_and_empty_pieces_drop() {
+        assert_eq!(
+            StudioRoute::parse("#/docs/guide#brightness"),
+            StudioRoute::Docs {
+                page: Some("guide".to_string()),
+                anchor: Some("brightness".to_string()),
+            }
+        );
+        assert_eq!(
+            StudioRoute::parse("#/docs/guide#"),
+            StudioRoute::Docs {
+                page: Some("guide".to_string()),
+                anchor: None,
+            }
+        );
+        assert_eq!(
+            StudioRoute::parse("#/docs/#lost"),
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            }
         );
     }
 

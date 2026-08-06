@@ -4729,6 +4729,9 @@ impl StudioController {
                 self.connect_loaded_project(handle_id, updates).await
             }
             ProjectOp::LoadDemoProject => self.load_demo_project(updates).await,
+            ProjectOp::OpenDocsExample { example_id } => {
+                self.open_docs_example(&example_id, updates).await
+            }
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
@@ -5553,6 +5556,109 @@ impl StudioController {
                     sync.synced,
                     "Demo project loaded",
                     "Demo project loaded; project sync needs attention",
+                )))
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    error.to_string(),
+                ));
+                self.project.fail(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    /// The docs-sim bootstrap ([`ProjectOp::OpenDocsExample`], interactive
+    /// docs D1/D2): ensure THIS controller's browser-worker sim is
+    /// connected, put the lens on it, and deploy a compiled-in example
+    /// directly — never through the library. A docs page's leased
+    /// controller dispatches this as its first action; re-dispatching on
+    /// the live sim is the docs "reset" (pristine re-deploy of the same
+    /// files). Never dispatched by any app surface.
+    async fn open_docs_example(&mut self, example_id: &str, updates: UxUpdateSink) -> UiResult {
+        match self.pool.sim_session() {
+            // Live sim: the reset path. Lens back on it, re-deploy below.
+            Some(sim) if matches!(sim.server_state(), ServerState::Connected { .. }) => {
+                let id = sim.id();
+                self.pool.set_lens(id);
+            }
+            // A sim in any half-state is unexpected here: the docs host
+            // boots fresh controllers and resets only live ones. Refuse
+            // loudly instead of guessing at recovery (removing the session
+            // without closing its provider would leak the worker).
+            Some(_) => {
+                return Err(UiError::MissingSession(
+                    "the docs simulator is not connected; shut this host down and boot a fresh one"
+                        .to_string(),
+                ));
+            }
+            None => {
+                emit_activity(
+                    &updates,
+                    UxActivityTarget::pane(ProjectController::NODE_ID),
+                    "Starting simulator",
+                    "Starting",
+                    "Starting the docs simulator",
+                );
+                let outcome = self
+                    .device
+                    .open_provider(LinkProviderKind::BrowserWorker)
+                    .await;
+                match outcome {
+                    Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
+                        self.record_logs(logs);
+                        let id = self.install_session(payload).await?;
+                        // The fresh install claims a lens-less pool's lens;
+                        // set it explicitly anyway so the invariant is local.
+                        self.pool.set_lens(id);
+                        let attach = self
+                            .pool
+                            .session_mut(id)
+                            .ok_or_else(|| {
+                                UiError::MissingSession(
+                                    "the docs simulator session vanished after install".to_string(),
+                                )
+                            })?
+                            .attach_server(updates.clone());
+                        if let Err(error) = attach {
+                            self.pool.remove_kind(crate::RuntimeKind::Sim);
+                            return Err(error);
+                        }
+                    }
+                    Ok(_) => {
+                        self.pool.remove_kind(crate::RuntimeKind::Sim);
+                        return Err(UiError::MissingSession(
+                            "the docs simulator did not connect".to_string(),
+                        ));
+                    }
+                    Err(error) => {
+                        self.pool.remove_kind(crate::RuntimeKind::Sim);
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Opening example",
+            "Opening",
+            "Pushing the example to the docs simulator",
+        );
+        let result = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.load_example_direct(server, example_id).await
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UiNotices::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Example running",
+                    "Example running; project sync needs attention",
                 )))
             }
             Err(error) => {
