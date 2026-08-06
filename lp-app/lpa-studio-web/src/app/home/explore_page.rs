@@ -4,6 +4,8 @@
 //! (the content system is future M4 / wled-compat material, D6/D7).
 
 use dioxus::prelude::*;
+
+use crate::base::HelpLink;
 use lpa_studio_core::{UiAction, UiExampleCard, UiHomeView};
 
 use crate::app::home::example_card::ExampleCard;
@@ -36,6 +38,12 @@ pub fn ExplorePage(
                     // examples exist (M6 grows this)
                     span { class: "tw:rounded-full tw:border tw:border-border tw:px-2.5 tw:py-0.5 tw:text-xs tw:font-semibold tw:text-muted-foreground",
                         "Projects"
+                    }
+                    // Where a WLED person goes looking for "the effects
+                    // list" — the exact spot the shader question arises.
+                    HelpLink {
+                        href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                        title: "What's a shader?",
                     }
                 }
                 div { class: card_grid_class(),

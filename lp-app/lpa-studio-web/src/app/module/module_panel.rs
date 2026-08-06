@@ -60,6 +60,12 @@ pub fn ModulePanel(
     detail_open_group: Option<String>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Mount the panel's own transient reset glyph (`held > 0`). The
+    /// default is Studio's behavior; a host whose CHROME already owns a
+    /// stable Reset (the docs embeds) passes false so one verb has one
+    /// button and nothing reflows when controls become held.
+    #[props(default = true)]
+    show_reset: bool,
 ) -> Element {
     if panel.is_empty() {
         return rsx! {
@@ -85,9 +91,9 @@ pub fn ModulePanel(
             // the controls, never competing with them. Reset only exists
             // when there is something to clear (and a real scope to clear
             // it in — fixture panels without a target render no reset).
-            if held > 0 || auto_save.is_some() {
+            if (show_reset && held > 0) || auto_save.is_some() {
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-1.5",
-                    if held > 0 && let Some(target) = target && let Some(handler) = on_panel {
+                    if show_reset && held > 0 && let Some(target) = target && let Some(handler) = on_panel {
                         PanelResetButton { scope: scope.clone(), target, held, on_panel: handler }
                     }
                     if let Some(auto_save) = auto_save {
@@ -124,6 +130,7 @@ pub fn ModulePanel(
                             play,
                             on_panel,
                             on_action,
+                            show_reset,
                         }
                     }
                 }
@@ -160,6 +167,10 @@ pub fn NestedPanelGroup(
     #[props(default = false)]
     detail_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// See [`ModulePanel::show_reset`]: false when the host's chrome owns
+    /// the one stable Reset (docs embeds).
+    #[props(default = true)]
+    show_reset: bool,
 ) -> Element {
     let held = group.engaged_total();
     let aspects = group.detail_aspects();
@@ -204,7 +215,7 @@ pub fn NestedPanelGroup(
                     trigger_open_class: GROUP_LABEL_TRIGGER_CLASS.to_string(),
                     on_action,
                 }
-                if held > 0 && let Some(target) = target && let Some(handler) = on_panel {
+                if show_reset && held > 0 && let Some(target) = target && let Some(handler) = on_panel {
                     PanelResetButton { scope: scope.clone(), target, held, on_panel: handler }
                 }
             }
@@ -234,6 +245,7 @@ pub fn NestedPanelGroup(
                                 play,
                                 on_panel,
                                 on_action,
+                                show_reset,
                             }
                         }
                     }

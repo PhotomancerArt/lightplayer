@@ -688,8 +688,13 @@ pub fn App() -> Element {
                     // lpa-boards stays platform-blind.
                     lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
                 },
-                StudioRoute::Docs { page } => rsx! {
-                    crate::app::DocsPage { page }
+                StudioRoute::Docs { page, anchor } => rsx! {
+                    // The section gets the app's real dispatcher: the
+                    // `open-in-studio` embed runs the same `OpenExample`
+                    // flow a gallery card does, into the user's own
+                    // library. Docs SIMS never come through here — they
+                    // are leased controllers of their own (D2).
+                    crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
                 StudioRoute::Projects => rsx! {
                     StudioShell {
@@ -745,13 +750,13 @@ fn detect_host_os() -> lpa_boards::HostOs {
     }
 }
 
-fn make_pull_timer(delay: Duration) -> TimeoutFuture {
+pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }
 
 /// DeviceSession timers on wasm: the same `setTimeout` future, boxed for
 /// the session's injected factory (the `make_pull_timer` pattern).
-fn make_device_timers() -> DeviceTimers {
+pub(crate) fn make_device_timers() -> DeviceTimers {
     DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
 }
 
@@ -845,14 +850,14 @@ fn install_library_listeners(tx: &CommandSender) {
 /// The controller's log-stamping clock on wasm: seconds since the Unix epoch
 /// from `Date.now()`. Core takes the closure so it stays platform-free.
 #[cfg(target_arch = "wasm32")]
-fn now_secs() -> f64 {
+pub(crate) fn now_secs() -> f64 {
     js_sys::Date::now() / 1000.0
 }
 
 /// Host builds of this crate only run unit tests and never spawn the actor,
 /// so the clock stub mirrors the JS-console stubs below.
 #[cfg(not(target_arch = "wasm32"))]
-fn now_secs() -> f64 {
+pub(crate) fn now_secs() -> f64 {
     0.0
 }
 
