@@ -15,6 +15,11 @@
 //!   the project is link-visible), the static app artifact, and an SPA
 //!   fallback for every path that is not a file.
 //!
+//! Across all three sits [`auth`]: the Google sign-in round trip
+//! ([`auth::google_auth`]), the session cookie every plane reads
+//! ([`auth::session_cookie`]), and the localhost-only dev login
+//! ([`auth::dev_auth`]).
+//!
 //! # Everything blocking goes through `spawn_blocking`
 //!
 //! [`CloudService`](lp_cloud_domain::CloudService) is sans-IO and entirely
@@ -47,5 +52,7 @@ pub mod ports;
 pub mod router;
 
 pub use app_state::{AppState, ServiceCore};
-pub use config::{BlobBackend, ConfigError, MetaBackend, ServerConfig};
+pub use config::{
+    BlobBackend, ConfigError, GoogleEndpoints, GoogleSettings, MetaBackend, ServerConfig,
+};
 pub use router::build_router;

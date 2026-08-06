@@ -17,7 +17,8 @@
 //! | `LP_CLOUD_STATIC_DIR` | `just studio-web-deploy-dir` artifact | none |
 //! | `LP_CLOUD_BASE_URL` | Canonical origin (OG urls, cookie `Secure`) | `http://127.0.0.1:{port}` |
 //! | `LP_CLOUD_DEV_AUTH` | `1` enables `GET /auth/dev` | off |
-//! | `LP_CLOUD_GOOGLE_CLIENT_ID` / `_SECRET` | OAuth (P08) | — |
+//! | `LP_CLOUD_GOOGLE_CLIENT_ID` / `_SECRET` | OAuth; both required for `GET /auth/google` | — |
+//! | `LP_CLOUD_GOOGLE_ENDPOINT_BASE` | Point the OAuth dance at a stub (tests) | Google |
 
 use std::fmt;
 use std::net::IpAddr;
@@ -54,10 +55,8 @@ pub struct ServerConfig {
     pub base_url: String,
     /// Whether `GET /auth/dev` exists. See [`dev_auth_allowed`].
     pub dev_auth: bool,
-    /// Google OAuth client id (P08).
-    pub google_client_id: Option<String>,
-    /// Google OAuth client secret (P08). Never logged.
-    pub google_client_secret: Option<String>,
+    /// What it takes to sign somebody in with Google.
+    pub google: GoogleSettings,
     /// How long a minted session lasts, in seconds.
     pub session_ttl_seconds: f64,
 }
@@ -122,8 +121,14 @@ impl ServerConfig {
                 .map(PathBuf::from),
             base_url,
             dev_auth,
-            google_client_id: get("LP_CLOUD_GOOGLE_CLIENT_ID"),
-            google_client_secret: get("LP_CLOUD_GOOGLE_CLIENT_SECRET"),
+            google: GoogleSettings {
+                client_id: nonempty(get("LP_CLOUD_GOOGLE_CLIENT_ID")),
+                client_secret: nonempty(get("LP_CLOUD_GOOGLE_CLIENT_SECRET")),
+                endpoints: match nonempty(get("LP_CLOUD_GOOGLE_ENDPOINT_BASE")) {
+                    Some(base) => GoogleEndpoints::under(&base),
+                    None => GoogleEndpoints::google(),
+                },
+            },
             session_ttl_seconds: SESSION_TTL_SECONDS,
         })
     }
@@ -138,6 +143,76 @@ impl ServerConfig {
     /// cookie, which looks exactly like a broken login.
     pub fn cookies_are_secure(&self) -> bool {
         self.base_url.starts_with("https://")
+    }
+}
+
+/// What the Google login needs: who we are to Google, and where Google is.
+#[derive(Debug, Clone, Default)]
+pub struct GoogleSettings {
+    /// OAuth client id. Public by nature — it travels in the authorize URL.
+    pub client_id: Option<String>,
+    /// OAuth client secret. **Never logged**, and never leaves the token
+    /// exchange's request body.
+    pub client_secret: Option<String>,
+    /// Where the three OAuth endpoints live.
+    pub endpoints: GoogleEndpoints,
+}
+
+impl GoogleSettings {
+    /// The credential pair, present only when *both* halves are configured.
+    ///
+    /// Half-configured is the same as unconfigured on purpose: a client id
+    /// with no secret produces a redirect to Google that can only fail at the
+    /// callback, minutes later and on somebody else's screen.
+    pub fn credentials(&self) -> Option<(&str, &str)> {
+        Some((self.client_id.as_deref()?, self.client_secret.as_deref()?))
+    }
+}
+
+/// The three URLs of the authorization-code flow.
+///
+/// These are configuration rather than constants for exactly one reason: the
+/// edge tests run the whole flow against an in-process stub server, and a
+/// test that cannot reach the network is worth more than one that must
+/// (`tests/google_auth.rs`). Production never sets the override, so the
+/// defaults below are what ships.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoogleEndpoints {
+    /// Where the browser is sent to consent.
+    pub authorize: String,
+    /// Where the authorization code is exchanged for an access token.
+    pub token: String,
+    /// Where the access token is spent, for `{ sub, email, … }`.
+    pub userinfo: String,
+}
+
+impl GoogleEndpoints {
+    /// The real Google. Three different hosts, which is why this is a struct
+    /// of URLs and not one base with paths hung off it.
+    pub fn google() -> Self {
+        Self {
+            authorize: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            token: "https://oauth2.googleapis.com/token".into(),
+            userinfo: "https://openidconnect.googleapis.com/v1/userinfo".into(),
+        }
+    }
+
+    /// A stub server carrying all three paths — `LP_CLOUD_GOOGLE_ENDPOINT_BASE`.
+    /// The paths mirror Google's so a stub reads like the thing it stands in
+    /// for.
+    pub fn under(base: &str) -> Self {
+        let base = base.trim().trim_end_matches('/');
+        Self {
+            authorize: format!("{base}/o/oauth2/v2/auth"),
+            token: format!("{base}/token"),
+            userinfo: format!("{base}/v1/userinfo"),
+        }
+    }
+}
+
+impl Default for GoogleEndpoints {
+    fn default() -> Self {
+        Self::google()
     }
 }
 
@@ -271,6 +346,14 @@ fn parse_var<T: std::str::FromStr>(
         })
 }
 
+/// An empty or whitespace-only variable means "not set". A shell recipe
+/// forwarding `${LP_CLOUD_GOOGLE_CLIENT_ID:-}` passes an empty string, and an
+/// empty client id would otherwise look configured.
+fn nonempty(raw: Option<String>) -> Option<String> {
+    raw.filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+}
+
 fn truthy(raw: &str) -> bool {
     matches!(raw.trim(), "1" | "true" | "yes" | "on")
 }
@@ -327,6 +410,58 @@ mod tests {
         assert!(dev_auth_allowed("http://[::1]:8080"));
         assert!(!dev_auth_allowed("https://lightplayer.app"));
         assert!(!dev_auth_allowed("https://localhost.evil.example"));
+    }
+
+    /// Half a credential is not a credential: a client id with no secret can
+    /// only fail at the callback, which is the worst place to learn it.
+    #[test]
+    fn google_needs_both_halves_of_the_credential() {
+        assert_eq!(from(&[]).google.credentials(), None);
+        assert_eq!(
+            from(&[("LP_CLOUD_GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com")])
+                .google
+                .credentials(),
+            None
+        );
+        assert_eq!(
+            from(&[
+                ("LP_CLOUD_GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com"),
+                ("LP_CLOUD_GOOGLE_CLIENT_SECRET", "shh"),
+            ])
+            .google
+            .credentials(),
+            Some(("id.apps.googleusercontent.com", "shh"))
+        );
+    }
+
+    /// A recipe forwarding `${VAR:-}` passes an empty string, which must not
+    /// read as "configured with the empty client id".
+    #[test]
+    fn an_empty_credential_variable_is_unset() {
+        let config = from(&[
+            ("LP_CLOUD_GOOGLE_CLIENT_ID", "  "),
+            ("LP_CLOUD_GOOGLE_CLIENT_SECRET", "shh"),
+        ]);
+        assert_eq!(config.google.credentials(), None);
+    }
+
+    #[test]
+    fn the_endpoints_are_googles_unless_a_stub_base_says_otherwise() {
+        assert_eq!(from(&[]).google.endpoints, GoogleEndpoints::google());
+        assert!(
+            from(&[])
+                .google
+                .endpoints
+                .authorize
+                .starts_with("https://accounts.google.com/")
+        );
+
+        let stubbed = from(&[("LP_CLOUD_GOOGLE_ENDPOINT_BASE", "http://127.0.0.1:9/")]);
+        assert_eq!(stubbed.google.endpoints.token, "http://127.0.0.1:9/token");
+        assert_eq!(
+            stubbed.google.endpoints.userinfo,
+            "http://127.0.0.1:9/v1/userinfo"
+        );
     }
 
     #[test]
