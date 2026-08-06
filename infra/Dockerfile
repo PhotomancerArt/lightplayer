@@ -56,20 +56,21 @@ RUN cargo build --release --locked -p lp-cloud-server
 # a statically linked Go binary, so it is fetched once here and copied into
 # the runtime stage rather than installed there.
 #
-# No sha256 pin: the checksum could not be verified offline when this file was
-# written, and a fabricated one is worse than none. Add it here when someone
-# next touches this stage:
+# The tarball is sha256-pinned (verified from the live release
+# 2026-08-06). Bumping LITESTREAM_VERSION requires recomputing it:
 #   curl -fsSL .../litestream-v${V}-linux-amd64.tar.gz | sha256sum
 FROM debian:bookworm-slim AS litestream
 
 ARG LITESTREAM_VERSION=0.3.13
 ARG LITESTREAM_ARCH=amd64
+ARG LITESTREAM_SHA256=eb75a3de5cab03875cdae9f5f539e6aedadd66607003d9b1e7a9077948818ba0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL -o /tmp/litestream.tar.gz \
         "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${LITESTREAM_ARCH}.tar.gz" \
+    && echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
     && tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz litestream \
     && rm /tmp/litestream.tar.gz \
     && /usr/local/bin/litestream version

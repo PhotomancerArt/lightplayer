@@ -5,13 +5,10 @@ name: Deploy Cloud Service
 # bundle (D26 — one origin, real 200s, per-URL OG tags).
 #
 # The Studio web artifact is built HERE and shipped into the image as bytes;
-# infra/Dockerfile deliberately does not run `dx`. That is why the build
-# steps below are a near-copy of deploy-studio-pages.yml — same command, same
-# toolchains, same caches.
-#
-# deploy-studio-pages.yml is still live and still deploying to GitHub Pages.
-# It retires in P12, AFTER the DNS cutover, so a rollback to Pages remains a
-# working path for as long as the old DNS records can be re-entered.
+# infra/Dockerfile deliberately does not run `dx`. The build steps were
+# inherited from the retired deploy-studio-pages.yml (GH Pages hosting died
+# with the 2026-08-06 DNS cutover; the last-deployed Pages site remains as
+# the DNS-rollback target — see docs/runbooks/godaddy-dns-cutover.md §5).
 
 # Deploys ride CI, not raw pushes: "Main push" green on main is the
 # trigger, so a red main never ships. workflow_dispatch remains the manual
