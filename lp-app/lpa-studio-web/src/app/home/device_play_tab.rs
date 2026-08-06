@@ -322,6 +322,7 @@ mod tests {
             fw: None,
             hardware: None,
             detected_chip: None,
+            board_id: None,
             port_label: None,
             safe_clamp: None,
             sim: false,

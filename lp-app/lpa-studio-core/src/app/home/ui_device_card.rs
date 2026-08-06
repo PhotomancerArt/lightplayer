@@ -48,6 +48,16 @@ pub struct UiDeviceCard {
     /// board picker leads with matching boards. Distinct from
     /// `hardware.board_id` (the device's own post-provision report).
     pub detected_chip: Option<String>,
+    /// The board this card's runtime claims to be (`vendor/product`), when
+    /// it is a fact the CARD carries: today that is the SIM alone
+    /// (gallery-rework vision D4 — inherited from the project it runs, and
+    /// rendered as the card's "as \<board\>" line).
+    ///
+    /// Device cards leave this `None` on purpose: a device's board is a
+    /// registry fact (`RegisteredDevice.board_id`) read straight from
+    /// `HomeInputs.registered`, and duplicating it onto the presentation
+    /// would give the two surfaces a way to disagree.
+    pub board_id: Option<String>,
     /// The port as the app can name it (endpoint label + grant short id,
     /// e.g. "ESP32 Serial (0x303a:0x1001) · port-2") — the Technical tab's
     /// identification line. `None` on registry (offline) cards and stubs.
