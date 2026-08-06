@@ -33,6 +33,16 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 12: the published output-frame probe —
+///   `ProjectProbeRequest::OutputFrame` / `ProjectProbeResult::OutputFrame`
+///   (`OutputFrameProbeRequest`, `OutputFrameProbeResult`,
+///   `OutputFrameEntry`) plus `ProjectProbeResultHeader::OutputFrame` for
+///   its chunked bulk samples. The cheap pull-only read of the frame each
+///   output has ALREADY published — no render in the request path, unlike
+///   the control-product probe. New enum variants on the probe enums and on
+///   the chunk header enum: an old peer cannot decode an `output_frame`
+///   frame and an old server cannot answer one, which is what earns the
+///   bump, additive though the surface reads.
 /// - 11: per-reading shaping on the timebase probe — `WirePhasorRow` gains
 ///   `readings: Vec<WirePhasorReading>` (consumer node/slot + waveform +
 ///   phase_offset), the witness data behind the clock face's trace cards.
@@ -91,7 +101,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 11;
+pub const WIRE_PROTO_VERSION: u32 = 12;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

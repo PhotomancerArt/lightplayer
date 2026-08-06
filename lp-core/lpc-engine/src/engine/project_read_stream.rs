@@ -243,6 +243,13 @@ impl<'a> EngineProjectReadSource<'a> {
                 self.engine
                     .read_project_control_product_probe(self.registry, request),
             ),
+            // Deliberately NOT routed through the control-product probe
+            // above: that path re-renders, this one reads what the outputs
+            // already published (see `OutputFrameProbeRequest`).
+            ProjectProbeRequest::OutputFrame(request) => ProjectProbeResult::OutputFrame(
+                self.engine
+                    .read_project_output_frame_probe(self.registry, request),
+            ),
             ProjectProbeRequest::BindingGraph(request) => ProjectProbeResult::BindingGraph(
                 self.engine
                     .read_project_binding_graph_probe(self.registry, request),
