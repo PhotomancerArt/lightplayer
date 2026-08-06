@@ -434,7 +434,7 @@ impl Harness {
             .borrow()
             .write_file(
                 self.project_path.join("clock.json").as_path(),
-                br#"{"kind":"Clock","controls":{"rate":2.0}}"#,
+                br#"{"kind":"Clock","transport":{"rate":2.0}}"#,
             )
             .expect("write clock");
     }
@@ -443,7 +443,7 @@ impl Harness {
         let fs = self.base_fs.borrow();
         fs.write_file(
             self.project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
         fs.write_file(
@@ -453,7 +453,7 @@ impl Harness {
         .expect("write module");
         fs.write_file(
             self.project_path.join("clock.json").as_path(),
-            br#"{"kind":"Clock","controls":{"rate":1.0}}"#,
+            br#"{"kind":"Clock","transport":{"rate":1.0}}"#,
         )
         .expect("write clock");
     }

@@ -3,10 +3,12 @@
 `lp-shader` is the shader compiler and runtime for **LightPlayer** — a system that JIT-compiles
 shader code to native code on resource-constrained devices at runtime.
 
-The primary target is **RISC-V 32-bit** (`riscv32imac`, ESP32-C6). Two native backends are
-available: `lpvm-native` (custom lightweight codegen, default on-device) and `lpvm-cranelift`
-(Cranelift-based, reference implementation). A separate **WebAssembly** backend produces `.wasm`
-modules for browser-based preview.
+The native targets are **RISC-V 32-bit** (`riscv32imac`, ESP32-C6) and **Xtensa**
+(ESP32-S3 / classic ESP32). Two native backends are available: `lpvm-native` (custom
+lightweight codegen with per-ISA backends, default on-device) and `lpvm-cranelift`
+(Cranelift-based, reference implementation; RV32 and host ISAs — no Xtensa). A separate
+**WebAssembly** backend
+produces `.wasm` modules for browser-based preview.
 
 Floating point math is replaced with `Q16.16` (Q32) fixed-point math for performance on non-float
 systems.
@@ -25,7 +27,7 @@ lps-frontend         Naga glsl-in → IrModule
   ▼
 LPIR                  flat, scalarized, mode-agnostic IR
   │
-  ├──► lpvm-native      → native machine code (default on-device JIT)
+  ├──► lpvm-native      → native machine code (RV32 + Xtensa, default on-device JIT)
   ├──► lpvm-cranelift    → native machine code (Cranelift, reference backend)
   ├──► lpvm-wasm         → .wasm (browser preview, wasm.q32 filetests)
   └──► lpir::interp      → in-process interpreter (testing)

@@ -564,7 +564,13 @@ struct FluidEmitter {{
     float intensity;
 }};
 
-layout(binding = 0) uniform float time;
+layout(binding = 0) uniform float wave_a;
+layout(binding = 1) uniform float wave_a2;
+layout(binding = 2) uniform float wave_b2;
+layout(binding = 3) uniform float wave_b;
+layout(binding = 4) uniform float wave_c;
+layout(binding = 5) uniform float wave_c2;
+layout(binding = 6) uniform float wave_breathe;
 FluidEmitter emitters[4];
 
 {}

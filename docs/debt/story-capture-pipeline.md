@@ -366,6 +366,18 @@ Exit when both hold across a few captures. If a new over-tolerance
 churner appears and resists diagnosis, that is the architecture signal —
 escalate rather than widening the threshold.
 
+**Added 2026-08-05 — criterion (6), the HANG (distinct from the drift
+criteria above).** The CI job wedged twice in one day for hours with zero
+output; the unbounded wait that let it is fixed, but the reason the discovery
+Chrome hangs is not known. See the 2026-08-05 incident. Exit (6) when either:
+the discovery hang is reproduced and root-caused (the way the 2026-07-26
+python-server wedge was), **or** several weeks of CI pass with no run hitting
+`STUDIO_STORY_DISCOVERY_ATTEMPTS` exhaustion, the run watchdog (exit 3), or a
+job `timeout-minutes` — i.e. the retry absorbs it and the class is empirically
+gone. Bounding a hang is containment, not diagnosis: `timeout-minutes` and the
+watchdog address the **carrying cost** (a burned runner and a PR pending for
+hours), and neither is an exit path on its own.
+
 - 2026-07-28 — **the `overview` composites are out of the pipeline, and
   the churn they caused was never a settling race.** Both PR #163
   flip-floppers were generated composites, which is what made "composites
@@ -397,6 +409,70 @@ escalate rather than widening the threshold.
   designing a fix** — this pipeline has now produced several "obviously a
   settling race" diagnoses that the pixels overturned.
 
+- 2026-08-05 — **a churner that was NOT a settling race, again: the clock
+  face's trace canvases were photographed at the wrong RESOLUTION.** Two CI
+  runs on PR #349 (which touches no clock-face code) auto-committed the same
+  five baselines back and forth between two blob hashes, the second run
+  restoring main's bytes exactly — the signature of a bistable render, and
+  the reason to compare a refresh against the PREVIOUS refresh rather than
+  against main. Diffing the two committed variants of
+  `clock-face__crowd__lg` (7 506 px, max Δ243, confined to the eight trace
+  canvases; every other pixel byte-identical) killed the obvious theory
+  first: **the waveforms are at the same phase in both** — peaks, troughs and
+  square transitions on the same output columns — so nothing about time or
+  settling was in play. What differed was that every *device-pixel-absolute*
+  constant shrank together: the 3px pad read ≈0.5, the 1.25px stroke read
+  ≈0.24, and the 1px 14%-alpha midline was **gone entirely** while the
+  vertical risers survived at varying intensity. That asymmetry is the
+  fingerprint of a bitmap being scaled down — a single-row feature is
+  all-or-nothing under it, a column of pixels is not — and normalized
+  quantities (the curve) passing through untouched is the other half.
+  Root cause: `paint_card` sizes the canvas backing store from
+  `getBoundingClientRect()`, and on a frozen story page the driver stops the
+  rAF loop after its first frame, so that one measurement is permanent.
+  Studio's stylesheet is injected by the wasm bundle after boot, so a paint
+  that beats it measures the canvas's unstyled 300×150 intrinsic size. Both
+  outcomes are stable terminals and the stable pair passes on either.
+  Reproduced live by serving the story build with the tailwind stylesheet
+  delayed 1500 ms: the trace canvases painted at the pre-stylesheet box and
+  stayed there. Fixed with a `ResizeObserver` that repaints on box change,
+  an inline box on the canvas (an unstyled canvas takes its box FROM the
+  width/height attributes the paint writes, which at dpr > 1 makes the new
+  repaint feed itself), and a ready-gate assertion that no
+  `canvas.ux-box-sized-canvas` may be captured while its backing store
+  disagrees with its box. See
+  [the defect](../defects/2026-08-05-clock-face-baselines-oscillate.md).
+  Three things for this entry's lore. (1) **"Diff the bytes before designing
+  a fix" paid again** — the third time now (composites 2026-07-28, the
+  code-editor gutter 2026-07-27, this): the settling-race reading was wrong
+  and the pixels said so in one look. (2) The freeze pins *time*; it does
+  not pin *geometry*. Any surface that stops re-rendering to be photographed
+  must have finished reading everything it depends on, and on this app "the
+  stylesheet has applied" is not something a first paint may assume. (3)
+  Debugging note for the harness browser pane: its tab reports
+  `document.hidden === true`, so rAF and ResizeObserver callbacks never fire
+  there until something forces a frame — take a screenshot first, or a
+  working fix reads as a dead one.
+  **Verified across two CI captures of the same tree** (runs 31024986361 and
+  31026385720, PR #354) — the comparison nothing in this pipeline does on its
+  own, and the only thing that can falsify an oscillation. Capture 1
+  reproduced main's `clock-face__crowd__lg` byte-for-byte and named exactly
+  two stale files (`crowd__md`, `default__lg`, both max Δ243); capture 2
+  reported the whole clock-face family byte-identical, in neither the drifted
+  set nor the tolerated-with-significant-pixels warning. Two notes that
+  outlive the fix. (a) **main was carrying the degraded render for those two**
+  while holding the correct one for the rest, so an oscillating baseline
+  leaves the set in a MIXED state — a branch that has not touched the files
+  silently takes main's side on merge, and the fix has to pin them back
+  explicitly or it re-lands the bad pair. (b) The comparison only worked
+  because both runs were on one branch close together; on main, a story that
+  flips has nothing to disagree with.
+  Left open by this pass: `exploration__node-ui__status-indicators__sm` was
+  byte-identical in capture 1 and drifted at 304 significant px / max Δ223 in
+  capture 2 — a fresh member of the bistable set, in a story family this
+  branch never touched and (unlike the traces) carrying no canvas, so it is a
+  different mechanism. It is what (5b) asks for: diagnose, do not suppress.
+
 - 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
   called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
@@ -424,3 +500,115 @@ escalate rather than widening the threshold.
   compile error is at the top of the step, thousands of lines above the
   failure line. Local prophylactic for studio-touching changes:
   `cargo check -p lpa-studio-web --target wasm32-unknown-unknown`.
+
+- 2026-08-05 — **CI WEDGE ROOT-CAUSED (the hang, not the drift): story
+  DISCOVERY Chrome never exits, and nothing was waiting on it with a bound.**
+  Two wedges the same day, both cancelled by hand: run 30993890003 job
+  92266222518 (PR #349) burned **5h08m**, and run 30986724958 job 92243105380
+  burned **3h35m** — out of ~25 story-job starts that day. Both logs have the
+  **identical** signature, and it is not subtle:
+  - Last line of output: `Artifacts: target/dx/lpa-studio-web/release/web/public/
+    (story build)` — i.e. `dx build` **succeeded**. Then *nothing at all* until
+    `##[error]The operation was canceled` hours later. Not one capture line.
+  - Orphan processes reaped at cleanup, identical in both: `just`, `tee`,
+    `bash`, `node`, **exactly one `chrome` and two `chrome_crashpad_handler`**.
+    That is the shape of a single `--dump-dom` browser, not a capture pass
+    (which runs 4 pages and would have printed `Capturing N/M …` and `wrote …`).
+  Between the build and the first capture line the script does exactly four
+  things, and only one of them could hang: `computeBuildFingerprint` (file
+  reads), `waitForServer` (bounded, 10s, throws), the static server's `listen`,
+  and **`discoverStoryIds()` → `runChrome(--dump-dom)` → `runProcess` → a bare
+  `await once(child, "exit")` with no timeout**. Every timeout this pipeline
+  has accumulated — `STUDIO_STORY_CAPTURE_TIMEOUT_MS`,
+  `STUDIO_STORY_CDP_TIMEOUT_MS`, page recycling,
+  `STUDIO_STORY_BROWSER_RESTART_EVERY` — guards the **CDP capture path**, which
+  a wedged discovery never reaches. So the run went silent and stayed silent
+  until GitHub's 6-hour default would have reaped it.
+  **What is fixed** (all verified against a fake Chrome that never exits, and
+  against a real Chrome for the success path):
+  - `runProcess` is now bounded (`STUDIO_STORY_SUBPROCESS_TIMEOUT_MS`, 180s
+    default; also covers the previously-unbounded `oxipng` call). It races the
+    exit against a timer and SIGKILLs, so it **always settles** even if the kill
+    does not take. Verified: the 5-hour hang becomes a 9-second failure, with no
+    leaked processes.
+  - Discovery gets its own bound + retries (`STUDIO_STORY_DISCOVERY_TIMEOUT_MS`
+    120s, `STUDIO_STORY_DISCOVERY_ATTEMPTS` 3), so a *transient* hang costs a
+    minute instead of the job. 120s is sized off a **measured** happy path
+    (~21s for a cold Chrome locally), not off `--virtual-time-budget=5000`.
+  - A **global watchdog** (`STUDIO_STORY_RUN_DEADLINE_MS`, 40 min) that exits
+    **3** — distinct from drift (1) and usage (2) — printing the phase it died
+    in. It is a watchdog timer rather than a race on individual awaits
+    deliberately: that is the only shape that covers phases nobody has thought
+    to bound yet, which is exactly the class this incident belonged to.
+  - **Periodic progress output** (`STUDIO_STORY_PROGRESS_INTERVAL_MS`, 30s):
+    `[+MM:SS] <phase> — N/M captured`. The capture phase was never the silent
+    one; the point is that discovery, oxipng, and comparison now announce
+    themselves, so a future wedge says *where* it stopped.
+  **What is NOT fixed, and why this entry stays open:** *why* the discovery
+  Chrome hangs is **unidentified and was not reproduced**. Per this entry's own
+  standing warning — this pipeline has produced several "obviously a settling
+  race" diagnoses the pixels later overturned — no theory about Chrome's
+  internals is recorded here, because none was tested. What is proven is the
+  *location* (the unbounded wait) and that bounding it converts the wedge into
+  a fast, labelled red. If it recurs, the new log will name the phase and the
+  killed-process message will carry Chrome's stderr — start there.
+  **Carrying-cost fix, filed alongside and explicitly NOT a root-cause fix:**
+  no workflow in this repo set `timeout-minutes` at all, so any wedge anywhere
+  ran to the 6-hour default. Every job in `.github/workflows/pre-merge.yml` now
+  has one, sized from the p95/max of the last ~60 runs' successful jobs at
+  roughly 2-3x the observed max (story job: p95 23.7 min, max 24.4 → 45).
+  Generous on purpose: the goal is to convert a wedge into a fast red, not to
+  make a slow-but-healthy run flaky. **This bounds the damage; it does not
+  explain the hang.** The entry stays open on the root cause.
+
+- 2026-08-05 — **`exploration/node-ui/status-indicators` @ sm: DIAGNOSED, and
+  the pixels overturned the settling-race prior again.** Run 31024986361
+  captured it byte-identically; run 31026385720, minutes later on the same
+  branch with no app change touching the story, reported 304/352560 px (0.086%)
+  over Δ64, max Δ223 — over the ratio limit, so the auto-commit refreshed it as
+  75e931304 (pre-refresh bytes in parent 6e694f210). Diffing the two committed
+  variants **first**, as this entry keeps insisting: the whole 390×904 frame is
+  byte-identical except an 11-row band, and that band is **one line** of the
+  five-line rustc-style error block in the error node's status popover, moved
+  down **exactly one device pixel**. The other four lines diff at **residual
+  zero** under alignment; the moved line's glyphs are bit-identical (pure
+  integer translation, residual 3px of AA). Nothing reflowed — the gap above it
+  shrank 1px and the gap below grew 1px.
+  **Root cause, reproduced not argued.** Two things compose.
+  (a) `.ux-node-ui-status-popup-error-detail` sets `font-size: 0.68rem` /
+  `line-height: 1.45` → a used pitch of **15.765625px**, so consecutive
+  baselines differ in fractional part by 0.765625 and the five lines never
+  share a rounding phase. Chrome snaps text baselines to whole device pixels,
+  so a sub-pixel move of the block flips only whichever line sits within that
+  move of a `.5` boundary — and with five lines spaced 0.766 apart there is
+  nearly always one. Measured on the real story the five fractional tops are
+  `[.1875, .9531, .7188, .4844, .25]`: one of them is **1/64 px** from the tie.
+  (b) `PopoverPosition::style()` emits `top: {:.1}px` — the panel position is
+  quantized to **one tenth of a pixel**, which is exactly the step that flips a
+  parked line. Reproduced directly with the same font and CSS: moving a
+  container top from `100.7px` to `100.8px` moves line 1 from 127.4531 to
+  127.5625 (row 127 → 128) and leaves every other line byte-identical —
+  **644 any-diff / 368 over Δ64 / max Δ231**, the same shape and amplitude as
+  CI's 513 / 304 / Δ223. And the position does wobble: **10 consecutive loads
+  of the real story in one headless Chrome emitted `921.2px` nine times and
+  `920.2px` once**, same build, same browser, same machine.
+  **Ruled out by measurement:** the stale-canvas-backing mechanism just fixed
+  for the clock face (this story mounts no canvas at all); webfont/fallback
+  metrics (those change glyph shapes — these are bit-identical); AA/raster
+  jitter (the version-badge/shader-face class tops out at Δ2–6, this is Δ223);
+  mid-flight CSS colour transitions (wide and faint, not narrow and geometric).
+  **Filed as** [popover-line-parked-on-a-rounding-tie](../defects/2026-08-05-popover-line-parked-on-a-rounding-tie.md),
+  with the fix ranked there (whole-pixel popover positions first — it collapses
+  the class for every popover story; integral line box on the error block
+  second). **Not fixed**, and thresholds were **not** touched: per (5b),
+  raising them is not an exit path. Also still unidentified: *why* the trigger
+  measurement varies between loads — the 1px wobble above is larger than the
+  sub-pixel one CI captured, and neither proposed fix explains it, they only
+  make the render insensitive to it.
+  **New lore for this entry's workaround list:** this story's ready gate does
+  not converge on macOS Chrome 142 — three `[data-story-wait="1"]` elements
+  never clear and `studio-story-pngs.mjs` times out at 30s and retries on a
+  fresh page, every attempt. CI's pinned Chrome 151 captures it fine. So the
+  flip could not be reproduced end-to-end through the real harness locally; the
+  mechanism was proven with a direct CDP probe instead. Worth knowing before
+  the next local reproduction attempt on a popover story.

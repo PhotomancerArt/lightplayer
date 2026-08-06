@@ -22,6 +22,50 @@ pub struct UiPanelTarget {
     pub engaged: bool,
 }
 
+/// How a numeric gesture's `f32` is TYPED on its way out of a control.
+///
+/// Every control until the M2 time break emitted the number itself, so the
+/// dispatching layer could read the family straight off the slot's current
+/// value. A phasor's period cannot: the value it edits is one field of a
+/// whole [`lpc_model::PhasorConfig`] record — the slot's shape when the
+/// knob edits locally, and the config channel's payload when it writes a
+/// panel value — so the number has to be *re-wrapped* before it goes
+/// anywhere, and only the projection knows the shaping to wrap it with.
+///
+/// Deliberately NOT a widget distinction: a period knob is an ordinary
+/// knob, and the two dispatch paths (slot edit / panel write) are the same
+/// two every other control uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum UiPanelEmit {
+    /// The gesture value IS the value written — every scalar control.
+    #[default]
+    Value,
+    /// The gesture value is a phasor **period in seconds**, written wrapped
+    /// in a whole `PhasorConfig` carrying this slot's own shaping.
+    ///
+    /// Waveform and phase offset are never panel-editable (settled D11 v1 —
+    /// a waveform is how ONE consumer reads a shared phase, so a panel that
+    /// set it would be setting it for everybody), but they must survive a
+    /// period edit intact, which is why they ride along here.
+    PhasorPeriod {
+        waveform: lpc_model::Waveform,
+        phase_offset: f32,
+    },
+    /// The gesture value is a whole [`lpc_model::GradientConfig`], written
+    /// as-is.
+    ///
+    /// The palette chooser is the one control that carries NO field along:
+    /// a phasor's period rides inside a record whose other fields must
+    /// survive the edit, but a palette pick replaces the config outright —
+    /// the same rule the engine reads it by (`resolve_gradient_config`
+    /// takes a driven config *whole*, never as a partial overlay, so a
+    /// palette never shows a set nobody authored together).
+    ///
+    /// Carries no payload for exactly that reason, and marks the control as
+    /// non-numeric: no `f32` gesture ladder applies to it.
+    Gradient,
+}
+
 /// A front-panel control projected from a slot that is on a panel —
 /// since Q13 that means a slot bound to a bus channel.
 ///
@@ -42,6 +86,9 @@ pub struct UiPanelControl {
     pub widget: UiPanelWidget,
     /// Current typed value, shared with the slot row's editor.
     pub value: UiSlotValue,
+    /// How a gesture's number is typed on the way out — see [`UiPanelEmit`].
+    /// `Value` for every control but a phasor's period knob.
+    pub emit: UiPanelEmit,
     /// The bound channel's current reading, display-only (P6 item 1): the
     /// widget renders it in the bound-violet family while [`Self::value`]
     /// (the authored default) stays the edit target. Already quantized
@@ -104,6 +151,33 @@ impl UiPanelControl {
         self.live_value.as_deref()?.parse().ok()
     }
 
+    /// The palette this control presents, when its value is one — the
+    /// [`crate::UiPanelWidget::PaletteSwatch`] payload.
+    ///
+    /// The parse is the model's own ([`gradient_config_value`]), reached
+    /// through the value kind's `LpValue` mirror, so neither panel renderer
+    /// walks the padded storage itself. `None` for any other value family,
+    /// which is what a swatch/value disagreement falls back on.
+    ///
+    /// [`gradient_config_value`]: crate::app::project::gradient_config_value
+    pub fn gradient_config(&self) -> Option<lpc_model::GradientConfig> {
+        crate::app::project::gradient_config_value(&self.value.kind.to_lp_value())
+    }
+
+    /// The palette a SWATCH control presents — [`Self::gradient_config`]
+    /// gated on the widget family, so a knob over some other struct-shaped
+    /// slot never renders strips and a swatch over a non-palette value
+    /// falls back to the read-only display.
+    ///
+    /// Both panel renderers ask here rather than each writing the guard: a
+    /// control is one derivation with two presentations.
+    pub fn swatch_palette(&self) -> Option<lpc_model::GradientConfig> {
+        if !matches!(self.widget, crate::UiPanelWidget::PaletteSwatch) {
+            return None;
+        }
+        self.gradient_config()
+    }
+
     /// The control's popover sections: the backing slot row's aspects plus
     /// the AUTHORED value, which the face no longer shows whenever a live
     /// reading displaces it (GV fix 3). Without this row the authored
@@ -152,6 +226,7 @@ mod tests {
                 step: None,
             },
             value: UiSlotValue::f32(1.6),
+            emit: crate::UiPanelEmit::Value,
             live_value: None,
             panel_target: None,
             unit: None,

@@ -76,6 +76,10 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The board the sim claims to be (vision D4), inherited from the
+    /// project it runs — `vendor/product`, the registry's vocabulary.
+    /// `None` = no board known, the ordinary default.
+    pub board_id: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
 }
@@ -154,12 +158,17 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 
     let mut issue = None;
     let projects: Vec<UiPackageCard> = match store.list() {
+        // Every listed package gets a card. Dropping the ones whose history
+        // or provenance would not load is how a project vanished from the
+        // gallery with only a `log::warn!` behind it; a card missing its
+        // "edited 3 days ago" line is a far smaller lie than no card at all.
         Ok(summaries) => summaries
             .into_iter()
-            .filter_map(|summary| {
-                package_card(&store, &registered, summary)
-                    .map_err(|error| log::warn!("home: skipping package card: {error}"))
-                    .ok()
+            .map(|summary| {
+                package_card(&store, &registered, summary.clone()).unwrap_or_else(|error| {
+                    log::warn!("home: {} listed without its history: {error}", summary.slug);
+                    degraded_package_card(summary)
+                })
             })
             .map(|mut card| {
                 card.open_elsewhere = open_elsewhere.iter().any(|uid| *uid == card.uid);
@@ -223,6 +232,7 @@ pub fn build_home_view(
             opening,
             issue,
             backup: None,
+            setup: None,
         };
     };
 
@@ -252,6 +262,7 @@ pub fn build_home_view(
         // The controller overlays a finished backup after the build (it is
         // controller state, not library/roster evidence).
         backup: None,
+        setup: None,
     }
 }
 
@@ -356,6 +367,113 @@ fn assemble_roster(
     (connections, devices)
 }
 
+/// The chrome session strip (vision D15/D16): every LIVE runtime
+/// session, in roster order (sim pinned first). Registry rows without a
+/// live session never appear (D36: chip existence = session existence).
+///
+/// Reuses [`assemble_roster`]'s card derivation — the strip and the
+/// gallery must never disagree on a session's status — then projects
+/// each live card down to wayfinding facts (D43: name and status only,
+/// no controls, no thumbnails).
+pub fn chrome_sessions(
+    registry_cards: &[UiDeviceCard],
+    pool: &HomePoolEvidence,
+    lens: Option<&crate::UiLensRuntime>,
+) -> Vec<crate::UiChromeSession> {
+    let (_, devices) = assemble_roster(registry_cards, pool);
+    devices
+        .into_iter()
+        // Live = the sim (its card exists only while the session does)
+        // or a device with pool-session evidence; registry-only rows
+        // have no session_key.
+        .filter(|card| card.sim || card.session_key.is_some())
+        .map(|card| {
+            let target = if card.sim {
+                crate::UiChromeSessionTarget::Sim {
+                    project_key: card.project.as_ref().map(|chip| chip.uid.clone()),
+                }
+            } else {
+                crate::UiChromeSessionTarget::Device {
+                    uid: card.uid.clone(),
+                }
+            };
+            let lensed = match (lens, card.sim) {
+                (Some(crate::UiLensRuntime::Sim { .. }), true) => true,
+                (Some(crate::UiLensRuntime::Device { uid }), false) => {
+                    // An unidentified lens device matches the (single)
+                    // live card that has no uid yet — same no-honest-
+                    // address window as the URL rule.
+                    match uid {
+                        Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
+                        None => card.uid.is_none(),
+                    }
+                }
+                _ => false,
+            };
+            crate::UiChromeSession {
+                key: card.identity_key().to_string(),
+                name: card.name.clone(),
+                sim: card.sim,
+                transport: if card.sim {
+                    String::new()
+                } else {
+                    card.transport.clone()
+                },
+                status: chip_status(&card.state),
+                lensed,
+                target,
+            }
+        })
+        .collect()
+}
+
+/// Collapse the roster's honest vocabulary to the strip's three dots
+/// (D16). Offline never reaches here (live-filtered above); everything
+/// that is neither running-clean nor connected-empty reads as attention
+/// — the chip only flags it, the card tells the story.
+fn chip_status(state: &RosterCardState) -> crate::UiChromeSessionStatus {
+    match state {
+        RosterCardState::RunningUpToDate => crate::UiChromeSessionStatus::Run,
+        RosterCardState::ConnectedEmpty | RosterCardState::ReadyToSetUp => {
+            crate::UiChromeSessionStatus::Empty
+        }
+        _ => crate::UiChromeSessionStatus::Attention,
+    }
+}
+
+/// Give the card an open setup flow is bound to the roster's LEADING
+/// position and report its [`UiDeviceCard::identity_key`] — the key the
+/// wizard's body takeover rides (G2 ruling, 2026-08-05: the wizard is a
+/// state of the device card, not a card of its own).
+///
+/// `session_key` is the flow's binding: the bound session's `RuntimeId`
+/// rendering on the hardware path, the sim's reserved card key on the sim
+/// path. It is matched against `session_key` FIRST because that is the
+/// thread that does not move — a board's `identity_key` becomes its uid
+/// the instant identity lands mid-flow, and a takeover keyed by the uid
+/// would lose its card at exactly that moment. The sim card carries no
+/// session key, so its reserved `identity_key` is the second rung.
+///
+/// `None` (no flow, or a flow with nothing attached yet) leaves the roster
+/// exactly as assembled: the wizard renders standalone in the entry-cards
+/// slot, because there is no card to be the body of.
+pub(crate) fn pin_setup_card(
+    devices: &mut Vec<UiDeviceCard>,
+    session_key: Option<&str>,
+) -> Option<String> {
+    let session_key = session_key?;
+    let index = devices.iter().position(|card| {
+        card.session_key.as_deref() == Some(session_key) || card.identity_key() == session_key
+    })?;
+    let card = devices.remove(index);
+    let key = card.identity_key().to_string();
+    // Ahead of everything, including the sim's own pin: a card mid-setup
+    // is the one the user is looking at, and a leading slot is what keeps
+    // it from hopping columns as facts (and other cards) land.
+    devices.insert(0, card);
+    Some(key)
+}
+
 /// The live sim card (D36): the shared card grammar in the sim
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
@@ -378,6 +496,8 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         hardware: None,
         detected_chip: None,
+        // D4: the sim's inherited board — the one card that carries this
+        board_id: sim.board_id.clone(),
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -422,10 +542,15 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         head_version: live.head_version,
         local_saved_at: live.local_saved_at,
         pushed_at: live.pushed_at,
-        unstamped: live
-            .sync
-            .as_ref()
-            .is_some_and(|sync| sync.identity.is_none()),
+        // "Needs a name" is about the NAME, not the uid. A MAC-identified
+        // board has a uid from its first hello (device identity design
+        // §3) while still being a board nobody has named, so the gate
+        // reads the name: identity absent, or present with nothing in it.
+        unnamed: live.sync.as_ref().is_some_and(|sync| {
+            sync.identity
+                .as_ref()
+                .is_none_or(|identity| identity.name.is_empty())
+        }),
         registry: None,
         connect: live.connect.clone(),
     });
@@ -440,6 +565,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
             uid: project_uid.clone(),
             name: slug.clone(),
         }),
+        // No chip for the rest — including an OLD-FORMAT copy (P5), whose
+        // library package is known but is NOT what the board is running:
+        // the firmware refused to load it. The card's Health section says
+        // what is there instead.
         _ => None,
     });
     // hello build + hardware facts: Technical evidence for the card's
@@ -461,6 +590,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         // still key distinctly by `session_key` — see `identity_key`.
         name: identity
             .map(|identity| identity.name.clone())
+            // An identity with an EMPTY name is a board that has a uid
+            // and no name yet (device identity design §3) — it falls
+            // through the same cascade an anonymous board takes.
+            .filter(|name| !name.is_empty())
             .or_else(|| live.detected_chip.as_deref().and_then(display_chip_name))
             .unwrap_or_else(|| "Connected device".to_string()),
         transport: live.transport.clone().unwrap_or_default(),
@@ -469,6 +602,8 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        // a device's board is a REGISTRY fact, read there (see the field doc)
+        board_id: None,
         port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
@@ -517,6 +652,11 @@ fn package_card(
 ) -> Result<UiPackageCard, crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
+    // Advisory board target (vision D3): straight passthrough from the
+    // container manifest, same seam `provenance`/`on_device` use — no
+    // catalog lookup here, that's the web renderer's job.
+    let target =
+        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?.target;
 
     let last_saved_at = handle
         .history
@@ -548,7 +688,29 @@ fn package_card(
         open_elsewhere: false,  // stamped by the hydration pass
         connected_device: None, // stamped by the D28 pairing at view build
         running_in_sim: false,  // stamped by the D28 sim arm at view build
+        target,
+        health: summary.health,
     })
+}
+
+/// The card for a package whose history or provenance would not open. The
+/// summary is all we have — and it is enough to name the package, show its
+/// health, and offer export and delete.
+fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPackageCard {
+    UiPackageCard {
+        uid: summary.uid.to_string(),
+        kind: summary.kind,
+        slug: summary.slug,
+        last_saved_at: None,
+        provenance: None,
+        on_device: None,
+        open_elsewhere: false,
+        connected_device: None,
+        running_in_sim: false,
+        // A degraded package's manifest may be unreadable; no target claim.
+        target: None,
+        health: summary.health,
+    }
 }
 
 /// The card's human provenance line; `None` for created-from-scratch.
@@ -603,7 +765,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         head_version: None,
         local_saved_at: None,
         pushed_at: None,
-        unstamped: false,
+        unnamed: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
     });
@@ -621,6 +783,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
+        board_id: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -657,6 +820,48 @@ mod tests {
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
         build_home_view(Some(&inputs), None, None, &HomePoolEvidence::default())
+    }
+
+    #[test]
+    fn an_unopenable_package_still_gets_a_card() {
+        // Swallow point 2: the card builder's `filter_map` dropped anything
+        // whose history or provenance would not load, on top of the store
+        // already dropping anything whose manifest would not parse. A card
+        // that says what is wrong is the only honest outcome.
+        let store = store();
+        store.create("Healthy", 1.0).unwrap();
+        {
+            let fs = store.fs_handle();
+            let view = fs.borrow();
+            view.write_file(
+                lpc_model::LpPath::new("/packages/z-hand-copied/project.json"),
+                br#"{"kind":"Project","format":2,"nodes":{}}"#,
+            )
+            .unwrap();
+        }
+
+        let view = view_of(&store);
+        assert_eq!(view.projects.len(), 2, "neither package vanished");
+        let stale = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "z-hand-copied")
+            .expect("the unreadable package has a card");
+        let (headline, remedy) = stale.health.blocked().expect("classified as blocked");
+        assert_eq!(headline, "Format 2 — too old for this Studio");
+        assert!(
+            remedy.contains("too old to upgrade automatically"),
+            "{remedy}"
+        );
+        // its identity is addressable, so the card's delete/export work
+        assert!(stale.uid.starts_with("prj_"));
+
+        let healthy = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-healthy")
+            .expect("the healthy package is unaffected");
+        assert_eq!(healthy.health, crate::app::library::PackageHealth::Ready);
     }
 
     fn ready_link() -> DeviceState {
@@ -763,6 +968,73 @@ mod tests {
     }
 
     #[test]
+    fn chrome_sessions_project_live_sessions_only() {
+        // One live identified device, one registry-only (offline) row, and
+        // the sim: the strip shows sim (pinned first) + the live device;
+        // the registry row never appears (D36: chip = session).
+        let mut evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "Desk C6".to_string(),
+            }),
+            content: DeviceContent::Empty,
+        });
+        evidence.session_key = Some("session-1".to_string());
+        let mut offline_card = device_card_from_live_evidence(&HomeDeviceEvidence::default());
+        offline_card.uid = Some("dev_bbbbbbbbbbbbbbbb".to_string());
+        offline_card.name = "Shelf sign".to_string();
+        let pool = HomePoolEvidence {
+            devices: vec![evidence],
+            sim: Some(HomeSimEvidence {
+                project: Some(UiDeviceProjectChip {
+                    uid: "prj_cccccccccccccccc".to_string(),
+                    name: "zook-dome".to_string(),
+                }),
+                ..HomeSimEvidence::default()
+            }),
+        };
+
+        let sessions = chrome_sessions(
+            std::slice::from_ref(&offline_card),
+            &pool,
+            Some(&crate::UiLensRuntime::Device {
+                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            }),
+        );
+
+        assert_eq!(
+            sessions.len(),
+            2,
+            "sim + live device, never the registry row"
+        );
+        assert!(sessions[0].sim, "the sim is pinned first");
+        assert_eq!(
+            sessions[0].target,
+            crate::UiChromeSessionTarget::Sim {
+                project_key: Some("prj_cccccccccccccccc".to_string())
+            }
+        );
+        assert!(!sessions[0].lensed);
+        // a project-less sim would read Empty; loaded = running clean
+        assert_eq!(sessions[0].status, crate::UiChromeSessionStatus::Run);
+        let device = &sessions[1];
+        assert_eq!(device.name, "Desk C6");
+        assert!(device.lensed, "the lens uid matches the live device");
+        assert_eq!(device.transport, "USB");
+        assert_eq!(
+            device.status,
+            crate::UiChromeSessionStatus::Empty,
+            "connected with nothing running reads hollow"
+        );
+        assert_eq!(
+            device.target,
+            crate::UiChromeSessionTarget::Device {
+                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string())
+            }
+        );
+    }
+
+    #[test]
     fn a_live_heartbeat_clamp_reaches_the_card_and_a_dead_link_drops_it() {
         let clamped_recovery = lpc_wire::server::RecoveryStatus {
             level: lpc_wire::server::RecoveryLevelWire::Green,
@@ -810,6 +1082,7 @@ mod tests {
             devices: Vec::new(),
             sim: Some(HomeSimEvidence {
                 project,
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         }
@@ -849,7 +1122,7 @@ mod tests {
                 "Basic",
                 &[(
                     "project.json".to_string(),
-                    br#"{"format":4,"name":"Basic"}"#.to_vec(),
+                    br#"{"format":5,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
                     source: "examples/fyeah-sign".to_string(),
@@ -877,6 +1150,45 @@ mod tests {
             .unwrap();
         assert_eq!(scratch.provenance, None);
         assert_eq!(scratch.kind, "Module");
+    }
+
+    /// P02: the advisory `target` passes through from the container
+    /// manifest to the card, and stays `None` for an untargeted project
+    /// (the common case — `store.create` writes no `target`).
+    #[test]
+    fn package_cards_carry_advisory_target() {
+        let store = store();
+        store.create("Untargeted", 1.0).unwrap();
+        store
+            .install_package(
+                "Targeted",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":4,"name":"Targeted","target":"espressif/esp32-c6-devkitc-1"}"#
+                        .to_vec(),
+                )],
+                PackageProvenance::Created,
+                2.0,
+            )
+            .unwrap();
+
+        let view = view_of(&store);
+        let targeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-targeted")
+            .unwrap();
+        assert_eq!(
+            targeted.target.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
+
+        let untargeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-untargeted")
+            .unwrap();
+        assert_eq!(untargeted.target, None);
     }
 
     #[test]
@@ -916,6 +1228,8 @@ mod tests {
                     last_seen_at: 5.0,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -953,6 +1267,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
             UiDeviceCard {
                 port_label: None,
@@ -969,6 +1284,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -997,6 +1313,8 @@ mod tests {
                     at: 5.0,
                 }),
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
 
@@ -1037,6 +1355,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1076,6 +1396,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1116,6 +1438,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1179,6 +1503,8 @@ mod tests {
                     last_seen_at: seen,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -1240,6 +1566,8 @@ mod tests {
                 last_seen_at: 50.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1361,6 +1689,7 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         };

@@ -101,13 +101,22 @@ impl Storage for LpFlashStorage {
 
     fn write(&mut self, block: u32, offset: u32, data: &[u8]) -> Result<(), LfsError> {
         let addr = self.block_offset(block, offset);
-        self.flash.write(addr, data).map_err(|_| LfsError::Io)
+        // Programming flash opens a cache-disabled window the other core must
+        // not run through — see `with_app_core_stalled`. Without the stall,
+        // every write here fails `Io` under the dual-core RMT deployment (and
+        // crashed the board when tried under render load, 2026-08-05).
+        crate::output::rmt::shared_driver::with_app_core_stalled(|| {
+            self.flash.write(addr, data).map_err(|_| LfsError::Io)
+        })
     }
 
     fn erase(&mut self, block: u32) -> Result<(), LfsError> {
         let from = self.partition.offset + block * BLOCK_SIZE;
         let to = from + BLOCK_SIZE;
-        self.flash.erase(from, to).map_err(|_| LfsError::Io)
+        // Same cache-disabled window as `write`; same stall requirement.
+        crate::output::rmt::shared_driver::with_app_core_stalled(|| {
+            self.flash.erase(from, to).map_err(|_| LfsError::Io)
+        })
     }
 }
 

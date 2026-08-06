@@ -62,10 +62,26 @@ env:
 # per-job caches comfortably under the repo's 10 GB Actions-cache budget.
 # validate-stories is deliberately exempt from all of this: its pinned
 # capture environment must not churn (see that job).
+#
+# Job timeouts (added 2026-08-05): every job carries `timeout-minutes`. Before
+# this, NO workflow in the repo set one, so a wedge ran to GitHub's 6-hour
+# default — burning a runner and leaving the PR's checks pending all day. Two
+# validate-stories wedges on 2026-08-05 alone cost 5h08m and 3h35m of runner
+# time and had to be cancelled by hand
+# (docs/debt/story-capture-pipeline.md). The numbers below are sized from the
+# p95 and max of the last ~60 runs' SUCCESSFUL jobs (each stated in the
+# comment above the value), at roughly 2-3x the observed max. That is
+# deliberately generous: the goal is to convert a wedge into a fast red, not
+# to turn a slow-but-healthy run into a flake. Re-measure before tightening —
+# and note a genuinely cold cache is the long tail here, not the typical run.
+# A job that starts timing out legitimately wants its p95 re-measured, not a
+# reflexive bump.
 jobs:
   detect-changes:
     name: Detect changed paths
     runs-on: ubuntu-24.04
+    # trivial (p95 0.1 min); the budget is checkout + the filter action.
+    timeout-minutes: 10
     outputs:
       core: ${{ github.event_name != 'pull_request' && 'true' || steps.core.outputs.core }}
       shader: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.shader }}
@@ -214,6 +230,8 @@ jobs:
   lint:
     name: Lint (x64)
     runs-on: ubuntu-24.04
+    # p95 6.5 min, max 7.1.
+    timeout-minutes: 25
     needs: detect-changes
     if: needs.detect-changes.outputs.core == 'true'
     env:
@@ -301,6 +319,8 @@ jobs:
   firmware-xtensa:
     name: Firmware build (esp32s3)
     runs-on: ubuntu-24.04
+    # p95 7.4 min, max 8.5.
+    timeout-minutes: 25
     needs: detect-changes
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
@@ -376,6 +396,8 @@ jobs:
   firmware-esp32v3:
     name: Firmware build (esp32v3)
     runs-on: ubuntu-24.04
+    # p95 5.3 min, max 6.7.
+    timeout-minutes: 25
     needs: detect-changes
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
@@ -467,6 +489,8 @@ jobs:
   validate-xtensa:
     name: Validate Xtensa (host)
     runs-on: ubuntu-24.04
+    # p95 6.6 min, max 7.6.
+    timeout-minutes: 25
     needs: detect-changes
     if: needs.detect-changes.outputs.shader == 'true'
     env:
@@ -659,6 +683,8 @@ jobs:
   firmware-size:
     name: Firmware size (esp32c6)
     runs-on: ubuntu-24.04
+    # p95 2.9 min, max 4.4.
+    timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
@@ -740,6 +766,8 @@ jobs:
   validate-x64:
     name: Validate (x64)
     runs-on: ubuntu-24.04
+    # p95 17.8 min, max 23.5.
+    timeout-minutes: 45
     needs: detect-changes
     if: needs.detect-changes.outputs.core == 'true'
     env:
@@ -834,6 +862,8 @@ jobs:
   validate-gfx:
     name: Validate GFX (ARM)
     runs-on: ubuntu-24.04-arm
+    # p95 3.2 min, max 3.6.
+    timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.gfx == 'true'
     env:
@@ -907,6 +937,8 @@ jobs:
   validate-browser:
     name: Validate Browser (x64)
     runs-on: ubuntu-24.04
+    # p95 3.6 min, max 4.1.
+    timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.browser == 'true'
     env:
@@ -1016,6 +1048,8 @@ jobs:
     # x64: Chrome ships no linux-arm64 build, and the canonical capture
     # environment is pinned to Chrome for Testing on x64 Linux.
     runs-on: ubuntu-24.04
+    # p95 23.7 min, max 24.4 (the p95 IS the cold-cache case).
+    timeout-minutes: 45
     needs: detect-changes
     if: needs.detect-changes.outputs.studio == 'true'
     # The repo defaults workflow tokens to read-only; this job pushes baseline

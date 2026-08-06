@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_voxpop",
+  "name": "Voxpop",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/voxpop"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "step",
+    "stops": "#9ccddc@0 #aed6e3@0.090909 #c0dfe9@0.181818 #d2e8f0@0.272727 #e4f1f6@0.363636 #f6fafc@0.454545 #fef8f8@0.545455 #fceaea@0.636364 #fadcdc@0.727273 #f9cece@0.818182 #f7c0c0@0.909091"
+  }
+}

@@ -10,6 +10,7 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
     ProjectSyncPhase, RosterCardState, UiAgentStatus, UiDeviceCard, UiDeviceProjectChip,
@@ -18,7 +19,7 @@ use lpa_studio_core::{
     UiViewContent,
 };
 
-use crate::app::home::HomeGallery;
+use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -57,11 +58,19 @@ fn studio_hero() -> Element {
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
-                home: readme_home_view(),
-                now_secs: Some(STORY_NOW),
-                has_ever_granted: Some(true),
-                on_action: |_| {},
+            div { class: "tw:grid tw:gap-10",
+                DevicesPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    has_ever_granted: Some(true),
+                    on_action: |_| {},
+                }
+                ProjectsPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+                ExplorePage { home: Some(readme_home_view()), on_action: |_| {} }
             }
         }
     }
@@ -220,6 +229,7 @@ fn readme_lens_card() -> UiDeviceCard {
         ],
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -241,6 +251,8 @@ fn readme_home_view() -> UiHomeView {
                 relation: lpa_studio_core::SyncRelation::AtHead,
             }),
             running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -252,6 +264,8 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: true,
+            target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -263,6 +277,8 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
         },
     ];
     let devices = vec![
@@ -284,6 +300,7 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
         UiDeviceCard {
             port_label: None,
@@ -303,6 +320,7 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
     ];
     UiHomeView {
@@ -317,5 +335,6 @@ fn readme_home_view() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }

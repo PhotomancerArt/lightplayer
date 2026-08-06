@@ -1,0 +1,14 @@
+{
+  "id": "bhw_bhw1_03",
+  "name": "Blackheartedwolf 03",
+  "license": {
+    "spdx": "CC-BY-3.0",
+    "author": "Blackheartedwolf",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/bhw/bhw1/bhw1_03"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#000000@0 #4eb0d0@0.540039 #7eeeb3@0.75 #ffffff@1"
+  }
+}

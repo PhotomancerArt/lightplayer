@@ -59,6 +59,9 @@
     --color-status-attention-bg: var(--studio-status-attention-bg);
     --color-status-attention-border: var(--studio-status-attention-border);
     --color-status-attention-foreground: var(--studio-status-attention-text);
+    --color-status-engaged-bg: var(--studio-status-engaged-bg);
+    --color-status-engaged-border: var(--studio-status-engaged-border);
+    --color-status-engaged-foreground: var(--studio-status-engaged-text);
     --color-status-error-bg: var(--studio-status-error-bg);
     --color-status-error-border: var(--studio-status-error-border);
     --color-status-error-foreground: var(--studio-status-error-text);

@@ -320,6 +320,7 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::ForkObservedVersion {
             project_uid: uid, ..
         }
+        | CatalogOp::UpgradePackageFormat { project_uid: uid }
         | CatalogOp::RecordPush {
             project_uid: uid, ..
         } => Some(uid),
@@ -327,8 +328,10 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }
         | CatalogOp::EnsureExampleSeeded { .. }
+        | CatalogOp::GenerateForBoard { .. }
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::RenameRegisteredDevice { .. }
+        | CatalogOp::RekeyRegisteredDevice { .. }
         | CatalogOp::ForgetRegisteredDevice { .. }
         | CatalogOp::AdoptDevicePackage { .. } => None,
     }
@@ -439,7 +442,7 @@ async fn prune_directory_husks(store: &LpFsOpfs) {
 
 /// Local wall-clock `YYYY-MM-DD-HHMM` for new-package slugs (the sans-IO
 /// core takes this injected — it never reads a clock).
-fn local_slug_stamp() -> String {
+pub(crate) fn local_slug_stamp() -> String {
     let now = js_sys::Date::new_0();
     format!(
         "{:04}-{:02}-{:02}-{:02}{:02}",

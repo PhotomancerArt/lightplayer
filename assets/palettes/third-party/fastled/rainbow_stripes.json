@@ -1,0 +1,14 @@
+{
+  "id": "fastled_rainbow_stripes",
+  "name": "Rainbow Stripes",
+  "license": {
+    "spdx": "MIT",
+    "author": "FastLED (Daniel Garcia, Mark Kriegsman et al.)",
+    "source_url": "https://github.com/FastLED/FastLED/blob/master/src/colorpalettes.cpp.hpp"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#ff0000 #000000 #ab5500 #000000 #abab00 #000000 #00ff00 #000000 #00ab55 #000000 #0000ff #000000 #5500ab #000000 #ab0055 #000000"
+  }
+}

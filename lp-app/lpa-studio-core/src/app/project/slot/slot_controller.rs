@@ -209,7 +209,21 @@ impl SlotController {
                 SlotPath::root().child(SlotName::parse("bindings").expect("valid slot name")),
             ),
             authored,
+            scalar_slot: self.value_shape_is_scalar_number(),
         })
+    }
+
+    /// Whether this slot's declared value shape is a plain number — the
+    /// shapes a product handle cannot convert into (P7 item 3).
+    ///
+    /// An UNKNOWN shape reads as "not scalar" deliberately: the picker's
+    /// guard is an annotation, and annotating on a guess would cry wolf on
+    /// rows whose shape simply has not arrived.
+    fn value_shape_is_scalar_number(&self) -> bool {
+        matches!(
+            self.value_shape.as_ref().map(|shape| &shape.ty),
+            Some(LpType::F32 | LpType::I32 | LpType::U32)
+        )
     }
 
     /// Extract authored binding facts from this root's `bindings` child.
@@ -513,6 +527,22 @@ impl SlotController {
                         )),
                 )
             }
+            // A clock's published handle. It gets the same product row the
+            // other two families get — identity, detail, binding — and no
+            // preview: `UiProductKind::Time` defaults to `MetadataOnly`, so
+            // nothing here requests a probe frame that could never arrive.
+            Some(LpValue::Product(ProductRef::Time(product))) => {
+                let product_ref = UiProductRef::from_time_product(*product);
+                Some(
+                    UiProducedProduct::time(self.label.clone())
+                        .with_product(product_ref)
+                        .with_detail(format!(
+                            "node {} output {}",
+                            product.node(),
+                            product.output()
+                        )),
+                )
+            }
             Some(LpValue::Unset) if self.value_shape_is_product() => {
                 Some(UiProducedProduct::empty(self.label.clone()))
             }
@@ -551,10 +581,18 @@ impl SlotController {
         }
         let value = self.value()?;
         let ui_value = UiSlotValue::from_lp_value(value);
+        let gradient = crate::app::project::gradient_config_value(value);
         // Composite values don't fit the scalar stat hero: surface the type
-        // name as the compact value and the per-field readings as rows.
-        let mut produced = match &ui_value.kind {
-            crate::UiSlotValueKind::Struct { name, fields } => {
+        // name as the compact value and the per-field readings as rows. A
+        // palette is a struct too, but its fields (`space`, `method`,
+        // `count`, and the stop array) say nothing the strip does not say
+        // better — it carries the summary line and no field rows (M4 P2).
+        let mut produced = match (&gradient, &ui_value.kind) {
+            (Some(config), _) => UiProducedValue::new(
+                self.label.clone(),
+                crate::app::project::format_gradient_summary(config),
+            ),
+            (None, crate::UiSlotValueKind::Struct { name, fields }) => {
                 let type_name = name
                     .clone()
                     .unwrap_or_else(|| String::from(ui_value.kind.type_label()));
@@ -567,6 +605,7 @@ impl SlotController {
             }
             _ => UiProducedValue::new(self.label.clone(), ui_value.display),
         };
+        produced.gradient = gradient;
         produced.key = self.ui_key();
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();
@@ -631,10 +670,13 @@ impl SlotController {
 
     /// Split one settings row into its Debug part — appended **flat** to
     /// `debug_slots`, so a Debug field never renders nested under the record
-    /// that declared it (D4: the clock's `controls.running/rate/
-    /// scrub_offset_seconds` become three top-level Debug rows, not a
-    /// "Controls › Controls" group) — and the Setting remainder, returned for
-    /// the settings section. `None` when nothing but Debug fields remained.
+    /// that declared it (D4: a Debug field inside a record becomes a
+    /// top-level Debug row keyed by its full path, never a nested group;
+    /// the clock's `transport.*` fields flatten this way too, though their
+    /// rows then retire into the tape face —
+    /// `node_controller::retire_face_claimed_debug_rows`) — and the Setting
+    /// remainder, returned for the settings section. `None` when nothing
+    /// but Debug fields remained.
     ///
     /// A row with no Debug descendant takes the fast path and is built exactly
     /// as before, so the common case is unchanged.
@@ -1607,6 +1649,7 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
         ValueEditorHint::Dimensions => UiSlotEditorHint::Dimensions,
         ValueEditorHint::Affine2d => UiSlotEditorHint::Affine2d,
         ValueEditorHint::Power => UiSlotEditorHint::Power,
+        ValueEditorHint::Gradient => UiSlotEditorHint::Gradient,
         ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
             min: min.map(|value| value.0),
             max: max.map(|value| value.0),

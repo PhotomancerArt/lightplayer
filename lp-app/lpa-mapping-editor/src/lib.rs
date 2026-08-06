@@ -15,14 +15,17 @@ pub mod editor_core;
 pub mod view;
 
 pub use editor_core::camera::Camera;
+pub use editor_core::doc_refusal::{DocOpen, DocRefusal};
 pub use editor_core::editor_session::MapEditorSession;
 pub use editor_core::map_selection::MapSelection;
 pub use editor_core::map_tool::MapTool;
+pub use editor_core::shape_path::ShapePath;
 pub use editor_core::view_geometry::{
     ArrowInput, LAMPS_PER_UNIVERSE, MapArrowOverlay, MapArrowSeg, lamp_universe, neutral_lamp_rgb,
     universe_rgb, wiring_arrows,
 };
-pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor};
+pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor, ReferenceOps};
+pub use view::reference::ReferenceImage;
 // The document type IS the component input type; re-exported so hosts that
 // only embed the editor need no direct lpc-mapping dependency.
 pub use lpc_mapping::Map2dDoc;

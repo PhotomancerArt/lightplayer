@@ -247,6 +247,11 @@ impl<'a> EngineProjectReadSource<'a> {
                 self.engine
                     .read_project_binding_graph_probe(self.registry, request),
             ),
+            // No registry: the timebase store is pure engine state, so the
+            // listing needs nothing from the project's artifacts.
+            ProjectProbeRequest::Timebase(request) => {
+                ProjectProbeResult::Timebase(self.engine.read_project_timebase_probe(request))
+            }
         };
         stream_probe_result(index, result, sink).await
     }
@@ -826,7 +831,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         // Both halves: the container manifest gates the load (D-A refuses a
         // project without one), the root module carries the def.
-        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 4}"#)
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 5}"#)
             .expect("write container manifest");
         fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
             .expect("write root module");
@@ -1197,12 +1202,12 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
             lpfs::LpPath::new("/clock.json"),
-            br#"{ "kind": "Clock", "controls": { "rate": 1.0 } }"#,
+            br#"{ "kind": "Clock", "transport": { "rate": 1.0 } }"#,
         )
         .expect("write clock def");
         let shapes = lpc_model::SlotShapeRegistry::default();
@@ -1239,7 +1244,7 @@ mod tests {
         ));
 
         let clock = lpc_model::ArtifactLocation::file("/clock.json");
-        let rate = lpc_model::SlotPath::parse("controls.rate").expect("slot path");
+        let rate = lpc_model::SlotPath::parse("transport.rate").expect("slot path");
 
         // Settled at the load revision: nothing is due at since == 1.
         assert!(

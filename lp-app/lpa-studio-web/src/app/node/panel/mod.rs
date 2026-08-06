@@ -1,7 +1,8 @@
 //! Front-panel control widgets for node card faces.
 //!
-//! The panel is the face's gesture surface: knobs, faders, and toggles
-//! projected from bound slots ([`lpa_studio_core::UiPanelControl`]).
+//! The panel is the face's gesture surface: knobs, faders, toggles, and
+//! palette swatches projected from bound slots
+//! ([`lpa_studio_core::UiPanelControl`]).
 //! Fields follow the stateless slot-field pattern (`value, state, address,
 //! on_action`) and dispatch through the standard slot write path
 //! (`SlotEditOp::SetValue`), so drags coalesce exactly like slot editor
@@ -11,6 +12,10 @@
 
 mod h_fader_field;
 mod knob_field;
+pub mod palette_catalog;
+mod palette_chooser;
+mod palette_editor;
+mod palette_swatch_field;
 mod panel_control;
 mod panel_emit;
 mod toggle_field;
@@ -21,6 +26,10 @@ pub use knob_field::KnobField;
 /// story stays a faithful record of what the app renders.
 #[cfg(feature = "stories")]
 pub(crate) use knob_field::knob_snap;
+pub use palette_catalog::{PaletteCatalog, PaletteChoice, PaletteGroup, project_palette_choices};
+pub use palette_chooser::{PaletteChooser, PaletteChooserTab, PaletteEditTarget};
+pub use palette_editor::{PaletteEditor, PaletteOrigin};
+pub use palette_swatch_field::PaletteSwatchField;
 pub use panel_control::PanelControl;
 pub use panel_emit::PanelEmit;
 pub use toggle_field::ToggleField;

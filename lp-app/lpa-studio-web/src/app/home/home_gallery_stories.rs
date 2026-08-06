@@ -1,16 +1,23 @@
-//! Home gallery stories: first run, populated, opening, and no-store.
+//! Gallery-page stories: first run, populated, opening, and no-store.
+//! The P09 split divided the combined gallery into Devices / Projects /
+//! Explore pages; these stories stack all three from one fixture so the
+//! old coverage (and the cross-page states, like empty-device push
+//! buttons) stays in frame.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiIssue,
     UiPackageCard,
 };
 
-use crate::app::home::HomeGallery;
+use lpa_studio_core::UiAction;
+
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -35,6 +42,8 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -46,6 +55,8 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -57,6 +68,8 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
         },
     ]
 }
@@ -82,6 +95,7 @@ fn devices() -> Vec<UiDeviceCard> {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
         UiDeviceCard {
             port_label: None,
@@ -103,6 +117,7 @@ fn devices() -> Vec<UiDeviceCard> {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
     ]
 }
@@ -121,10 +136,11 @@ fn first_run() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -149,13 +165,74 @@ fn gallery_chooser_buttons() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Export zip on the card, delete in the menu."
+)]
+fn project_format_states() -> Element {
+    let mut projects = packages();
+    projects[0].health = PackageHealth::UpgradesOnOpen { found: 4 };
+    projects[1].health = PackageHealth::Blocked {
+        headline: "Format 3 — too old for this Studio".to_string(),
+        remedy: "Project format 3, expected 5; formats below 4 are too old to upgrade \
+                 automatically. Open it in a LightPlayer that still reads format 3 and \
+                 re-save it, or rebuild the project."
+            .to_string(),
+    };
+    projects[2].health = PackageHealth::Blocked {
+        headline: "Format 7 — made by a newer LightPlayer".to_string(),
+        remedy: "Project format 7, expected 5; it was written by a newer LightPlayer. \
+                 Update LightPlayer to open it."
+            .to_string(),
+    };
+    projects.push(UiPackageCard {
+        uid: "prj_5tYu7Vw90xZaBc4DeFgHi".to_string(),
+        kind: "Module".to_string(),
+        slug: "2026-06-11-0815-half-written".to_string(),
+        last_saved_at: None,
+        provenance: None,
+        on_device: None,
+        open_elsewhere: false,
+        connected_device: None,
+        running_in_sim: false,
+        target: None,
+        health: PackageHealth::Blocked {
+            headline: "project.json could not be read".to_string(),
+            remedy: "project.json could not be read as a project manifest (expected value at \
+                     line 1 column 1); expected a JSON object stating format 5. Fix or restore \
+                     the file before opening the project."
+                .to_string(),
+        },
+    });
+    let home = UiHomeView {
+        devices: Vec::new(),
+        projects,
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+        backup: None,
+        setup: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            GalleryPages {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(false),
                 on_action: |_| {},
             }
         }
@@ -172,10 +249,11 @@ fn populated() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -218,6 +296,7 @@ fn connected_device_and_project_chip() -> Element {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     });
     let home = UiHomeView {
         devices,
@@ -227,10 +306,11 @@ fn connected_device_and_project_chip() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -254,10 +334,11 @@ fn project_open_in_another_tab() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -277,11 +358,12 @@ fn opening_a_project() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     home.opening = Some(home.projects[0].uid.clone());
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(false),
@@ -364,6 +446,7 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -392,13 +475,14 @@ fn sim_and_live_device_home() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }
 
 fn gallery(home: UiHomeView, roster_label: Option<String>) -> Element {
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
@@ -424,6 +508,7 @@ fn sim_running_only() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -451,6 +536,7 @@ fn device_in_safe_mode() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -483,6 +569,7 @@ fn project_live_in_two_places() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -504,6 +591,7 @@ fn sim_and_offline_device() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -540,15 +628,42 @@ fn store_unavailable_with_issue() -> Element {
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
+            GalleryPages {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
                 on_action: |_| {},
             }
+        }
+    }
+}
+
+/// The P09 pages stacked from one fixture — the story stand-in for the
+/// old combined gallery page (the app renders them on separate routes).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn GalleryPages(
+    home: UiHomeView,
+    #[props(default)] now_secs: Option<f64>,
+    #[props(default)] has_ever_granted: Option<bool>,
+    #[props(default)] roster_label: Option<String>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-10",
+            DevicesPage {
+                home: home.clone(),
+                now_secs,
+                has_ever_granted,
+                roster_label,
+                on_action,
+            }
+            ProjectsPage { home: home.clone(), now_secs, on_action }
+            ExplorePage { home: Some(home), on_action }
         }
     }
 }

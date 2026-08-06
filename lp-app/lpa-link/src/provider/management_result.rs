@@ -18,6 +18,15 @@ pub struct LinkFirmwareManifest {
 pub struct LinkFirmwareFlashResult {
     pub manifest: LinkFirmwareManifest,
     pub chip_name: Option<String>,
+    /// The chip's factory base MAC, if the flasher's bootloader session read
+    /// it — the download-mode half of hardware identity (acquisition rule
+    /// A2), riding a session the user explicitly initiated.
+    ///
+    /// **As reported**, in whatever spelling the flasher used:
+    /// `DeviceSession::manage` runs it through
+    /// [`normalize_base_mac`](crate::normalize_base_mac) before it becomes
+    /// session evidence. `None` means no evidence — never a failed flash.
+    pub probed_mac: Option<String>,
     pub logs: Vec<String>,
     pub progress: Vec<LinkManagementProgress>,
 }

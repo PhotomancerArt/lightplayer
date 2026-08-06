@@ -128,7 +128,7 @@ fn project_apply_body_change_does_not_recreate_runtime_node() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 2.0
   }
 }
@@ -178,7 +178,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 4\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 5\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -446,7 +446,7 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 fn fixture_map2d_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 4\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 5\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -489,7 +489,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
 
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 4\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 5\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -510,7 +510,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }
@@ -522,7 +522,7 @@ fn clock_project_fs() -> LpFsMemory {
 
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 4\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 5\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -620,7 +620,8 @@ fn project_apply_binding_body_change_rebinds_runtime() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
-    // Slot-declared default: seconds publishes bus:time at fallback priority.
+    // Slot-declared default: the clock's time PRODUCT publishes bus:time at
+    // fallback priority (raw seconds stay produced-unbound).
     assert!(
         published_channels(&engine)
             .iter()
@@ -635,11 +636,11 @@ fn project_apply_binding_body_change_rebinds_runtime() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   },
   "bindings": {
-    "seconds": {
+    "product": {
       "target": "bus:custom"
     }
   }
@@ -698,11 +699,11 @@ fn project_apply_unbind_restores_declared_default() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   },
   "bindings": {
-    "seconds": {
+    "product": {
       "target": "bus:custom"
     }
   }
@@ -726,7 +727,7 @@ fn project_apply_unbind_restores_declared_default() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }

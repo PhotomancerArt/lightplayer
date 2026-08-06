@@ -581,6 +581,7 @@ format-bump:
         echo "error: could not parse PROJECT_FORMAT_VERSION from $const_file" >&2
         exit 1
     fi
+    next=$((version + 1))
     dest="schemas/history/v${version}"
     if [[ -e "$dest" ]]; then
         echo "error: $dest already exists — format v${version} was already snapshotted" >&2
@@ -590,14 +591,56 @@ format-bump:
     mkdir -p "$dest/fixtures"
     cp schemas/*.schema.json "$dest/"
     cp -R schemas/shapes "$dest/shapes"
-    # Fixture projects, one directory each. Keep at least one single-output
-    # project AND one multi-output project so a future upgrader is never
-    # exercised against a one-shape-only corpus.
+    # Fixture projects, one directory each, copied VERBATIM — every file, not
+    # just *.json. GLSL/SVG/map2d assets are the future upgrader's corpus
+    # too; dropping them here is what forced the v4→v5 step to recover them
+    # from git history instead (`git show f9d6981dc^:...`). Keep at least one
+    # single-output project AND one multi-output project so a future upgrader
+    # is never exercised against a one-shape-only corpus.
     for fixture_project in projects/test/fyeah-sign projects/test/quad-strips-v3; do
         name=$(basename "$fixture_project")
         mkdir -p "$dest/fixtures/$name"
-        cp "$fixture_project"/*.json "$dest/fixtures/$name/"
+        cp -R "$fixture_project"/. "$dest/fixtures/$name/"
     done
+
+    # Scaffold the migration step, so the bump ships with a place to write it
+    # instead of a blank page. lpa-upgrade's chain-tip test
+    # (`upgrade::tests::the_chain_ends_at_the_current_format`) already fails
+    # `cargo test -p lpa-upgrade` — and so CI — the moment
+    # PROJECT_FORMAT_VERSION moves past this file's `to`; this recipe just
+    # removes the excuse to skip writing it.
+    step_file="lp-app/lpa-upgrade/src/steps/v${version}_to_v${next}.rs"
+    if [[ ! -e "$step_file" ]]; then
+        step_lines=(
+            "//! Format ${version} → ${next}: TODO — name the break in one line."
+            "//!"
+            "//! TODO: describe what changed and why, the way v4_to_v5.rs does —"
+            "//! link the feat!/chore commit that made the break, and say which"
+            "//! files or shapes moved."
+            "//!"
+            "//! Behavior preservation: this step must translate authored data,"
+            "//! never improve it (see the crate README's contract). Key off"
+            "//! *meaning* — a binding target, a shape — never a field name;"
+            "//! v4_to_v5's \"rule R10, in the negative\" is the cautionary example."
+            ""
+            "use crate::project_files::ProjectFiles;"
+            "use crate::upgrade_error::UpgradeError;"
+            "use crate::upgrade_report::UpgradeReport;"
+            ""
+            "pub(crate) fn apply("
+            "    files: &mut ProjectFiles,"
+            "    report: &mut UpgradeReport,"
+            ") -> Result<(), UpgradeError> {"
+            "    let _ = (files, report);"
+            "    todo!(\"format ${version} -> ${next}: write the migration, then delete this stub\")"
+            "}"
+        )
+        printf '%s\n' "${step_lines[@]}" > "$step_file"
+        echo "Scaffolded ${step_file} (stub — fill in apply())."
+    else
+        echo "${step_file} already exists — leaving it alone."
+    fi
+
     echo
     echo "Snapshotted format v${version} into ${dest}/."
     echo
@@ -605,10 +648,21 @@ format-bump:
     echo "  1. Bump PROJECT_FORMAT_VERSION in ${const_file}."
     echo "  2. Make the format change; update authored project.json files"
     echo "     (projects/, examples/, lp-fw/fw-browser/www/smoke-project)."
-    echo "  3. just schema-gen    # regenerate schemas/ for the new format"
-    echo "  4. just check         # drift gate + lints"
-    echo "  5. cargo test -p lp-cli   # conformance over the authored corpus"
-    echo "  6. Commit the ${dest}/ snapshot together with the bump."
+    echo "  3. Write ${step_file}'s apply() (see lp-app/lpa-upgrade/README.md)"
+    echo "     and register it in lp-app/lpa-upgrade/src/steps/mod.rs::STEPS."
+    echo "  4. Copy ${dest}/fixtures/* into"
+    echo "     lp-app/lpa-upgrade/tests/corpus/v${version}/ — whole project"
+    echo "     directories, assets included. Add any authored project that"
+    echo "     exercises a shape the two fixtures miss (a real user project,"
+    echo "     sanitized, makes the best fixture)."
+    echo "  5. Bless the goldens, then read every line before committing:"
+    echo "       LPA_UPGRADE_BLESS=1 cargo test -p lpa-upgrade --test corpus_goldens"
+    echo "  6. just schema-gen        # regenerate schemas/ for the new format"
+    echo "  7. just check             # drift gate + lints"
+    echo "  8. cargo test -p lp-cli      # conformance over the authored corpus"
+    echo "  9. cargo test -p lpa-upgrade # goldens, refusals, chain-tip"
+    echo " 10. Commit the ${dest}/ snapshot, the corpus + goldens, and the"
+    echo "     step together with the bump."
 
 # ============================================================================
 # Build commands - Workspace-wide
@@ -926,6 +980,17 @@ fwtest-backtrace-esp32s3 port="":
 # the re-derivation of `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt` —
 # a mismatch there is a finding to triage, never a reason to edit the golden.
 #
+# The cross-core teardown-race harness for lp-ws281x, under Miri (the UAF
+# oracle for the classic ESP32's APP-core ISR deployment). The preemption
+# flag is load-bearing: at Miri's default rate the schedules never land
+# inside the teardown window and the run proves much less. Needs the miri
+# component on the nightly toolchain (`rustup +nightly component add miri`).
+# Manual/pre-push; not wired into CI (nightly-only). See
+# lp-fw/lp-ws281x/tests/cross_core.rs for the validated-oracle note.
+ws281x-miri:
+    MIRIFLAGS="-Zmiri-preemption-rate=0.5" \
+        cargo +nightly miri test -p lp-ws281x --test cross_core
+
 # Run the host oracle first; it drives the same sequencing against a mock and
 # the same classifier against the committed capture:
 #
@@ -1094,6 +1159,13 @@ fw-manifest-check-esp32s3:
 fw-manifest-check-esp32v3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
 
+# Wired into `check` (local full gate): the four expected fixtures move
+# together on any wire-proto change, and without a local manifest check a
+# WIRE_PROTO_VERSION bump passes `just check test` clean and only fails in
+# CI's per-chip firmware jobs (the TimeProduct 9→10 bump did exactly that).
+# This is the one manifest check that needs no chip toolchain — just the
+# rv32 target the gate already installs — so it is the local proxy for all
+# four; the esp32 variants stay CI-only with their chip builds.
 fw-manifest-check-emu: build-fw-emu
     node scripts/extract-fw-manifest.mjs target/{{ rv32_target }}/release/fw-emu --stable | diff -u lp-fw/fw-emu/manifest-core.expected.json -
 
@@ -1367,6 +1439,11 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
 # missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
 # exists in a gate-off build and is only run here.
 #
+# Wired into `check-lint` (and so CI's Lint job): the recipe sat unwired for
+# a while and the gate-off tier rotted exactly as predicted — a `#[cfg(test)]`
+# helper whose only callers were feature-gated tests went dead-code under
+# `-D warnings` and nothing noticed until a manual run.
+#
 # `--all-targets` matters: without it the gate-off tests are never built.
 check-lpc-engine-gates:
     #!/usr/bin/env bash
@@ -1512,8 +1589,24 @@ test-xt-host:
 test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
+# The browser CPU tier's shader frontend, on the engine's own palette suite.
+#
+# `fw-browser` pins `ShaderFrontend::Naga` while devices and native servers use
+# `LpsGlsl`, so the Naga half of the palette contract has no coverage in a
+# default-feature build: `lpc-engine`'s `naga` feature is off, and the
+# `#[cfg(feature = "naga")]` test compiles to nothing and passes having run
+# nothing (the failure mode `test-xt-host` documents above). Separate
+# invocation because turning `naga` on unifies it across the whole
+# default-members build.
+#
+# This is the only test that couples the engine's *generated* shader header to
+# the frontend the browser actually compiles it with, so a change to either
+# side that blacks out Studio's palette previews fails here.
+test-browser-shader-frontend:
+    cargo test -p lpc-engine --features naga --lib -- shader_palette
+
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host test-xt-host
+test-rust: test-rust-core test-studio-host test-xt-host test-browser-shader-frontend
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -1568,11 +1661,16 @@ test-glsl-filetests:
 # but shares nothing with clippy's check-mode output (racing clippy for cores
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
+#
+# `fw-manifest-check-emu` is likewise local-full-gate only: in CI the same
+# drift class is caught by the per-chip firmware jobs' manifest checks
+# (which need chip builds this gate deliberately avoids). Note the narrow
+# residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
-check: check-lint schema-check
+check: check-lint schema-check fw-manifest-check-emu
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -1596,6 +1694,11 @@ lint-vec-corpus:
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
     ./scripts/check-schemars-fw.sh
+
+# Guard against lpa-upgrade reaching the RV32 firmware graphs (the device
+# refuses old project formats, it never migrates them; see script).
+lint-upgrade-fw:
+    ./scripts/check-upgrade-fw.sh
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.

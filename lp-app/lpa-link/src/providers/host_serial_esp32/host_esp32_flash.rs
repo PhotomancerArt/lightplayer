@@ -115,6 +115,11 @@ pub(super) fn flash_firmware(
     Ok(LinkFirmwareFlashResult {
         manifest,
         chip_name,
+        // No MAC read on this path yet. A2 evidence is what the BROWSER
+        // flash preflight collects, because that is the flow a user's board
+        // is identified in; the host flasher is the bench/CLI route and
+        // reading it here would be an extra ROM round-trip nothing consumes.
+        probed_mac: None,
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),
     })

@@ -43,17 +43,22 @@ const MID_FRAME_US: u64 = 8_333;
 const RESERVED_CHANNELS: usize = 8;
 
 struct ChannelState {
+    /// ⚠️ Declared before `frame` on purpose: fields drop in declaration
+    /// order, and the output's own `Drop` is what stops an in-flight
+    /// transmission that may still be reading `frame`'s bytes. Swapping these
+    /// two fields would free the frame under a running transmitter.
     output: Box<dyn Ws281xOutput>,
     byte_count: u32,
     pipeline: DisplayPipeline,
     /// The channel's own rendered frame, alive between writes.
     ///
     /// It used to be a `Vec` allocated inside every `write`, which is fine
-    /// while one handle is written at a time. It is not fine for a batched
-    /// transmission, where every channel's bytes must stay alive across the
-    /// whole batch — so the storage belongs to the channel, not to the call.
-    /// Sized from the channel's granted `byte_count`, so this is the same
-    /// memory the per-write allocation held, just held for longer.
+    /// while one handle is written at a time. It is not fine for a concurrent
+    /// transmission, where every channel's bytes must stay alive from its
+    /// `start` until its `wait_complete` — so the storage belongs to the
+    /// channel, not to the call. Sized from the channel's granted
+    /// `byte_count`, so this is the same memory the per-write allocation held,
+    /// just held for longer.
     frame: Vec<u8>,
 }
 
@@ -138,6 +143,35 @@ impl OutputProvider for Esp32OutputProvider {
             },
         );
 
+        // The board's measured total-LED envelope, if it carries one. A SOFT
+        // limit: exceeding it warns and proceeds — the record is evidence of
+        // what has run clean (heap binds before frame time on the classic),
+        // never a refusal. Checked at open, not per frame: opens are rare and
+        // the sum only changes here.
+        if let Some(budget) = self
+            .hardware_system
+            .registry()
+            .manifest()
+            .soft_limits()
+            .and_then(|limits| limits.total_leds.as_ref())
+        {
+            let total_leds: u32 = self
+                .channels
+                .borrow()
+                .iter()
+                .map(|(_, channel)| channel.byte_count / 3)
+                .sum();
+            if total_leds > budget.value {
+                log::warn!(
+                    "Esp32OutputProvider::open: total LEDs across outputs ({total_leds}) \
+                     exceed the board's measured envelope of {} — proceeding; expect heap \
+                     pressure. Envelope provenance: {}",
+                    budget.value,
+                    budget.measured,
+                );
+            }
+        }
+
         Ok(handle)
     }
 
@@ -154,6 +188,16 @@ impl OutputProvider for Esp32OutputProvider {
             log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
             OutputError::InvalidHandle { handle: handle_id }
         })?;
+
+        // The previous frame may still be on the wire — `start` below returns
+        // without waiting, and the transmitter keeps reading `channel.frame`
+        // until it finishes. Wait it out before anything below touches state
+        // it may still be reading (the resize moves the frame's bytes; the
+        // pipeline overwrites them). In the steady state a whole render has
+        // passed since the frame started, so this returns without spinning;
+        // it only actually waits when a frame hung, in which case it aborts
+        // and reports rather than staging over a live transmission.
+        channel.output.wait_complete()?;
 
         let mut num_leds = (channel.byte_count / 3) as usize;
         let expected_len = num_leds * 3;
@@ -196,7 +240,21 @@ impl OutputProvider for Esp32OutputProvider {
         } = channel;
         pipeline.tick(MID_FRAME_US, frame);
 
-        output.write(frame)
+        // Start the transmission and return without waiting for it. Handles
+        // written back to back in one flush therefore transmit concurrently —
+        // the frame pays for its slowest wave of wires, not the sum of all of
+        // them — and the wait happens in [`OutputProvider::flush`], the
+        // frame-wide barrier the engine calls after the last write.
+        //
+        // SAFETY: `frame` is heap storage owned by this channel's entry in
+        // `self.channels`, so its bytes stay in place when the map grows or
+        // the `ChannelState` moves. Every path that mutates or moves those
+        // bytes — this function's resize and staging above — first calls
+        // `wait_complete`, and dropping the entry drops `output` (which stops
+        // the transmission) before `frame` (see the field-order note on
+        // `ChannelState`). That is exactly the lifetime `start`'s contract
+        // asks for.
+        unsafe { output.start(frame) }
     }
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
@@ -206,6 +264,49 @@ impl OutputProvider for Esp32OutputProvider {
             .remove(&handle_id)
             .ok_or_else(|| OutputError::InvalidHandle { handle: handle_id })?;
         Ok(())
+    }
+
+    /// Wait out the frame's transmissions — for the outputs that need it.
+    ///
+    /// Two modes per channel, decided by [`Ws281xOutput::background_tx_safe`]:
+    ///
+    /// * **Barrier** (the default, and every output that has not proven
+    ///   otherwise): the wire time is spent here, inside a quiet spin, not
+    ///   under the engine's next tick. That placement is load-bearing when
+    ///   the transmission's ISR shares the render core: the classic ESP32's
+    ///   app path masks interrupts in stretches long enough to starve the
+    ///   refill deadline (measured 2026-08-04 — wires transmitting while the
+    ///   engine ran truncated ~99 % of their frames).
+    /// * **Background-safe** (the classic with its refill ISR on the
+    ///   dedicated APP core): the wait is skipped and the wire time overlaps
+    ///   the next render. The frame-lifetime guarantee does not move an inch
+    ///   — `write`'s wait-before-stage above waits the previous frame out
+    ///   before anything touches the channel's storage, and that wait is
+    ///   mandatory in both modes. The hang detector also rides that deferred
+    ///   wait: `FRAME_TIMEOUT` (50 ms) runs from `start`, and by the next
+    ///   write a ~33 ms frame interval plus ≤ ~31 ms of worst-case wire time
+    ///   can exceed it only for frames far past dome scale — worth
+    ///   re-checking if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
+    ///
+    /// The engine calls this once per frame regardless of modes — the
+    /// barrier-call-count test and the wrapper-forwarding guard from the
+    /// concurrent-flush ADR stay exactly as meaningful. Every failure is
+    /// logged with its handle; the first is returned.
+    fn flush(&self) -> Result<(), OutputError> {
+        let mut first_error: Option<OutputError> = None;
+        for (handle_id, channel) in self.channels.borrow_mut().iter_mut() {
+            if channel.output.background_tx_safe() {
+                continue;
+            }
+            if let Err(error) = channel.output.wait_complete() {
+                log::warn!("Esp32OutputProvider::flush: handle={handle_id}: {error}");
+                first_error.get_or_insert(error);
+            }
+        }
+        match first_error {
+            None => Ok(()),
+            Some(error) => Err(error),
+        }
     }
 
     fn hardware_generation(&self) -> u64 {
@@ -287,6 +388,35 @@ mod tests {
             .expect("a write of exactly the capped size succeeds");
     }
 
+    /// The total-LED soft limit is SOFT: an open that pushes the board past
+    /// its measured envelope warns (log-only) and must still succeed — a
+    /// refusal would invert the measured-records convention.
+    #[test]
+    fn opening_past_the_soft_led_envelope_still_succeeds() {
+        use lpc_hardware::{HwMeasuredLimit, HwSoftLimits};
+        let manifest = HwManifest::virtual_single_rmt_gpio_board().with_soft_limits(HwSoftLimits {
+            total_leds: Some(HwMeasuredLimit {
+                value: 10,
+                measured: "test envelope".into(),
+            }),
+        });
+        let registry = Rc::new(HwRegistry::new(manifest));
+        let provider =
+            Esp32OutputProvider::new(Rc::new(HardwareSystem::with_virtual_drivers(registry)));
+
+        // 100 lamps against an envelope of 10: warns, proceeds.
+        let handle = provider
+            .open(
+                &lpc_hardware::HwEndpointSpec::from_static("ws281x:local:D10"),
+                100 * 3,
+                OutputFormat::Ws2811,
+                None,
+            )
+            .expect("a soft limit must never refuse an open");
+        let frame = vec![0u16; 100 * 3];
+        provider.write(handle, &frame).expect("and writes proceed");
+    }
+
     /// 375 and 1024 lamps both sit at or under the cap: `open` must grant
     /// exactly what was asked, with no truncation.
     #[test]
@@ -325,5 +455,332 @@ mod tests {
             ),
             "the channel must have grown to exactly the capped byte count, not the frame's own size"
         );
+    }
+}
+
+#[cfg(test)]
+mod concurrent_flush_tests {
+    //! The deferred-wait transmission contract, proven against a probe output:
+    //! `write` waits out the channel's *previous* frame before touching its
+    //! storage, starts the new one, and returns without waiting for it — so
+    //! handles written back to back transmit concurrently.
+
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::cell::RefCell;
+
+    use lpc_hardware::{
+        HardwareEndpointError, HardwareSystem, HwAddress, HwDriver, HwEndpoint, HwEndpointId,
+        HwEndpointKind, HwEndpointSpec, HwManifest, HwRegistry, OutputError, Ws281xConfig,
+        Ws281xDriver, Ws281xOutput,
+    };
+    use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+
+    use super::Esp32OutputProvider;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProbeEvent {
+        /// `wait_complete`, with whether this output still had a frame in
+        /// flight when it was called.
+        Wait { had_in_flight: bool },
+        /// The non-blocking `start`.
+        Start,
+        /// The blocking `write` — the provider must never fall back to it.
+        BlockingWrite,
+    }
+
+    #[derive(Default)]
+    struct ProbeLog {
+        events: Vec<ProbeEvent>,
+        /// Outputs with a started, un-waited frame — across ALL probe outputs,
+        /// which is what makes concurrency observable.
+        in_flight: usize,
+    }
+
+    struct ProbeOutput {
+        log: Rc<RefCell<ProbeLog>>,
+        in_flight: bool,
+        /// What this output claims via `background_tx_safe` — the provider's
+        /// flush must skip waiting exactly the outputs that claim `true`.
+        background_safe: bool,
+    }
+
+    impl Ws281xOutput for ProbeOutput {
+        fn background_tx_safe(&self) -> bool {
+            self.background_safe
+        }
+
+        fn write(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            self.log.borrow_mut().events.push(ProbeEvent::BlockingWrite);
+            Ok(())
+        }
+
+        fn resize(&mut self, _config: Ws281xConfig) -> Result<(), OutputError> {
+            Ok(())
+        }
+
+        unsafe fn start(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            assert!(
+                !self.in_flight,
+                "start while a frame is in flight violates the wait-first contract"
+            );
+            let mut log = self.log.borrow_mut();
+            log.events.push(ProbeEvent::Start);
+            log.in_flight += 1;
+            self.in_flight = true;
+            Ok(())
+        }
+
+        fn wait_complete(&mut self) -> Result<(), OutputError> {
+            let mut log = self.log.borrow_mut();
+            log.events.push(ProbeEvent::Wait {
+                had_in_flight: self.in_flight,
+            });
+            if self.in_flight {
+                log.in_flight -= 1;
+                self.in_flight = false;
+            }
+            Ok(())
+        }
+    }
+
+    /// Offers `ws281x:local:P0` / `ws281x:local:P1` and opens a [`ProbeOutput`]
+    /// for either; claims nothing from the registry — leases are not what these
+    /// tests are about.
+    struct ProbeDriver {
+        log: Rc<RefCell<ProbeLog>>,
+        /// Bit `n` set = endpoint `Pn`'s outputs report `background_tx_safe`.
+        background_safe: u32,
+    }
+
+    const PROBE_ENDPOINTS: usize = 2;
+
+    impl HwDriver for ProbeDriver {
+        fn driver_id(&self) -> &str {
+            "probe-ws281x"
+        }
+
+        fn display_label(&self) -> &str {
+            "Probe WS281x"
+        }
+    }
+
+    impl Ws281xDriver for ProbeDriver {
+        fn endpoints(&self) -> Vec<HwEndpoint> {
+            (0..PROBE_ENDPOINTS)
+                .map(|n| {
+                    let spec = HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}"))
+                        .expect("probe spec parses");
+                    HwEndpoint::new(
+                        HwEndpointId::for_driver_spec(self.driver_id(), &spec),
+                        spec,
+                        HwEndpointKind::Ws281x,
+                        self.driver_id(),
+                        HwAddress::gpio(10 + n as u32),
+                        "probe",
+                        lpc_hardware::HwEndpointStatus::Available,
+                    )
+                })
+                .collect()
+        }
+
+        fn open(
+            &self,
+            endpoint_id: &HwEndpointId,
+            _config: Ws281xConfig,
+        ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+            let background_safe = (0..PROBE_ENDPOINTS).any(|n| {
+                let spec = HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}"))
+                    .expect("probe spec parses");
+                HwEndpointId::for_driver_spec(self.driver_id(), &spec) == *endpoint_id
+                    && self.background_safe & (1 << n) != 0
+            });
+            Ok(Box::new(ProbeOutput {
+                log: Rc::clone(&self.log),
+                in_flight: false,
+                background_safe,
+            }))
+        }
+    }
+
+    fn probe_provider() -> (Esp32OutputProvider, Rc<RefCell<ProbeLog>>) {
+        probe_provider_with_background(0)
+    }
+
+    /// [`probe_provider`] with bit `n` of `background_safe` making endpoint
+    /// `Pn`'s outputs claim `background_tx_safe`.
+    fn probe_provider_with_background(
+        background_safe: u32,
+    ) -> (Esp32OutputProvider, Rc<RefCell<ProbeLog>>) {
+        let log = Rc::new(RefCell::new(ProbeLog::default()));
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
+        let mut system = HardwareSystem::new(registry);
+        system.add_ws281x_driver(Box::new(ProbeDriver {
+            log: Rc::clone(&log),
+            background_safe,
+        }));
+        (Esp32OutputProvider::new(Rc::new(system)), log)
+    }
+
+    fn open_probe(provider: &Esp32OutputProvider, n: usize) -> OutputChannelHandle {
+        provider
+            .open(
+                &lpc_hardware::HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}"))
+                    .expect("probe spec parses"),
+                3,
+                OutputFormat::Ws2811,
+                None,
+            )
+            .expect("probe endpoint opens")
+    }
+
+    /// One handle, two writes: each write waits out the previous frame
+    /// *before* starting the next — never after — and never falls back to the
+    /// blocking write. The first wait finds no frame; the second finds the one
+    /// the first write left in flight, which is the deferred wait working.
+    #[test]
+    fn write_waits_for_the_previous_frame_then_starts_without_blocking() {
+        let (provider, log) = probe_provider();
+        let handle = open_probe(&provider, 0);
+
+        let frame = vec![0u16; 3];
+        provider.write(handle, &frame).expect("first write");
+        provider.write(handle, &frame).expect("second write");
+
+        assert_eq!(
+            log.borrow().events,
+            vec![
+                ProbeEvent::Wait {
+                    had_in_flight: false
+                },
+                ProbeEvent::Start,
+                ProbeEvent::Wait {
+                    had_in_flight: true
+                },
+                ProbeEvent::Start,
+            ],
+        );
+    }
+
+    /// Two handles written back to back — the shape of one engine flush — are
+    /// both still transmitting afterwards: `write` starts and returns rather
+    /// than paying each wire time sequentially.
+    #[test]
+    fn back_to_back_writes_transmit_concurrently() {
+        let (provider, log) = probe_provider();
+        let first = open_probe(&provider, 0);
+        let second = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(first, &frame).expect("first wire");
+        provider.write(second, &frame).expect("second wire");
+
+        assert_eq!(
+            log.borrow().in_flight,
+            2,
+            "both wires must be in flight at once; a blocking write would leave at most one"
+        );
+    }
+
+    /// `flush` is the frame-wide barrier: after it, nothing is in flight, and
+    /// every in-flight channel got a `wait_complete`.
+    #[test]
+    fn flush_waits_out_every_started_transmission() {
+        let (provider, log) = probe_provider();
+        let first = open_probe(&provider, 0);
+        let second = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(first, &frame).expect("first wire");
+        provider.write(second, &frame).expect("second wire");
+        assert_eq!(log.borrow().in_flight, 2);
+
+        provider.flush().expect("flush");
+        assert_eq!(log.borrow().in_flight, 0, "flush must drain every wire");
+    }
+
+    /// A background-safe output's transmission overlaps the next render:
+    /// `flush` must not wait it out — and the frame-lifetime guarantee then
+    /// rides on the *next* write's wait-before-stage, which must still find
+    /// and drain the in-flight frame.
+    #[test]
+    fn flush_skips_background_safe_outputs_and_the_next_write_still_waits() {
+        let (provider, log) = probe_provider_with_background(0b11);
+        let first = open_probe(&provider, 0);
+        let second = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(first, &frame).expect("first wire");
+        provider.write(second, &frame).expect("second wire");
+        assert_eq!(log.borrow().in_flight, 2);
+
+        let waits_before = wait_count(&log);
+        provider.flush().expect("flush");
+        assert_eq!(
+            wait_count(&log),
+            waits_before,
+            "flush must not wait out a background-safe output"
+        );
+        assert_eq!(
+            log.borrow().in_flight,
+            2,
+            "both wires keep transmitting across the barrier"
+        );
+
+        // The deferred wait is not optional: the next write on the handle
+        // must drain the in-flight frame before staging over its bytes.
+        provider.write(first, &frame).expect("next frame");
+        assert!(
+            log.borrow().events.iter().rev().any(|e| *e
+                == ProbeEvent::Wait {
+                    had_in_flight: true
+                }),
+            "wait-before-stage must find the overlapped frame in flight"
+        );
+    }
+
+    /// Mixed wires — one barrier, one background-safe — wait exactly the
+    /// barrier one at flush.
+    #[test]
+    fn flush_waits_only_the_barrier_output_in_a_mixed_frame() {
+        let (provider, log) = probe_provider_with_background(0b10);
+        let barrier = open_probe(&provider, 0);
+        let background = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(barrier, &frame).expect("barrier wire");
+        provider.write(background, &frame).expect("background wire");
+        assert_eq!(log.borrow().in_flight, 2);
+
+        provider.flush().expect("flush");
+        assert_eq!(
+            log.borrow().in_flight,
+            1,
+            "the barrier wire is drained, the background wire keeps going"
+        );
+    }
+
+    fn wait_count(log: &Rc<RefCell<ProbeLog>>) -> usize {
+        log.borrow()
+            .events
+            .iter()
+            .filter(|e| matches!(e, ProbeEvent::Wait { .. }))
+            .count()
+    }
+
+    /// Closing a handle mid-flight must reach the output's own drop (which on
+    /// hardware stops the transmitter) — the provider must not require a wait
+    /// before close.
+    #[test]
+    fn close_drops_the_output_with_a_frame_still_in_flight() {
+        let (provider, log) = probe_provider();
+        let handle = open_probe(&provider, 0);
+
+        let frame = vec![0u16; 3];
+        provider.write(handle, &frame).expect("write");
+        assert_eq!(log.borrow().in_flight, 1);
+        provider.close(handle).expect("close");
     }
 }

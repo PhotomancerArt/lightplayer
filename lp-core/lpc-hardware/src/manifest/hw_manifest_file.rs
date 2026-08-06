@@ -5,7 +5,9 @@ use lp_collection::VecSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwResource};
+use crate::{
+    HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwResource, HwSoftLimits,
+};
 
 /// Serializable board manifest file (authored as JSON).
 ///
@@ -23,6 +25,12 @@ pub struct HardwareManifestFile {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Measured soft-limit records (see [`HwSoftLimits`]): envelopes this
+    /// board×firmware has run clean at. Optional and additive — older
+    /// firmware parsing a manifest that carries them simply ignores the
+    /// field, which is what keeps this change format-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limits: Option<HwSoftLimits>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub board_label: Vec<HardwareBoardLabelFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -46,6 +54,7 @@ impl HardwareManifestFile {
             product: product.clone(),
             description: None,
             url: None,
+            soft_limits: None,
             board_label: Vec::new(),
             gpio: Vec::new(),
             resource: Vec::new(),
@@ -126,6 +135,9 @@ impl HardwareManifestFile {
         }
         if let Some(url) = &self.url {
             manifest = manifest.with_url(url.clone());
+        }
+        if let Some(soft_limits) = &self.soft_limits {
+            manifest = manifest.with_soft_limits(soft_limits.clone());
         }
         Ok(manifest)
     }
@@ -309,6 +321,7 @@ mod tests {
             product: "product".into(),
             description: None,
             url: None,
+            soft_limits: None,
             board_label: Vec::new(),
             gpio: alloc::vec![
                 HardwareResourceFile::new("/gpio/1", "GPIO1", [HwCapability::GpioOutput]),
@@ -318,5 +331,49 @@ mod tests {
         };
 
         assert!(manifest.validate().is_err());
+    }
+
+    /// Soft limits survive the JSON round trip and the runtime conversion,
+    /// and an absent field parses (older manifests stay valid).
+    #[test]
+    fn soft_limits_round_trip_and_default_to_absent() {
+        let json = r#"{
+            "id": "vendor/board",
+            "target": "esp32",
+            "vendor": "vendor",
+            "product": "board",
+            "soft_limits": {
+                "totalLeds": { "value": 1500, "measured": "2026-08-05 soak" }
+            }
+        }"#;
+        let file = HardwareManifestFile::read_json(json).unwrap();
+        let limit = file
+            .soft_limits
+            .as_ref()
+            .and_then(|limits| limits.total_leds.as_ref())
+            .expect("the record must parse");
+        assert_eq!(limit.value, 1500);
+        assert_eq!(limit.measured, "2026-08-05 soak");
+
+        let runtime = file.to_manifest().unwrap();
+        assert_eq!(
+            runtime
+                .soft_limits()
+                .and_then(|limits| limits.total_leds.as_ref())
+                .map(|limit| limit.value),
+            Some(1500),
+        );
+
+        let rewritten = file.write_json().unwrap();
+        assert_eq!(HardwareManifestFile::read_json(&rewritten).unwrap(), file);
+
+        let without = r#"{
+            "id": "vendor/board",
+            "target": "esp32",
+            "vendor": "vendor",
+            "product": "board"
+        }"#;
+        let file = HardwareManifestFile::read_json(without).unwrap();
+        assert!(file.soft_limits.is_none(), "absence must stay valid");
     }
 }

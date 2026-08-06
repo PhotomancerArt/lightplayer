@@ -1,0 +1,14 @@
+{
+  "id": "jjg_misc_subtle",
+  "name": "Subtle",
+  "license": {
+    "spdx": "Public Domain",
+    "author": "J.J. Green",
+    "source_url": "https://phillips.shef.ac.uk/pub/cpt-city/jjg/misc/subtle"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#0075e2@0 #06acf1@0.06 #0ce3ff@0.19 #51f0e8@0.25 #95fed0@0.32 #bbee9e@0.42 #e0de6d@0.53 #f0c17f@0.65 #ffa391@0.75 #e78166@0.87 #cf5f3b@1"
+  }
+}

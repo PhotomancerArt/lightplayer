@@ -13,14 +13,19 @@
 
 use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
+mod clock_face;
 mod fixture_face;
 mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;
 mod output_face;
+mod phasor_trace;
 mod playlist_face;
 mod shader_face;
+mod tape_driver;
+mod tape_transport;
 
+pub use clock_face::ClockFace;
 pub use fixture_face::FixtureFace;
 pub use node_card_drawers::NodeCardDrawers;
 pub use node_card_section::NodeCardSection;
@@ -28,6 +33,9 @@ pub use node_face_body::NodeFaceBody;
 pub use output_face::OutputFace;
 pub use playlist_face::PlaylistFace;
 pub use shader_face::ShaderFace;
+pub(crate) use tape_transport::{
+    RATE_DETENTS, adjacent_detent, apply_detents, frac_rate, rate_frac,
+};
 
 /// Wrap a node-card UI mutation in its dispatchable action (targeted at
 /// the project editor's node-tree surface; the op carries its own node

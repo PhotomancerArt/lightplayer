@@ -1,6 +1,7 @@
 # ADR: Device card state vocabulary as a first-class concept
 
-- **Status:** Accepted (amended 2026-07-24 — see the M7′ note below)
+- **Status:** Accepted (amended 2026-07-24 — see the M7′ note below;
+  annotated 2026-08-04 — see the state-count note below)
 - **Date:** 2026-07-16
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -17,6 +18,15 @@
 > **`RosterStateSpec`/`RosterTreatment`** (`roster/roster_state_spec.rs`,
 > `RosterCardState::spec()`) — still renderer-independent, still the
 > derivation an on-device LED would consume.
+
+> **State-count note (2026-08-04, project-format-upgrades P5).** The
+> vocabulary grew past 14 with `RosterCardState::HoldsOldFormatProject`
+> (a readable project whose format this build cannot run). The "14" below
+> is a historical fact about the direction doc that founded this ADR, not
+> a live count — `roster_card_state.rs` is the source of truth for how
+> many states exist today. The doc comments elsewhere that used to quote
+> "14-state" now say "the roster card-state vocabulary" instead, so
+> nothing else needs re-editing at the next addition.
 
 ## Context
 

@@ -9,8 +9,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::UiAgentStatus;
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::NodePane;
-use crate::app::node::face_story_fixtures::shader_node_view;
+use crate::app::node::face_story_fixtures::{period_knob, shader_node_view};
+use crate::app::node::{NodePane, PanelControl};
 use crate::base::Platform;
 
 #[component]
@@ -43,6 +43,28 @@ fn bound_knob() -> Element {
         ShaderCardCanvas {
             NodePane {
                 view: shader_node_view(true, UiAgentStatus::Idle),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+/// The two states a speed knob has (P7 item 5, re-voiced at G2): the
+/// readout is the auto-denominated rate ("3/min" — bigger IS faster, the
+/// drag axis inverts to match), and the gesture still writes a whole
+/// `PhasorConfig`, never a bare float.
+#[story(
+    description = "Speed knobs. Left: slot-local — the knob edits consumed[phase].phasor.some and belongs to this card alone. Right: channel-driven — an authored config channel makes it violet, puts it on the module panel, and every reader of that channel rides the one integrator it retunes."
+)]
+fn phasor_period() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:items-start tw:gap-8 tw:p-4",
+            PanelControl {
+                control: period_knob("Speed", 20.0, false),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: period_knob("Speed", 100.0, true),
                 on_action: move |_| {},
             }
         }

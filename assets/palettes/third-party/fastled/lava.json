@@ -1,0 +1,14 @@
+{
+  "id": "fastled_lava",
+  "name": "Lava",
+  "license": {
+    "spdx": "MIT",
+    "author": "FastLED (Daniel Garcia, Mark Kriegsman et al.)",
+    "source_url": "https://github.com/FastLED/FastLED/blob/master/src/colorpalettes.cpp.hpp"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#000000 #800000 #000000 #800000 #8b0000 #8b0000 #800000 #8b0000 #8b0000 #8b0000 #ff0000 #ffa500 #ffffff #ffa500 #ff0000 #8b0000"
+  }
+}

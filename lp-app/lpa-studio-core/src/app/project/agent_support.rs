@@ -6,7 +6,9 @@
 //! because it reads private controller state (node tree, def-artifact map).
 
 use lpa_agent::{EngineStatusKind, EngineVerdict, ParamUpsert};
-use lpc_model::{LpValue, Revision, SlotEdit, SlotMapKey, SlotName, SlotPath};
+use lpc_model::{
+    LpValue, PhasorConfig, Revision, SlotEdit, SlotMapKey, SlotName, SlotPath, ToLpValue, Waveform,
+};
 
 use crate::{ProjectNodeStatusTone, ProjectNodeStatusView, UiShaderError};
 
@@ -75,10 +77,16 @@ pub(crate) fn engine_verdict(status: &ProjectNodeStatusView) -> EngineVerdict {
 /// The `SlotEdit` list one `upsert_param` dispatches, in order: ensure the
 /// `consumed[name]` entry exists (the server constructs the record default
 /// — kind/value included, f32 in v1), then per present field the same ops
-/// the human gestures send (`AssignValue` on the `label` value slot;
-/// `EnsurePresent` + `AssignValue` on each option's `.some`). All edits
-/// ride ONE `MutationCmdBatch` of `PutSlotEdit`s on the def artifact, the
-/// same batch shape as `apply_asset_body`.
+/// the human gestures send (`AssignValue` on the `label`/`kind` value
+/// slots; `EnsurePresent` + `AssignValue` on each option's `.some`). A
+/// `kind: "phasor"` upsert also (re)writes the whole `phasor.some`
+/// [`PhasorConfig`] in one `AssignValue` — it is a leaf struct, not a
+/// further-decomposed slot — built from `period_seconds`/`waveform`/
+/// `phase_offset` over [`PhasorConfig::default`] for whatever the call
+/// omitted; the tool layer rejects those three fields unless `kind` is
+/// `"phasor"` in the same call, so partial phasor edits always restate the
+/// kind. All edits ride ONE `MutationCmdBatch` of `PutSlotEdit`s on the def
+/// artifact, the same batch shape as `apply_asset_body`.
 pub(crate) fn param_upsert_edits(upsert: &ParamUpsert) -> Vec<SlotEdit> {
     fn field(path: &SlotPath, name: &str) -> SlotPath {
         path.child(SlotName::parse(name).expect("static field name"))
@@ -92,6 +100,12 @@ pub(crate) fn param_upsert_edits(upsert: &ParamUpsert) -> Vec<SlotEdit> {
         edits.push(SlotEdit::assign_value(
             field(&entry, "label"),
             LpValue::String(label.clone()),
+        ));
+    }
+    if let Some(kind) = &upsert.kind {
+        edits.push(SlotEdit::assign_value(
+            field(&entry, "kind"),
+            LpValue::String(kind.clone()),
         ));
     }
     let mut option = |name: &str, value: LpValue| {
@@ -111,6 +125,20 @@ pub(crate) fn param_upsert_edits(upsert: &ParamUpsert) -> Vec<SlotEdit> {
     }
     if let Some(unit) = &upsert.unit {
         option("unit", LpValue::String(unit.clone()));
+    }
+    if upsert.kind.as_deref() == Some("phasor") {
+        let config = PhasorConfig {
+            period_seconds: upsert
+                .period_seconds
+                .unwrap_or(PhasorConfig::default().period_seconds),
+            waveform: upsert
+                .waveform
+                .as_deref()
+                .and_then(Waveform::parse)
+                .unwrap_or_default(),
+            phase_offset: upsert.phase_offset.unwrap_or(0.0),
+        };
+        option("phasor", config.to_lp_value());
     }
     edits
 }
@@ -145,6 +173,7 @@ mod tests {
             max: Some(4.0),
             step: Some(1.0),
             unit: Some("x".into()),
+            ..ParamUpsert::default()
         };
         assert_eq!(
             param_upsert_edits(&upsert),
@@ -191,6 +220,76 @@ mod tests {
                     LpValue::F32(2.0),
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn kind_upsert_assigns_the_kind_field_directly() {
+        // `kind` is a required ValueSlot (like `label`), not an Option — no
+        // `ensure_present` needed.
+        let upsert = ParamUpsert {
+            name: "phase".into(),
+            kind: Some("seconds".into()),
+            ..ParamUpsert::default()
+        };
+        assert_eq!(
+            param_upsert_edits(&upsert),
+            vec![
+                SlotEdit::ensure_present(parse(r#"consumed["phase"]"#)),
+                SlotEdit::assign_value(
+                    parse(r#"consumed["phase"].kind"#),
+                    LpValue::String("seconds".into()),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn phasor_kind_writes_the_whole_config_in_one_leaf_assign() {
+        let upsert = ParamUpsert {
+            name: "phase".into(),
+            kind: Some("phasor".into()),
+            period_seconds: Some(2.5),
+            waveform: Some("sine".into()),
+            phase_offset: Some(0.25),
+            ..ParamUpsert::default()
+        };
+        assert_eq!(
+            param_upsert_edits(&upsert),
+            vec![
+                SlotEdit::ensure_present(parse(r#"consumed["phase"]"#)),
+                SlotEdit::assign_value(
+                    parse(r#"consumed["phase"].kind"#),
+                    LpValue::String("phasor".into()),
+                ),
+                SlotEdit::ensure_present(parse(r#"consumed["phase"].phasor.some"#)),
+                SlotEdit::assign_value(
+                    parse(r#"consumed["phase"].phasor.some"#),
+                    PhasorConfig {
+                        period_seconds: 2.5,
+                        waveform: Waveform::Sine,
+                        phase_offset: 0.25,
+                    }
+                    .to_lp_value(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn phasor_kind_with_no_shaping_fields_writes_the_default_config() {
+        let upsert = ParamUpsert {
+            name: "phase".into(),
+            kind: Some("phasor".into()),
+            ..ParamUpsert::default()
+        };
+        let edits = param_upsert_edits(&upsert);
+        assert_eq!(
+            edits.last(),
+            Some(&SlotEdit::assign_value(
+                parse(r#"consumed["phase"].phasor.some"#),
+                PhasorConfig::default().to_lp_value(),
+            ))
         );
     }
 }

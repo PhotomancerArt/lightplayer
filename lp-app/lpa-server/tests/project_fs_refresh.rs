@@ -21,7 +21,7 @@ fn server_tick_refreshes_referenced_artifact_without_recreating_runtime_node() {
     let handle = server.load_project(project_path.as_path()).expect("load");
     let before_id = clock_runtime_node_id(project(&server, handle));
 
-    // `controls.rate` is Debug-role (D2): an external file edit to it is
+    // `transport.rate` is Debug-role (D2): an external file edit to it is
     // ignored by the loader (warn-and-skip), so it cannot prove a body
     // actually re-parsed. A Setting-role field (a binding) is the probe
     // here instead.
@@ -68,7 +68,7 @@ fn overlay_commit_does_not_echo_as_external_fs_change() {
                     mutation: MutationOp::PutSlotEdit {
                         artifact: ArtifactLocation::file("/clock.json"),
                         edit: SlotEdit::assign_value(
-                            SlotPath::parse("controls.rate").expect("rate path"),
+                            SlotPath::parse("transport.rate").expect("rate path"),
                             LpValue::F32(3.0),
                         ),
                     },
@@ -117,7 +117,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_file(name, "project.json").as_path(),
-            b"{\n  \"format\": 4\n}\n",
+            b"{\n  \"format\": 5\n}\n",
         )
         .expect("write container manifest");
     server
@@ -172,7 +172,7 @@ fn clock_rate(project: &Project) -> f32 {
     let NodeDef::Clock(def) = entry.state.loaded_def().expect("loaded clock") else {
         panic!("expected clock definition");
     };
-    *def.controls.rate.value()
+    *def.transport.rate.value()
 }
 
 fn clock_has_seconds_binding(project: &Project) -> bool {
@@ -203,7 +203,7 @@ fn clock_json_with_rate(rate: f32) -> alloc::string::String {
         r#"
 {{
   "kind": "Clock",
-  "controls": {{
+  "transport": {{
     "rate": {rate}
   }}
 }}

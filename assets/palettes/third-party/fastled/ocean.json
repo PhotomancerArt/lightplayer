@@ -1,0 +1,14 @@
+{
+  "id": "fastled_ocean",
+  "name": "Ocean",
+  "license": {
+    "spdx": "MIT",
+    "author": "FastLED (Daniel Garcia, Mark Kriegsman et al.)",
+    "source_url": "https://github.com/FastLED/FastLED/blob/master/src/colorpalettes.cpp.hpp"
+  },
+  "gradient": {
+    "space": "srgb",
+    "method": "linear",
+    "stops": "#191970 #00008b #191970 #000080 #00008b #0000cd #2e8b57 #008080 #5f9ea0 #0000ff #008b8b #6495ed #7fffd4 #2e8b57 #00ffff #87cefa"
+  }
+}

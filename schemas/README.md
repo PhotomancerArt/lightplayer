@@ -12,7 +12,7 @@ artifact format). Decision record:
 
 | Path | What it is |
 |---|---|
-| `project.schema.json` | JSON Schema (2020-12) for the `project.json` container manifest (not a node envelope): required `"format": N`, optional `uid`/`name`, nothing else. |
+| `project.schema.json` | JSON Schema (2020-12) for the `project.json` container manifest (not a node envelope): required `"format": N`, optional `uid`/`name` plus the optional provenance fields `author`/`version`/`license`/`created`, nothing else. |
 | `module.schema.json` | JSON Schema for the `module.json` root module node artifact: `kind: "Module"` plus the compiled `ModuleDef` shape. |
 | `node.schema.json` | JSON Schema for any node artifact file — a `oneOf` over every registered node kind, discriminated by the `kind` field. |
 | `hardware.schema.json` | JSON Schema for board hardware manifests (`lp-core/lpc-hardware/boards/**/*.json`, `/hardware.json` device override). |
@@ -32,9 +32,9 @@ and `SlotRole::Debug` fields (session-only diagnostics, e.g. the clock's
 `controls.*`) are omitted from the JSON Schema entirely even though the
 reader still accepts (and now warns-and-ignores) an authored value there —
 the dump still carries their role, since it describes the model, not what a
-def file may validly author. A future offline upgrader (Studio/desktop; the
-device never upgrades) will consume shape dumps and fixture files, not JSON
-Schemas.
+def file may validly author. The offline upgrader (Studio/desktop; the
+device never upgrades) is `lp-app/lpa-upgrade` — it consumes the fixture
+files this directory's history snapshots, not the JSON Schemas.
 
 ## Regenerating and CI
 
@@ -61,21 +61,39 @@ Two more guards keep the schemas honest:
 mismatched version before parsing. To make a breaking format change:
 
 1. `just format-bump` — snapshots the *outgoing* schemas, shape dumps, and
-   a few real fixture artifacts into `schemas/history/v<N>/` (the future
-   upgrader's build-time inputs). The recipe refuses to overwrite an
-   existing snapshot and does not edit the constant.
+   a few real fixture project directories (verbatim — every file, not just
+   `*.json`) into `schemas/history/v<N>/`, and scaffolds
+   `lp-app/lpa-upgrade/src/steps/v<N>_to_v<N+1>.rs` as a stub. Refuses to
+   overwrite an existing snapshot and does not edit the constant.
 2. Bump `PROJECT_FORMAT_VERSION` by hand and make the format change.
 3. Update the authored `project.json` files (`projects/`, `examples/`,
    `lp-fw/fw-browser/www/smoke-project`).
-4. `just schema-gen`, then `just check` and `cargo test -p lp-cli`.
-5. Commit the snapshot together with the bump.
+4. Write the scaffolded step's `apply()` and register it in
+   `lp-app/lpa-upgrade/src/steps/mod.rs::STEPS`; copy the new snapshot's
+   fixtures into `lp-app/lpa-upgrade/tests/corpus/v<N>/` and bless the
+   goldens (`LPA_UPGRADE_BLESS=1 cargo test -p lpa-upgrade`) — see
+   `lp-app/lpa-upgrade/README.md` for the full ritual.
+5. `just schema-gen`, then `just check`, `cargo test -p lp-cli`, and
+   `cargo test -p lpa-upgrade`.
+6. Commit the snapshot, the corpus + goldens, and the step together with
+   the bump.
+
+A bump without a step is caught, not just documented: `lpa-upgrade`'s
+`the_chain_ends_at_the_current_format` test fails the moment
+`PROJECT_FORMAT_VERSION` moves past the last registered step, and a
+companion test fails if `schemas/history/v<N-1>/` is missing for the
+current `N` — both run in `cargo test -p lpa-upgrade`, so CI is red until
+the ritual above is actually followed.
 
 `schemas/history/` holds one directory per retired format (`v1/`, `v2/`, …),
 each with that format's schemas, shape dumps, and `fixtures/<project>/`
-copies of real authored artifacts. Snapshots are frozen history: never
-rewrite them when the model changes, and keep the fixture set covering both
-a single-output and a multi-output project so a future upgrader is never
-exercised against a one-shape-only corpus.
+copies of real authored artifacts — copied whole, assets included, since a
+migration step needs the GLSL/SVG/map2d files as much as the JSON. Snapshots
+are frozen history: never rewrite them when the model changes. Grow the
+fixture list whenever a bump touches a shape the existing two fixtures don't
+exercise; a real user project (sanitized — e.g. a Zook dome project) makes a
+better fixture than a synthetic one, because it is guaranteed to hit shapes
+an author actually reached for.
 
 ## Editor integration
 

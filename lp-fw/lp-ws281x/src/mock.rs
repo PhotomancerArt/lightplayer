@@ -17,54 +17,106 @@
 //! 800 kHz. [`MockRmt::advance`] is the clock; tests decide when interrupts get
 //! serviced, which is how a late or lost refill is simulated.
 //!
+//! The mock is `Sync`: its state is atomics plus a tiny internal spinlock, so
+//! a `Ws281xDriver<MockRmt, N>` can be shared with a real "ISR thread" — the
+//! shape `tests/cross_core.rs` uses (under Miri) to hunt teardown races. It
+//! is thread-shareable, **not** a timing model: cross-thread interleaving of
+//! `advance` and driver calls is whatever the scheduler makes it.
+//!
 //! Enabled by the default `mock` feature; firmware depends on this crate with
 //! `default-features = false`.
 
 use alloc::vec::Vec;
-use core::cell::{Cell, RefCell};
+use core::cell::UnsafeCell;
+use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize};
 
 use crate::blocks::BlockPlan;
 use crate::driver::Ws281xDriver;
 use crate::hw::{InterruptFlags, RmtHw};
 use crate::pulse::{PulseItem, STOP_WORD};
 
+/// A minimal test-double spinlock, because this crate is `no_std` (no
+/// `std::sync::Mutex`) and deliberately dependency-free.
+///
+/// Guards the two pieces of mock state that are not a single machine word:
+/// the pending [`InterruptFlags`] (three `u32`s that must be read-and-cleared
+/// as one) and each channel's transmitted-word log. Contention is test-only
+/// and momentary; correctness is the plain Acquire/Release handoff.
+#[derive(Debug, Default)]
+struct SpinLock<T> {
+    locked: AtomicBool,
+    value: UnsafeCell<T>,
+}
+
+// SAFETY: the lock provides mutual exclusion (`with` is the only accessor,
+// and it holds the flag for the closure's duration), so `&SpinLock<T>` may be
+// shared across threads whenever the protected value itself is sendable.
+unsafe impl<T: Send> Sync for SpinLock<T> {}
+
+impl<T> SpinLock<T> {
+    fn new(value: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            value: UnsafeCell::new(value),
+        }
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        while self
+            .locked
+            .compare_exchange_weak(false, true, Acquire, Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        // SAFETY: the flag was just won, so this is the only live reference;
+        // it dies before the flag is released below.
+        let result = f(unsafe { &mut *self.value.get() });
+        self.locked.store(false, Release);
+        result
+    }
+}
+
 /// One simulated RMT TX channel.
 #[derive(Debug)]
 struct MockChannel {
-    ram: Vec<Cell<u32>>,
-    tx_lim: Cell<u16>,
-    pos: Cell<usize>,
-    running: Cell<bool>,
-    emitted: RefCell<Vec<u32>>,
-    starts: Cell<usize>,
-    stops: Cell<usize>,
-    writes: Cell<usize>,
+    ram: Vec<AtomicU32>,
+    tx_lim: AtomicU16,
+    pos: AtomicUsize,
+    running: AtomicBool,
+    emitted: SpinLock<Vec<u32>>,
+    starts: AtomicUsize,
+    stops: AtomicUsize,
+    writes: AtomicUsize,
 }
 
 impl MockChannel {
     fn new(ram_words: usize) -> Self {
         Self {
-            ram: (0..ram_words).map(|_| Cell::new(0)).collect(),
-            tx_lim: Cell::new(0),
-            pos: Cell::new(0),
-            running: Cell::new(false),
-            emitted: RefCell::new(Vec::new()),
-            starts: Cell::new(0),
-            stops: Cell::new(0),
-            writes: Cell::new(0),
+            ram: (0..ram_words).map(|_| AtomicU32::new(0)).collect(),
+            tx_lim: AtomicU16::new(0),
+            pos: AtomicUsize::new(0),
+            running: AtomicBool::new(false),
+            emitted: SpinLock::new(Vec::new()),
+            starts: AtomicUsize::new(0),
+            stops: AtomicUsize::new(0),
+            writes: AtomicUsize::new(0),
         }
     }
 }
 
 /// A simulated RMT peripheral.
 ///
-/// Not `Sync` — it is a single-threaded test double. The driver only ever needs
-/// `&self` on the backend, so interior mutability is all that is required.
+/// `Sync` (see the module docs) so the cross-core harness can drive the
+/// driver from two real threads. The driver only ever needs `&self` on the
+/// backend, so interior mutability is all that is required; everything is a
+/// `Relaxed` atomic except the two lock-guarded aggregates.
 #[derive(Debug)]
 pub struct MockRmt {
     channels: Vec<MockChannel>,
-    pending: Cell<InterruptFlags>,
-    writes_per_word: Cell<usize>,
+    pending: SpinLock<InterruptFlags>,
+    writes_per_word: AtomicUsize,
 }
 
 impl MockRmt {
@@ -77,8 +129,8 @@ impl MockRmt {
     pub fn with_ram_sizes(sizes: &[usize]) -> Self {
         Self {
             channels: sizes.iter().map(|&w| MockChannel::new(w)).collect(),
-            pending: Cell::new(InterruptFlags::NONE),
-            writes_per_word: Cell::new(0),
+            pending: SpinLock::new(InterruptFlags::NONE),
+            writes_per_word: AtomicUsize::new(0),
         }
     }
 
@@ -102,7 +154,7 @@ impl MockRmt {
     /// models a handler that is racing the transmitter — which is exactly what
     /// the read-pointer-delta statistic measures.
     pub fn set_refill_cost(&self, writes_per_word: usize) {
-        self.writes_per_word.set(writes_per_word);
+        self.writes_per_word.store(writes_per_word, Relaxed);
     }
 
     fn channel(&self, ch: u8) -> &MockChannel {
@@ -125,20 +177,21 @@ impl MockRmt {
             return 0;
         }
         let mut done = 0;
-        while done < words && c.running.get() {
-            let word = c.ram[c.pos.get()].get();
+        while done < words && c.running.load(Relaxed) {
+            let pos = c.pos.load(Relaxed);
+            let word = c.ram[pos].load(Relaxed);
             if word == STOP_WORD {
-                c.running.set(false);
+                c.running.store(false, Relaxed);
                 self.flag(|f| f.set_end(ch));
                 break;
             }
-            c.emitted.borrow_mut().push(word);
-            c.pos.set((c.pos.get() + 1) % len);
+            c.emitted.with(|log| log.push(word));
+            c.pos.store((pos + 1) % len, Relaxed);
             done += 1;
 
             // `tx_lim == ram_words` arms the wrap back to word 0.
-            let boundary = (c.tx_lim.get() as usize) % len;
-            if c.pos.get() == boundary {
+            let boundary = (c.tx_lim.load(Relaxed) as usize) % len;
+            if (pos + 1) % len == boundary {
                 self.flag(|f| f.set_threshold(ch));
             }
         }
@@ -154,53 +207,49 @@ impl MockRmt {
 
     /// Is `ch` transmitting?
     pub fn is_running(&self, ch: u8) -> bool {
-        self.channel(ch).running.get()
+        self.channel(ch).running.load(Relaxed)
     }
 
     /// Is any channel transmitting?
     pub fn any_running(&self) -> bool {
-        self.channels.iter().any(|c| c.running.get())
+        self.channels.iter().any(|c| c.running.load(Relaxed))
     }
 
     /// Is an interrupt cause waiting to be taken?
     pub fn has_pending(&self) -> bool {
-        !self.pending.get().is_empty()
+        !self.pending.with(|f| *f).is_empty()
     }
 
     /// The currently pending causes, without clearing them.
     pub fn peek_interrupts(&self) -> InterruptFlags {
-        self.pending.get()
+        self.pending.with(|f| *f)
     }
 
     /// Throw away all pending `tx_thr_event` bits — simulates a threshold
     /// interrupt that was lost (masked out, or preempted past its deadline).
     pub fn drop_threshold_interrupts(&self) {
-        let mut f = self.pending.get();
-        f.threshold = 0;
-        self.pending.set(f);
+        self.pending.with(|f| f.threshold = 0);
     }
 
     /// As [`Self::drop_threshold_interrupts`], but for one channel only.
     pub fn drop_threshold_interrupt(&self, ch: u8) {
-        let mut f = self.pending.get();
-        f.threshold &= !(1u32 << ch);
-        self.pending.set(f);
+        self.pending.with(|f| f.threshold &= !(1u32 << ch));
     }
 
     /// Inject interrupt causes, e.g. a `tx_err` the model does not produce on
     /// its own.
     pub fn raise(&self, flags: InterruptFlags) {
-        self.pending.set(self.pending.get().merged(flags));
+        self.pending.with(|f| *f = f.merged(flags));
     }
 
     /// `ch`'s read pointer, as a `usize`.
     pub fn read_pos_words(&self, ch: u8) -> usize {
-        self.channel(ch).pos.get()
+        self.channel(ch).pos.load(Relaxed)
     }
 
     /// Every word `ch` has transmitted since the last [`Self::clear_emitted`].
     pub fn emitted(&self, ch: u8) -> Vec<u32> {
-        self.channel(ch).emitted.borrow().clone()
+        self.channel(ch).emitted.with(|log| log.clone())
     }
 
     /// [`Self::emitted`], decoded into level/duration pairs.
@@ -213,33 +262,35 @@ impl MockRmt {
 
     /// Forget `ch`'s transmitted-word log.
     pub fn clear_emitted(&self, ch: u8) {
-        self.channel(ch).emitted.borrow_mut().clear();
+        self.channel(ch).emitted.with(|log| log.clear());
     }
 
     /// A copy of `ch`'s RAM window.
     pub fn ram(&self, ch: u8) -> Vec<u32> {
-        self.channel(ch).ram.iter().map(Cell::get).collect()
+        self.channel(ch)
+            .ram
+            .iter()
+            .map(|w| w.load(Relaxed))
+            .collect()
     }
 
     /// `ch`'s current `tx_lim`.
     pub fn tx_lim(&self, ch: u8) -> u16 {
-        self.channel(ch).tx_lim.get()
+        self.channel(ch).tx_lim.load(Relaxed)
     }
 
     /// How many times `ch` has been started.
     pub fn start_count(&self, ch: u8) -> usize {
-        self.channel(ch).starts.get()
+        self.channel(ch).starts.load(Relaxed)
     }
 
     /// How many times `ch` has been explicitly stopped.
     pub fn stop_count(&self, ch: u8) -> usize {
-        self.channel(ch).stops.get()
+        self.channel(ch).stops.load(Relaxed)
     }
 
     fn flag(&self, f: impl FnOnce(&mut InterruptFlags)) {
-        let mut flags = self.pending.get();
-        f(&mut flags);
-        self.pending.set(flags);
+        self.pending.with(f);
     }
 }
 
@@ -255,42 +306,42 @@ impl RmtHw for MockRmt {
             "mock: write_ram({ch}, {word_idx}) outside the {}-word window",
             c.ram.len()
         );
-        c.ram[word_idx].set(value);
+        c.ram[word_idx].store(value, Relaxed);
 
-        let cost = self.writes_per_word.get();
+        let cost = self.writes_per_word.load(Relaxed);
         if cost > 0 {
-            c.writes.set(c.writes.get() + 1);
-            if c.writes.get() % cost == 0 {
+            let writes = c.writes.fetch_add(1, Relaxed) + 1;
+            if writes % cost == 0 {
                 self.advance(ch, 1);
             }
         }
     }
 
     fn set_tx_threshold(&self, ch: u8, words: u16) {
-        self.channel(ch).tx_lim.set(words);
+        self.channel(ch).tx_lim.store(words, Relaxed);
     }
 
     fn read_pos(&self, ch: u8) -> u16 {
-        self.channel(ch).pos.get() as u16
+        self.channel(ch).pos.load(Relaxed) as u16
     }
 
     fn start_tx(&self, ch: u8) {
         let c = self.channel(ch);
-        c.pos.set(0);
-        c.running.set(true);
-        c.starts.set(c.starts.get() + 1);
+        c.pos.store(0, Relaxed);
+        c.running.store(true, Relaxed);
+        c.starts.fetch_add(1, Relaxed);
     }
 
     fn stop_tx(&self, ch: u8) {
         let c = self.channel(ch);
-        if c.running.get() {
-            c.running.set(false);
-            c.stops.set(c.stops.get() + 1);
+        if c.running.swap(false, Relaxed) {
+            c.stops.fetch_add(1, Relaxed);
         }
     }
 
     fn take_interrupts(&self) -> InterruptFlags {
-        self.pending.replace(InterruptFlags::NONE)
+        self.pending
+            .with(|f| core::mem::replace(f, InterruptFlags::NONE))
     }
 }
 

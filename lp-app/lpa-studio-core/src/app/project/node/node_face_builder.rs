@@ -51,8 +51,8 @@
 //!   sections.
 
 use lpc_model::{
-    FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef, ShaderValueShapeRef,
-    shader_panel_step,
+    ClockDef, FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef,
+    ShaderValueShapeRef, shader_panel_step,
 };
 
 use crate::app::project::format_lp_value;
@@ -104,9 +104,113 @@ pub(in crate::app::project) fn kind_face(
             Some(UiNodeFace::Playlist(face))
         }
         OutputDef::KIND => output_face(sections).map(UiNodeFace::Output),
+        ClockDef::KIND => clock_face(sections).map(UiNodeFace::Clock),
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
+}
+
+/// The clock card's face: the published time product, the transport
+/// instrument (run/pause, rate, scrub, probe-anchored seconds), and (after
+/// the decoration pass) the per-reading trace cards riding this timebase —
+/// parent D10, reshaped by clock-face v2 and the tape-hero plan's P2.
+///
+/// `None` — generic-sections fallback — when the node publishes no time
+/// product row, which is the state of a clock whose runtime state has not
+/// landed yet. The trace cards, and the transport block's numeric
+/// `seconds`, are deliberately NOT derivable here: they live in the
+/// engine's timebase store, not in any slot, so they arrive through
+/// `ProjectController::apply_clock_faces` exactly the way the output
+/// face's board facts do.
+fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
+    let product = product_of_kind(sections, UiProductKind::Time)?;
+    let mut face = crate::UiClockFace::new(product);
+    face.transport = clock_transport(sections);
+    Some(face)
+}
+
+/// The clock's transport block, lifted from the flattened `transport.*`
+/// Debug rows (D4: `SlotController::collect_config` flattens every Debug
+/// field to a top-level row regardless of the record that declared it, so
+/// there is no `transport` record row to descend into — three sibling rows
+/// keyed by their full path).
+///
+/// Value + address + editability ride straight off each row exactly as the
+/// panel controls read them (`row_edit_address`, `UiSlotFieldState
+/// ::editable`) — staged edits flow through the same edit-buffer join the
+/// rows already carry, so the DTO reflects an in-flight drag immediately
+/// (the echo-suppression contract the tape widgets rely on, P3/P4).
+///
+/// `None` when the three rows have not landed (unread project — the Debug
+/// section is absent, or a differently-shaped clock). Numeric `seconds`
+/// starts at `0.0`; only `ProjectController::apply_clock_faces` can fill it
+/// in, from the cached timebase probe.
+fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport> {
+    let rows = debug_rows(sections);
+    let running_row = rows.iter().find(|row| row.key == "transport.running")?;
+    let rate_row = rows.iter().find(|row| row.key == "transport.rate")?;
+    let scrub_row = rows
+        .iter()
+        .find(|row| row.key == "transport.scrub_offset_seconds")?;
+    Some(crate::UiClockTransport {
+        seconds: 0.0,
+        running: row_bool(running_row)?,
+        rate: row_f32(rate_row)?,
+        scrub_offset_seconds: row_f32(scrub_row)?,
+        running_address: editable_row_address(running_row),
+        rate_address: editable_row_address(rate_row),
+        scrub_address: editable_row_address(scrub_row),
+        running_override: row_override(running_row),
+        rate_override: row_override(rate_row),
+        scrub_override: row_override(scrub_row),
+    })
+}
+
+/// The row's active debug-override entry: `Some` while the row is dirty
+/// (an override is live this session), carrying the address the per-value
+/// **Clear** dispatches — the row's own edit entry, or the row address for
+/// a scalar whose entry annotation has not landed yet. `None` = clean, no
+/// tint, no Clear.
+fn row_override(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if row.state.dirty == crate::UiNodeDirtyState::Clean {
+        return None;
+    }
+    row.edit_entry_address
+        .clone()
+        .or_else(|| row.address.clone())
+}
+
+/// A row's scalar `f32` value, when its body is a plain value of that kind.
+fn row_f32(row: &UiConfigSlot) -> Option<f32> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::F32(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A row's scalar `bool` value, when its body is a plain value of that kind.
+fn row_bool(row: &UiConfigSlot) -> Option<bool> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::Bool(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// [`row_edit_address`], but `None` when the row itself is not editable —
+/// the DTO's own "not editable" signal (transport rows are ordinarily
+/// always writable Debug fields, but the address should never invite a
+/// dispatch the row can't accept).
+fn editable_row_address(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if !row.state.editable {
+        return None;
+    }
+    row_edit_address(row)
 }
 
 /// The shader card's face: visual hero, panel knobs, code drawer. `None`
@@ -235,6 +339,23 @@ fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
         .collect()
 }
 
+/// Flattened Debug rows — the `config_rows` twin over `UiNodeSection
+/// ::DebugSlots` instead. Debug rows are already flat at the section level
+/// (`SlotController::partition_debug` lifts every Debug field to a
+/// top-level row regardless of nesting depth in the record that declared
+/// it), so this needs no record-descent the way `config_rows` never needed
+/// one either.
+fn debug_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            UiNodeSection::DebugSlots(slots) => Some(slots),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 /// The first inline GLSL editor among the node's asset rows — the code
 /// drawer reuses it verbatim (it is the SAME editor the sections view
 /// renders, minus the studio-level agent decoration).
@@ -281,11 +402,282 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
     else {
         return Vec::new();
     };
+    // One phasor on the def → the knob is just "Speed"; several need the
+    // uniform's name to tell them apart (G2 feedback: "phase period" was
+    // expert vocabulary). A def can also carry a plain VALUE uniform the
+    // author already labeled "Speed" (the pre-migration idiom) — the plain
+    // label yields to it rather than rendering two knobs with one name.
+    let lone_phasor = consumed
+        .fields
+        .iter()
+        .filter(|entry| uniform_kind(entry).as_deref() == Some(PHASOR_SLOT_KIND))
+        .count()
+        == 1
+        && !consumed.fields.iter().any(|entry| {
+            uniform_kind(entry).as_deref() != Some(PHASOR_SLOT_KIND) && uniform_speed_label(entry)
+        });
     consumed
         .fields
         .iter()
-        .filter_map(|entry| shader_uniform_control(entry, &rows))
+        .filter_map(|entry| match uniform_kind(entry).as_deref() {
+            // A timebase uniform has no `default` to turn: its value comes
+            // from the scope's clock. The ONE thing a person tunes about a
+            // phasor is how long a cycle takes, so that is the one control
+            // it gets (settled D11 v1 — waveform and phase offset stay
+            // card-face/def-editable, because a waveform is how ONE reader
+            // shapes a possibly-shared phase).
+            Some(PHASOR_SLOT_KIND) => phasor_period_control(entry, &rows, lone_phasor),
+            // `seconds` is unbounded time. There is nothing to set: no
+            // period, no range, no default. It gets no knob at all.
+            Some(SECONDS_SLOT_KIND) => None,
+            // A palette has no `default` either — its value is the whole
+            // `GradientConfig` on the slot's `gradient` option (M4 P3).
+            Some(PALETTE_SLOT_KIND) => palette_swatch_control(entry, &rows),
+            _ => shader_uniform_control(entry, &rows),
+        })
         .collect()
+}
+
+/// Whether a uniform's display label is "Speed" (the pre-migration idiom a
+/// plain phasor label must not collide with).
+fn uniform_speed_label(entry: &UiConfigSlot) -> bool {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return false;
+    };
+    string_field(&record.fields, "label")
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| entry.label.clone())
+        .eq_ignore_ascii_case("speed")
+}
+
+/// The `kind` discriminant string on a uniform's record row
+/// (`value` / `phasor` / `seconds`).
+fn uniform_kind(entry: &UiConfigSlot) -> Option<String> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    string_field(&record.fields, "kind")
+}
+
+/// `ShaderSlotKind::Phasor`'s wire tag.
+const PHASOR_SLOT_KIND: &str = "phasor";
+/// `ShaderSlotKind::Seconds`'s wire tag.
+const SECONDS_SLOT_KIND: &str = "seconds";
+/// `ShaderSlotKind::Palette`'s wire tag.
+const PALETTE_SLOT_KIND: &str = "palette";
+
+/// Widest period a phasor knob reaches when the uniform authors no range:
+/// one hour. The knob sweeps LOG-period, so the slow decades cost no
+/// resolution at the fast end — and G3 judged the old two-minute floor
+/// (30/hr) "too fast" for the slow end of the sweep. An author who wants a
+/// different range says so with `min`/`max` like any other uniform.
+const PHASOR_PERIOD_MAX_SECONDS: f32 = 3600.0;
+
+/// One phasor uniform → its **period** knob (P7 item 5).
+///
+/// Unlike a value uniform's knob, this one exists whether or not the slot's
+/// wiring is public: a phasor's period is the card's own affordance the way
+/// a fixture's brightness fader is. What publicity decides is only where
+/// the knob *also* shows up and what a gesture writes:
+///
+/// - **authored config channel** (public `panel_target`) → the knob joins
+///   the enclosing module's panel and gestures are PANEL WRITES of a whole
+///   `PhasorConfig` onto that channel, which is what every reader of the
+///   channel then integrates at (parent D3: one shared integrator);
+/// - **slot-local, or `default_bind`-only wiring** → card face only, and
+///   gestures are ordinary slot edits at `consumed[<name>].phasor.some`.
+///
+/// Both paths carry the slot's own waveform and phase offset through
+/// untouched ([`crate::UiPanelEmit::PhasorPeriod`]) — the period is the
+/// only field a panel may move.
+fn phasor_period_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+    lone_phasor: bool,
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    // The authored config row. Absent (option off) = nothing to turn: the
+    // engine runs the slot on `PhasorConfig::default()`, and a knob that
+    // edited a slot which is not there would need the option-on gesture the
+    // generic row already owns.
+    let config_row = uniform_field(fields, "phasor")
+        .filter(|row| row.optionality.is_some_and(|opt| opt.included))?;
+    let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+        return None;
+    };
+    let UiSlotValueKind::Struct { fields: config, .. } = &config_value.kind else {
+        return None;
+    };
+    let period = struct_f32(config, "period_seconds")?;
+
+    let min = option_f32_field(fields, "min").unwrap_or(0.0);
+    let max = option_f32_field(fields, "max").unwrap_or(PHASOR_PERIOD_MAX_SECONDS);
+    let mut control = UiPanelControl {
+        // The knob's LABEL: "Period" when the def has one phasor; the
+        // uniform's name joins only to disambiguate several. The M4 P6
+        // gate picked the plain-seconds voice (retiring the PROVISIONAL
+        // reciprocal Speed readout), so the knob speaks the seconds the
+        // slot actually stores — the clock face's own vocabulary.
+        label: if lone_phasor {
+            "Period".to_string()
+        } else {
+            format!(
+                "{} period",
+                string_field(fields, "label")
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or_else(|| entry.label.clone())
+            )
+        },
+        address: row_edit_address(config_row),
+        widget: UiPanelWidget::Knob {
+            min,
+            max,
+            // Continuous: a period is seconds, not a count.
+            step: None,
+        },
+        // The knob turns the PERIOD, so its value is that one number even
+        // though the slot it writes is the whole record. The FACE readout
+        // presents it in plain seconds ("100 s") with the unit riding the
+        // string, so the control carries no unit suffix.
+        value: UiSlotValue::f32(period).with_unit(crate::UiSlotUnit::seconds()),
+        emit: crate::UiPanelEmit::PhasorPeriod {
+            waveform: struct_waveform(config),
+            phase_offset: struct_f32(config, "phase_offset").unwrap_or(0.0),
+        },
+        live_value: None,
+        panel_target: None,
+        unit: None,
+        state: config_row.state.clone(),
+        aspects: config_row.visible_aspects(),
+    };
+    // The wiring facts live on the binding-derived row keyed by the bare
+    // uniform name, exactly as they do for a value uniform's knob.
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    control.panel_target = top_rows
+        .iter()
+        .find(|row| row.key == name)
+        .and_then(|row| public_panel_target(row));
+    // The live reading rides the same binding-derived row (the channel's
+    // PhasorConfig reads back as its period) — without it the knob snapped
+    // back to the authored value after every gesture, because the writes it
+    // was landing had no display path (G2: "stuck at 100").
+    control.live_value = top_rows
+        .iter()
+        .find(|row| row.key == name)
+        .and_then(|row| bound_live_value(row));
+    Some(control)
+}
+
+/// One palette uniform → its **swatch** control (M4 P3).
+///
+/// The palette twin of [`phasor_period_control`], and the differences are
+/// the interesting part:
+///
+/// - the value is the WHOLE `GradientConfig` on the slot's `gradient`
+///   option, not one field of a record, so the emit family carries no
+///   shaping to preserve ([`crate::UiPanelEmit::Gradient`]);
+/// - there is no range, because a palette is not a number.
+///
+/// Everything else is the same rule: the control exists whether or not the
+/// wiring is public (a palette is the card's own affordance), and publicity
+/// only decides whether a pick becomes a PANEL WRITE on the config channel
+/// — where every reader of that channel takes the config whole
+/// (`resolve_gradient_config`) — or an ordinary slot edit at
+/// `consumed[<name>].gradient.some`.
+///
+/// An ABSENT `gradient` option still gets a control, seeded with
+/// `GradientConfig::default()` — exactly what the engine runs the slot on.
+/// This is the realistic authored case: most palette slots are authored
+/// with just a `default_bind` and no inline `gradient`, so the option
+/// arrives absent and the swatch is how the first palette gets picked at
+/// all. The first pick's `AssignValue` at `…gradient.some`
+/// materializes the option (the overlay's ensure-present rule).
+fn palette_swatch_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    let config_row = uniform_field(fields, "gradient")?;
+    let present = config_row.optionality.is_some_and(|opt| opt.included);
+    let (config_value, address) = if present {
+        let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+            return None;
+        };
+        // The value has to READ as a palette, or the swatch has nothing to
+        // sample and the web layer would fall back to a bare display anyway.
+        crate::app::project::gradient_config_value(&config_value.kind.to_lp_value())?;
+        (config_value.clone(), row_edit_address(config_row))
+    } else {
+        let default_value = crate::UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::default(),
+        ))
+        .with_editor(crate::UiSlotEditorHint::Gradient);
+        let address = config_row
+            .address
+            .as_ref()
+            .and_then(|address| address.child_field("some"));
+        (default_value, address)
+    };
+
+    let mut control = UiPanelControl {
+        label: string_field(fields, "label")
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| entry.label.clone()),
+        address,
+        widget: UiPanelWidget::PaletteSwatch,
+        value: config_value,
+        emit: crate::UiPanelEmit::Gradient,
+        live_value: None,
+        panel_target: None,
+        // A palette carries its own vocabulary in the readout (`5 stops`,
+        // `↻ 4 · 3/min`); a unit suffix has nothing to add.
+        unit: None,
+        state: config_row.state.clone(),
+        aspects: config_row.visible_aspects(),
+    };
+    // The wiring facts live on the binding-derived row keyed by the bare
+    // uniform name, exactly as they do for a knob.
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    let top_row = top_rows.iter().find(|row| row.key == name);
+    control.panel_target = top_row.and_then(|row| public_panel_target(row));
+    // A driven palette reads back as the channel's config summary (the
+    // `format_live_panel_value` gradient branch) — text, not a config the
+    // swatch could sample, so the strips keep showing the authored one.
+    control.live_value = top_row.and_then(|row| bound_live_value(row));
+    Some(control)
+}
+
+/// A named `f32` inside a struct-valued slot payload.
+fn struct_f32(fields: &[(String, UiSlotValue)], name: &str) -> Option<f32> {
+    match fields.iter().find(|(field, _)| field == name)?.1.kind {
+        UiSlotValueKind::F32(value) => Some(value),
+        _ => None,
+    }
+}
+
+/// The config's waveform, defaulting to `Ramp` — the same fallback the
+/// model uses, so an unreadable payload cannot silently reshape a phasor
+/// the next time its period is turned.
+fn struct_waveform(fields: &[(String, UiSlotValue)]) -> lpc_model::Waveform {
+    let Some((_, value)) = fields.iter().find(|(field, _)| field == "waveform") else {
+        return lpc_model::Waveform::default();
+    };
+    let UiSlotValueKind::String(tag) = &value.kind else {
+        return lpc_model::Waveform::default();
+    };
+    lpc_model::Waveform::parse(tag).unwrap_or_default()
 }
 
 /// One uniform entry (a `ShaderSlotDef` record row) → its knob control.
@@ -693,6 +1085,7 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
     resolve_authored_slices(&mut channels);
 
     Some(UiOutputFace {
+        led_budget: None,
         channels,
         channels_address: channels_row.address.clone(),
         input_binding: bound_endpoint_label(&rows, "input"),
@@ -735,6 +1128,7 @@ fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
     let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
 
     Some(UiOutputChannelRow {
+        wire_status: None,
         key,
         pin_label: endpoint_pin_label(&endpoint_display),
         endpoint_display,
@@ -802,6 +1196,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         address: row_edit_address(slot),
         widget,
         value: value.clone(),
+        emit: crate::UiPanelEmit::Value,
         live_value: bound_live_value(slot),
         panel_target: public_panel_target(slot),
         unit: value.unit.clone(),
@@ -836,6 +1231,10 @@ fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
             max: *max,
             step: *step,
         }),
+        // The Gradient hint is what P1 declared on both palette storage
+        // forms, so any gradient-shaped row reads as a swatch here — the
+        // same hint the slot ROW dispatches its read-only strip on (P2).
+        UiSlotEditorHint::Gradient => Some(UiPanelWidget::PaletteSwatch),
         _ => matches!(value.kind, UiSlotValueKind::Bool(_)).then_some(UiPanelWidget::Toggle),
     }
 }
@@ -1625,6 +2024,604 @@ mod tests {
                 bound_row("speed", endpoint),
             ]),
         ]
+    }
+
+    // -- phasor period knob (P7 item 5) -----------------------------------
+
+    /// A `phasor`-kind uniform record with an authored config.
+    fn phasor_uniform(name: &str, period: f32, waveform: &str, offset: f32) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let config = UiSlotValue {
+            kind: UiSlotValueKind::Struct {
+                name: Some("PhasorConfig".to_string()),
+                fields: vec![
+                    ("period_seconds".to_string(), UiSlotValue::f32(period)),
+                    ("waveform".to_string(), UiSlotValue::string(waveform)),
+                    ("phase_offset".to_string(), UiSlotValue::f32(offset)),
+                ],
+            },
+            ..UiSlotValue::f32(period)
+        };
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("phasor"),
+            ),
+            UiConfigSlot::value(format!("{prefix}.phasor"), "Phasor", config)
+                .with_address(address(&format!("{prefix}.phasor")))
+                .with_optionality(UiSlotOptionality::included(true)),
+            option_f32(&format!("{prefix}.default"), "Default", 0.0),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Phase"),
+            ),
+        ];
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+    }
+
+    fn phasor_sections(uniform: UiConfigSlot, wiring: Option<UiConfigSlot>) -> Vec<UiNodeSection> {
+        let mut rows = vec![UiConfigSlot::record("consumed", "Consumed", vec![uniform])];
+        rows.extend(wiring);
+        vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+            UiNodeSection::ConfigSlots(rows),
+        ]
+    }
+
+    fn phasor_face(sections: &[UiNodeSection]) -> UiShaderFace {
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        face
+    }
+
+    /// A phasor slot gets ONE knob — the period, in seconds — and it gets it
+    /// whether or not the slot is wired: unlike a value uniform's default,
+    /// a period is the card's own affordance. Slot-local means the gesture
+    /// is an ordinary slot edit at `…phasor.some`.
+    #[test]
+    fn a_phasor_slot_gets_exactly_one_knob_and_it_edits_the_config_slot() {
+        let face = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 20.0, "ramp", 0.0),
+            None,
+        ));
+
+        assert_eq!(face.controls.len(), 1, "one control per phasor slot");
+        let control = &face.controls[0];
+        assert_eq!(
+            control.label, "Period",
+            "a lone phasor knob wears the plain label"
+        );
+        assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
+        assert_eq!(
+            control.unit, None,
+            "the auto-denominated rate readout carries its unit in the string"
+        );
+        assert_eq!(
+            control.widget,
+            UiPanelWidget::Knob {
+                min: 0.0,
+                max: PHASOR_PERIOD_MAX_SECONDS,
+                step: None,
+            },
+            "unauthored range falls back to 0..3600 s, continuous"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("period edits are addressed")
+                .path
+                .to_string(),
+            "consumed[phase].phasor.some",
+            "the knob edits the interior config slot"
+        );
+        assert!(
+            control.panel_target.is_none(),
+            "unwired: the knob is the card's own, not a panel entry"
+        );
+    }
+
+    /// The gesture writes a WHOLE config, so the slot's shaping has to ride
+    /// along — a panel may move the period and nothing else (settled D11 v1).
+    #[test]
+    fn the_period_knob_carries_the_slots_shaping_through_the_gesture() {
+        let face = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 4.0, "triangle", 0.25),
+            None,
+        ));
+
+        assert_eq!(
+            face.controls[0].emit,
+            crate::UiPanelEmit::PhasorPeriod {
+                waveform: lpc_model::Waveform::Triangle,
+                phase_offset: 0.25,
+            }
+        );
+    }
+
+    /// Publicity follows the ordinary derived rules: an AUTHORED binding on
+    /// the phasor slot puts the knob on the enclosing module's panel and
+    /// turns its gestures into panel writes onto the config channel (parent
+    /// D3 — one shared integrator for every reader). `default_bind`-only
+    /// wiring is not publicity, so the knob stays on the card.
+    #[test]
+    fn phasor_publicity_follows_the_authored_binding() {
+        let authored = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 100.0, "ramp", 0.0),
+            Some(bound_row(
+                "phase",
+                channel_endpoint("bus:speed", "speed", 3),
+            )),
+        ));
+        let target = authored.controls[0]
+            .panel_target
+            .as_ref()
+            .expect("an authored config channel is a panel write target");
+        assert_eq!(target.channel, "speed");
+
+        let defaulted = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 100.0, "ramp", 0.0),
+            Some(bound_row(
+                "phase",
+                channel_endpoint("bus:speed", "speed", 3).with_default_origin(),
+            )),
+        ));
+        assert_eq!(defaulted.controls.len(), 1, "the card keeps its knob");
+        assert!(
+            defaulted.controls[0].panel_target.is_none(),
+            "default-origin wiring is not publicity"
+        );
+    }
+
+    /// An authored `min`/`max` beats the default range, exactly as it does
+    /// for a value uniform's knob.
+    #[test]
+    fn an_authored_range_bounds_the_period_knob() {
+        let mut uniform = phasor_uniform("phase", 20.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body {
+            record
+                .fields
+                .push(option_f32("consumed[phase].min", "Min", 1.0));
+            record
+                .fields
+                .push(option_f32("consumed[phase].max", "Max", 30.0));
+        }
+
+        let face = phasor_face(&phasor_sections(uniform, None));
+
+        assert_eq!(
+            face.controls[0].widget,
+            UiPanelWidget::Knob {
+                min: 1.0,
+                max: 30.0,
+                step: None,
+            }
+        );
+    }
+
+    /// `seconds` is unbounded time: no period, no range, no default —
+    /// nothing to turn, so no knob anywhere.
+    #[test]
+    fn a_seconds_slot_gets_no_knob() {
+        let mut uniform = phasor_uniform("t", 0.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body
+            && let Some(kind) = record.fields.first_mut()
+        {
+            *kind = UiConfigSlot::value("consumed[t].kind", "Kind", UiSlotValue::string("seconds"));
+        }
+
+        let face = phasor_face(&phasor_sections(
+            uniform,
+            Some(bound_row("t", channel_endpoint("bus:time", "time", 3))),
+        ));
+
+        assert!(
+            face.controls.is_empty(),
+            "seconds has nothing to set, got {:?}",
+            face.controls
+                .iter()
+                .map(|control| control.label.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A phasor whose config option is OFF has no slot to edit: the engine
+    /// runs it on the default shaping, and turning a knob would have to
+    /// perform the option-on gesture the generic row already owns.
+    #[test]
+    fn a_phasor_with_no_authored_config_gets_no_knob() {
+        let mut uniform = phasor_uniform("phase", 20.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body {
+            record
+                .fields
+                .retain(|field| !field.key.ends_with(".phasor"));
+        }
+
+        assert!(
+            phasor_face(&phasor_sections(uniform, None))
+                .controls
+                .is_empty()
+        );
+    }
+
+    // -- palette swatch (M4 P3) --------------------------------------------
+
+    /// A palette uniform record: `kind = palette`, the authored config on a
+    /// present `gradient` option, and a label — the shape the shader
+    /// projection reads.
+    fn palette_uniform(name: &str, config: &lpc_model::GradientConfig) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(config)),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::included(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+    }
+
+    fn ramp(stops: usize) -> lpc_model::Gradient {
+        lpc_model::Gradient {
+            space: lpc_model::Colorspace::Oklab,
+            method: lpc_model::InterpMethod::Linear,
+            stops: (0..stops)
+                .map(|index| lpc_model::GradientStop {
+                    at: index as f32 / (stops - 1) as f32,
+                    c: [index as f32 / stops as f32, 0.1, -0.1],
+                })
+                .collect(),
+        }
+    }
+
+    /// A palette slot gets ONE swatch, whatever the wiring: like a phasor's
+    /// period, the palette is the card's own affordance. Slot-local means
+    /// the pick is an ordinary slot edit at `…gradient.some`, and the whole
+    /// config is what the control carries.
+    #[test]
+    fn a_palette_slot_gets_one_swatch_editing_its_config_slot() {
+        let config = lpc_model::GradientConfig::Static(ramp(3));
+        let face = phasor_face(&phasor_sections(palette_uniform("palette", &config), None));
+
+        assert_eq!(face.controls.len(), 1, "one control per palette slot");
+        let control = &face.controls[0];
+        assert_eq!(control.label, "Palette");
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(control.emit, crate::UiPanelEmit::Gradient);
+        assert_eq!(control.unit, None);
+        assert_eq!(
+            control.gradient_config(),
+            Some(config),
+            "the control carries the WHOLE config, not a field of it"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("palette picks are addressed")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
+        assert!(
+            control.panel_target.is_none(),
+            "unwired: the swatch is the card's own, not a panel entry"
+        );
+        // The row's display is the palette summary (P2), never the padded
+        // 24-entry storage dump.
+        assert_eq!(control.value.display, "oklab \u{b7} linear \u{b7} 3 stops");
+    }
+
+    /// The realistic authored case: a hand-authored palette slot usually
+    /// arrives with the `gradient` option ABSENT (just a `default_bind`) —
+    /// and still gets its swatch, seeded with the same default the engine
+    /// runs the slot on.
+    /// The first pick's `AssignValue` at `…gradient.some` materializes the
+    /// option (the overlay's ensure-present rule).
+    #[test]
+    fn an_absent_gradient_option_still_gets_a_default_seeded_swatch() {
+        let prefix = "consumed[palette]";
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::unset(),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::excluded(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        let uniform = UiConfigSlot::record(prefix.to_string(), "palette", fields)
+            .with_address(address(prefix));
+
+        let face = phasor_face(&phasor_sections(uniform, None));
+
+        assert_eq!(face.controls.len(), 1, "the absent option still presents");
+        let control = &face.controls[0];
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(
+            control.gradient_config(),
+            Some(lpc_model::GradientConfig::default()),
+            "the swatch shows what the engine actually runs"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("the first pick lands at the option's some")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
+    }
+
+    /// Publicity is the ordinary derived rule, and a wired palette's live
+    /// reading is the channel's own config summary.
+    #[test]
+    fn palette_publicity_follows_the_authored_binding() {
+        let config = lpc_model::GradientConfig::Cycle {
+            set: vec![ramp(2), ramp(3)],
+            step_seconds: 20.0,
+            fade_seconds: 0.5,
+        };
+        let mut endpoint = channel_endpoint("bus:palette", "palette", 3);
+        endpoint.live_value = crate::app::project::format_live_panel_value(
+            &lpc_model::ToLpValue::to_lp_value(&config),
+        );
+        let face = phasor_face(&phasor_sections(
+            palette_uniform("palette", &config),
+            Some(bound_row("palette", endpoint)),
+        ));
+
+        let control = &face.controls[0];
+        assert_eq!(
+            control
+                .panel_target
+                .as_ref()
+                .expect("an authored config channel is a panel write target")
+                .channel,
+            "palette"
+        );
+        assert_eq!(
+            control.live_value.as_deref(),
+            Some("cycle \u{b7} 2 palettes \u{b7} every 20 s \u{b7} 0.5 s fade"),
+            "a driven palette reads back as words; the strip keeps the authored config"
+        );
+    }
+
+    /// An absent `gradient` option has no slot to edit (the engine runs the
+    /// default palette), and a non-gradient payload has nothing to sample —
+    /// both fall back to the generic row rather than an empty swatch.
+    #[test]
+    fn a_palette_without_a_readable_config_gets_no_swatch() {
+        let config = lpc_model::GradientConfig::Static(ramp(2));
+        let mut absent = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut absent.body {
+            record
+                .fields
+                .retain(|field| !field.key.ends_with(".gradient"));
+        }
+        assert!(
+            phasor_face(&phasor_sections(absent, None))
+                .controls
+                .is_empty(),
+            "option off: nothing to pick into"
+        );
+
+        let mut mis_shaped = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut mis_shaped.body
+            && let Some(row) = record
+                .fields
+                .iter_mut()
+                .find(|field| field.key.ends_with(".gradient"))
+        {
+            row.body = UiConfigSlotBody::Value(UiSlotValue::f32(0.5));
+        }
+        assert!(
+            phasor_face(&phasor_sections(mis_shaped, None))
+                .controls
+                .is_empty(),
+            "a non-palette payload behind a palette slot renders no swatch"
+        );
+    }
+
+    /// The hint mapping is the other entry point: any `Gradient`-hinted
+    /// value row reads as a swatch, the same hint the slot row draws its
+    /// read-only strip from (P2).
+    #[test]
+    fn the_gradient_hint_maps_to_the_swatch_widget() {
+        let value = UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::Static(ramp(4)),
+        ))
+        .with_editor(UiSlotEditorHint::Gradient);
+        let slot = UiConfigSlot::value("palette", "Palette", value);
+
+        assert_eq!(panel_widget(&slot), Some(UiPanelWidget::PaletteSwatch));
+    }
+
+    // -- clock face (P7 item 4) --------------------------------------------
+
+    /// The clock's face is the published handle plus the tiny seconds
+    /// readout (clock-face v2 — the Delta row is gone outright); the trace
+    /// cards arrive later, from the timebase probe, so a freshly derived
+    /// face is `Unread` with no cards — NOT an empty listing, which would
+    /// read as "nothing is running".
+    #[test]
+    fn clock_face_derives_the_product_and_waits_for_the_timebase_probe() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::ProducedValues(vec![
+                UiProducedValue::new("Seconds", "3.5").with_key("seconds"),
+                UiProducedValue::new("Delta seconds", "0.033").with_key("delta_seconds"),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        assert_eq!(face.product.kind, UiProductKind::Time);
+        assert_eq!(
+            face.transport, None,
+            "no Debug rows yet — the transport block waits, same as the probe"
+        );
+        assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
+        assert!(face.phasors.is_empty());
+    }
+
+    fn transport_row(field: &str, value: UiSlotValue) -> UiConfigSlot {
+        let key = format!("transport.{field}");
+        UiConfigSlot::value(&key, field, value).with_address(clock_slot_address(&key))
+    }
+
+    fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.module/node.clock").expect("valid address"),
+            ProjectSlotRoot::Def,
+            SlotPath::parse(path).expect("valid path"),
+        )
+    }
+
+    /// The transport block lifts value + address + editability straight off
+    /// the flattened Debug rows — the tape widgets' whole read surface.
+    #[test]
+    fn clock_face_lifts_the_transport_block_from_the_debug_rows() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(false)),
+                transport_row("rate", UiSlotValue::f32(2.0)),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(-12.4)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("three rows present → block present");
+        assert!(!transport.running);
+        assert_eq!(transport.rate, 2.0);
+        assert_eq!(transport.scrub_offset_seconds, -12.4);
+        assert_eq!(transport.seconds, 0.0, "numeric seconds is probe-only");
+        assert_eq!(
+            transport.rate_address,
+            Some(clock_slot_address("transport.rate")),
+            "editable row → dispatch address"
+        );
+        assert!(transport.running_address.is_some());
+        assert!(transport.scrub_address.is_some());
+    }
+
+    /// A read-only row keeps its value but withholds the dispatch address —
+    /// the widgets render inert chrome instead of dead handlers (P4).
+    #[test]
+    fn a_read_only_transport_row_withholds_its_dispatch_address() {
+        let read_only = UiSlotFieldState {
+            editable: false,
+            ..UiSlotFieldState::editable()
+        };
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(1.0)).with_state(read_only),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("values still lift");
+        assert_eq!(transport.rate, 1.0);
+        assert_eq!(transport.rate_address, None, "read-only → no dispatch");
+        assert!(transport.running_address.is_some(), "siblings unaffected");
+    }
+
+    /// A dirty Debug row (an active session override) lifts its own edit
+    /// entry as the override marker — the tape's changed-tint flag and
+    /// per-value Clear target in one; clean rows lift `None`.
+    #[test]
+    fn an_active_override_lifts_its_clear_target() {
+        let dirty = UiSlotFieldState::editable().with_dirty(crate::UiNodeDirtyState::Dirty);
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(2.0))
+                    .with_state(dirty)
+                    .with_edit_entry_address(clock_slot_address("transport.rate")),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("block present");
+        assert_eq!(
+            transport.rate_override,
+            Some(clock_slot_address("transport.rate")),
+            "dirty row → its edit entry is the Clear target"
+        );
+        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.scrub_override, None);
+    }
+
+    /// A clock with no produced product row keeps the generic sections —
+    /// the same stable-face rule every other kind follows.
+    #[test]
+    fn a_clock_with_no_product_row_stays_generic() {
+        assert_eq!(
+            kind_face(
+                "clock",
+                &test_address(),
+                &[UiNodeSection::ConfigSlots(Vec::new())],
+                &mut Vec::new()
+            ),
+            None
+        );
     }
 
     /// The binding-derived row the project walk appends for a wired uniform

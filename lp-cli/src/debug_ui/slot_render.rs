@@ -454,7 +454,7 @@ fn render_named_slot_shape_row(
         (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
             egui::CollapsingHeader::new(format!("{name} ({})", fields.len()))
                 .id_salt(("slot-row-record", id_path))
-                .default_open((depth == 0 && name == "bindings") || name == "controls")
+                .default_open((depth == 0 && name == "bindings") || name == "transport")
                 .show(ui, |ui| {
                     ui.small(format!("changed rev {}", record.fields_revision.0));
                     for (index, field) in fields.iter().enumerate() {
@@ -724,6 +724,9 @@ pub(crate) fn render_product_skeleton(
                                 extent.rows.saturating_mul(extent.samples_per_row)
                             ));
                         }
+                        ProductRef::Time(_) => {
+                            ui.small("lazy");
+                        }
                     });
                 });
             });
@@ -795,6 +798,7 @@ fn product_kind_label(product: ProductRef) -> &'static str {
     match product {
         ProductRef::Visual(_) => "visual product",
         ProductRef::Control(_) => "control product",
+        ProductRef::Time(_) => "time product",
     }
 }
 

@@ -888,11 +888,15 @@ pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
         | (LpValue::Resource(_), LpType::Resource) => true,
         (LpValue::Product(product), LpType::Product(kind)) => match (product, kind) {
             (crate::ProductRef::Visual(_), ProductKind::Visual)
-            | (crate::ProductRef::Control(_), ProductKind::Control) => true,
+            | (crate::ProductRef::Control(_), ProductKind::Control)
+            | (crate::ProductRef::Time(_), ProductKind::Time) => true,
             _ => false,
         },
+        // Fixed-size arrays accept up to the declared length: the declared
+        // size is the maximum, and a shorter value's absent tail is
+        // type-default (fixed sizes are maxima, not required lengths).
         (LpValue::Array(values), LpType::Array(item_ty, len)) => {
-            values.len() == *len
+            values.len() <= *len
                 && values
                     .iter()
                     .all(|value| lp_value_matches_type(value, item_ty))

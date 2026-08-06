@@ -11,8 +11,8 @@ use lpc_wire::{
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, WireBindingGraph,
-    WireChannelSampleFormat, WireTextureFormat,
+    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingGraph, WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -29,6 +29,11 @@ pub struct ProjectSync {
     /// renders natively at whatever is asked.
     visual_preview_frame: UiProductPreviewFrame,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
+    /// Latest timebase listing per subscribed time product (D10). Keyed like
+    /// `product_previews` and filled by the same probe cycle: a clock's card
+    /// asks for its listing exactly while it is subscribed for products, so
+    /// the debug surface costs nothing on an unfocused clock.
+    timebases: BTreeMap<UiProductRef, UiTimebaseRead>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -56,6 +61,7 @@ impl ProjectSync {
             phase: ProjectSyncPhase::Empty,
             visual_preview_frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             product_previews: BTreeMap::new(),
+            timebases: BTreeMap::new(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -273,6 +279,13 @@ impl ProjectSync {
         self.product_previews.get(product)
     }
 
+    /// Latest cached timebase listing for a time product (D10). `None` means
+    /// no read has landed yet — distinct from a read that came back
+    /// [`UiTimebaseRead::Unknown`].
+    pub fn timebase(&self, product: &UiProductRef) -> Option<&UiTimebaseRead> {
+        self.timebases.get(product)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.phase == ProjectSyncPhase::Ready
     }
@@ -359,6 +372,7 @@ impl ProjectSync {
     pub fn reset_view(&mut self) {
         self.view = ProjectView::new();
         self.product_previews.clear();
+        self.timebases.clear();
         self.binding_graph = None;
     }
 
@@ -371,6 +385,13 @@ impl ProjectSync {
     #[cfg(test)]
     pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
         self.binding_graph = Some(graph);
+    }
+
+    /// Inject a timebase read directly (test fixture path), standing in for
+    /// the probe cycle the same way `set_binding_graph_for_test` does.
+    #[cfg(test)]
+    pub(crate) fn set_timebase_for_test(&mut self, product: UiProductRef, read: UiTimebaseRead) {
+        self.timebases.insert(product, read);
     }
 
     /// Set the resolution visual-product probes request (runtime-tiered:
@@ -435,6 +456,17 @@ impl ProjectSync {
                         ));
                     }
                 }
+                // A time product has no preview frame — there is no picture
+                // behind the handle. What it has is the timebase listing, so
+                // the same subscription that would fetch a preview fetches
+                // the phasor rows instead (D10).
+                UiProductRef::Time { .. } => {
+                    if let Some(time) = product.time_product() {
+                        probes.push(ProjectProbeRequest::Timebase(TimebaseProbeRequest {
+                            product: time,
+                        }));
+                    }
+                }
             }
         }
         probes
@@ -445,15 +477,75 @@ impl ProjectSync {
             if let Some((product, preview)) = self.product_preview_from_probe(probe) {
                 self.product_previews.insert(product, preview);
             }
+            if let Some((product, read)) = timebase_from_probe(probe) {
+                self.timebases.insert(product, read);
+            }
         }
     }
 
+    /// Control products whose latest preview carries no display layout,
+    /// paired with that preview's product revision — the candidates for the
+    /// client-side fallback
+    /// ([`crate::app::project::control_display_layout_fallback`]).
+    ///
+    /// A layout is missing whenever the engine refused it (over the wire
+    /// budget, or a producer that publishes none) and nothing cached stands
+    /// in, which is exactly the state
+    /// [`display_layout_from_probe_result`]'s `Unsupported` arm leaves
+    /// behind.
+    pub(in crate::app::project) fn control_products_missing_display_layout(
+        &self,
+    ) -> Vec<(UiProductRef, Revision)> {
+        self.product_previews
+            .iter()
+            .filter_map(|(product, preview)| match preview {
+                UiProductPreview::ControlNative(preview) if preview.display_layout.is_none() => {
+                    Some((*product, Revision::new(preview.revision)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Install a client-synthesized display layout on a cached control
+    /// preview. A no-op when the preview is gone or is not a native control
+    /// preview — the fallback never creates preview state of its own.
+    pub(in crate::app::project) fn set_control_display_layout(
+        &mut self,
+        product: &UiProductRef,
+        layout: Rc<ControlDisplayLayout>,
+    ) {
+        if let Some(UiProductPreview::ControlNative(preview)) =
+            self.product_previews.get_mut(product)
+        {
+            preview.display_layout = Some(layout);
+        }
+    }
+
+    /// What the next probe should ask for: nothing new while the cached
+    /// layout's revision still stands, otherwise the whole layout.
+    ///
+    /// A client-synthesized layout ([`Self::set_control_display_layout`])
+    /// rides this the same way an engine-sent one does, carrying the
+    /// preview's PRODUCT revision rather than the engine's layout revision —
+    /// the refusal never tells us the latter. Both answers the engine can
+    /// give back are correct:
+    ///
+    /// - the revisions differ (the normal case, since the product revision
+    ///   advances every tick), so the engine re-evaluates, refuses again,
+    ///   and the fallback re-synthesizes from the current document;
+    /// - they coincide, so the engine answers `Unchanged` and the cached
+    ///   synthesis is kept — which is what a matching layout revision means
+    ///   anyway: the geometry has not moved.
+    ///
+    /// Neither path issues an extra request or loses the layout, so the
+    /// fallback cannot churn the read loop.
     fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
         match self
             .product_previews
             .get(&product)
             .and_then(control_preview_display_layout)
-            .map(ControlDisplayLayout::revision)
+            .map(|layout| layout.revision())
         {
             Some(revision) => ControlDisplayLayoutRead::IfChanged {
                 known_revision: Some(revision),
@@ -478,8 +570,7 @@ impl ProjectSync {
             }) => {
                 let product_ref = UiProductRef::from_control_product(*product);
                 let cached = self.product_previews.get(&product_ref);
-                let display_layout =
-                    display_layout_from_probe_result(display_layout, cached).cloned();
+                let display_layout = display_layout_from_probe_result(display_layout, cached);
                 Some((
                     product_ref,
                     UiProductPreview::ControlNative(UiControlProductPreview {
@@ -704,27 +795,81 @@ fn product_preview_from_probe(
             ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
-        ProjectProbeResult::BindingGraph(_) => None,
+        ProjectProbeResult::BindingGraph(_) | ProjectProbeResult::Timebase(_) => None,
     }
 }
 
-fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&ControlDisplayLayout> {
+/// One clock's timebase, as the Studio caches it between reads (D10).
+///
+/// `Unknown` is a real answer, not a missing one: the product names a clock
+/// the runtime resolves no timebase for (the node just left the tree, or has
+/// never produced). "No read has landed yet" is the *absence* of a
+/// [`UiTimebaseRead`], which the clock face renders differently.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiTimebaseRead {
+    /// The clock published a timebase; `phasors` is what rides it (empty is
+    /// a normal state — nothing declared a phasor, or they all went idle).
+    Live {
+        /// Effective project seconds (rate and scrub applied).
+        seconds: f32,
+        /// Seconds the timebase advanced on the most recent tick. Negative
+        /// while a device scrubs backwards.
+        delta_seconds: f32,
+        /// Live integrators, in store order.
+        phasors: Vec<lpc_wire::WirePhasorRow>,
+    },
+    /// The named product resolves to no clock in this runtime.
+    Unknown,
+}
+
+fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTimebaseRead)> {
+    match probe {
+        ProjectProbeResult::Timebase(TimebaseProbeResult::Timebase {
+            product,
+            seconds,
+            delta_seconds,
+            phasors,
+            ..
+        }) => Some((
+            UiProductRef::from_time_product(*product),
+            UiTimebaseRead::Live {
+                seconds: *seconds,
+                delta_seconds: *delta_seconds,
+                phasors: phasors.clone(),
+            },
+        )),
+        ProjectProbeResult::Timebase(TimebaseProbeResult::Unknown { product }) => Some((
+            UiProductRef::from_time_product(*product),
+            UiTimebaseRead::Unknown,
+        )),
+        _ => None,
+    }
+}
+
+fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&Rc<ControlDisplayLayout>> {
     match preview {
         UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
         _ => None,
     }
 }
 
-fn display_layout_from_probe_result<'a>(
-    result: &'a ControlDisplayLayoutProbeResult,
-    cached: Option<&'a UiProductPreview>,
-) -> Option<&'a ControlDisplayLayout> {
+/// The layout the fresh preview should carry. Reuses the cached `Rc` on the
+/// per-tick `Unchanged`/`Omitted` paths — a dome-scale layout is 1500 lamps,
+/// and deep-copying it every tick was a measurable slice of the 2026-08-05
+/// editor-perf trace. Only a genuinely new engine-sent layout allocates.
+fn display_layout_from_probe_result(
+    result: &ControlDisplayLayoutProbeResult,
+    cached: Option<&UiProductPreview>,
+) -> Option<Rc<ControlDisplayLayout>> {
     match result {
-        ControlDisplayLayoutProbeResult::Layout(layout) => Some(layout),
+        ControlDisplayLayoutProbeResult::Layout(layout) => Some(Rc::new(layout.clone())),
         ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
             .and_then(control_preview_display_layout)
-            .filter(|layout| layout.revision() == *revision),
-        ControlDisplayLayoutProbeResult::Omitted => cached.and_then(control_preview_display_layout),
+            .filter(|layout| layout.revision() == *revision)
+            .cloned(),
+        ControlDisplayLayoutProbeResult::Omitted => {
+            cached.and_then(control_preview_display_layout).cloned()
+        }
         ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
     }
 }
@@ -991,6 +1136,83 @@ mod tests {
         );
     }
 
+    /// P7 item 4: a subscribed TIME product asks for its timebase listing
+    /// instead of a preview frame — there is no picture behind the handle,
+    /// so the probe that would fetch one fetches the phasor rows.
+    #[test]
+    fn refresh_request_asks_a_time_product_for_its_timebase() {
+        let mut sync = ProjectSync::new();
+        let product = lpc_model::TimeProduct::new(NodeId::new(2), 0);
+
+        let request =
+            sync.refresh_project_read_request(vec![UiProductRef::from_time_product(product)]);
+
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::Timebase(TimebaseProbeRequest {
+                product
+            })]
+        );
+        assert_eq!(
+            sync.product_preview(&UiProductRef::from_time_product(product)),
+            None,
+            "and no Pending preview is parked for a frame that can never arrive"
+        );
+    }
+
+    /// Both probe answers cache, and they are DIFFERENT answers: `Unknown`
+    /// is a real verdict, while "no read yet" is the absence of an entry.
+    #[test]
+    fn a_timebase_probe_result_caches_live_rows_and_unknown_alike() {
+        let mut sync = ProjectSync::new();
+        let product = lpc_model::TimeProduct::new(NodeId::new(2), 0);
+        let key = UiProductRef::from_time_product(product);
+        assert_eq!(sync.timebase(&key), None, "nothing read yet");
+
+        let row = lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Node {
+                node: 8,
+                slot: "phase".to_string(),
+            },
+            phase: 0.25,
+            cycle: 3,
+            period_seconds: 4.0,
+            readings: vec![],
+        };
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::Timebase(
+                TimebaseProbeResult::Timebase {
+                    product,
+                    revision: Revision::new(8),
+                    seconds: 3.5,
+                    delta_seconds: 0.033,
+                    phasors: vec![row.clone()],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sync.timebase(&key),
+            Some(&UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: vec![row],
+            })
+        );
+
+        sync.apply_project_read_events(probe_events(
+            10,
+            vec![ProjectProbeResult::Timebase(TimebaseProbeResult::Unknown {
+                product,
+            })],
+        ))
+        .unwrap();
+
+        assert_eq!(sync.timebase(&key), Some(&UiTimebaseRead::Unknown));
+    }
+
     #[test]
     fn project_read_response_caches_visual_product_preview() {
         let mut sync = ProjectSync::new();
@@ -1177,7 +1399,7 @@ mod tests {
                 extent: product.preferred_extent(),
                 sample_format: UiControlSampleFormat::U16,
                 sample_layout,
-                display_layout: Some(display_layout),
+                display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
@@ -1188,7 +1410,7 @@ mod tests {
     }
 
     fn overlay_test_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn put_cmd(id: u64, value: f32) -> (MutationCmd, MutationEffect) {

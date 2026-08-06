@@ -585,31 +585,31 @@ mod tests {
         let buffer = BTreeMap::from([(at("brightness"), PendingEdit::pending(LpValue::F32(0.9)))]);
         let overlay = BTreeMap::from([
             (
-                at("controls.rate"),
+                at("transport.rate"),
                 SlotEditOp::AssignValue(LpValue::F32(2.0)),
             ),
             (
-                at("controls.running"),
+                at("transport.running"),
                 SlotEditOp::AssignValue(LpValue::Bool(false)),
             ),
             (
                 ProjectSlotAddress::new(
                     other.clone(),
                     ProjectSlotRoot::def(),
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                 ),
                 SlotEditOp::AssignValue(LpValue::F32(0.5)),
             ),
         ]);
         let persistence = BTreeMap::from([
             (at("brightness"), SlotPersistence::Persisted),
-            (at("controls.rate"), SlotPersistence::Transient),
-            (at("controls.running"), SlotPersistence::Transient),
+            (at("transport.rate"), SlotPersistence::Transient),
+            (at("transport.running"), SlotPersistence::Transient),
             (
                 ProjectSlotAddress::new(
                     other.clone(),
                     ProjectSlotRoot::def(),
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                 ),
                 SlotPersistence::Transient,
             ),

@@ -27,11 +27,31 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
+/// - `5` — `bus:time` carries a **time product**, not raw seconds:
+///   `ClockState` publishes a new `product` output on the channel (its
+///   `seconds`/`delta_seconds` stay produced-but-unbound), `FluidDef.time`
+///   and `PlaylistDef.time` are product-typed consumed slots rather than
+///   f32 values, and `ShaderSlotDef` gained the `phasor`/`seconds` kinds
+///   with a `phasor` config record. Version-4 artifacts author `"time": 0`
+///   on fluid/playlist nodes and bind plain `f32` shader uniforms to
+///   `bus:time`; both are refused rather than migrated.
 /// - `4` — multi-endpoint output nodes: `OutputDef.endpoint` (one string)
 ///   became `channels` (a map of `{endpoint, count}` records), and endpoint
 ///   specs name the target device instead of a driver mechanism
 ///   (`ws281x:local:IO18`, likewise `button:local:*` / `radio:local:*`).
 ///   Version-3 outputs carry a top-level `endpoint` key and are refused.
+///   Later in the same format: the container gained `target`, an advisory
+///   `Option<String>` board-catalog id (`vendor/product`, the same strings
+///   as `RegisteredDevice.board_id`) stored beside `author`/`license`.
+///   Not a bump — same call as the `author`/`version`/`license`/`created`
+///   provenance fields that joined the container earlier in this format
+///   (P3 of the modules-impl roadmap): a purely additive optional
+///   container field, never read by the engine, and the container's own
+///   closed-vocabulary parser already refuses it loudly on an
+///   unaware reader (no version field is needed for that refusal to be
+///   loud rather than silent — see the module-level doc above). Reserve
+///   the bump for changes that alter the *meaning* of already-authored
+///   data, as this format's own `channels` change did.
 /// - `3` — project/module mitosis: `project.json` became the non-node
 ///   container manifest (`format`/`uid`/`name`), and the root module node
 ///   moved to `module.json` (kind `Module`, renamed from `project` in the
@@ -40,7 +60,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 4;
+pub const PROJECT_FORMAT_VERSION: u32 = 5;
 
 /// Parsed `project.json` container manifest.
 ///
@@ -64,6 +84,14 @@ pub struct ProjectManifest {
     pub license: Option<String>,
     /// Provenance: ISO date the project was created.
     pub created: Option<String>,
+    /// Advisory board target: a board catalog id in the registry's
+    /// `vendor/product` vocabulary (e.g. `espressif/esp32-c6-devkitc-1`),
+    /// the same strings as `RegisteredDevice.board_id`. Feeds generation,
+    /// the load-time mismatch warning, and sim board inheritance — never
+    /// read by the engine. Provenance-tier metadata beside `author` /
+    /// `license`; not validated against the board catalog here (`lpc-model`
+    /// carries no catalog dependency).
+    pub target: Option<String>,
 }
 
 impl ProjectManifest {
@@ -117,6 +145,7 @@ impl ProjectManifest {
                     "version" => manifest.version = Some(read_string(&mut source, "version")?),
                     "license" => manifest.license = Some(read_string(&mut source, "license")?),
                     "created" => manifest.created = Some(read_string(&mut source, "created")?),
+                    "target" => manifest.target = Some(read_string(&mut source, "target")?),
                     other => {
                         return Err(ManifestParseError::UnknownField {
                             field: other.to_string(),
@@ -141,7 +170,7 @@ impl ProjectManifest {
 
     /// Write the manifest as canonical authored JSON: pretty-printed, fixed
     /// field order (`format`, `uid`, `name`, `author`, `version`,
-    /// `license`, `created`), absent fields omitted,
+    /// `license`, `created`, `target`), absent fields omitted,
     /// trailing newline. Deterministic so unchanged models produce
     /// byte-identical files.
     pub fn write_json(&self) -> String {
@@ -181,6 +210,9 @@ impl ProjectManifest {
         }
         if let Some(created) = &self.created {
             field("created", created, true, &mut out);
+        }
+        if let Some(target) = &self.target {
+            field("target", target, true, &mut out);
         }
         if first {
             out.push_str("}\n");
@@ -275,15 +307,51 @@ mod tests {
             version: Some(String::from("0.1")),
             license: Some(String::from("CC0-1.0")),
             created: Some(String::from("2026-08-01")),
+            target: Some(String::from("espressif/esp32-c6-devkitc-1")),
         };
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 4,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\"\n}\n"
+            "{\n  \"format\": 5,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
         assert_eq!(read.write_json(), text);
+    }
+
+    /// P02: `target` present round-trips, and its absence (the common case
+    /// — an untargeted project) serializes to nothing, exactly like the
+    /// other optional provenance fields.
+    #[test]
+    fn manifest_target_present_round_trips() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            target: Some(String::from("seeed/xiao-esp32-c6")),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert_eq!(
+            text,
+            "{\n  \"format\": 5,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read, manifest);
+        assert_eq!(read.target.as_deref(), Some("seeed/xiao-esp32-c6"));
+    }
+
+    #[test]
+    fn manifest_target_absent_round_trips() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert!(
+            !text.contains("target"),
+            "an untargeted project must not author a target key: {text}"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read.target, None);
     }
 
     #[test]

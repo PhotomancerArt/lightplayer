@@ -173,6 +173,27 @@ pub struct StudioController {
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
     random: Rc<dyn Fn() -> [u8; 16]>,
+    /// The LOCAL `YYYY-MM-DD-HHMM` stamp the library dates slugs with —
+    /// the same string the setup flow derives a device name's date from
+    /// (`derive_device_name`, design §3). Injected for the same reason as
+    /// the clock: core reads neither time nor timezone. The default
+    /// derives UTC from `now_secs`, which is honest in tests and one
+    /// timezone off in a shell that forgets to install its own.
+    local_stamp: Rc<dyn Fn() -> String>,
+    /// The one open setup wizard (flow design F5b: the wizard is a card).
+    /// One at a time — two would be two flows racing for one serial port.
+    setup: Option<crate::SetupSession>,
+    /// The device session the open setup flow is driving, once a port
+    /// grant produced one. Kept beside the session because the card key
+    /// the executor addresses is derived from it.
+    setup_device: Option<crate::RuntimeId>,
+    /// The device sessions that existed when the flow asked for its port.
+    /// `open_provider` is a long await (chooser, open, reset, boot wait)
+    /// that emits renders while the new session installs — before
+    /// `setup_device` can bind. Any session NOT in this snapshot is the
+    /// flow's own and stands down with it (the connect-window card flash,
+    /// G2 2026-08-05). Cleared when the port request settles.
+    setup_port_snapshot: Option<Vec<crate::RuntimeId>>,
     /// The layered settings store (user > host > baked defaults). Pure
     /// state: the platform edges load its layers and persist the user
     /// layer via [`Self::set_on_user_settings`].
@@ -190,6 +211,17 @@ pub struct StudioController {
     /// injected platform facilities (spawner, provider factory); runs are
     /// spawned tasks reporting back through the actor's command queue.
     agent: crate::AgentController,
+}
+
+/// What one session's identity resolution produced (device identity
+/// design §3): the identity itself, plus whether the registry already
+/// remembers this board — the difference between a sighting worth
+/// recording and a stranger that registers nothing.
+#[derive(Clone, Debug)]
+struct SessionIdentity {
+    identity: crate::app::places::DeviceIdentity,
+    /// A registry row exists under the resolved uid.
+    registered: bool,
 }
 
 /// What a home card asked to open.
@@ -220,6 +252,7 @@ impl StudioController {
     /// the crate stays platform-free (P1).
     pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
         let now_secs: LogClock = Rc::new(now_secs);
+        let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         let mut device = DeviceController::new();
         device.set_event_recorder(DeviceEventRecorder::new(
@@ -253,6 +286,13 @@ impl StudioController {
             device_backup_seq: 0,
             sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
+            local_stamp: {
+                let clock = Rc::clone(&now_secs_for_stamp);
+                Rc::new(move || utc_slug_stamp(clock()))
+            },
+            setup: None,
+            setup_device: None,
+            setup_port_snapshot: None,
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
             on_copy_text: None,
@@ -468,6 +508,14 @@ impl StudioController {
     /// clock — unique enough for tests, not for production.
     pub fn set_random(&mut self, random: impl Fn() -> [u8; 16] + 'static) {
         self.random = Rc::new(random);
+    }
+
+    /// Install the platform's LOCAL slug stamp (`YYYY-MM-DD-HHMM`) — the
+    /// same closure the library host dates package slugs with, so a
+    /// device named at provision and the project generated beside it read
+    /// the same day. The default is UTC off the injected clock.
+    pub fn set_local_stamp(&mut self, stamp: impl Fn() -> String + 'static) {
+        self.local_stamp = Rc::new(stamp);
     }
 
     /// Install the platform's timer factory for hardware device-session
@@ -793,6 +841,7 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.ambient_device_sync().cloned())
+                .with_sessions(self.chrome_sessions())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -809,9 +858,12 @@ impl StudioController {
             // extent feeding the node (the upstream card's produced control
             // product). "No board known" is a first-class state — a device
             // provisioned outside Studio simply has no board id.
+            let lens = self.pool.lens_session();
             crate::app::studio::output_face_decoration::decorate_output_faces(
                 editor,
                 self.lens_board_id(),
+                lens.and_then(|session| session.output_wire_status()),
+                lens.and_then(|session| session.total_led_budget()),
             );
         }
         // Hoist the project's edit state to the shell: the web edge arms the
@@ -833,22 +885,42 @@ impl StudioController {
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
+            .with_sessions(self.chrome_sessions())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
     }
 
-    /// The board the LENS device is known to be — `RegisteredDevice.board_id`,
-    /// stamped at provisioning (board-selection M5) and cached with the
-    /// gallery's registry rows.
+    /// The chrome strip's session projection (D15/D16), built in BOTH
+    /// view arms — the strip renders wherever the chrome does. Same
+    /// registry + pool evidence the gallery roster consumes.
+    fn chrome_sessions(&self) -> Vec<crate::UiChromeSession> {
+        let registry_cards = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.devices.as_slice())
+            .unwrap_or(&[]);
+        home_view_builder::chrome_sessions(
+            registry_cards,
+            &self.home_pool_evidence(),
+            self.lens_runtime().as_ref(),
+        )
+    }
+
+    /// The board the LENS runtime is known to be — for a device,
+    /// `RegisteredDevice.board_id`, stamped at provisioning (board-selection
+    /// M5) and cached with the gallery's registry rows; for the SIM, the
+    /// board it inherited from the project it runs (vision D4).
     ///
-    /// `None` is ORDINARY, not exceptional: no lens, a sim lens (the sim is
-    /// not a device — D22), an unidentified board, or a device provisioned
-    /// outside Studio. The wire's `HardwareFacts.board_id` is not a fallback
-    /// — it is always `None` today, so the registry is the only source.
+    /// `None` is ORDINARY, not exceptional: no lens, an unidentified board,
+    /// a device provisioned outside Studio, or a sim running an untargeted
+    /// project. The wire's `HardwareFacts.board_id` is not a fallback — it
+    /// is always `None` today, so the registry is the device's only source.
     fn lens_board_id(&self) -> Option<&str> {
         let session = self.pool.lens_session()?;
         if session.is_sim() {
-            return None;
+            // the sim is still not a device (D22): it has no registry row,
+            // and its board is the session's own advisory identity
+            return session.sim_board_id();
         }
         let uid = session.device_uid().or_else(|| {
             session
@@ -1011,7 +1083,101 @@ impl StudioController {
             .map(|card| self.overlay_card_ui(card))
             .collect();
         view.backup = self.device_backup.clone();
+        // The open flow (if any) rides the bound device's own card as a
+        // body takeover (G2 ruling, 2026-08-05). Resolving it here — after
+        // the roster exists — is what lets the takeover follow the card's
+        // identity key while the flow runs, and pins that card first.
+        let takeover =
+            home_view_builder::pin_setup_card(&mut view.devices, self.setup_binding().as_deref());
+        view.setup = self.setup_view(takeover);
         Some(view)
+    }
+
+    /// The session an open setup flow is bound to, as the roster names it
+    /// — `Some` exactly while the flow should be rendering as a device
+    /// card's body.
+    ///
+    /// `None` covers the cases where it must not: no flow at all; the
+    /// pre-device states (nothing granted yet, so there is no card to be
+    /// the body of); the PRE-VERDICT states (see below); and
+    /// DEVICE_HOME/CLOSED, where the handoff is done and the card's own
+    /// body returns. The hardware binding is the bound `RuntimeId` rather
+    /// than the session's stored card key, so a port release un-binds the
+    /// takeover the moment the session goes.
+    ///
+    /// **The takeover binds at the VERDICT** (G2 follow-up, 2026-08-05).
+    /// Between the port grant and the probe's answer the live card is
+    /// anonymous, so a board the registry already knows would render
+    /// twice — the remembered row plus an un-mergeable anonymous card.
+    /// The verdict is the recognition moment: from there the live card
+    /// carries the probed uid ([`Self::setup_recognised_uid`]) and merges
+    /// with its registry row, and there is exactly one card to ride.
+    fn setup_binding(&self) -> Option<String> {
+        if !self.setup_flow_running() {
+            return None;
+        }
+        let session = self.setup.as_ref()?;
+        if !session.state().kind().has_verdict() {
+            return None;
+        }
+        if session.sim {
+            // The sim's key is known from the start, but no sim card
+            // exists until the session does — so this resolves to nothing
+            // (a standalone card) for the whole sim path up to the start.
+            session.card_key.clone()
+        } else {
+            self.setup_device.map(|id| id.to_string())
+        }
+    }
+
+    /// Whether a setup flow is still WORKING. DEVICE_HOME is terminal (the
+    /// reducer's own words: "the card owns the surface from here"), so a
+    /// finished flow lingering in `setup` must not keep standing anything
+    /// down.
+    fn setup_flow_running(&self) -> bool {
+        self.setup.as_ref().is_some_and(|session| {
+            !matches!(
+                session.state().kind(),
+                crate::SetupStateKind::DeviceHome | crate::SetupStateKind::Closed
+            )
+        })
+    }
+
+    /// The bound session whose roster row STANDS DOWN — the pre-verdict
+    /// window only (port granted, probe not yet answered).
+    ///
+    /// This is the one scoped suppression the model keeps, and it exists
+    /// because of the KNOWN board: its registry row is already on the
+    /// grid, the just-granted session has no identity to merge with it
+    /// yet, and two rows for one board is exactly what this model is for.
+    /// No evidence is lost — the wizard's own PORT_PICKING/PROBING body
+    /// is the narration for precisely this window, and the row returns
+    /// (as the takeover's card) the instant the verdict lands.
+    fn setup_pre_verdict_session(&self) -> Option<crate::RuntimeId> {
+        if !self.setup_flow_running() {
+            return None;
+        }
+        if self.setup.as_ref()?.state().kind().has_verdict() {
+            return None;
+        }
+        self.setup_device
+    }
+
+    /// The uid the PROBE anchored, once a verdict carries one — the
+    /// recognition the live card wears until its own identity read lands.
+    ///
+    /// Fed to the bound row as `pending_uid`, which is the roster's
+    /// existing "this live evidence belongs to THAT remembered card"
+    /// channel (built for the reconnect-transient-twin defect, and this
+    /// is the same problem arriving from the probe instead of a click).
+    /// It is what makes the live card and the registry row ONE card from
+    /// the verdict on.
+    fn setup_recognised_uid(&self) -> Option<String> {
+        let session = self.setup.as_ref()?;
+        if !self.setup_flow_running() {
+            return None;
+        }
+        session.state().probe()?.hardware_uid.clone()
     }
 
     /// The runtime pool's roster evidence (P4 → multi-device M3): one
@@ -1027,12 +1193,43 @@ impl StudioController {
     /// not of a session") while nothing is attached. Recorded in the
     /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
+        // Every session gets its evidence — INCLUDING the one an open setup
+        // flow drives, from the verdict on. That card is not a rival to the
+        // wizard; it IS the wizard's card (G2 ruling, 2026-08-05), and
+        // standing it down wholesale was what made one board wear two
+        // representations. The ONE window that still stands down is
+        // pre-verdict, where the row cannot yet be merged with the
+        // remembered card of a board we already know
+        // ([`Self::setup_pre_verdict_session`]).
+        let pre_verdict = self.setup_pre_verdict_session();
+        // …and during the port request itself the flow's session exists
+        // BEFORE the bind can land (`open_provider` is a long await that
+        // renders while the session installs — the connect-window card
+        // flash). Any session absent from the request's snapshot is the
+        // flow's own and stands down with it.
+        let unclaimed_newborn = |id: crate::RuntimeId| {
+            self.setup_flow_running()
+                && self
+                    .setup_port_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| !snapshot.contains(&id))
+        };
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
             .device_sessions()
+            .filter(|session| Some(session.id()) != pre_verdict && !unclaimed_newborn(session.id()))
             .map(|session| self.device_evidence(session))
             .collect();
-        let flow_connect = self.gallery_connect_evidence();
+        // The connect NARRATION does still stand down while a flow is
+        // open: the wizard's PORT_PICKING body says "the browser is asking
+        // which port…" itself, and the app-singular connect evidence would
+        // otherwise spawn a session-less "Connecting…" card beside the
+        // wizard — the very twin this model exists to delete.
+        let flow_connect = if self.setup_flow_running() {
+            crate::ConnectEvidence::Idle
+        } else {
+            self.gallery_connect_evidence()
+        };
         let pending_uid = self.device.pending_reconnect_uid().map(str::to_string);
         match devices.first_mut() {
             Some(first) => {
@@ -1055,6 +1252,20 @@ impl StudioController {
                 });
             }
         }
+        // The probe's recognition, on the bound row: it makes the live
+        // card adopt the remembered board's uid and name, which is what
+        // lets the roster's twin filter drop the registry row. Applied
+        // after the connect-flow overlay above so the more specific
+        // attribution wins on that row.
+        if let (Some(device_id), Some(uid)) = (self.setup_device, self.setup_recognised_uid()) {
+            let key = device_id.to_string();
+            if let Some(bound) = devices
+                .iter_mut()
+                .find(|entry| entry.session_key.as_deref() == Some(key.as_str()))
+            {
+                bound.pending_uid = Some(uid);
+            }
+        }
         let sim = self
             .pool
             .sim_session()
@@ -1065,6 +1276,7 @@ impl StudioController {
                         uid: project.uid.clone(),
                         name: project.name.clone(),
                     }),
+                board_id: session.sim_board_id().map(str::to_string),
                 console_tail: session.console_tail().iter().cloned().collect(),
             });
         crate::app::home::HomePoolEvidence { devices, sim }
@@ -1109,6 +1321,10 @@ impl StudioController {
             pending_uid: None,
             console_tail: session.console_tail().iter().cloned().collect(),
             recovery: session.recovery_status().cloned(),
+            // `DeviceSnapshot` also carries `probed_mac` (the flash
+            // preflight's efuse read, acquisition rule A2) — consumed by
+            // the identity resolver (`places/identity_resolution.rs`),
+            // not surfaced on the card yet.
             detected_chip: session
                 .hardware_session()
                 .and_then(|hardware| hardware.snapshot().detected_chip),
@@ -1373,6 +1589,30 @@ impl StudioController {
         }
     }
 
+    /// Carry a card's persisted UI view-state across the anonymous →
+    /// identified key flip.
+    ///
+    /// `card_ui` is keyed by `UiDeviceCard::identity_key()`, which is the
+    /// session key while a board is anonymous and its `dev_…` uid the
+    /// moment identity resolves. The flip is the same wart
+    /// [`Self::migrate_card_op`] exists for (2026-08-02): state the user
+    /// built on the anonymous card — the open tab, the open sheet —
+    /// orphans under the old key seconds after it was set. Identity
+    /// arrives EARLIER now (at the hello, not at a stamp mid-provision),
+    /// which narrows the window but does not close it.
+    ///
+    /// The uid's own entry wins when it already has one: a remembered
+    /// board's saved state outranks whatever the pre-identity card
+    /// accumulated.
+    fn migrate_card_ui(&mut self, session_key: &str, uid: &str) {
+        if session_key == uid || self.card_ui.contains_key(uid) {
+            return;
+        }
+        if let Some(state) = self.card_ui.remove(session_key) {
+            self.card_ui.insert(uid.to_string(), state);
+        }
+    }
+
     /// The live device session a CARD KEY names, if any.
     ///
     /// One vocabulary for op targeting (M4): `UiDeviceCard::identity_key()`
@@ -1519,12 +1759,22 @@ impl StudioController {
     ) -> Result<DeviceSyncState, UiError> {
         self.record_logs(core::mem::take(&mut pulled.logs));
         let now = (self.now_secs)();
-        let identity = self
-            .reconcile_identity_name(device_id, pulled.identity.clone())
+        let resolved = self
+            .resolve_session_identity(device_id, pulled.identity.clone())
             .await;
+        let identity = resolved.as_ref().map(|resolved| resolved.identity.clone());
 
-        if let Some(identity) = &identity {
-            self.upsert_device_entry(device_id, identity, now).await;
+        // A sighting alone never registers a board (design §4 step 4): a
+        // MAC-identified stranger has a uid the moment it says hello, but
+        // the registry only remembers boards we were told about — one the
+        // library already knows, or one carrying a legacy stamp. An
+        // unknown board's row is created by ADOPTION (below) or by
+        // provisioning, never by having been seen.
+        if let Some(resolved) = &resolved
+            && (resolved.registered || pulled.identity.is_some())
+        {
+            self.upsert_device_entry(device_id, &resolved.identity, now)
+                .await;
         }
 
         // a content read/hash failure on an IDENTIFIED device: partial
@@ -1567,6 +1817,16 @@ impl StudioController {
                 },
             });
         }
+
+        // What FORMAT the board's project states (P5). Read here, before
+        // any relation talk, because the firmware refuses to load anything
+        // but the current format: a stale-format board is not "running an
+        // older version", it is not running at all. The banking below
+        // still happens — the board's bytes reach the library either way
+        // (D8) — but the CARD is told the truth by the classification at
+        // the end of each branch.
+        let format = device_session::classify_device_project(&pulled.files);
+        let stale_format = !matches!(format, lpa_upgrade::FormatClass::Current);
 
         // resolve the manifest uid against the library
         let local = match (&pulled.manifest_uid, self.library_host()) {
@@ -1644,14 +1904,21 @@ impl StudioController {
                 session.set_device_drift_times((head_saved_at, pushed_at));
             }
             let Some(identity_value) = identity.clone() else {
-                // anonymous hardware: classification only (the wizard
-                // stamps an identity, then this re-runs)
-                let content = DeviceContent::Known {
+                // anonymous hardware (rule A4): classification only —
+                // nothing is banked for a board that can name neither
+                // its silicon nor a stamp; naming re-runs this.
+                let content = device_content_for_format(
+                    &format,
+                    Some(summary.uid.to_string()),
+                    Some(summary.slug.clone()),
+                    pulled.observed,
+                )
+                .unwrap_or(DeviceContent::Known {
                     project_uid: summary.uid.to_string(),
                     slug: summary.slug.clone(),
                     observed: pulled.observed,
                     relation,
-                };
+                });
                 return Ok(DeviceSyncState { identity, content });
             };
             let device_uid: lpc_history::PrefixedUid = identity_value.uid.parse().map_err(|e| {
@@ -1670,11 +1937,7 @@ impl StudioController {
                 let host = self.library_host()?;
                 let op = CatalogOp::RecordDeviceObservation {
                     project_uid: summary.uid.to_string(),
-                    device: device_session::registry_entry_for(
-                        &identity_value,
-                        self.transport_label_for(device_id).unwrap_or_default(),
-                        now,
-                    ),
+                    device: self.registry_entry_for_session(device_id, &identity_value, now),
                     observed: pulled.observed,
                     files: pulled.files.clone(),
                 };
@@ -1703,8 +1966,12 @@ impl StudioController {
             // Edited-on-device is reserved for genuine forks. Skipped
             // when banking didn't happen (another tab owns the history) —
             // the card then asks, which is always safe.
+            // NEVER for a stale-format copy: fast-forwarding would move
+            // the library head BACKWARD onto bytes this build cannot open,
+            // silently undoing an upgrade the user already did.
             let mut relation = relation;
             if relation == lpc_history::SyncRelation::Diverged
+                && !stale_format
                 && banked
                 && head.is_some()
                 && association.as_ref().is_some_and(|assoc| {
@@ -1746,18 +2013,30 @@ impl StudioController {
                 }
             }
 
-            let content = DeviceContent::Known {
+            let content = device_content_for_format(
+                &format,
+                Some(summary.uid.to_string()),
+                Some(summary.slug.clone()),
+                pulled.observed,
+            )
+            .unwrap_or(DeviceContent::Known {
                 project_uid: summary.uid.to_string(),
                 slug: summary.slug.clone(),
                 observed: pulled.observed,
                 relation,
-            };
+            });
             self.request_library_refresh();
             return Ok(DeviceSyncState { identity, content });
         }
 
         // unknown project: adopt when the device has an identity to
-        // attribute it to; otherwise wait for the wizard to stamp one
+        // attribute it to. A MAC board always does (adoption runs here,
+        // at connect); rule A4's anonymous board is what still waits.
+        //
+        // The format is NOT reported here: naming that board comes first
+        // either way (M8′ order — nothing can be pushed to an unnamed
+        // board), and naming re-runs this whole classification, which is
+        // where the format card lands if there is one.
         let Some(identity_value) = &identity else {
             return Ok(DeviceSyncState {
                 identity,
@@ -1769,11 +2048,7 @@ impl StudioController {
         let host = self.library_host()?;
         let outcome = host
             .catalog(CatalogOp::AdoptDevicePackage {
-                device: device_session::registry_entry_for(
-                    identity_value,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                ),
+                device: self.registry_entry_for_session(device_id, identity_value, now),
                 files: pulled.files.clone(),
             })
             .await
@@ -1787,65 +2062,198 @@ impl StudioController {
             UiLogOrigin::Studio,
             format!("Adopted \"{}\" from {}", summary.slug, identity_value.name),
         ));
-        Ok(DeviceSyncState {
+        // The adoption is byte-faithful BY DESIGN (a pull is not an
+        // import), so a stale-format board becomes a stale-format library
+        // package — listed honestly by its own format card (P3) and named
+        // by the device card here.
+        let content = device_content_for_format(
+            &format,
+            Some(summary.uid.to_string()),
+            Some(summary.slug.clone()),
+            pulled.observed,
+        )
+        .unwrap_or(DeviceContent::Adopted {
+            project_uid: summary.uid.to_string(),
+            slug: summary.slug,
+            observed: pulled.observed,
+        });
+        Ok(DeviceSyncState { identity, content })
+    }
+
+    /// Resolve THIS session's identity from its own evidence (device
+    /// identity design §3, rules A1–A4), migrate the registry row a
+    /// legacy stamp left behind, and name the result from the registry.
+    ///
+    /// The order is the contract: silicon (the hello's efuse MAC, then a
+    /// download-mode read banked on this session) outranks the stamped
+    /// `/.lp/device.json`, because the stamp dies with a flash erase and
+    /// the MAC does not. `None` is rule A4 — the board stays
+    /// session-scoped, exactly today's unstamped behavior.
+    async fn resolve_session_identity(
+        &mut self,
+        device_id: crate::RuntimeId,
+        file_identity: Option<crate::app::places::DeviceIdentity>,
+    ) -> Option<SessionIdentity> {
+        let evidence = self.identity_evidence_for(device_id, file_identity.as_ref());
+        let resolved = crate::app::places::resolve_identity(&evidence)?;
+        let uid = resolved.uid.to_string();
+
+        // D5 (clones): two live boards claiming one MAC. The newcomer
+        // stays anonymous rather than sharing a key — two cards under one
+        // `identity_key()` is a keyed-list duplicate, which panics Dioxus
+        // (the 2026-07-15 crash class), and remembering the wrong board
+        // under a remembered row is worse than not remembering it.
+        if self.another_live_session_wears(device_id, &uid) {
+            self.push_log(UiLogDraft::from_notice(UiNotice::warning(format!(
+                "Two connected boards report the same hardware id ({}) — \
+                 the second one stays unnamed until one is unplugged.",
+                resolved.hardware_id
+            ))));
+            if let Ok(session) = self.pool.device_session_mut(device_id) {
+                session.set_hardware_id(None);
+            }
+            return None;
+        }
+
+        // Lazy re-key (design §4): this board was remembered under the
+        // uid a stamp gave it. Move the row BEFORE the sighting upsert so
+        // name, board, and association all land on the derived key.
+        if let Some(old_uid) = resolved.rekey_from
+            && let Ok(host) = self.library_host()
+            && let Err(error) = host
+                .catalog(CatalogOp::RekeyRegisteredDevice {
+                    old_uid: old_uid.to_string(),
+                    new_uid: uid.clone(),
+                    hardware_id: resolved.hardware_id.to_string(),
+                })
+                .await
+        {
+            log::warn!("device registry re-key failed: {error}");
+        }
+
+        let registered = self.registered_device(&uid).await;
+        // D34: the registry is the naming truth. A row's name wins; a
+        // board with no row falls back to whatever its legacy file said,
+        // and an empty name renders through the card's existing cascade.
+        let name = registered
+            .as_ref()
+            .map(|entry| entry.name.clone())
+            .filter(|name| !name.is_empty())
+            .or_else(|| file_identity.as_ref().map(|identity| identity.name.clone()))
+            .unwrap_or_default();
+        let identity = crate::app::places::DeviceIdentity {
+            uid: uid.clone(),
+            name,
+        };
+
+        // The D34 write-back survives only where the file is still a
+        // store: host-class and legacy boards that ANSWERED with one. An
+        // ESP-class board's name lives in the registry alone (design §5),
+        // so a rename never writes its filesystem again.
+        if let (crate::app::places::HardwareId::Minted { .. }, Some(file_identity)) =
+            (&resolved.hardware_id, &file_identity)
+            && !identity.name.is_empty()
+            && identity.name != file_identity.name
+        {
+            self.write_identity_name_to_device(device_id, &identity)
+                .await;
+        }
+
+        // The anonymous → identified key flip (design §6): the card's
+        // `identity_key()` moves from the session key to the uid the
+        // instant identity resolves, and persisted card UI state keyed by
+        // the old key would orphan — the 2026-08-02 wart `migrate_card_op`
+        // already handles for op flows. Same move, same reason.
+        self.migrate_card_ui(&device_id.to_string(), &uid);
+
+        if let Ok(session) = self.pool.device_session_mut(device_id) {
+            session.set_hardware_id(Some(resolved.hardware_id));
+        }
+        Some(SessionIdentity {
             identity,
-            content: DeviceContent::Adopted {
-                project_uid: summary.uid.to_string(),
-                slug: summary.slug,
-                observed: pulled.observed,
-            },
+            registered: registered.is_some(),
         })
     }
 
-    /// D34 name reconcile at connect: the registry name is the user-facing
-    /// truth, so a device reporting a stale name (renamed while offline)
-    /// gets the registry name written back to `/.lp/device.json` — and the
-    /// UI uses the registry name either way. A failed write-back only
-    /// logs: the next connect retries, and the registry keeps winning in
-    /// the meantime (`upsert_device_merged`).
-    async fn reconcile_identity_name(
+    /// The identity evidence THIS session offers (design §3): the hello's
+    /// efuse MAC (A1), the base MAC a flash preflight read in download
+    /// mode (A2, already normalized by `lpa_link::normalize_base_mac`),
+    /// and the stamped uid (A3) — the legacy file when it exists, else
+    /// the uid the hello carries.
+    fn identity_evidence_for(
+        &self,
+        device_id: crate::RuntimeId,
+        file_identity: Option<&crate::app::places::DeviceIdentity>,
+    ) -> crate::app::places::IdentityEvidence {
+        let session = self.pool.device_session(device_id);
+        crate::app::places::IdentityEvidence {
+            hello_base_mac: session.and_then(|session| match session.device_state() {
+                Some(DeviceState::Ready { hello }) => hello.hardware.base_mac,
+                _ => None,
+            }),
+            probed_mac: session
+                .and_then(crate::RuntimeSession::hardware_session)
+                .and_then(|hardware| hardware.snapshot().probed_mac),
+            stamped_uid: file_identity
+                .map(|identity| identity.uid.clone())
+                .or_else(|| session.and_then(crate::RuntimeSession::device_uid)),
+            file_name: file_identity.map(|identity| identity.name.clone()),
+        }
+    }
+
+    /// Is ANOTHER live device session already wearing `uid`? The D5 clone
+    /// guard's question — asked of the pool, because a duplicate MAC is
+    /// only a problem while both boards are attached.
+    fn another_live_session_wears(&self, device_id: crate::RuntimeId, uid: &str) -> bool {
+        self.pool.device_sessions().any(|session| {
+            session.id() != device_id
+                && session
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .is_some_and(|identity| identity.uid == uid)
+        })
+    }
+
+    /// The registry row for `uid`, from a fresh catalog snapshot.
+    async fn registered_device(
+        &mut self,
+        uid: &str,
+    ) -> Option<crate::app::places::RegisteredDevice> {
+        let fs = self.library_host().ok()?.catalog_snapshot().await.ok()?;
+        crate::app::places::DeviceRegistry::new(fs)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|entry| entry.uid == uid)
+    }
+
+    /// Write the registry name back into a legacy board's
+    /// `/.lp/device.json`. A failed write only logs: the next connect
+    /// retries, and the registry keeps winning in the meantime
+    /// (`upsert_device_merged`).
+    async fn write_identity_name_to_device(
         &mut self,
         device_id: crate::RuntimeId,
-        identity: Option<crate::app::places::DeviceIdentity>,
-    ) -> Option<crate::app::places::DeviceIdentity> {
-        let mut identity = identity?;
-        let registry_name = match self.library_host() {
-            Ok(host) => match host.catalog_snapshot().await {
-                Ok(fs) => crate::app::places::DeviceRegistry::new(fs)
-                    .list()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .find(|entry| entry.uid == identity.uid)
-                    .map(|entry| entry.name),
-                Err(_) => None,
-            },
-            Err(_) => None,
-        };
-        if let Some(registry_name) = registry_name
-            && !registry_name.is_empty()
-            && registry_name != identity.name
+        identity: &crate::app::places::DeviceIdentity,
+    ) {
+        use lpc_model::AsLpPath;
+        match self
+            .pool
+            .device_session_mut(device_id)
+            .and_then(crate::RuntimeSession::client_mut)
         {
-            use lpc_model::AsLpPath;
-            identity.name = registry_name;
-            match self
-                .pool
-                .device_session_mut(device_id)
-                .and_then(crate::RuntimeSession::client_mut)
+            Ok(server) => match server
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                    &identity.to_json_bytes(),
+                )
+                .await
             {
-                Ok(server) => match server
-                    .fs_write(
-                        crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
-                        &identity.to_json_bytes(),
-                    )
-                    .await
-                {
-                    Ok(logs) => self.record_logs(logs),
-                    Err(error) => log::warn!("device rename write-back failed: {error}"),
-                },
-                Err(_) => log::warn!("device rename write-back skipped: no live server"),
-            }
+                Ok(logs) => self.record_logs(logs),
+                Err(error) => log::warn!("device rename write-back failed: {error}"),
+            },
+            Err(_) => log::warn!("device rename write-back skipped: no live server"),
         }
-        Some(identity)
     }
 
     /// Record the device sighting in the registry (merge semantics: an
@@ -1859,15 +2267,34 @@ impl StudioController {
         let Ok(host) = self.library_host() else {
             return;
         };
-        let entry = device_session::registry_entry_for(
-            identity,
-            self.transport_label_for(device_id).unwrap_or_default(),
-            now,
-        );
+        let entry = self.registry_entry_for_session(device_id, identity, now);
         if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
             log::warn!("device registry upsert failed: {error}");
         }
         self.request_library_refresh();
+    }
+
+    /// The registry row a session's write targets: the pull's identity
+    /// plus the two facts only the live session knows — its transport
+    /// label and the identity SOURCE it resolved (design §4's
+    /// `hardware_id` column).
+    fn registry_entry_for_session(
+        &self,
+        device_id: crate::RuntimeId,
+        identity: &crate::app::places::DeviceIdentity,
+        now: f64,
+    ) -> crate::app::places::RegisteredDevice {
+        let mut entry = device_session::registry_entry_for(
+            identity,
+            self.transport_label_for(device_id).unwrap_or_default(),
+            now,
+        );
+        entry.hardware_id = self
+            .pool
+            .device_session(device_id)
+            .and_then(crate::RuntimeSession::hardware_id)
+            .map(|hardware_id| hardware_id.to_string());
+        entry
     }
 
     /// Where the open project usually lives: the registered device whose
@@ -1903,18 +2330,24 @@ impl StudioController {
             DeployOp::PushProject { target, .. }
             | DeployOp::AdoptDeviceCopy { target }
             | DeployOp::KeepBothFork { target }
+            | DeployOp::UpgradeDeviceProject { target }
             | DeployOp::EraseDevice { target } => target,
         })?;
         match op {
             DeployOp::PushProject { key, .. } => {
                 // The direct push (M5; since M8′ the ONLY push): the
                 // dispatching gesture is the D11 consent. The device must
-                // carry a stamped identity (the Running-family states and
-                // the picker's Connected-empty guarantee it; unstamped
-                // boards go through the name sheet first).
+                // carry a NAMED identity (the Running-family states and
+                // the picker's Connected-empty guarantee it; unnamed
+                // boards go through the name sheet first). A
+                // MAC-identified board has a uid from its first hello
+                // (device identity design §3) — the name is what the
+                // gently-insist-on-a-name flow is still waiting for, so
+                // the gate reads the name, not the uid.
                 let device = self
                     .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.clone())
+                    .filter(|identity| !identity.name.is_empty())
                     .ok_or_else(|| {
                         UiError::MissingSession("no named device is connected".to_string())
                     })?;
@@ -1966,6 +2399,7 @@ impl StudioController {
                     .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.as_ref())
                     .map(|identity| identity.name.clone())
+                    .filter(|name| !name.is_empty())
                     .unwrap_or_else(|| "device".to_string());
                 let host = self.library_host()?;
                 let outcome = host
@@ -1984,11 +2418,197 @@ impl StudioController {
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
+            DeployOp::UpgradeDeviceProject { .. } => {
+                self.run_device_project_upgrade(device_id, updates).await
+            }
             DeployOp::EraseDevice { .. } => {
                 // from the card's Danger tab, behind the D41 confirm sheet
                 self.reset_to_blank(device_id, updates).await
             }
         }
+    }
+
+    /// The roster's Upgrade verb (P5): make the board's old-format project
+    /// runnable again.
+    ///
+    /// The device is NEVER upgraded in place (D14 / ADR 2026-07-05
+    /// decision 5). The migrated bytes are born in the library and travel
+    /// back over the ordinary hash-checked push, so the board's copy and
+    /// the library's stay one thing.
+    ///
+    /// **Which bytes get migrated** — the choice this flow turns on. When
+    /// the board's project resolves to a library package (the common case:
+    /// connect-is-a-pull already adopted or matched it), THAT package is
+    /// the migration subject, not the pulled copy. The board's bytes were
+    /// banked at connect, so nothing is lost either way, and taking the
+    /// library's line means the verb can never overwrite a newer local
+    /// head with an older board copy — that is `Use board copy`'s job, and
+    /// it is a decision the user makes, not one an upgrade makes for them.
+    /// Only when the library has NO copy at all (adoption did not run) is
+    /// the pulled copy migrated and adopted, which is the same
+    /// adopt-then-push shape connect uses.
+    async fn run_device_project_upgrade(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let sync = self
+            .device_sync_for(device_id)
+            .cloned()
+            .ok_or_else(|| UiError::MissingSession("this device has not been read".to_string()))?;
+        let DeviceContent::OldFormat {
+            project_uid, class, ..
+        } = &sync.content
+        else {
+            return Err(UiError::UnsupportedAction(
+                "This board's project is not waiting for a format upgrade".to_string(),
+            ));
+        };
+        // Below the floor / from a newer LightPlayer: the card never
+        // offers the verb, and a stray dispatch says why rather than
+        // failing halfway through a migration that cannot run.
+        if !class.is_upgradable() {
+            return Err(UiError::UnsupportedAction(class.describe()));
+        }
+        // The push needs a stamped board (same requirement as any push);
+        // an unnamed board is asked for its name first.
+        let device = sync
+            .identity
+            .clone()
+            .ok_or_else(|| UiError::MissingSession("no named device is connected".to_string()))?;
+        let project_uid = project_uid.clone();
+
+        self.pool
+            .device_session_mut(device_id)?
+            .set_operation(Some("Upgrading".to_string()));
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        let result = self
+            .upgrade_and_push_device_project(device_id, &device, project_uid)
+            .await;
+        if let Ok(session) = self.pool.device_session_mut(device_id) {
+            session.set_operation(None);
+        }
+        self.mark_dirty();
+        let (slug, upgraded_from) = result?;
+        self.request_library_refresh();
+        Ok(
+            UiNotices::new().with_notice(UiNotice::info(match upgraded_from {
+                Some(from) => format!(
+                    "Upgraded {slug} from format {from} to {} and put it back on {}",
+                    lpc_model::PROJECT_FORMAT_VERSION,
+                    device.name
+                ),
+                // The library copy was already current — the board was the
+                // only stale one. Say what actually happened.
+                None => format!("Pushed {slug} to {} — it was already upgraded", device.name),
+            })),
+        )
+    }
+
+    /// The Upgrade verb's body: land current-format bytes in the library,
+    /// then push them. Returns the pushed project's slug and the format it
+    /// was migrated from (`None` when the library copy needed no work).
+    async fn upgrade_and_push_device_project(
+        &mut self,
+        device_id: crate::RuntimeId,
+        device: &crate::app::places::DeviceIdentity,
+        project_uid: Option<String>,
+    ) -> Result<(String, Option<u32>), UiError> {
+        let (project_uid, upgraded_from) = match project_uid {
+            // The library's copy may already be current — the user opened
+            // it in the editor (which migrates on open, P3) and only the
+            // board was left behind. Then there is nothing to migrate and
+            // the push alone fixes it. Checked off a lock-free snapshot
+            // first, because the catalog op would take the project lock
+            // and refuse for a project open in this very tab.
+            Some(project_uid) if self.library_package_is_current(&project_uid).await => {
+                (project_uid, None)
+            }
+            Some(project_uid) => {
+                let host = self.library_host()?;
+                let outcome = host
+                    .catalog(CatalogOp::UpgradePackageFormat {
+                        project_uid: project_uid.clone(),
+                    })
+                    .await
+                    .map_err(|error| self.library_error_with_name(error))?;
+                (project_uid, outcome.upgraded_from)
+            }
+            None => self.adopt_upgraded_device_copy(device_id, device).await?,
+        };
+        let target = self.resolve_deploy_target(&project_uid).await?;
+        self.run_device_push(device_id, device, &target).await?;
+        Ok((target.slug, upgraded_from))
+    }
+
+    /// Whether the library's copy of `project_uid` opens as it stands
+    /// (current format, readable manifest) — read off a lock-free
+    /// snapshot. `false` for a package that needs migrating, is blocked,
+    /// or cannot be found at all: each of those is the caller's next
+    /// question, and none of them may be answered "already fine".
+    async fn library_package_is_current(&mut self, project_uid: &str) -> bool {
+        let Ok(host) = self.library_host() else {
+            return false;
+        };
+        let Ok(fs) = host.catalog_snapshot().await else {
+            return false;
+        };
+        crate::app::library::LibraryStore::read_only(fs)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|summary| summary.uid.to_string() == project_uid)
+            .is_some_and(|summary| summary.health == crate::app::library::PackageHealth::Ready)
+    }
+
+    /// The unadopted board's half of the Upgrade verb: pull the board's
+    /// copy, migrate it, and adopt the RESULT as a new library package —
+    /// so even here the bytes that land on disk are current-format ones,
+    /// born in the library (D14).
+    async fn adopt_upgraded_device_copy(
+        &mut self,
+        device_id: crate::RuntimeId,
+        device: &crate::app::places::DeviceIdentity,
+    ) -> Result<(String, Option<u32>), UiError> {
+        let default_storage_id = self
+            .pool
+            .device_session(device_id)
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
+        let mut pulled = {
+            let server = self.pool.device_session_mut(device_id)?.client_mut()?;
+            device_session::pull_device_copy(server, &default_storage_id).await?
+        };
+        self.record_logs(core::mem::take(&mut pulled.logs));
+        if let Some(detail) = &pulled.read_error {
+            return Err(UiError::MissingSession(format!(
+                "could not read the device: {detail}"
+            )));
+        }
+        let mut files = device_session::device_project_files(&pulled.files);
+        let report = lpa_upgrade::upgrade_to_current(&mut files)
+            .map_err(|error| UiError::UnsupportedAction(error.to_string()))?;
+
+        let now = (self.now_secs)();
+        let host = self.library_host()?;
+        let outcome = host
+            .catalog(CatalogOp::AdoptDevicePackage {
+                device: device_session::registry_entry_for(
+                    device,
+                    self.transport_label_for(device_id).unwrap_or_default(),
+                    now,
+                ),
+                files: files.into_pairs(),
+            })
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        let summary = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession("upgrading produced no library package".to_string())
+        })?;
+        Ok((summary.uid.to_string(), Some(report.from)))
     }
 
     /// The diverged copy an adopt/keep-both verb targets: the live
@@ -2011,10 +2631,93 @@ impl StudioController {
         }
     }
 
-    /// Stamp a `dev_` identity onto the connected device: mint the uid,
-    /// write `/.lp/device.json` at the device's fs ROOT over the wire
-    /// (identity is device-scoped, outside every project storage dir),
-    /// register the device, and re-pull (adoption may now run for
+    /// Name the connected device (the one naming path: the Needs-a-name
+    /// card's form and the setup form's post-flash name both land here).
+    ///
+    /// A board whose identity is its silicon takes a **registry write**
+    /// (design §5): the name goes on the row keyed by its derived uid and
+    /// nothing at all is written to the board, because a name kept on an
+    /// erasable filesystem was never the truth. Only a session with no
+    /// silicon to anchor to — a host-class embedder, or a board that
+    /// reported no MAC — falls back to the legacy stamp.
+    async fn run_device_naming(
+        &mut self,
+        device_id: crate::RuntimeId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        match self
+            .pool
+            .device_session(device_id)
+            .and_then(crate::RuntimeSession::hardware_id)
+        {
+            Some(hardware_id @ crate::app::places::HardwareId::EspEfuse { .. }) => {
+                self.write_name_to_registry(device_id, hardware_id, name)
+                    .await
+            }
+            _ => {
+                // Current firmware always reports its efuse MAC in the
+                // hello, so an ESP-class session reaching the fallback
+                // means the silicon half went missing somewhere. Say so:
+                // the stamp about to run writes a uid onto a filesystem
+                // the next erase takes with it.
+                if self
+                    .hardware_session_for(device_id)
+                    .and_then(|session| session.snapshot().detected_chip)
+                    .is_some()
+                {
+                    log::warn!(
+                        "naming an ESP board through the legacy identity stamp: \
+                         this session resolved no efuse MAC"
+                    );
+                }
+                self.run_identity_stamp(device_id, name).await
+            }
+        }
+    }
+
+    /// The registry half of naming (design §5): the chosen name lands on
+    /// the row keyed by the board's DERIVED uid, carrying the identity
+    /// source with it, and the live card wears the name immediately. The
+    /// merge keeps what earlier sightings recorded (board choice, push
+    /// association) — and no re-pull is needed, because the identity was
+    /// known at attach and adoption already ran there.
+    async fn write_name_to_registry(
+        &mut self,
+        device_id: crate::RuntimeId,
+        hardware_id: crate::app::places::HardwareId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        let identity = crate::app::places::DeviceIdentity {
+            uid: hardware_id.device_uid().to_string(),
+            name,
+        };
+        let now = (self.now_secs)();
+        let entry = self.registry_entry_for_session(device_id, &identity, now);
+        let host = self.library_host()?;
+        host.catalog(CatalogOp::UpsertRegisteredDevice(entry))
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        if let Some(sync) = self
+            .pool
+            .device_session_mut(device_id)
+            .ok()
+            .and_then(crate::RuntimeSession::device_sync_mut)
+        {
+            sync.identity = Some(identity.clone());
+        }
+        self.request_library_refresh();
+        self.mark_dirty();
+        Ok(identity)
+    }
+
+    /// The naming FALLBACK for sessions with no silicon identity (D3/D6):
+    /// host-class embedders and boards whose hello carries no efuse MAC.
+    /// ESP-class provisioning writes the registry only — see
+    /// [`Self::run_device_naming`].
+    ///
+    /// Mint the uid, write `/.lp/device.json` at the device's fs ROOT over
+    /// the wire (identity is device-scoped, outside every project storage
+    /// dir), register the device, and re-pull (adoption may now run for
     /// previously-anonymous content).
     async fn run_identity_stamp(
         &mut self,
@@ -2078,11 +2781,7 @@ impl StudioController {
         {
             let now = (self.now_secs)();
             if let Ok(host) = self.library_host() {
-                let mut entry = device_session::registry_entry_for(
-                    &identity,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                );
+                let mut entry = self.registry_entry_for_session(device_id, &identity, now);
                 entry.board_id = Some(board_id.to_string());
                 if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
                     log::warn!("device registry board upsert failed: {error}");
@@ -2161,11 +2860,7 @@ impl StudioController {
         let host = self.library_host()?;
         if recorded_on_active {
             // association still goes through the registry (store root)
-            let mut entry = device_session::registry_entry_for(
-                device,
-                self.transport_label_for(device_id).unwrap_or_default(),
-                now,
-            );
+            let mut entry = self.registry_entry_for_session(device_id, device, now);
             entry.association = Some(lpc_history::DeviceAssociation {
                 device: device_uid,
                 project: target
@@ -2181,11 +2876,7 @@ impl StudioController {
         } else {
             host.catalog(CatalogOp::RecordPush {
                 project_uid: target.project_uid.clone(),
-                device: device_session::registry_entry_for(
-                    device,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                ),
+                device: self.registry_entry_for_session(device_id, device, now),
                 version: local_hash,
             })
             .await
@@ -2922,19 +3613,15 @@ impl StudioController {
                         bytes: bytes.0,
                     })
                     .await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(import_message("Imported", &outcome))))
             }
             HomeOp::ImportJson { text } => {
                 let outcome = self.run_catalog_op(CatalogOp::ImportJson { text }).await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Pasted {imported}"))))
+                Ok(
+                    UiNotices::new()
+                        .with_notice(UiNotice::info(import_message("Pasted", &outcome))),
+                )
             }
             HomeOp::RenameDevice { uid, name } => {
                 let name = name.trim().to_string();
@@ -2954,11 +3641,7 @@ impl StudioController {
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info(format!("This device is now \"{name}\""))))
             }
-            HomeOp::ForgetDevice { uid } => {
-                self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
-                    .await?;
-                Ok(UiNotices::new().with_notice(UiNotice::info("Device forgotten")))
-            }
+            HomeOp::ForgetDevice { uid } => self.forget_device(uid).await,
             HomeOp::NameDevice { target, name } => {
                 let name = name.trim().to_string();
                 if name.is_empty() {
@@ -2967,21 +3650,719 @@ impl StudioController {
                     ));
                 }
                 // the Needs-a-name card's inline form (D14 gently insists
-                // upstream): stamp mints the uid, writes the identity over
-                // the wire, registers the device, and re-pulls (adoption
-                // may now run for previously-anonymous content)
+                // upstream): the name lands on the registry row keyed by
+                // the board's own derived uid — nothing is written to the
+                // board (design §5) — with the legacy stamp standing in
+                // only where there is no silicon to anchor to
                 let device_id = self.resolve_device_target(&target)?;
-                let identity = self.run_identity_stamp(device_id, name).await?;
+                let identity = self.run_device_naming(device_id, name).await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!(
                     "This device is now \"{}\"",
                     identity.name
                 ))))
             }
+            HomeOp::StartSetup { sim } => self.start_setup(sim, updates).await,
+            HomeOp::Setup(gesture) => self.advance_setup(gesture, updates).await,
             HomeOp::CardUi(op) => {
                 self.apply_card_ui_op(op);
                 Ok(UiNotices::new())
             }
         }
+    }
+
+    /// Forget a device: revoke the browser's persistent access to the
+    /// board, then delete its registry row.
+    ///
+    /// The revocation is what makes forgetting STICK (G2 walk,
+    /// 2026-08-05). Deleting the row alone was silently undone by the next
+    /// page load: the Web Serial grant outlives the page, so the app
+    /// re-enumerated the granted port, auto-probed it, re-derived the same
+    /// `dev_` uid from its efuse MAC (identity design §3 — the uid is
+    /// silicon, not a stored fact), and the sighting write recreated the
+    /// row the user had just deleted.
+    ///
+    /// A grant can only be revoked through the endpoint that holds it, and
+    /// only a LIVE session names its endpoint — which physical board a
+    /// grant belongs to is unknowable until something connects through it.
+    /// So an offline device is registry-only: its row goes, and any grant
+    /// it may still hold survives (harmless on its own — a grant with no
+    /// row re-registers only if the user reconnects that board). Forgetting
+    /// the board in front of you does the whole job.
+    async fn forget_device(&mut self, uid: String) -> UiResult {
+        // Capture the link BEFORE the disconnect tears the session down.
+        let live = self.device_id_for_card_key(&uid).and_then(|id| {
+            let session = self.pool.device_session(id)?.hardware_session()?;
+            Some((id, session.connector(), session.session().endpoint_id))
+        });
+        let mut notices = UiNotices::new();
+        if let Some((id, connector, endpoint_id)) = live {
+            // Order matters: the grant cannot be revoked out from under an
+            // open port, and `forget()` on a live SerialPort is exactly the
+            // shape that leaves a wedged reader behind.
+            self.disconnect_device(id).await?;
+            // A FAILED revocation keeps the registry row: the row is the
+            // only visible trace of a device the app can still reach, and
+            // deleting it here would stage exactly the disappear-then-
+            // reappear the fix exists to end. The user sees the device
+            // still listed — which is the truth — and can try again.
+            let revoked = connector
+                .forget_endpoint(&endpoint_id)
+                .await
+                .map_err(|error| {
+                    UiError::Link(format!(
+                        "couldn't release this device's port, so it stays in the list: {error}"
+                    ))
+                })?;
+            if !revoked && connector.kind() == LinkProviderKind::BrowserSerialEsp32 {
+                // A browser that will NEVER give the grant back (no
+                // `SerialPort.forget()` before Chrome 103) is different
+                // from a revocation that failed: retrying cannot help, so
+                // the row goes and the warning names the manual way out.
+                notices = notices.with_notice(UiNotice::warning(
+                    "This browser cannot release its serial-port permission — \
+                     revoke it in the browser's site settings, or this device \
+                     reappears when you reload",
+                ));
+            }
+        }
+        self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
+            .await?;
+        Ok(notices.with_notice(UiNotice::info("Device forgotten")))
+    }
+
+    // ---- the setup wizard (P06 over the P11 machine) -------------------
+    //
+    // Design: `docs/design/device-setup-flow.md`. Everything below runs
+    // commands the REDUCER produced; nothing here decides a transition.
+    // `dispatch_for` (§8) says which machinery performs each command, and
+    // this is where that machinery is actually awaited.
+
+    /// Open the wizard on a target — the two entry cards' gesture.
+    async fn start_setup(&mut self, sim: bool, updates: UxUpdateSink) -> UiResult {
+        let stamp = (self.local_stamp)();
+        let taken = self.registered_device_names().await;
+        self.setup_device = None;
+        self.setup = Some(if sim {
+            crate::SetupSession::simulator(
+                crate::SimulatorSetupTarget::default().card_key,
+                stamp,
+                taken,
+            )
+        } else {
+            crate::SetupSession::hardware(stamp, taken)
+        });
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(UiNotices::new())
+    }
+
+    /// Apply one wizard gesture, then run whatever the reducer asked for.
+    async fn advance_setup(
+        &mut self,
+        gesture: crate::SetupGesture,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let Some(session) = self.setup.as_mut() else {
+            // A click that arrived after the card went away. Inert, like
+            // every other stale gesture in this flow (§2 cross-cutting).
+            return Ok(UiNotices::new());
+        };
+        let commands = session.handle(gesture);
+        self.run_setup_commands(commands, updates).await
+    }
+
+    /// Run a command list to quiescence: each command's outcome may feed
+    /// the machine another event, whose commands join the queue. The loop
+    /// is flat on purpose — a flash that fails, retries, and fails again
+    /// must not grow the stack.
+    async fn run_setup_commands(
+        &mut self,
+        commands: Vec<crate::SetupCommand>,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let mut queue: std::collections::VecDeque<crate::SetupCommand> = commands.into();
+        let mut notices = UiNotices::new();
+        while let Some(command) = queue.pop_front() {
+            if self.setup.is_none() {
+                break;
+            }
+            let (outcome, event) = self.run_setup_command(&command, updates.clone()).await;
+            notices.notices.extend(outcome.notices);
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
+            if let Some(event) = event
+                && let Some(session) = self.setup.as_mut()
+            {
+                queue.extend(session.flow.handle(event));
+            }
+        }
+        // A closed flow is dropped outright. DEVICE_HOME needs no cleanup
+        // here: it is terminal, and `setup_view` already stopped drawing
+        // it — the bound card is on the grid wearing its own body.
+        if self
+            .setup
+            .as_ref()
+            .is_some_and(|session| session.is_closed())
+        {
+            self.setup = None;
+            self.setup_device = None;
+        }
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(notices)
+    }
+
+    /// One command → the machinery `dispatch_for` names, plus the event
+    /// (if any) its outcome reports back to the machine.
+    async fn run_setup_command(
+        &mut self,
+        command: &crate::SetupCommand,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        use crate::{SetupCommand, SetupDispatch, SetupEvent};
+
+        // Provisioning WRITES TO THE BOARD, so the board has to be back
+        // first. The flash's own reattach normally leaves it Ready and
+        // absorbed, but a board still finishing its boot (or a reattach
+        // that landed a beat late) would otherwise be addressed with no
+        // identity at all — which is how a typed name reached nothing and
+        // the push refused "no named device is connected".
+        if matches!(
+            command,
+            SetupCommand::WriteRegistry { .. } | SetupCommand::PushProject { .. }
+        ) {
+            self.settle_setup_device(&updates).await;
+        }
+        let context = self.setup_executor_context();
+        match crate::dispatch_for(command, &context) {
+            SetupDispatch::Device(DeviceOp::OpenProvider { provider_id }) => {
+                self.run_setup_port_request(provider_id, updates).await
+            }
+            SetupDispatch::ReadProbe => {
+                let probe = self.read_setup_probe().await;
+                (UiNotices::new(), Some(SetupEvent::ProbeCompleted { probe }))
+            }
+            SetupDispatch::Device(op @ DeviceOp::ProvisionFirmware { .. }) => {
+                self.run_setup_flash(op, updates).await
+            }
+            SetupDispatch::Device(op) => {
+                // ReleasePort. A port that is already gone is not an
+                // error: the flow asked for it to be released, and it is.
+                let _ = self.execute_device_op(op, updates).await;
+                self.setup_device = None;
+                (UiNotices::new(), None)
+            }
+            SetupDispatch::Catalog(op) => match (command, self.run_catalog_op(op).await) {
+                (SetupCommand::GenerateProject { .. }, Ok(outcome)) => {
+                    match outcome.summary.map(|summary| summary.uid.to_string()) {
+                        Some(project_uid) => (
+                            UiNotices::new(),
+                            Some(SetupEvent::ProjectGenerated { project_uid }),
+                        ),
+                        None => {
+                            self.fail_setup("the generator installed no project");
+                            (UiNotices::new(), None)
+                        }
+                    }
+                }
+                (SetupCommand::GenerateProject { .. }, Err(error)) => {
+                    self.fail_setup(error.to_string());
+                    (UiNotices::new(), None)
+                }
+                // The registry writes (name at provision, sighting at
+                // adopt). The name is what makes the push's identity gate
+                // pass, so the session's identity is re-read here.
+                (_, result) => {
+                    if let Err(error) = result {
+                        self.fail_setup(error.to_string());
+                        return (UiNotices::new(), None);
+                    }
+                    if let Some(device_id) = self.setup_device {
+                        // Held across the refresh on purpose: the refresh
+                        // CLEARS the reconcile state before it re-reads
+                        // (`clear_reconcile`), and a re-read that cannot
+                        // run leaves the session with no identity at all.
+                        let previous = self.device_sync_for(device_id).cloned();
+                        self.refresh_device_sync_for(device_id).await;
+                        // The row we just wrote IS the naming truth (D34),
+                        // and the push gate reads the SESSION's copy of
+                        // it. The pull above re-resolves everything and
+                        // normally lands the same name — but it needs the
+                        // wire, and a pull that cannot run (or fails, and
+                        // then records `identity: None`) would leave the
+                        // board nameless one command before the push
+                        // demands a name. So the write is applied to the
+                        // session directly, from what we know we wrote.
+                        if let SetupCommand::WriteRegistry {
+                            name, hardware_uid, ..
+                        } = command
+                        {
+                            // The SAME uid the executor addressed the row
+                            // with — read off the context built BEFORE the
+                            // dispatch, because a pull that failed just
+                            // above has by now recorded `identity: None`
+                            // and re-reading it would stamp nothing.
+                            let uid = context
+                                .resolved_uid
+                                .clone()
+                                .or_else(|| hardware_uid.clone());
+                            if let Some(uid) = uid {
+                                self.stamp_setup_identity(device_id, &uid, name, previous);
+                            }
+                        }
+                    }
+                    (UiNotices::new(), None)
+                }
+            },
+            SetupDispatch::Deploy(op) => self.run_setup_push(op, updates).await,
+            SetupDispatch::AttachLens => {
+                let landed = self.open_setup_device_home(updates).await;
+                match landed {
+                    Ok(notices) => (notices, None),
+                    Err(error) => {
+                        self.fail_setup(error.to_string());
+                        (UiNotices::new(), None)
+                    }
+                }
+            }
+            SetupDispatch::MarkIncompleteFlash => {
+                self.mark_setup_flash_incomplete();
+                (UiNotices::new(), None)
+            }
+            // Nothing to run, and a reason worth saying out loud: an
+            // un-anchored board cannot be remembered, so its name lives
+            // only as long as the session does.
+            SetupDispatch::Skip { reason } => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("setup: skipped {} — {reason}", command.label()),
+                ));
+                (UiNotices::new(), None)
+            }
+            // `Home` is never produced by `dispatch_for` today; a future
+            // command that maps to one lands here rather than silently.
+            SetupDispatch::Home(_) => (UiNotices::new(), None),
+        }
+    }
+
+    /// What the executor needs that a command does not carry: the card key
+    /// ops address, and the uid the bound session's identity resolves to
+    /// right now (which is what a registry write is addressed with when
+    /// the probe anchored none — see `SetupCommand::WriteRegistry`).
+    fn setup_executor_context(&self) -> crate::SetupExecutorContext {
+        let context = crate::SetupExecutorContext::new((self.now_secs)()).with_resolved_uid(
+            self.setup_device.and_then(|id| {
+                self.device_sync_for(id)
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.uid.clone())
+            }),
+        );
+        match self
+            .setup
+            .as_ref()
+            .and_then(|session| session.card_key.clone())
+        {
+            Some(card_key) => context.with_card_key(card_key),
+            None => context,
+        }
+    }
+
+    /// Put the name the setup flow just wrote to the registry onto the
+    /// bound session's cached identity, under the uid the row was written
+    /// with.
+    ///
+    /// The registry is the naming truth (D34) and the session's copy is
+    /// what every gate downstream reads — including the push's
+    /// "carries a NAMED identity". Re-reading it through a pull is the
+    /// thorough path and runs first; this is the part that does not need
+    /// the wire, so a pull that could not run (or that failed, and
+    /// recorded `identity: None` for its trouble) cannot leave a board
+    /// nameless one command before the push demands a name.
+    ///
+    /// `previous` is the sync from BEFORE that refresh, and it is not
+    /// belt-and-braces: `refresh_device_sync_for` clears the reconcile
+    /// state before it re-reads, so a re-read that could not run (the
+    /// board still finishing its reboot, the protocol not attached yet)
+    /// leaves the session with NO identity — and the push one command
+    /// later refuses a board it can see. The classification in `previous`
+    /// is a moment old and nothing on the board changed in between; the
+    /// alternative is discarding a device's identity because a read did
+    /// not happen.
+    ///
+    /// Never invents a sync from nothing: a board nobody has ever read
+    /// gets no content classification here.
+    fn stamp_setup_identity(
+        &mut self,
+        device_id: crate::RuntimeId,
+        uid: &str,
+        name: &str,
+        previous: Option<DeviceSyncState>,
+    ) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let Some(session) = self.device_session_by_id(device_id) else {
+            return;
+        };
+        let Some(mut sync) = session.device_sync().cloned().or(previous) else {
+            return;
+        };
+        sync.identity = Some(crate::app::places::DeviceIdentity {
+            uid: uid.to_string(),
+            name: name.to_string(),
+        });
+        session.set_device_sync(Some(sync));
+        self.mark_dirty();
+    }
+
+    /// Wait for the bound board to be BACK — Ready, and its copy absorbed
+    /// — before provisioning writes to it or pushes.
+    ///
+    /// Bounded by the link layer's own readiness deadline:
+    /// [`lpa_link::DeviceSession::wait_ready`] drives the readiness engine
+    /// until the state leaves `Booting` or that deadline expires, and is
+    /// idempotent outside `Booting` (so on the ordinary path — where the
+    /// flash's own reattach already landed — this returns immediately and
+    /// costs nothing). A board that never comes back is left to the
+    /// push's own refusal rather than a second error voice.
+    async fn settle_setup_device(&mut self, updates: &UxUpdateSink) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        let state = match self.hardware_session_for(device_id) {
+            Some(session) => Some(session.wait_ready().await),
+            None => None,
+        };
+        if !matches!(state, Some(DeviceState::Ready { .. })) {
+            return;
+        }
+        // Ready, but nothing absorbed: the post-flash pull is what turns
+        // a hello into a resolved identity, and the registry write and
+        // the push both address the board through it.
+        if self
+            .device_sync_for(device_id)
+            .and_then(|sync| sync.identity.as_ref())
+            .is_none()
+        {
+            self.refresh_device_sync_for(device_id).await;
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
+        }
+    }
+
+    /// `RequestPort`: the browser's own chooser, then a connect. The port
+    /// grant is what gives the flow a session — and therefore a card key.
+    async fn run_setup_port_request(
+        &mut self,
+        provider_id: LinkProviderKind,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let before: Vec<crate::RuntimeId> = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .collect();
+        // Claim any session born during this request before it can render:
+        // the await below emits views while the session installs, and the
+        // bind only lands after it returns.
+        self.setup_port_snapshot = Some(before.clone());
+        let outcome = self.device.open_provider(provider_id).await;
+        // The chooser's own vocabulary: a grant that produced no session
+        // is a cancel. Web Serial cannot tell "cancelled" from "the list
+        // was empty" — both are one `NotFoundError` — so the flow only
+        // ever hears `PortPickerCancelled` here, and the escalation to
+        // board-first rides the intro's secondary CTA instead.
+        let cancelled = matches!(
+            outcome,
+            Ok(DeviceOpenOutcome::Cancelled { .. } | DeviceOpenOutcome::Opened)
+        );
+        let failed = outcome.is_err();
+        let settled = self
+            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+            .await;
+        let notices = match settled {
+            Ok(notices) => notices,
+            Err(error) => {
+                self.push_log(UiLogDraft::from_notice(UiNotice::warning(
+                    error.to_string(),
+                )));
+                UiNotices::new()
+            }
+        };
+        let granted = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .find(|id| !before.contains(id))
+            // A re-picked port reconnects the SAME endpoint rather than
+            // adding a session; the flow still holds a port then.
+            .or_else(|| {
+                if cancelled || failed {
+                    None
+                } else {
+                    self.pool
+                        .oldest_device_session()
+                        .map(crate::RuntimeSession::id)
+                }
+            });
+        // The bind (or the cancel) supersedes the snapshot claim.
+        self.setup_port_snapshot = None;
+        match granted {
+            Some(device_id) => {
+                self.bind_setup_device(device_id);
+                (notices, Some(crate::SetupEvent::PortGranted))
+            }
+            None => (notices, Some(crate::SetupEvent::PortPickerCancelled)),
+        }
+    }
+
+    /// Remember which session the flow drives, and give the executor the
+    /// card key its ops address (`DeviceTarget::card`).
+    fn bind_setup_device(&mut self, device_id: crate::RuntimeId) {
+        self.setup_device = Some(device_id);
+        if let Some(session) = self.setup.as_mut() {
+            session.card_key = Some(device_id.to_string());
+        }
+    }
+
+    /// `ProbeBoard`: one passive read of what the session already knows,
+    /// classified by [`classify_board`](crate::classify_board) against the
+    /// registry. Nothing is re-derived here — the evidence is exactly what
+    /// the link layer observed.
+    async fn read_setup_probe(&mut self) -> crate::BoardProbe {
+        let registry = self.registered_devices().await;
+        let Some(device_id) = self.setup_device else {
+            return crate::classify_board(&crate::ProbeEvidence::default(), &registry);
+        };
+        let evidence = self.setup_probe_evidence(device_id);
+        let probe = crate::classify_board(&evidence, &registry);
+        if !matches!(probe.verdict, crate::BoardVerdict::Unresponsive { .. }) {
+            return probe;
+        }
+        // Design §8: escalate ONLY on `Unresponsive`. The sync probe
+        // resets the board to talk to its ROM loader, which is why it is
+        // never automatic — but a board that said nothing intelligible has
+        // nothing to lose, and this is what turns "it's dead" into "it's
+        // blank, here are your boards".
+        let Some(session) = self.hardware_session_for(device_id) else {
+            return probe;
+        };
+        let _ = session
+            .probe_link_mode(lpa_link::DeviceEventSink::noop())
+            .await;
+        let escalated = self.setup_probe_evidence(device_id);
+        crate::classify_board(&escalated, &registry)
+    }
+
+    /// One probe pass's evidence, in the link layer's own vocabulary.
+    fn setup_probe_evidence(&self, device_id: crate::RuntimeId) -> crate::ProbeEvidence {
+        let session = self.pool.device_session(device_id);
+        let device_state = session.and_then(crate::RuntimeSession::device_state);
+        let hello = match &device_state {
+            Some(DeviceState::Ready { hello }) => Some(hello.clone()),
+            _ => None,
+        };
+        let snapshot = session
+            .and_then(crate::RuntimeSession::hardware_session)
+            .map(lpa_link::DeviceSession::snapshot);
+        // The no-firmware signature has two sources: the session sitting
+        // in ROM download mode, and the link's OWN boot-line classifier
+        // (`invalid header: 0xffffffff` after a clean ROM banner →
+        // `DeviceState::BlankFlash`). The G2 walk's blank C6 was hard-reset
+        // OUT of the bootloader before the wizard's read, so only the
+        // second source knew — ignoring it turned "blank, pick a board"
+        // into "nothing intelligible answered".
+        let state_says_blank = matches!(
+            device_state,
+            Some(DeviceState::BlankFlash | DeviceState::Bootloader)
+        );
+        crate::ProbeEvidence {
+            hello_seen: hello.is_some(),
+            no_firmware_signature: state_says_blank
+                || snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
+            lines: snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.recent_lines.clone())
+                .unwrap_or_default(),
+            detected_chip: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.detected_chip.clone()),
+            base_mac: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.probed_mac.clone())
+                .or_else(|| hello.and_then(|hello| hello.hardware.base_mac)),
+        }
+    }
+
+    /// `Flash`: the EXISTING provisioning op, unchanged. Its verdict is
+    /// read off the card-owned op flow rather than the notices — that flow
+    /// is what the refusal path (no image for this chip) writes to, and it
+    /// is the same surface the abandon guard marks.
+    async fn run_setup_flash(
+        &mut self,
+        op: DeviceOp,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let result = self.execute_device_op(op, updates).await;
+        let failure = self.setup_flash_failure();
+        let notices = match result {
+            Ok(notices) => notices,
+            Err(error) => {
+                return (
+                    UiNotices::new(),
+                    Some(crate::SetupEvent::FlashFailed {
+                        detail: error.to_string(),
+                    }),
+                );
+            }
+        };
+        match failure {
+            Some(detail) => (notices, Some(crate::SetupEvent::FlashFailed { detail })),
+            None => (notices, Some(crate::SetupEvent::FlashSucceeded)),
+        }
+    }
+
+    /// The failure text the card-owned op flow is carrying, if it failed.
+    fn setup_flash_failure(&self) -> Option<String> {
+        let device_id = self.setup_device?;
+        let op = self.device_card_ops.get(&device_id)?.borrow();
+        match &op.phase {
+            crate::CardOpPhase::Failed { error, .. } => Some(error.clone()),
+            _ => None,
+        }
+    }
+
+    /// `PushProject`. On hardware that is the deploy lane, verbatim. On a
+    /// target with no device session — THE simulator — it is the sim's own
+    /// load path, reached explicitly here rather than by the open-anything
+    /// hardwiring the device-first-creation ADR retired.
+    async fn run_setup_push(
+        &mut self,
+        op: DeployOp,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let sim = self.setup.as_ref().is_some_and(|session| session.sim);
+        let result = if sim {
+            let DeployOp::PushProject { key, .. } = &op else {
+                return (UiNotices::new(), None);
+            };
+            self.open_on_simulator(PendingOpen::Package(key.clone()), updates)
+                .await
+        } else {
+            self.execute_deploy_op(op, updates).await
+        };
+        match result {
+            Ok(notices) => (notices, Some(crate::SetupEvent::PushCompleted)),
+            Err(error) => {
+                self.fail_setup(error.to_string());
+                (UiNotices::new(), None)
+            }
+        }
+    }
+
+    /// `OpenDeviceHome`: the editor lensed to this target (vision D17).
+    /// The sim path is already lensed by its own load, so this is the
+    /// hardware landing.
+    async fn open_setup_device_home(&mut self, updates: UxUpdateSink) -> UiResult {
+        if self.setup.as_ref().is_some_and(|session| session.sim) {
+            return Ok(UiNotices::new());
+        }
+        let Some(device_id) = self.setup_device else {
+            return Ok(UiNotices::new());
+        };
+        self.attach_lens(device_id, updates).await
+    }
+
+    /// `MarkIncompleteFlash`: leave the board's card saying so. An
+    /// interrupted image is never trusted, and the card is where the user
+    /// will look. The board stays REMEMBERED — identity is anchored in
+    /// silicon, so an incomplete flash costs a re-flash, not a name.
+    fn mark_setup_flash_incomplete(&mut self) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        self.device_card_ops.insert(
+            device_id,
+            Rc::new(RefCell::new(crate::CardOp::failed(
+                "Flashing firmware",
+                "Incomplete flash — the board needs re-flashing before it can run. \
+                 Nothing was bricked: its bootloader is untouched.",
+                "Back to set up",
+            ))),
+        );
+        self.mark_dirty();
+    }
+
+    /// Record a failure the MACHINE has no edge for — a generate or a push
+    /// that did not land (design §7.10). The wizard shows it and offers
+    /// its ✕; inventing a transition here would be inventing the answer to
+    /// "what does a flashed, registered board with no project mean".
+    fn fail_setup(&mut self, error: impl Into<String>) {
+        let error = error.into();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Error,
+            UiLogOrigin::Studio,
+            error.clone(),
+        ));
+        if let Some(session) = self.setup.as_mut() {
+            session.error = Some(error);
+        }
+        self.mark_dirty();
+    }
+
+    /// Every remembered device row (the recognition lookup's corpus).
+    async fn registered_devices(&mut self) -> Vec<crate::app::places::RegisteredDevice> {
+        let Ok(host) = self.library_host() else {
+            return Vec::new();
+        };
+        let Ok(fs) = host.catalog_snapshot().await else {
+            return Vec::new();
+        };
+        crate::app::places::DeviceRegistry::new(fs)
+            .list()
+            .unwrap_or_default()
+    }
+
+    /// Every remembered device's name, for the provision step's collision
+    /// suffix (design §3).
+    async fn registered_device_names(&mut self) -> Vec<String> {
+        self.registered_devices()
+            .await
+            .into_iter()
+            .map(|row| row.name)
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    /// The wizard, if one is open and still has something to draw: the
+    /// machine's state, the card it rides (`takeover_card` — `None` renders
+    /// it standalone in the entry-cards slot), and the two things only the
+    /// controller can see — the live flash op and the session's console
+    /// tail.
+    ///
+    /// A flow at DEVICE_HOME/CLOSED draws NOTHING: the handoff is a body
+    /// swap, so the bound card is already on the grid wearing its own body
+    /// (G2 ruling), and a standalone frame here would be the card
+    /// appearing that the ruling forbids.
+    fn setup_view(&self, takeover_card: Option<String>) -> Option<crate::UiSetupWizard> {
+        if !self.setup_flow_running() {
+            return None;
+        }
+        let session = self.setup.as_ref()?;
+        let flash = self
+            .setup_device
+            .and_then(|id| self.device_card_ops.get(&id))
+            .map(|slot| slot.borrow().clone());
+        let console_tail = self
+            .setup_device
+            .and_then(|id| self.pool.device_session(id))
+            .map(|session| session.console_tail().iter().cloned().collect())
+            .unwrap_or_default();
+        Some(session.view(takeover_card, flash, console_tail))
     }
 
     /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
@@ -3066,10 +4447,15 @@ impl StudioController {
     }
 
     /// The live half of a device rename (D34): when the renamed device is
-    /// the attached one, write `/.lp/device.json` back over the wire and
-    /// update the cached sync state so every surface shows the new name
-    /// immediately. Offline devices skip this — the write-back happens on
-    /// the next connect (`reconcile_identity_name`).
+    /// the attached one, update the cached sync state so every surface
+    /// shows the new name immediately — and, for a board whose identity
+    /// still lives in its filesystem, write `/.lp/device.json` back over
+    /// the wire. Offline devices skip both halves; the write-back happens
+    /// on the next connect (`resolve_session_identity`).
+    ///
+    /// The wire half is `Minted`-only (design §5), the same rule the
+    /// connect path applies: an ESP-class board's name lives in the
+    /// registry alone, so renaming it never touches its filesystem.
     async fn write_back_live_identity_name(
         &mut self,
         uid: &str,
@@ -3088,16 +4474,24 @@ impl StudioController {
             uid: uid.to_string(),
             name: name.to_string(),
         };
-        let logs = self
-            .pool
-            .device_session_mut(device_id)?
-            .client_mut()?
-            .fs_write(
-                crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
-                &identity.to_json_bytes(),
-            )
-            .await?;
-        self.record_logs(logs);
+        let file_is_the_store = matches!(
+            self.pool
+                .device_session(device_id)
+                .and_then(crate::RuntimeSession::hardware_id),
+            Some(crate::app::places::HardwareId::Minted { .. })
+        );
+        if file_is_the_store {
+            let logs = self
+                .pool
+                .device_session_mut(device_id)?
+                .client_mut()?
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                    &identity.to_json_bytes(),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
         if let Some(sync) = self
             .pool
             .device_session_mut(device_id)
@@ -3161,6 +4555,17 @@ impl StudioController {
     /// (P2 coexistence — the old "disconnect the device to open this
     /// project" refusal is gone).
     async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
+        // Opening a LIBRARY CARD still means the simulator, and now says
+        // so: the destination is named at the call site rather than being
+        // the one thing `open_from_home_inner` could do (device-first
+        // creation ADR — the setup wizard reaches the sim through
+        // `open_on_simulator` too, explicitly, and never through here).
+        self.open_on_simulator(pending, updates).await
+    }
+
+    /// Open a package or example ON THE SIMULATOR: start or reuse THE sim
+    /// session, put the lens on it, and load. The explicit sim path.
+    async fn open_on_simulator(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         self.library_host()?;
         self.pending_open = Some(pending);
         let result = self.open_from_home_inner(updates).await;
@@ -3291,8 +4696,15 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
+                // The open path's own notices come FIRST — a format upgrade
+                // is the thing the user most needs to read, and it must not
+                // be a console-only line (P3).
+                let mut notices = UiNotices::new();
+                for notice in self.project.take_open_notices() {
+                    notices = notices.with_notice(notice);
+                }
                 let sync = self.sync_project_after_attach(updates).await?;
-                Ok(UiNotices::new().with_notice(project_sync_notice(
+                Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
                     "Project opened; project sync needs attention",
@@ -3317,6 +4729,9 @@ impl StudioController {
                 self.connect_loaded_project(handle_id, updates).await
             }
             ProjectOp::LoadDemoProject => self.load_demo_project(updates).await,
+            ProjectOp::OpenDocsExample { example_id } => {
+                self.open_docs_example(&example_id, updates).await
+            }
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
@@ -4155,6 +5570,109 @@ impl StudioController {
         }
     }
 
+    /// The docs-sim bootstrap ([`ProjectOp::OpenDocsExample`], interactive
+    /// docs D1/D2): ensure THIS controller's browser-worker sim is
+    /// connected, put the lens on it, and deploy a compiled-in example
+    /// directly — never through the library. A docs page's leased
+    /// controller dispatches this as its first action; re-dispatching on
+    /// the live sim is the docs "reset" (pristine re-deploy of the same
+    /// files). Never dispatched by any app surface.
+    async fn open_docs_example(&mut self, example_id: &str, updates: UxUpdateSink) -> UiResult {
+        match self.pool.sim_session() {
+            // Live sim: the reset path. Lens back on it, re-deploy below.
+            Some(sim) if matches!(sim.server_state(), ServerState::Connected { .. }) => {
+                let id = sim.id();
+                self.pool.set_lens(id);
+            }
+            // A sim in any half-state is unexpected here: the docs host
+            // boots fresh controllers and resets only live ones. Refuse
+            // loudly instead of guessing at recovery (removing the session
+            // without closing its provider would leak the worker).
+            Some(_) => {
+                return Err(UiError::MissingSession(
+                    "the docs simulator is not connected; shut this host down and boot a fresh one"
+                        .to_string(),
+                ));
+            }
+            None => {
+                emit_activity(
+                    &updates,
+                    UxActivityTarget::pane(ProjectController::NODE_ID),
+                    "Starting simulator",
+                    "Starting",
+                    "Starting the docs simulator",
+                );
+                let outcome = self
+                    .device
+                    .open_provider(LinkProviderKind::BrowserWorker)
+                    .await;
+                match outcome {
+                    Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
+                        self.record_logs(logs);
+                        let id = self.install_session(payload).await?;
+                        // The fresh install claims a lens-less pool's lens;
+                        // set it explicitly anyway so the invariant is local.
+                        self.pool.set_lens(id);
+                        let attach = self
+                            .pool
+                            .session_mut(id)
+                            .ok_or_else(|| {
+                                UiError::MissingSession(
+                                    "the docs simulator session vanished after install".to_string(),
+                                )
+                            })?
+                            .attach_server(updates.clone());
+                        if let Err(error) = attach {
+                            self.pool.remove_kind(crate::RuntimeKind::Sim);
+                            return Err(error);
+                        }
+                    }
+                    Ok(_) => {
+                        self.pool.remove_kind(crate::RuntimeKind::Sim);
+                        return Err(UiError::MissingSession(
+                            "the docs simulator did not connect".to_string(),
+                        ));
+                    }
+                    Err(error) => {
+                        self.pool.remove_kind(crate::RuntimeKind::Sim);
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Opening example",
+            "Opening",
+            "Pushing the example to the docs simulator",
+        );
+        let result = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.load_example_direct(server, example_id).await
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UiNotices::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Example running",
+                    "Example running; project sync needs attention",
+                )))
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    error.to_string(),
+                ));
+                self.project.fail(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
     async fn disconnect_project(&mut self) -> UiResult {
         self.project.disconnect();
         Ok(UiNotices::new().with_notice(UiNotice::info("Project disconnected")))
@@ -4166,16 +5684,25 @@ impl StudioController {
     /// not on a sim or the open carried no library identity (the storeless
     /// demo path); the record outlives the lens (detach keeps the sim
     /// running) and dies with the session.
+    ///
+    /// The sim's BOARD identity rides along (vision D4: the sim inherits
+    /// its board from the project it runs) — the project's advisory
+    /// manifest `target`, which is where that fact persists. It follows the
+    /// project exactly: an untargeted project leaves the sim with no board,
+    /// which is today's behavior everywhere until the wizard generates
+    /// targeted projects.
     fn note_sim_loaded_project(&mut self) {
         let project = self
             .project
             .active_library_uid()
             .zip(self.project.active_library_slug());
+        let target = self.project.active_target();
         if let Some((uid, name)) = project
             && let Ok(session) = self.pool.lens_session_mut()
             && session.is_sim()
         {
             session.set_sim_loaded_project(Some(crate::SimLoadedProject { uid, name }));
+            session.set_sim_board_id(target);
         }
     }
 
@@ -4625,20 +6152,26 @@ impl StudioController {
                 updates,
             )
             .await?;
-        // The setup form's name stamps at first post-flash contact
+        // The setup form's name lands at first post-flash contact
         // (model §1-A): the happy path never detours through
-        // Needs-a-name. Only an identity-less board takes the stamp —
-        // an update on a stamped device keeps its name. Naming failure
-        // degrades honestly: the flash stands, the card offers naming.
+        // Needs-a-name. Only an UNNAMED board takes the name — an update
+        // on a named device keeps its name. Naming failure degrades
+        // honestly: the flash stands, the card offers naming. A
+        // MAC-identified board arrives with a uid and no name (device
+        // identity design §3), so the gate reads the NAME; the name
+        // itself is a registry write under that uid, and the board's
+        // filesystem is never touched.
         let setup_name = setup_name
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = setup_name
-            && self
-                .device_sync_for(device_id)
-                .is_some_and(|sync| sync.identity.is_none())
+            && self.device_sync_for(device_id).is_some_and(|sync| {
+                sync.identity
+                    .as_ref()
+                    .is_none_or(|identity| identity.name.is_empty())
+            })
         {
-            match self.run_identity_stamp(device_id, name).await {
+            match self.run_device_naming(device_id, name).await {
                 Ok(identity) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "This device is now \"{}\"",
@@ -4653,7 +6186,7 @@ impl StudioController {
             }
         }
         // The setup form's board choice lands on the device as
-        // `/hardware.json` (D4) — after the identity stamp so the registry
+        // `/hardware.json` (D4) — after the naming write so the registry
         // row exists to cache the board. Generic choice (`None`) writes
         // nothing: the compiled-in default stands. Failure degrades
         // honestly — the flash and name stand; the pin map just stays
@@ -4885,7 +6418,10 @@ impl StudioController {
         let device_label = self
             .device_sync_for(device_id)
             .and_then(|sync| sync.identity.as_ref())
-            .map(|identity| identity.name.clone());
+            .map(|identity| identity.name.clone())
+            // an identified-but-unnamed board (device identity design §3)
+            // is as nameless as an anonymous one for a FILE name
+            .filter(|name| !name.is_empty());
         let sink: Rc<RefCell<Option<LinkManagementResult>>> = Rc::new(RefCell::new(None));
         let mut outcome = self
             .run_device_management(
@@ -5451,6 +6987,27 @@ fn fold_fixture_summaries(
     }
 }
 
+/// The import/paste confirmation, saying so when the archive arrived at an
+/// older format and was migrated on the way in.
+///
+/// Naming the upgrade is the point: the project the user gets back is not
+/// byte-identical to the one they handed over, and the only moment that
+/// fact is cheap to state is the moment it happens.
+fn import_message(verb: &str, outcome: &crate::app::library::CatalogOutcome) -> String {
+    let name = outcome
+        .summary
+        .as_ref()
+        .map(|summary| summary.name.clone())
+        .unwrap_or_default();
+    match outcome.upgraded_from {
+        Some(found) => format!(
+            "{verb} {name} — upgraded from format {found} to {}",
+            lpc_model::PROJECT_FORMAT_VERSION
+        ),
+        None => format!("{verb} {name}"),
+    }
+}
+
 fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> UiNotice {
     if synced {
         UiNotice::info(success)
@@ -5478,7 +7035,37 @@ fn device_content_label(content: &DeviceContent) -> &'static str {
         DeviceContent::Known { .. } => "known",
         DeviceContent::Adopted { .. } => "adopted",
         DeviceContent::PendingIdentity { .. } => "pending-identity",
+        DeviceContent::OldFormat { .. } => "old-format",
         DeviceContent::Unreadable { .. } => "unreadable",
+    }
+}
+
+/// The card-facing content for a board whose project format is not this
+/// build's — `None` when the sniff says the project IS current, which is
+/// the ordinary case and leaves the caller's own classification standing.
+///
+/// A manifest that reads as JSON but is not a project manifest at all
+/// (no `format`, wrong root shape) lands on the unreadable card rather
+/// than on a format claim we cannot back up.
+fn device_content_for_format(
+    class: &lpa_upgrade::FormatClass,
+    project_uid: Option<String>,
+    slug: Option<String>,
+    observed: lpc_history::ContentHash,
+) -> Option<DeviceContent> {
+    match class {
+        lpa_upgrade::FormatClass::Current => None,
+        lpa_upgrade::FormatClass::NotAProject | lpa_upgrade::FormatClass::Unreadable { .. } => {
+            Some(DeviceContent::Unreadable {
+                detail: class.describe(),
+            })
+        }
+        _ => Some(DeviceContent::OldFormat {
+            project_uid,
+            slug,
+            observed,
+            class: class.clone(),
+        }),
     }
 }
 
@@ -5504,6 +7091,29 @@ fn clock_fallback_random() -> [u8; 16] {
     bytes[..8].copy_from_slice(&a.to_le_bytes());
     bytes[8..].copy_from_slice(&b.to_le_bytes());
     bytes
+}
+
+/// `YYYY-MM-DD-HHMM` in UTC from epoch seconds — the fallback slug stamp
+/// for a shell that installed no local one (see
+/// [`StudioController::set_local_stamp`]). Howard Hinnant's civil-from-days.
+fn utc_slug_stamp(now_secs: f64) -> String {
+    let secs = now_secs as i64;
+    let days = secs.div_euclid(86_400);
+    let seconds_of_day = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}-{:02}{:02}",
+        seconds_of_day / 3_600,
+        (seconds_of_day % 3_600) / 60,
+    )
 }
 
 fn emit_activity(
@@ -5785,6 +7395,40 @@ mod tests {
         assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
         // Window elapsed: allowed again.
         assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
+    }
+
+    #[test]
+    fn an_upgraded_import_says_so_and_an_ordinary_one_stays_quiet() {
+        use crate::app::library::{CatalogOutcome, PackageHealth, PackageSummary};
+
+        let summary = PackageSummary {
+            uid: "prj_0123456789abcdef".parse().unwrap(),
+            name: "Plasma".to_string(),
+            kind: "Project".to_string(),
+            slug: "2026-08-04-1800-plasma".to_string(),
+            health: PackageHealth::Ready,
+        };
+
+        // The whole point of the import gate reaching the user: the bytes
+        // they handed over are not the bytes that landed.
+        let upgraded = CatalogOutcome {
+            summary: Some(summary.clone()),
+            upgraded_from: Some(4),
+        };
+        let message = import_message("Imported", &upgraded);
+        assert!(message.contains("Plasma"), "{message}");
+        assert!(message.contains("upgraded from format 4"), "{message}");
+        assert!(
+            message.contains(&lpc_model::PROJECT_FORMAT_VERSION.to_string()),
+            "{message}"
+        );
+
+        // ...and the ordinary case is not made noisy by it.
+        let plain = CatalogOutcome {
+            summary: Some(summary),
+            upgraded_from: None,
+        };
+        assert_eq!(import_message("Pasted", &plain), "Pasted Plasma");
     }
 
     #[test]
@@ -6146,6 +7790,60 @@ mod tests {
         assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
         studio.run_due_heartbeats();
         assert_eq!(studio.next_refresh_interval(), DEVICE_HEARTBEAT_INTERVAL);
+    }
+
+    #[test]
+    fn a_sim_lens_with_a_board_feeds_lens_board_id_and_its_card() {
+        // Gallery-rework P04 / vision D4. The sim is still not a device
+        // (D22) — no registry row backs it — but a board identity makes
+        // the output face's pin diagram light up for it exactly as it does
+        // for hardware, and the card says what it is pretending to be.
+        let mut studio = StudioController::new(|| 100.0);
+        studio.set_stub_sim_for_test();
+
+        assert_eq!(
+            studio.lens_board_id(),
+            None,
+            "default: no board, today's behavior"
+        );
+        assert_eq!(
+            studio
+                .lens_device_card()
+                .expect("a lens card for the sim session")
+                .board_id,
+            None
+        );
+
+        studio
+            .pool
+            .lens_session_mut()
+            .expect("the sim holds the lens")
+            .set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
+
+        assert_eq!(studio.lens_board_id(), Some("seeed/xiao-esp32-c6"));
+        assert_eq!(
+            studio
+                .lens_device_card()
+                .expect("a lens card for the sim session")
+                .board_id
+                .as_deref(),
+            Some("seeed/xiao-esp32-c6"),
+            "the card carries it too — that is the \"as <board>\" line"
+        );
+    }
+
+    #[test]
+    fn a_device_session_never_takes_the_sims_board_field() {
+        // The two sources stay separate: a device's board is its registry
+        // row, and `set_sim_board_id` is a no-op on a device session.
+        let mut studio = StudioController::new(|| 100.0);
+        studio.set_stub_device_for_test(lpa_link::DeviceState::Booting);
+        let session = studio
+            .pool
+            .lens_session_mut()
+            .expect("the device holds the lens");
+        session.set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
+        assert_eq!(session.sim_board_id(), None);
     }
 
     #[test]
@@ -7182,6 +8880,642 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+
+    // ---- the setup wizard ------------------------------------------------
+
+    fn setup_action(op: HomeOp) -> UiAction {
+        UiAction::from_op(ControllerId::new(crate::HOME_NODE_ID), op)
+    }
+
+    fn wizard_of(studio: &StudioController) -> Option<crate::UiSetupWizard> {
+        studio.view().home.and_then(|home| home.setup)
+    }
+
+    #[test]
+    fn the_wizard_is_a_card_on_the_home_view_from_the_moment_it_opens() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        assert!(
+            wizard_of(&studio).is_none(),
+            "no wizard until one is asked for"
+        );
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let wizard = wizard_of(&studio).expect("the wizard renders as a card");
+        assert!(!wizard.sim);
+        assert_eq!(wizard.title, "Connect a device");
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::ConnectIntro);
+        assert_eq!(
+            wizard
+                .steps
+                .iter()
+                .map(|step| step.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Connect", "Flash", "Project", "Done"],
+        );
+    }
+
+    #[test]
+    fn the_simulator_entry_opens_on_the_board_pick_with_no_probe() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: true }))).unwrap();
+        let wizard = wizard_of(&studio).expect("the sim wizard is a card too");
+        assert!(wizard.sim);
+        // Design §7.1: the sim's entry IS `BOARD_PICK`, entered with no
+        // probe evidence — not a second state wearing a disguise.
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::BoardPick);
+        assert_eq!(wizard.state.probe(), None);
+        assert_eq!(wizard.detected_chip(), None);
+    }
+
+    #[test]
+    fn closing_the_wizard_takes_its_card_off_the_grid() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::CloseRequested,
+        ))))
+        .unwrap();
+        assert!(
+            wizard_of(&studio).is_none(),
+            "a closed flow leaves no card behind"
+        );
+    }
+
+    const KNOWN_UID: &str = "dev_000000029EVDlKLX";
+
+    /// Install a stub device session — a board on the wire, no flow.
+    fn install_stub_device(studio: &mut StudioController) -> crate::RuntimeId {
+        studio
+            .pool
+            .install(
+                crate::app::runtime_pool::RuntimePayload::stub_device_for_test(
+                    crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+                ),
+            )
+            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message))
+    }
+
+    /// The port-grant moment without a wire: a stub session, bound to the
+    /// flow, with the machine walked to PROBING (where a real grant lands).
+    fn grant_a_port(studio: &mut StudioController) -> crate::RuntimeId {
+        let device_id = install_stub_device(studio);
+        studio.bind_setup_device(device_id);
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+        flow.handle(crate::SetupEvent::ItsConnected);
+        flow.handle(crate::SetupEvent::PortGranted);
+        device_id
+    }
+
+    /// A probe verdict, as the executor would report it.
+    fn blank_probe(hardware_uid: Option<&str>) -> crate::BoardProbe {
+        crate::BoardProbe {
+            verdict: crate::BoardVerdict::Blank { known: None },
+            detected_chip: Some("esp32c6".to_string()),
+            hardware_uid: hardware_uid.map(str::to_string),
+            hardware_origin: hardware_uid.map(|_| "efuse:aa:bb:cc:dd:ee:ff".to_string()),
+        }
+    }
+
+    /// Land a verdict on the open flow — the recognition moment the
+    /// takeover binds at.
+    fn land_a_verdict(studio: &mut StudioController, probe: crate::BoardProbe) {
+        studio
+            .setup
+            .as_mut()
+            .expect("wizard")
+            .flow
+            .handle(crate::SetupEvent::ProbeCompleted { probe });
+    }
+
+    /// Walk the pure machine from a landed BLANK verdict to DEVICE_HOME.
+    /// The machine does not care where the events came from (R1).
+    fn walk_the_flow_to_device_home(studio: &mut StudioController) {
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+        flow.handle(crate::SetupEvent::BoardChosen {
+            board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+        });
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::FlashSucceeded);
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::ProjectGenerated {
+            project_uid: "prj_test".to_string(),
+        });
+        flow.handle(crate::SetupEvent::PushCompleted);
+    }
+
+    #[test]
+    fn a_bound_flow_rides_the_devices_own_card_from_the_verdict_on() {
+        // G2 ruling 2026-08-05 + its follow-up: one physical board, ONE
+        // card, at every moment. Pre-device and PRE-VERDICT the wizard is
+        // standalone and the bound session's row stands down (an anonymous
+        // row cannot merge with a remembered card); from the verdict on the
+        // wizard is the BODY of that board's own roster card.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+
+        // Pre-device: nothing to attach to, so the wizard is standalone —
+        // and no phantom "Connecting…" card rides along beside it.
+        let home = studio.view().home.expect("home view");
+        let wizard = home.setup.expect("the wizard is on the grid");
+        assert_eq!(wizard.takeover_card, None, "nothing to be the body of yet");
+        assert!(
+            home.devices.is_empty(),
+            "the connect narration is the wizard's own; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        let device_id = grant_a_port(&mut studio);
+
+        // Pre-verdict: still standalone, and the bound row stands down —
+        // the wizard's PROBING body is the whole of the narration.
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::Probing,
+        );
+        assert_eq!(
+            home.setup.expect("the wizard renders").takeover_card,
+            None,
+            "no verdict, no card to ride"
+        );
+        assert!(
+            home.devices.is_empty(),
+            "the pre-verdict row stands down; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        land_a_verdict(&mut studio, blank_probe(None));
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "exactly one card carries the device; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        let card = &home.devices[0];
+        assert_eq!(
+            card.session_key.as_deref(),
+            Some(device_id.to_string().as_str()),
+            "and it is the bound session's own card"
+        );
+        let wizard = home.setup.as_ref().expect("the wizard still renders");
+        assert_eq!(
+            wizard.takeover_card.as_deref(),
+            Some(card.identity_key()),
+            "the wizard rides that card's body"
+        );
+    }
+
+    #[test]
+    fn a_recognised_board_never_renders_twice() {
+        // The G2 re-walk finding: a board the registry already knows was
+        // showing its remembered card AND the connection's anonymous card.
+        // The verdict is what fixes it — the probe's uid rides the live row
+        // as `pending_uid`, the live card adopts the remembered identity,
+        // and the roster's twin filter drops the registry row.
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::app::places::{DeviceRegistry, RegisteredDevice};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| "2026-08-05-0900".to_string()),
+        );
+        DeviceRegistry::new(store.fs_handle())
+            .upsert(RegisteredDevice {
+                uid: KNOWN_UID.to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1_799_000_000.0,
+                association: None,
+                board_id: Some("espressif/esp32-c6-devkitc-1".to_string()),
+                hardware_id: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
+                previous_uids: Vec::new(),
+            })
+            .expect("the registry remembers this board");
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 1.0))));
+        block_on_ready(studio.settle_library());
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "the remembered board's card is on the grid to begin with"
+        );
+
+        grant_a_port(&mut studio);
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "pre-verdict the connection adds NO second card; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        land_a_verdict(&mut studio, blank_probe(Some(KNOWN_UID)));
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "and from the verdict on there is still exactly one; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        let card = &home.devices[0];
+        assert_eq!(card.uid.as_deref(), Some(KNOWN_UID), "it is THE board");
+        assert_eq!(card.name, "Porch sign", "wearing the name we remember");
+        assert!(card.session_key.is_some(), "and it is the LIVE card");
+        assert_eq!(
+            home.setup.expect("wizard").takeover_card.as_deref(),
+            Some(card.identity_key()),
+            "the wizard rides the merged card"
+        );
+    }
+
+    /// A studio with a memory library, plus the store behind it so a test
+    /// can read what the flow wrote.
+    fn studio_with_library() -> (StudioController, crate::app::library::LibraryStore) {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [9u8; 16]),
+            Rc::new(|| "2026-08-05-0900".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 1_800_000_000.0),
+        )));
+        block_on_ready(studio.settle_library());
+        (studio, store)
+    }
+
+    /// Give the bound session the identity a post-flash hello resolves:
+    /// a uid from silicon, and NO name (the name is what provisioning is
+    /// about to write).
+    fn absorb_identity(studio: &mut StudioController, device_id: crate::RuntimeId, uid: &str) {
+        let session = studio
+            .pool
+            .device_session_mut(device_id)
+            .expect("the bound session");
+        session.set_device_sync(Some(crate::app::places::DeviceSyncState {
+            identity: Some(crate::app::places::DeviceIdentity {
+                uid: uid.to_string(),
+                name: String::new(),
+            }),
+            content: crate::app::places::DeviceContent::Empty,
+        }));
+    }
+
+    #[test]
+    fn provisioning_names_the_board_under_the_identity_the_flash_gave_it() {
+        // G2 blank-C6 walk, 2026-08-05: a blank board probed in its boot
+        // loop anchors NO uid, so the reducer's old "write the registry
+        // only when the probe carried one" meant the name the user typed
+        // was written nowhere — and the push then refused the board with
+        // "no named device is connected". The identity the FLASH gave the
+        // board (its post-flash hello) is what the row is addressed with.
+        let (mut studio, store) = studio_with_library();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let device_id = grant_a_port(&mut studio);
+        // A probe that anchored nothing — the case that used to lose the name.
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+            flow.handle(crate::SetupEvent::NameEdited {
+                name: "Porch sign".to_string(),
+            });
+        }
+        // …and the flash's reattach absorbed the board's identity.
+        absorb_identity(&mut studio, device_id, "dev_fromthehello");
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .expect("provisioning runs");
+
+        let rows = crate::app::places::DeviceRegistry::new(store.fs_handle())
+            .list()
+            .expect("the registry is readable");
+        let row = rows
+            .iter()
+            .find(|row| row.uid == "dev_fromthehello")
+            .unwrap_or_else(|| panic!("the board is remembered; got {rows:?}"));
+        assert_eq!(row.name, "Porch sign", "under the name the user typed");
+        assert_eq!(
+            row.board_id.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
+        // …and the SESSION carries that name, which is what the push gate
+        // reads. Without this the push refuses a board it can see.
+        assert_eq!(
+            studio
+                .device_sync_for(device_id)
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.name.as_str()),
+            Some("Porch sign"),
+        );
+    }
+
+    #[test]
+    fn a_board_no_identity_anchors_provisions_without_a_registry_row() {
+        // The other side of the same seam: neither the probe nor the
+        // session can name the board, so no row is invented — the flow
+        // carries on rather than writing garbage under an empty uid.
+        let (mut studio, store) = studio_with_library();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+        }
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .expect("provisioning runs");
+
+        assert!(
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .list()
+                .expect("the registry is readable")
+                .is_empty(),
+            "a board anchored to nothing is remembered by nothing"
+        );
+    }
+
+    #[test]
+    fn closing_at_provision_leaves_the_flashed_board_connected() {
+        // G2 walk: ✕ after a successful flash released the port, and the
+        // board that had just been set up read "not connected" on the very
+        // next frame. The session — and its card — stay.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let device_id = grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+        }
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::Provision,
+        );
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::CloseRequested,
+        ))))
+        .expect("closing is not an error");
+
+        assert!(studio.setup.is_none(), "the flow is over");
+        assert!(
+            studio.pool.device_session(device_id).is_some(),
+            "the board keeps its session"
+        );
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "and its card is still on the grid; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        assert!(home.setup.is_none(), "with its own body back");
+    }
+
+    #[test]
+    fn the_takeover_ends_at_device_home_without_the_card_changing() {
+        // "Becomes the device card" is a BODY SWAP: at DEVICE_HOME the
+        // same card is still there, in the same place, wearing its own
+        // body again. Nothing appears, nothing disappears.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        let before = studio.view().home.expect("home view");
+        let key = before.devices[0].identity_key().to_string();
+
+        walk_the_flow_to_device_home(&mut studio);
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::DeviceHome,
+        );
+
+        let after = studio.view().home.expect("home view");
+        assert_eq!(
+            after
+                .devices
+                .iter()
+                .map(|card| card.identity_key().to_string())
+                .collect::<Vec<_>>(),
+            vec![key],
+            "the same one card, still on the grid"
+        );
+        assert!(
+            after.setup.is_none(),
+            "the takeover is gone — the card's own body is the landing"
+        );
+    }
+
+    #[test]
+    fn the_mid_setup_card_leads_the_roster() {
+        // A card mid-setup holds a stable, leading grid position: it is
+        // pinned first, ahead even of the sim's own pin, so it does not
+        // hop columns as other cards land.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let idle = install_stub_device(&mut studio);
+        let bound = grant_a_port(&mut studio);
+        land_a_verdict(&mut studio, blank_probe(None));
+        assert_ne!(idle, bound, "two boards attached");
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(home.devices.len(), 2, "both boards keep their cards");
+        assert_eq!(
+            home.devices[0].session_key.as_deref(),
+            Some(bound.to_string().as_str()),
+            "the board the flow is on leads"
+        );
+        assert_eq!(
+            home.setup.expect("wizard").takeover_card.as_deref(),
+            Some(home.devices[0].identity_key()),
+        );
+    }
+
+    #[test]
+    fn a_session_born_during_the_port_request_never_renders_before_the_bind() {
+        // The connect-window card flash (G2, 2026-08-05): `open_provider`
+        // is a long await that emits renders while the new session
+        // installs, and `bind_setup_device` only runs after it returns.
+        // The request's snapshot claims the newborn for the flow.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        studio
+            .setup
+            .as_mut()
+            .expect("wizard")
+            .flow
+            .handle(crate::SetupEvent::ItsConnected);
+        // What run_setup_port_request does before the await:
+        studio.setup_port_snapshot = Some(vec![]);
+        // …and what the connect flow does DURING it:
+        let newborn = install_stub_device(&mut studio);
+        assert_eq!(studio.setup_device, None, "the bind has not landed yet");
+        let home = studio.view().home.expect("home view");
+        assert!(
+            home.devices.is_empty(),
+            "the flow's own newborn session must not flash a card; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        // A session that predates the request keeps its card.
+        studio.setup_port_snapshot = Some(vec![newborn]);
+        assert!(!studio.view().home.expect("home view").devices.is_empty());
+    }
+
+    #[test]
+    fn a_blank_flash_device_state_is_blank_evidence_not_unresponsive() {
+        // The G2 blank-C6 walk: the board was hard-reset out of the
+        // bootloader before the wizard's read, so `link_mode` was normal —
+        // but the link's boot-line classifier had already concluded
+        // `BlankFlash` (`invalid header: 0xffffffff`). That state IS the
+        // no-firmware signature.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let device_id = studio
+            .pool
+            .install(
+                crate::app::runtime_pool::RuntimePayload::stub_device_for_test(
+                    DeviceState::BlankFlash,
+                ),
+            )
+            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message));
+        let evidence = studio.setup_probe_evidence(device_id);
+        assert!(evidence.no_firmware_signature);
+        assert!(!evidence.hello_seen);
+        let probe = crate::classify_board(&evidence, &[]);
+        assert!(
+            matches!(probe.verdict, crate::BoardVerdict::Blank { known: None }),
+            "a BlankFlash link state must classify Blank, got {:?}",
+            probe.verdict
+        );
+    }
+
+    #[test]
+    fn a_gesture_with_no_wizard_open_is_inert() {
+        // The stale-click case (§2 cross-cutting): the card went away
+        // between render and click. Nothing happens, and nothing errors.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let notices = block_on_ready(
+            studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))),
+        )
+        .expect("a stale gesture is not an error");
+        assert!(notices.notices.is_empty());
+        assert!(wizard_of(&studio).is_none());
+    }
+
+    #[test]
+    fn the_sim_path_reaches_provision_with_a_project_line_and_no_name() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: true }))).unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            },
+        ))))
+        .unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .unwrap();
+        let wizard = wizard_of(&studio).expect("still a card");
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::Provision);
+        let project = wizard.project.expect("the compact project line");
+        assert!(project.summary.starts_with("meteor → 256-px strip → "));
+        // §3: the sim names nothing — `can_rename` is false, so the state
+        // carries no name for a field to show.
+        let crate::SetupState::Provision(provision) = &wizard.state else {
+            panic!("provision state")
+        };
+        assert_eq!(provision.name, "");
+    }
+
+    #[test]
+    fn the_hardware_name_derives_from_the_injected_stamp() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        studio.set_local_stamp(|| "2026-08-05-0930".to_string());
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        // Walk the hardware path's tail without a wire: the machine does
+        // not care where the events came from, which is the point of R1.
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+        flow.handle(crate::SetupEvent::ItsConnected);
+        flow.handle(crate::SetupEvent::PortGranted);
+        flow.handle(crate::SetupEvent::ProbeCompleted {
+            probe: crate::BoardProbe {
+                verdict: crate::BoardVerdict::Blank { known: None },
+                detected_chip: Some("esp32c6".to_string()),
+                hardware_uid: None,
+                hardware_origin: None,
+            },
+        });
+        flow.handle(crate::SetupEvent::BoardChosen {
+            board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+        });
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::FlashSucceeded);
+        let crate::SetupState::Provision(provision) = flow.state() else {
+            panic!("the flash lands on provision")
+        };
+        assert!(
+            provision.name.ends_with(" · Aug 5"),
+            "the derived name reads the LIBRARY's stamp, not a clock: {}",
+            provision.name
+        );
+    }
+
+    #[test]
+    fn the_utc_fallback_stamp_is_a_well_formed_slug_stamp() {
+        // The default when a shell installs no local stamp. `Aug 5 2026,
+        // 12:00 UTC` — the naming helper must be able to read it.
+        let stamp = utc_slug_stamp(1_786_000_000.0);
+        assert_eq!(stamp.len(), 15, "{stamp}");
+        assert!(
+            crate::month_day_label(&stamp).is_some(),
+            "the naming helper must be able to read the fallback: {stamp}"
+        );
     }
 }
 
