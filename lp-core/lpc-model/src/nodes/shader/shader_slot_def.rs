@@ -40,11 +40,26 @@ pub struct ShaderSlotDef {
     /// instead be driven by a bound channel, in which case this is the
     /// fallback — see the field-split rule on
     /// `lpc_engine::nodes::shader::resolve_gradient_config`.
+    ///
+    /// In authored node-def JSON this option spells the same shape every
+    /// other surface carries (`docs/design/color.md` §5): token metadata
+    /// plus one stops literal per gradient — genuinely hand-authorable.
+    /// Author inline, through Studio's chooser, or omit the option and let
+    /// `gradient_config()` fall back.
     pub gradient: OptionSlot<ValueSlot<GradientConfig>>,
     /// Declarative default binding endpoint (`bus:<channel>`), materialized
     /// at load when no authored binding names this slot (ADR 2026-07-09).
     /// Consumed slots source from the channel; produced slots publish to it.
     pub default_bind: OptionSlot<ValueSlot<BindingRef>>,
+    /// Panel-visibility hint for the binding this slot's `default_bind`
+    /// materializes (`panel: "show"`), the additive override on the derived
+    /// membership rule (ADR 2026-08-03-panel-visibility-is-derived, amended).
+    ///
+    /// A native def spells the same hint as a `#[slot(panel = "show")]`
+    /// attribute — shape metadata — but a shader slot is authored data, so
+    /// here it is a field. Without it, a `default_bind` alone materializes a
+    /// Default-origin binding, which the panel deliberately does not present.
+    pub panel: OptionSlot<ValueSlot<crate::PanelHint>>,
     pub default: OptionSlot<ValueSlot<f32>>,
     pub min: OptionSlot<ValueSlot<f32>>,
     pub max: OptionSlot<ValueSlot<f32>>,
@@ -67,6 +82,17 @@ impl ShaderSlotDef {
         self
     }
 
+    /// Promote this slot's default-bound channel to a panel control.
+    pub fn with_panel_show(mut self) -> Self {
+        self.panel = OptionSlot::some(ValueSlot::new(crate::PanelHint::Show));
+        self
+    }
+
+    /// The declared panel hint, if any.
+    pub fn panel_hint(&self) -> Option<crate::PanelHint> {
+        self.panel.data.as_ref().map(|hint| *hint.value())
+    }
+
     pub fn value_f32(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Value),
@@ -75,6 +101,7 @@ impl ShaderSlotDef {
             phasor: OptionSlot::none(),
             gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
+            panel: OptionSlot::none(),
             default: OptionSlot::some(ValueSlot::new(default)),
             min: min
                 .map(ValueSlot::new)
@@ -109,6 +136,11 @@ impl ShaderSlotDef {
 
     /// A `palette` slot: a `sampler2D` uniform fed by a height-one texture the
     /// engine bakes from `config` (`docs/design/color.md` §5).
+    ///
+    /// Declares `default_bind: "bus:palette"` + `panel: "show"` (D5): an
+    /// unbound palette slot still surfaces its picker on the module panel —
+    /// the default bind materializes the channel and the hint promotes the
+    /// Default-origin binding the derived rule would otherwise keep private.
     pub fn palette(label: &str, description: &str, config: GradientConfig) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Palette),
@@ -119,6 +151,8 @@ impl ShaderSlotDef {
             default: OptionSlot::none(),
             ..Self::value_f32(label, description, 0.0, None)
         }
+        .with_default_bind(BindingRef::parse("bus:palette").expect("bus:palette parses"))
+        .with_panel_show()
     }
 
     /// The phasor config this slot evaluates against when nothing drives it
@@ -161,6 +195,7 @@ impl ShaderSlotDef {
             phasor: OptionSlot::none(),
             gradient: OptionSlot::none(),
             default_bind: OptionSlot::none(),
+            panel: OptionSlot::none(),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
             max: OptionSlot::none(),

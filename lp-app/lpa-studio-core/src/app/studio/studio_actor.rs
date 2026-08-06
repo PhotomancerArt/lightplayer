@@ -100,6 +100,27 @@ impl CancelSignal for SharedCancel {
     }
 }
 
+/// Construction options for secondary actors.
+///
+/// The global `log::` sink has ONE per-thread pending queue and
+/// [`take_pending_records`] is a destructive `mem::take` — so exactly one
+/// actor per thread may drain it. The app's main actor keeps the default
+/// (`drain_logs: true`); every additional actor on the same thread (the
+/// docs-sim hosts) must pass `drain_logs: false` or it silently steals
+/// the main console's records.
+#[derive(Clone, Copy, Debug)]
+pub struct StudioActorOptions {
+    /// Drain the global `log::` sink into this controller's console ring
+    /// each batch. True for the app's single main actor only.
+    pub drain_logs: bool,
+}
+
+impl Default for StudioActorOptions {
+    fn default() -> Self {
+        Self { drain_logs: true }
+    }
+}
+
 /// The actor: owns the controller and drives it from the command queue.
 ///
 /// Tick policy is per session (runtime-pool P2): the passive pull follows
@@ -117,6 +138,7 @@ pub struct StudioActor<MakeTimer> {
     /// next tick (min over sessions of cadence/heartbeat + backoff),
     /// refreshed each batch.
     delay: Rc<Cell<Duration>>,
+    options: StudioActorOptions,
 }
 
 impl<MakeTimer, Timer> StudioActor<MakeTimer>
@@ -129,7 +151,17 @@ where
     /// `make_timer` is the platform timer factory used to build each pull's
     /// progress deadline. Call [`StudioActor::run`] to drive the loop (wasm:
     /// under `spawn_local`; tests: under a bare waker).
-    pub fn new(mut controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
+    pub fn new(controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
+        Self::new_with_options(controller, make_timer, StudioActorOptions::default())
+    }
+
+    /// [`StudioActor::new`] with explicit [`StudioActorOptions`] — the
+    /// docs-sim hosts use this to opt out of the global log-sink drain.
+    pub fn new_with_options(
+        mut controller: StudioController,
+        make_timer: MakeTimer,
+        options: StudioActorOptions,
+    ) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
         // Agent run futures report progress (and stage edits) through the
@@ -151,6 +183,7 @@ where
             view_out,
             make_timer,
             delay: Rc::clone(&delay),
+            options,
         };
         (actor, StudioHandle { tx, view, delay })
     }
@@ -410,7 +443,9 @@ where
     /// *during* a batch land in that batch's own snapshot, and records logged
     /// between batches are picked up by the next one.
     fn emit_if_changed(&mut self) {
-        self.drain_log_sink();
+        if self.options.drain_logs {
+            self.drain_log_sink();
+        }
         if let Some(view) = self.controller.view_if_changed() {
             self.view_out.send(view);
         }

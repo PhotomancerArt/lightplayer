@@ -26,6 +26,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_gradient_chip;
 use lpa_studio_core::{
     UiAction, UiPanelControl as UiPanelControlData, UiPanelEmit, UiPanelWidget, UiSlotAffordance,
     UiSlotValueKind,
@@ -36,7 +37,7 @@ use crate::app::node::slot_edit_actions::panel_clear_action;
 use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
-use super::{HFaderField, KnobField, PanelEmit, ToggleField};
+use super::{HFaderField, KnobField, PaletteSwatchField, PanelEmit, ToggleField};
 
 static NEXT_PANEL_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -69,8 +70,13 @@ pub fn PanelControl(
         let id = NEXT_PANEL_CONTROL_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-panel-control-{id}")
     });
+    // A fader and a palette swatch are the WIDE controls: both want the
+    // row's width and stack label-over-widget, where a knob or a toggle is
+    // a fixed-width column.
     let outer_class = match control.widget {
-        UiPanelWidget::Fader { .. } => "tw:grid tw:min-w-0 tw:gap-1.5",
+        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
+            "tw:grid tw:min-w-0 tw:gap-1.5"
+        }
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
             "tw:flex tw:min-w-[52px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
         }
@@ -78,7 +84,7 @@ pub fn PanelControl(
     // The top-layer copy of the control painted over the anchor while the
     // popover is open — same component, same data, sized to the anchor rect.
     let anchor_visual_class = match control.widget {
-        UiPanelWidget::Fader { .. } => {
+        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
             "tw:grid tw:h-full tw:w-full tw:min-w-0 tw:content-start tw:gap-1.5"
         }
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
@@ -137,6 +143,10 @@ fn PanelControlBody(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let bound = control.bound();
+    let engaged = control
+        .panel_target
+        .as_ref()
+        .is_some_and(|target| target.engaged);
     // A panel-targeted control with an ENGAGED writer gets the clear
     // affordance (panel.md P2): a small ↺ beside the readout releasing the
     // held value back to the authored wiring.
@@ -168,7 +178,11 @@ fn PanelControlBody(
     // in parentheses it read as a second value and, worse, reflowed the
     // control's width on every step of a drag.
     let live = control.live_value.is_some();
-    let readout_class = if live {
+    // Engaged outranks the bound-violet family on the readout, same ladder
+    // as the swatch frame: a held value is the panel's own, not the wire's.
+    let readout_class = if engaged {
+        "tw:text-status-engaged-foreground"
+    } else if live {
         "tw:text-status-bound-foreground"
     } else {
         "tw:text-muted-foreground"
@@ -178,15 +192,34 @@ fn PanelControlBody(
     } else {
         "authored value"
     };
-    // A phasor speed knob stores period_seconds but PRESENTS as speed (G2
-    // feedback — "phase period" was expert vocabulary): the readout is the
-    // reciprocal ("1/100 s") and the drag axis inverts so up = faster.
-    // PROVISIONAL display language pending the clock-face UX spike.
+    // A palette's chip drops what the dense summary says (space, method,
+    // fade), so hovering keeps the full line reachable: the LIVE reading
+    // when a channel drives the slot, else the authored summary.
+    let palette_title = control
+        .live_value
+        .clone()
+        .unwrap_or_else(|| control.value.display.clone());
+    // A phasor period knob stores period_seconds and PRESENTS them plainly
+    // ("100 s") — the Step/plain-seconds voice the M4 P6 gate picked, which
+    // retired the PROVISIONAL reciprocal Speed readout. The GESTURE keeps
+    // the clock-face-v2 log-period feel (up = faster, equal drag = equal
+    // feel-ratio; `invert` on the knob) — that axis was judged at its own
+    // visual gate and is independent of what the readout says.
     let phasor = matches!(control.emit, UiPanelEmit::PhasorPeriod { .. });
+    // A palette's readout is the compact chip (`5 stops`, `↻ 4 · 20 s`) —
+    // the strips below say which palette, so the words only have to say
+    // what KIND of palette it is and how fast it moves.
+    let palette = control.swatch_palette();
     let shown_value = if phasor {
-        phasor_speed_display(control.shown_display())
+        format!("{} s", control.shown_display())
+    } else if let Some(config) = &palette {
+        format_gradient_chip(config)
     } else {
         control.shown_display().to_string()
+    };
+    let readout_title = match &palette {
+        Some(_) => palette_title,
+        None => readout_title.to_string(),
     };
     let readout = rsx! {
         // `relative` so the engaged clear hangs past the readout without
@@ -210,9 +243,9 @@ fn PanelControlBody(
                     min,
                     max,
                     step,
+                    invert: phasor,
                     state: control.state.clone(),
                     bound,
-                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
@@ -246,6 +279,28 @@ fn PanelControlBody(
                 }
             }
         }
+        UiPanelWidget::PaletteSwatch => {
+            let Some(config) = palette else {
+                return mismatch_fallback(&control);
+            };
+            rsx! {
+                // The fader's anatomy: the name and the reading share one
+                // baseline above a control that wants the row's width.
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                PaletteSwatchField {
+                    config,
+                    state: control.state.clone(),
+                    bound,
+                    engaged,
+                    address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
+                    on_action,
+                }
+            }
+        }
         UiPanelWidget::Toggle => {
             let Some(value) = bool_value(&control) else {
                 return mismatch_fallback(&control);
@@ -270,12 +325,6 @@ fn PanelControlBody(
         }
     }
 }
-
-/// A period reading presented as an auto-denominated rate — the G2
-/// convergence, now shared with the clock face's trace cards, so the pure
-/// function lives in `lpa-studio-core` ([`phasor_speed_display`]) and this
-/// module only re-exports it for its readout path.
-pub(crate) use lpa_studio_core::phasor_speed_display;
 
 /// The label visual shared by the trigger button and its top-layer copy:
 /// the control name in the panel's label typography plus a small info glyph
@@ -323,6 +372,10 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
             numeric_value(control).is_some()
         }
         UiPanelWidget::Toggle => bool_value(control).is_some(),
+        // A swatch agrees with its value when that value READS as a
+        // palette (`UiPanelControl::swatch_palette`) — the same guard the
+        // render arm falls back on.
+        UiPanelWidget::PaletteSwatch => control.swatch_palette().is_some(),
     }
 }
 
@@ -503,22 +556,6 @@ mod tests {
         bound.live_value = None;
         assert_eq!(bound.live_numeric(), None);
         assert_eq!(bound.shown_display(), "1.6");
-    }
-
-    #[test]
-    fn phasor_readouts_auto_denominate_the_rate() {
-        use super::phasor_speed_display;
-        // The G2 examples verbatim: 2/s → 3/min → 15/hr.
-        assert_eq!(phasor_speed_display("0.5"), "2/s");
-        assert_eq!(phasor_speed_display("20"), "3/min");
-        assert_eq!(phasor_speed_display("240"), "15/hr");
-        // Plasma's 100 s: under one per minute, so it reads per hour.
-        assert_eq!(phasor_speed_display("100"), "36/hr");
-        assert_eq!(phasor_speed_display("45"), "1.3/min");
-        // Period 0 is the frozen sentinel: it never cycles.
-        assert_eq!(phasor_speed_display("0.0"), "0/s");
-        // A non-numeric reading (product chip label, etc.) passes through.
-        assert_eq!(phasor_speed_display("Time product"), "Time product");
     }
 
     #[test]

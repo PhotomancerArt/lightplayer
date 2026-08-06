@@ -129,6 +129,14 @@
     --studio-status-attention-bg: #291f14;
     --studio-status-attention-border: #795833;
     --studio-status-attention-text: #f0b97a;
+    /* Engaged (gold): a panel writer holds this channel — "your hand is
+       on it" (panel.md P6, gate-picked 2026-08-06: the spike's gold,
+       laddered like every status family — dark tinted bg, mid border,
+       bright text). Deliberately distinct from attention-orange
+       (device/roster health) and warning-yellow (unsaved edits). */
+    --studio-status-engaged-bg: #292213;
+    --studio-status-engaged-border: #8a6f35;
+    --studio-status-engaged-text: #e8c56b;
     /* Debug (D9): transient-by-nature diagnostics/authoring territory.
        Borrows the attention family's orange so it reads as "not ordinary
        config", then adds DIAGONAL HAZARD STRIPES as the distinguishing mark
@@ -1349,6 +1357,16 @@ label:has(> input:not(:disabled)) {
     max-width: 100%;
     max-height: 320px;
     margin-inline: auto;
+}
+
+/* The docs article's hero (`sim-canvas view=product`): the SAME real
+   ProductPreview the map boxes below it use, presented larger — an article
+   opens on the thing it is about, and 320px reads as a thumbnail there.
+   Only the cap moves; the frame keeps its aspect ratio, so the reserved
+   loading height in `sim_canvas.rs` (HERO_HEIGHT) matches what arrives. */
+.ux-docs-hero-product .ux-produced-product-frame-capped {
+    width: 512px;
+    max-height: 512px;
 }
 
 .ux-produced-product-pixel-canvas {
