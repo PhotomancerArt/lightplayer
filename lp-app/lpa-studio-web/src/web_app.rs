@@ -339,7 +339,10 @@ pub fn App() -> Element {
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
-                    // goes home. The boot-time home flash (nothing started
+                    // goes back to the gallery the cards live on
+                    // (`/devices`, not the `/` landing: the core is
+                    // showing the gallery view, so the landing stub would
+                    // be the wrong body). The boot-time home flash (nothing started
                     // yet) keeps the route so the startup re-derivation
                     // can use it; a route-dispatched open still connecting
                     // (pending) keeps it too — the gallery's connect
@@ -673,9 +676,10 @@ pub fn App() -> Element {
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
     let section = match &current_route {
+        // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
-        // Explicit, not the catch-all: `#/` must light the Devices tab
-        // (a catch-all once carried it and silently stopped when lens
+        // Explicit, not the catch-all: `/devices` must light the Devices
+        // tab (a catch-all once carried it and silently stopped when lens
         // routes moved to Session — G3 finding).
         StudioRoute::Devices => SiteSection::Devices,
         StudioRoute::Projects => SiteSection::Projects,
