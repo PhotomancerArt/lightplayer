@@ -77,8 +77,7 @@ pub fn lower_texture_calls(
     // name;`. naga glsl-in has no `sampler2D` type (same constraint the CPU
     // frontend works around in `lps-frontend::parse`); the separated
     // texture2D global is exactly the WGSL-side shape we bind.
-    let stripped = crate::assembly::strip_comments_and_directives(authored);
-    let declared = rewrite_sampler_declarations(authored, &stripped)?;
+    let declared = rewrite_sampler_declarations(authored)?;
 
     // Pass 2: rewrite the sampling call sites to generated helpers.
     let stripped = crate::assembly::strip_comments_and_directives(&declared);
@@ -250,103 +249,55 @@ fn sample_helper(entry: &UsedHelper) -> (String, String) {
 /// separated form: `layout(set = 0, binding = K) uniform texture2D name;`.
 /// A declaration that already carries an explicit `layout(...)` keeps it
 /// (only the type token changes). Any other appearance of `sampler2D`
-/// (function parameter, struct member) is a compile error — samplers are
-/// uniforms in this dialect.
-fn rewrite_sampler_declarations(original: &str, stripped: &str) -> Result<String, GfxError> {
-    let bytes = stripped.as_bytes();
-    let mut next_binding = max_explicit_binding(stripped).map_or(0, |b| b + 1);
+/// (function parameter, struct member, array, multi-declarator) is a
+/// compile error — samplers are uniforms in this dialect.
+///
+/// Recognition is `lps_shared::scan_uniform_sampler2d_decls`, shared with
+/// the CPU tier (`lps-frontend::parse`) so the two can never disagree about
+/// which declarations are rewritten
+/// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md). No
+/// companion sampler is synthesized on this tier: `texture()` sites lower
+/// to generated `texelFetch` helpers (see the module docs), so no sampler
+/// object is ever bound.
+fn rewrite_sampler_declarations(original: &str) -> Result<String, GfxError> {
+    use lps_shared::sampler2d_decl::{Sampler2DSite, scan_uniform_sampler2d_decls};
+
+    let scan = scan_uniform_sampler2d_decls(original);
+    let mut next_binding = scan.max_explicit_binding.map_or(0, |b| b + 1);
     let mut out = String::new();
     let mut cursor = 0usize;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if !is_ident_byte(bytes[i]) || (i > 0 && is_ident_byte(bytes[i - 1])) {
-            i += 1;
-            continue;
-        }
-        let mut end = i;
-        while end < bytes.len() && is_ident_byte(bytes[end]) {
-            end += 1;
-        }
-        if &stripped[i..end] != "sampler2D" {
-            i = end;
-            continue;
-        }
-        // The token before `sampler2D` must be `uniform`.
-        let before = stripped[..i].trim_end();
-        let Some(uniform_start) = before
-            .strip_suffix("uniform")
-            .filter(|rest| rest.is_empty() || !is_ident_byte(rest.as_bytes()[rest.len() - 1]))
-            .map(|rest| rest.len())
-        else {
-            return Err(GfxError::Compile(String::from(
-                "sampler2D is only supported as a `uniform sampler2D <name>;` declaration \
-                 (optionally with an explicit layout qualifier)",
-            )));
+    for site in &scan.sites {
+        let decl = match site {
+            Sampler2DSite::Decl(decl) => decl,
+            Sampler2DSite::NonUniform(_) => {
+                return Err(GfxError::Compile(String::from(
+                    "sampler2D is only supported as a `uniform sampler2D <name>;` declaration \
+                     (optionally with an explicit layout qualifier)",
+                )));
+            }
+            Sampler2DSite::MalformedUniform(_) => {
+                return Err(GfxError::Compile(String::from(
+                    "sampler2D declarations must be single non-array declarators \
+                     (`uniform sampler2D <name>;`)",
+                )));
+            }
         };
-        // Reject multi-declarator / array forms after the identifier.
-        let mut j = end;
-        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        let mut name_end = j;
-        while name_end < bytes.len() && is_ident_byte(bytes[name_end]) {
-            name_end += 1;
-        }
-        let after_name = stripped[name_end..].trim_start();
-        if !after_name.starts_with(';') {
-            return Err(GfxError::Compile(String::from(
-                "sampler2D declarations must be single non-array declarators \
-                 (`uniform sampler2D <name>;`)",
-            )));
-        }
-
-        // Explicit layout present when the text before `uniform` ends with
-        // the `)` of a layout qualifier.
-        let has_layout = stripped[..uniform_start].trim_end().ends_with(')');
-        if has_layout {
-            out.push_str(&original[cursor..i]);
+        if decl.layout.is_some() {
+            // Keep the authored layout verbatim; only the type token changes.
+            out.push_str(&original[cursor..decl.type_token.start]);
             out.push_str("texture2D");
         } else {
-            out.push_str(&original[cursor..uniform_start]);
+            out.push_str(&original[cursor..decl.span.start]);
             let _ = write!(
                 out,
                 "layout(set = 0, binding = {next_binding}) uniform texture2D"
             );
             next_binding += 1;
         }
-        cursor = end;
-        i = end;
+        cursor = decl.type_token.end;
     }
     out.push_str(&original[cursor..]);
     Ok(out)
-}
-
-/// Highest `binding = N` value that appears in the stripped source (used to
-/// start synthetic sampler bindings after the authored ones).
-fn max_explicit_binding(stripped: &str) -> Option<u32> {
-    let bytes = stripped.as_bytes();
-    let mut max = None;
-    let mut i = 0usize;
-    while let Some(found) = stripped[i..].find("binding") {
-        let start = i + found;
-        let end = start + "binding".len();
-        i = end;
-        let at_boundary = (start == 0 || !is_ident_byte(bytes[start - 1]))
-            && (end >= bytes.len() || !is_ident_byte(bytes[end]));
-        if !at_boundary {
-            continue;
-        }
-        let rest = stripped[end..].trim_start();
-        let Some(rest) = rest.strip_prefix('=') else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-        if let Ok(value) = digits.parse::<u32>() {
-            max = Some(max.map_or(value, |m: u32| m.max(value)));
-        }
-    }
-    max
 }
 
 /// Rewrite every `texture(...)` / `texelFetch(...)` call in `original`,
@@ -679,6 +630,55 @@ mod tests {
         let lowered = lower(authored, &specs(&[("t", rgba16_nearest_clamp())])).expect("lowers");
         assert!(lowered.rewritten.contains("textureSize(t, 0)"));
         assert!(lowered.rewritten.contains("mytexture(vec2 p)"));
+    }
+
+    /// The engine's generated palette spelling — `layout(binding = N)`, no
+    /// `set` — keeps its layout verbatim and only the type token changes.
+    /// The CPU tier's independent scanner once declined exactly this shape
+    /// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md);
+    /// recognition is shared now, and this pins the GPU half of the contract.
+    #[test]
+    fn binding_only_layout_is_kept_and_type_swapped() {
+        let authored = "layout(binding = 1) uniform sampler2D palette;\n\
+                        vec4 f() { return texelFetch(palette, ivec2(0, 0), 0); }\n";
+        let lowered =
+            lower(authored, &specs(&[("palette", rgba16_nearest_clamp())])).expect("lowers");
+        assert!(
+            lowered
+                .rewritten
+                .contains("layout(binding = 1) uniform texture2D palette;"),
+            "{}",
+            lowered.rewritten
+        );
+    }
+
+    /// A declaration with no layout gets a synthesized binding past the
+    /// highest explicit `binding = N` anywhere in the source, so it can
+    /// never collide with an authored slot.
+    #[test]
+    fn synthesized_binding_starts_after_max_explicit() {
+        let authored = "layout(binding = 3) uniform float speed;\n\
+                        uniform sampler2D t;\n\
+                        vec4 f() { return texelFetch(t, ivec2(0, 0), 0); }\n";
+        let lowered = lower(authored, &specs(&[("t", rgba16_nearest_clamp())])).expect("lowers");
+        assert!(
+            lowered
+                .rewritten
+                .contains("layout(set = 0, binding = 4) uniform texture2D t;"),
+            "{}",
+            lowered.rewritten
+        );
+    }
+
+    #[test]
+    fn sampler2d_function_parameter_is_a_compile_error() {
+        let authored = "uniform sampler2D t;\n\
+                        vec4 f(sampler2D s) { return vec4(0.0); }\n";
+        let err = lower(authored, &specs(&[("t", rgba16_nearest_clamp())])).expect_err("must fail");
+        let GfxError::Compile(message) = err else {
+            panic!("expected compile error");
+        };
+        assert!(message.contains("uniform sampler2D <name>;"), "{message}");
     }
 
     #[test]
