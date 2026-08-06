@@ -783,6 +783,15 @@ clippy-fw-esp32v3:
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
+    # `float-f32` OFF, mirroring clippy-fw-esp32s3's pass of the same name. It is
+    # on by default, so every build above compiles the f32 dependency cohort and
+    # none of them compiles the gate-off one. This crate has no
+    # `cfg(feature = "float-f32")` of its own today — the feature only forwards
+    # to lpvm-native and lp-gfx-lpvm — so what this catches is breakage down
+    # there, and it is what a future FPU-less Xtensa board would ship.
+    echo "clippy: float-f32 OFF (the gate-off configuration)"
+    cargo clippy --profile release-esp32v3 --no-default-features \
+        --features esp32,server -- --no-deps -D warnings
 
 
 # `features` is a comma-separated list added to the defaults — for the app path
