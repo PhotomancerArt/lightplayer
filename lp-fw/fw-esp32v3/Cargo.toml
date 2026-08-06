@@ -146,6 +146,22 @@ radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos", "esp-rtos/esp-radio", "esp-r
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
 
+# The FP conformance rig on THIS chip's FPU — the classic's LX6, where the
+# committed predictions were all measured on the S3's LX7. Answers the question
+# `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` left open at its "LX6
+# (classic ESP32) FPU — untouched" line.
+#
+# The rig itself is `lp-xt-fp-harness`, shared with fw-esp32s3; this crate
+# supplies only the entrypoint and its `BoardId`. It prints `(result, FSR)` per
+# vector and classifies nothing — `just fp-diff` does that on the host, against
+# goldens committed before any board ran.
+#
+# ⚠️ First `test_*` feature on this crate: it is what makes build.rs emit
+# `fw_harness`, which replaces the app entrypoint. Add any future one to the
+# harness loop in `just clippy-fw-esp32v3` — harness code is cfg'd out of the
+# default build, and 13 harnesses once rotted uncompiled in this repo.
+test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
+
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
 # (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
@@ -306,6 +322,12 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, feat
     "xt-map-esp32-classic",
 ], optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+
+# The shared Xtensa FP conformance rig (`test_xt_fp_conformance`). Shared with
+# fw-esp32s3 rather than copied: it is a correctness oracle, and two copies that
+# drift would leave the two chips diffed against different vector sets while
+# both look healthy.
+lp-xt-fp-harness = { path = "../../lp-xt/lp-xt-fp-harness", optional = true }
 
 # The RAM probe's radio cohort (M2-P3 of the classic bring-up roadmap):
 # versions from the experiment repo's led-lab-esp32 `test_stress`, the set
