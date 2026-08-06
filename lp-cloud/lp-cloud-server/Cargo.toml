@@ -1,0 +1,47 @@
+[package]
+name = "lp-cloud-server"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The cloud service's HTTP edge: axum router for the control, content, and page planes"
+
+[dependencies]
+lp-cloud-domain = { path = "../lp-cloud-domain" }
+lp-cloud-store-mem = { path = "../lp-cloud-store-mem" }
+lp-cloud-store-sqlite = { path = "../lp-cloud-store-sqlite" }
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+lpc-history = { path = "../../lp-core/lpc-history" }
+lpfs = { path = "../../lp-base/lpfs" }
+
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+base64 = { workspace = true, features = ["std"] }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# THE edge crate: axum/tokio live here and nowhere else in the workspace
+# (reqwest joins them in P08 for the Google token exchange). Versions match
+# what the lockfile already carries, so nothing gains a second copy.
+axum = "0.8"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+] }
+
+# Session tokens are bearer credentials, so the mint behind `IdMint` has to
+# be the OS CSPRNG — `MemIdMint` is a counter and says so in its own docs.
+getrandom = "0.3"
+
+[dev-dependencies]
+# `ServiceExt::oneshot` drives the router without binding a port: the edge
+# tests are about routes and headers, not about sockets.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+
+[lints]
+workspace = true

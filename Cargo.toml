@@ -52,6 +52,7 @@ members = [
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",
     "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -145,6 +146,7 @@ default-members = [
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",
     "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
