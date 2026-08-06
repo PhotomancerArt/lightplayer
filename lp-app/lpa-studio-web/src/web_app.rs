@@ -636,7 +636,10 @@ pub fn App() -> Element {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
-            SiteChrome { section, on_action,
+            SiteChrome {
+                section,
+                sessions: current_view.sessions.clone(),
+                on_editor: current_route.is_lens(),
                 if let Some(href) = play_toggle {
                     // A plain hash link, like the nav tabs: the route
                     // listener picks it up, sees the same session, and

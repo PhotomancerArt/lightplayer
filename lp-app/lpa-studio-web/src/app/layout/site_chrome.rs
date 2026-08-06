@@ -20,6 +20,13 @@
 //!   editor stay outside the tab row, reachable from the tools overflow
 //!   menu — which stays distinct from the nav ⋯ menu (merge candidate if
 //!   the two read confusingly at G3).
+//! - **Running sessions are places** (vision D15/D16): the session strip
+//!   docks one chip per live runtime session behind a hairline divider
+//!   after the primary family. Chips are wayfinding only — name, glyph,
+//!   status dot — never controls or thumbnails (D43). The active chip is
+//!   the editor's representation in the nav; no nav tab detaches the
+//!   lens (navigation does, through the route listener, same as the back
+//!   button).
 //!
 //! The chrome is presentational. Nav tabs are plain hash links: `web_app`
 //! owns the route signal and swaps only the body beneath this bar, so
@@ -27,11 +34,13 @@
 //! any open sim/device session. Nothing here reloads the page.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiAction;
+use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
 use crate::base::{
-    IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
+    IconMenuButton, IconMenuTone, LogoLockup, PopoverButton, PopoverCloseHandle, PopoverPlacement,
+    StudioIcon, StudioIconName,
 };
+use crate::router::StudioRoute;
 
 /// Which nav tab renders as the current section. Home has no tab (the
 /// logo is its affordance) but is still a section the chrome can be "at"
@@ -53,14 +62,20 @@ pub enum SiteSection {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SiteChrome(
     section: SiteSection,
-    /// Studio-app action hook. Present: the Devices tab ALSO dispatches
-    /// the lens detach (see [`NavTab`]). Absent only under stories, which
-    /// mount the chrome with no actor behind it.
+    /// The session strip's live sessions (D15); empty renders no strip
+    /// and no divider. Stories and chrome-only mounts default to none.
     #[props(default)]
-    on_action: Option<EventHandler<UiAction>>,
+    sessions: Vec<UiChromeSession>,
+    /// A lens route is the current route — the lensed chip reads *here*
+    /// (accent); with it false the lensed chip reads *open* (washed).
+    #[props(default = false)]
+    on_editor: bool,
     /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
     #[props(default = false)]
     nav_menu_open: bool,
+    /// Stories only: mount the session flyout open.
+    #[props(default = false)]
+    session_flyout_open: bool,
     children: Element,
 ) -> Element {
     rsx! {
@@ -75,13 +90,17 @@ pub fn SiteChrome(
                     label: "Devices",
                     href: "#/",
                     active: section == SiteSection::Devices,
-                    on_action,
                 }
                 NavTab {
                     label: "Projects",
                     href: "#/projects",
                     active: section == SiteSection::Projects,
                 }
+            }
+            if !sessions.is_empty() {
+                // Hairline divider, then the strip (concept A dock).
+                span { class: "tw:h-5 tw:w-px tw:flex-none tw:self-center tw:bg-border-subtle" }
+                SessionStrip { sessions: sessions.clone(), on_editor, flyout_open: session_flyout_open }
             }
             div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 // Secondary family: lighter, right cluster, no divider —
@@ -201,6 +220,13 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
 /// text that brightens on hover. `secondary` is the lighter family
 /// treatment (reduced weight, dimmer at rest, full strength on
 /// hover/active — the spike's `.secondary`).
+///
+/// Tabs are PLAIN links on purpose (P12): no tab dispatches a lens
+/// detach anymore — navigation to a gallery route detaches through the
+/// route listener, the same path as the back button, and returning to
+/// the editor is the active session chip's job. (The old Studio-tab
+/// direct dispatch existed for the URL-less D29 device editor at `#/`;
+/// identity-at-probe made device lenses addressable, closing that gap.)
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavTab(
@@ -208,7 +234,6 @@ fn NavTab(
     href: &'static str,
     active: bool,
     #[props(default = false)] secondary: bool,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let class = match (secondary, active) {
         (false, true) => NAV_TAB_ACTIVE,
@@ -221,26 +246,265 @@ fn NavTab(
             class: "{class}",
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
-            onclick: move |_| {
-                // The Devices tab is the way home. Navigating to `#/` fires
-                // `hashchange`, which the route listener turns into the lens
-                // detach (runtime-pool P3: the editor closes, sessions keep
-                // running) — the same path as the browser back button. The
-                // click ALSO dispatches the detach directly: the D29 device
-                // editor lives at `#/` (no URL until M5), so a Devices click
-                // there changes no hash and the listener never fires — the
-                // direct dispatch is its way home. Detaching an
-                // already-detached lens is a no-op, so the doubled dispatch
-                // on project routes is harmless.
-                if let Some(on_action) = on_action {
-                    on_action.call(UiAction::from_op(
-                        lpa_studio_core::ProjectController::NODE_ID,
-                        lpa_studio_core::ProjectOp::DetachLens,
-                    ));
-                }
-            },
             "{label}"
         }
+    }
+}
+
+/// The session strip (D15/D16): squared tab-chips for live sessions,
+/// responsive in the D11 grammar — all chips (cap 4) while the bar is
+/// wide, two on middling bars, and a single count chip at phone widths;
+/// the `+n` and count chips open the same flyout listing every session.
+/// All width variants render and container queries pick, so the strip
+/// needs no measurement code.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionStrip(
+    sessions: Vec<UiChromeSession>,
+    on_editor: bool,
+    #[props(default = false)] flyout_open: bool,
+) -> Element {
+    let total = sessions.len();
+    let any_lensed = sessions.iter().any(|session| session.lensed);
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
+            for (index , session) in sessions.iter().take(4).enumerate() {
+                span {
+                    key: "{session.key}",
+                    // Chips 0-1 appear on md bars, 2-3 only on wide ones;
+                    // everything past 4 lives in the flyout alone.
+                    class: if index < 2 { "tw:hidden tw:min-w-0 tw:@min-[680px]:flex" } else { "tw:hidden tw:min-w-0 tw:@min-[900px]:flex" },
+                    SessionChip { session: session.clone(), on_editor }
+                }
+            }
+            // md: +n past the first two…
+            if total > 2 {
+                span { class: "tw:hidden tw:@min-[680px]:flex tw:@min-[900px]:hidden",
+                    SessionFlyoutChip {
+                        sessions: sessions.clone(),
+                        on_editor,
+                        label: format!("+{}", total - 2),
+                        any_lensed,
+                        count_form: false,
+                        initially_open: false,
+                    }
+                }
+            }
+            // …wide: +n past the cap of four…
+            if total > 4 {
+                span { class: "tw:hidden tw:@min-[900px]:flex",
+                    SessionFlyoutChip {
+                        sessions: sessions.clone(),
+                        on_editor,
+                        label: format!("+{}", total - 4),
+                        any_lensed,
+                        count_form: false,
+                        initially_open: false,
+                    }
+                }
+            }
+            // …narrow: the one count chip (stacked dots + count).
+            span { class: "tw:flex tw:@min-[680px]:hidden",
+                SessionFlyoutChip {
+                    sessions: sessions.clone(),
+                    on_editor,
+                    label: format!("{total}"),
+                    any_lensed,
+                    count_form: true,
+                    initially_open: flyout_open,
+                }
+            }
+        }
+    }
+}
+
+/// One session chip: transport glyph, status dot, ellipsized name.
+/// States: *here* (accent — lensed and the editor is fronted), *open*
+/// (washed — lensed, another section fronted), idle. A session without
+/// an honest route renders inert (no fake URLs — the same rule the URL
+/// bar follows).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionChip(session: UiChromeSession, on_editor: bool) -> Element {
+    let class = chip_state_class(&session, on_editor);
+    let body = rsx! {
+        SessionGlyph { sim: session.sim }
+        SessionDot { status: session.status }
+        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
+            "{session.name}"
+        }
+    };
+    match session_href(&session) {
+        Some(href) => rsx! {
+            a {
+                class: "{class}",
+                href: "{href}",
+                aria_current: if session.lensed && on_editor { "page" } else { "false" },
+                title: "{session.name}",
+                {body}
+            }
+        },
+        None => rsx! {
+            span { class: "{class}", title: "{session.name}", {body} }
+        },
+    }
+}
+
+/// The chip's route (D37 keys): `#/sim/<project-uid>` for the sim,
+/// `#/device/<dev-uid>` for hardware; `None` while no honest address
+/// exists.
+fn session_href(session: &UiChromeSession) -> Option<String> {
+    match &session.target {
+        UiChromeSessionTarget::Sim { project_key } => project_key.as_ref().map(|key| {
+            StudioRoute::Sim {
+                key: key.clone(),
+                play: false,
+            }
+            .hash()
+        }),
+        UiChromeSessionTarget::Device { uid } => uid.as_ref().map(|uid| {
+            StudioRoute::Device {
+                uid: uid.clone(),
+                play: false,
+            }
+            .hash()
+        }),
+    }
+}
+
+fn chip_state_class(session: &UiChromeSession, on_editor: bool) -> &'static str {
+    match (session.lensed, on_editor) {
+        (true, true) => SESSION_CHIP_HERE,
+        (true, false) => SESSION_CHIP_OPEN,
+        (false, _) => SESSION_CHIP_IDLE,
+    }
+}
+
+/// The session's kind glyph: violet sim mark for the simulator (the
+/// bound-family convention the sim card wears), transport icon for
+/// hardware — USB today; the slot grows network/BT glyphs with those
+/// transports.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionGlyph(sim: bool) -> Element {
+    if sim {
+        rsx! {
+            span { class: "tw:flex-none tw:text-status-bound-foreground",
+                StudioIcon { name: StudioIconName::Simulator, size: 12 }
+            }
+        }
+    } else {
+        rsx! {
+            span { class: "tw:flex-none",
+                StudioIcon { name: StudioIconName::Usb, size: 12 }
+            }
+        }
+    }
+}
+
+/// The chip's status dot (D16): accent run / amber attention / hollow
+/// connected-empty.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionDot(status: UiChromeSessionStatus) -> Element {
+    let class = match status {
+        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-accent",
+        UiChromeSessionStatus::Attention => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
+        }
+        UiChromeSessionStatus::Empty => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:border tw:border-border-strong tw:bg-transparent"
+        }
+    };
+    rsx! {
+        span { class: "{class}" }
+    }
+}
+
+/// The strip's overflow trigger — the md/wide `+n` chip and the narrow
+/// count chip are the SAME flyout with different faces. The count form
+/// stacks the first three status dots and rings accent when the lens is
+/// inside. The flyout lists every session in the ⋯-menu grammar.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionFlyoutChip(
+    sessions: Vec<UiChromeSession>,
+    on_editor: bool,
+    label: String,
+    any_lensed: bool,
+    count_form: bool,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
+    let trigger_class = if count_form && any_lensed && on_editor {
+        SESSION_CHIP_COUNT_RINGED
+    } else {
+        SESSION_CHIP_IDLE
+    };
+    let trigger = rsx! {
+        if count_form {
+            span { class: "tw:flex tw:flex-none tw:items-center tw:gap-0.5",
+                for (index , session) in sessions.iter().take(3).enumerate() {
+                    span { key: "{index}", SessionDot { status: session.status } }
+                }
+            }
+        }
+        span { "{label}" }
+    };
+    rsx! {
+        PopoverButton {
+            class: trigger_class.to_string(),
+            open_class: SESSION_CHIP_OPEN.to_string(),
+            trigger,
+            label: "Sessions".to_string(),
+            title: "Running sessions".to_string(),
+            popup_class: NAV_POPUP_CLASS.to_string(),
+            chrome_class: "ux-popover-chrome-neutral".to_string(),
+            placement: PopoverPlacement::BottomStart,
+            initially_open,
+            layer_keeps_layout: true,
+            span { class: "tw:px-1.5 tw:pt-0.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                "Sessions"
+            }
+            for session in sessions.iter() {
+                SessionFlyoutRow { key: "{session.key}", session: session.clone(), on_editor }
+            }
+        }
+    }
+}
+
+/// One flyout row: the chip anatomy at menu width, closing the flyout as
+/// it navigates. *Here* rows read heading-bold; *open* rows muted-bold.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SessionFlyoutRow(session: UiChromeSession, on_editor: bool) -> Element {
+    let close = try_consume_context::<PopoverCloseHandle>();
+    let class = match (session.lensed, on_editor) {
+        (true, true) => NAV_MENU_ITEM_ACTIVE,
+        _ => NAV_MENU_ITEM_IDLE,
+    };
+    let body = rsx! {
+        SessionGlyph { sim: session.sim }
+        SessionDot { status: session.status }
+        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
+            "{session.name}"
+        }
+    };
+    match session_href(&session) {
+        Some(href) => rsx! {
+            a {
+                class: "{class} tw:flex tw:items-center tw:gap-1.5",
+                href: "{href}",
+                onclick: move |_| {
+                    if let Some(mut close) = close {
+                        close.close();
+                    }
+                },
+                {body}
+            }
+        },
+        None => rsx! {
+            span { class: "{class} tw:flex tw:items-center tw:gap-1.5", {body} }
+        },
     }
 }
 
@@ -327,6 +591,19 @@ const NAV_POPUP_CLASS: &str = "tw:grid tw:w-[164px] tw:gap-0.5 tw:rounded-md tw:
 const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 /// Nav ⋯ menu row, current section.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
+
+// Session chips (D16): squared tab-chips in the entity grammar — never
+// status pills. One shared geometry, three states.
+/// *Here*: lensed and the editor is the fronted route — the chip IS the
+/// current-place marker (no nav tab lights during a lens route).
+const SESSION_CHIP_HERE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-heading tw:no-underline";
+/// *Open*: lensed, but another section is fronted — washed presence.
+const SESSION_CHIP_OPEN: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border tw:bg-background-wash tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground";
+/// Idle: a live session the lens is not on.
+const SESSION_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
+/// The narrow count chip when the lens is inside AND fronted: the idle
+/// face with an accent ring standing in for the hidden *here* chip.
+const SESSION_CHIP_COUNT_RINGED: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-heading tw:no-underline";
 
 const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 /// Rows are cards, not text links: fixed three-column grid so the title and

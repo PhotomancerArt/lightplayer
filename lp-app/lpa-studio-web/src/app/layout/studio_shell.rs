@@ -41,6 +41,8 @@ pub fn StudioShell(
         // the lens card renders the sync facts (D43)
         device_sync: _,
         lens_card,
+        // the chrome renders the session strip (web_app passes it through)
+        sessions: _,
         // the chrome renders the settings surface (web_app owns both)
         settings: _,
         // consumed by the web shell's unload gate; the project pane
