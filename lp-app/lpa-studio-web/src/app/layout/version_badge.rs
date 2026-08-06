@@ -18,7 +18,7 @@ use crate::base::{PopoverButton, PopoverPlacement};
 
 /// GitHub slug used when no deploy `version.json` is present (local dev builds),
 /// so the repo link and copyright still resolve.
-const DEFAULT_REPO: &str = "light-player/lightplayer";
+const DEFAULT_REPO: &str = "PhotomancerArt/lightplayer";
 /// Studio is authored by Yona Appletree / photomancer.art.
 const AUTHOR: &str = "Yona Appletree";
 const AUTHOR_URL: &str = "https://photomancer.art";
