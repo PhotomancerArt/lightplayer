@@ -44,7 +44,10 @@ use crate::router::StudioRoute;
 
 /// Which nav tab renders as the current section. Home has no tab (the
 /// logo is its affordance) but is still a section the chrome can be "at"
-/// — no tab lights up there.
+/// — no tab lights up there. Session is the editor lens fronted: no tab
+/// lights either, because the active session CHIP is the current-place
+/// marker there (D15 — the chip is the editor's representation in the
+/// nav).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
     Home,
@@ -53,6 +56,7 @@ pub enum SiteSection {
     Explore,
     Boards,
     Docs,
+    Session,
 }
 
 /// The shared top bar. `children` render at the start of the right-hand

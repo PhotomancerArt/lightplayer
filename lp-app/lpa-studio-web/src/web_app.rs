@@ -626,9 +626,10 @@ pub fn App() -> Element {
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
-        // Lens routes light Devices until the session strip (P12) gives
-        // the open session its own place in the nav.
-        _ => SiteSection::Devices,
+        // Lens routes light NO tab — the active session chip is the
+        // current-place marker (D15). The other catch-all routes
+        // (stories, the standalone editors) never render this chrome.
+        _ => SiteSection::Session,
     };
     let settings = current_view.settings.clone();
 
