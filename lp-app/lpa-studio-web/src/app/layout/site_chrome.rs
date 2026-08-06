@@ -182,30 +182,35 @@ fn ChromeOverflowMenu(
             tone: IconMenuTone::Quiet,
             initially_open,
             popup_class: OVERFLOW_POPUP_CLASS.to_string(),
-            if include_sections {
-                span { class: GROUP_HEADER_CLASS, "Sections" }
-                NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
-                NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
-                NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
-            }
-            if !sessions.is_empty() {
-                span { class: GROUP_HEADER_CLASS, "Sessions" }
-                for session in sessions.iter() {
-                    SessionMenuRow { key: "{session.key}", session: session.clone(), on_editor }
+            // One explicit grid wrapper: the popover primitive nests
+            // children in its own content div, so the panel's classes
+            // never reach them — inline rows would flow sideways.
+            div { class: "tw:grid tw:gap-1",
+                if include_sections {
+                    span { class: GROUP_HEADER_CLASS, "Sections" }
+                    NavMenuItem { label: "Explore", href: "#/explore", active: section == SiteSection::Explore }
+                    NavMenuItem { label: "Boards", href: "#/boards", active: section == SiteSection::Boards }
+                    NavMenuItem { label: "Docs", href: "#/docs", active: section == SiteSection::Docs }
                 }
-            }
-            span { class: GROUP_HEADER_CLASS, "Tools" }
-            ToolCard {
-                icon: StudioIconName::MapArrows,
-                title: "Mapping editor",
-                detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
-                href: "#/mapping",
-            }
-            ToolCard {
-                icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
-                title: "Board editor",
-                detail: "Draw and edit the board diagrams behind the catalog.",
-                href: "#/boards/edit",
+                if !sessions.is_empty() {
+                    span { class: GROUP_HEADER_CLASS, "Sessions" }
+                    for session in sessions.iter() {
+                        SessionMenuRow { key: "{session.key}", session: session.clone(), on_editor }
+                    }
+                }
+                span { class: GROUP_HEADER_CLASS, "Tools" }
+                ToolCard {
+                    icon: StudioIconName::MapArrows,
+                    title: "Mapping editor",
+                    detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
+                    href: "#/mapping",
+                }
+                ToolCard {
+                    icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
+                    title: "Board editor",
+                    detail: "Draw and edit the board diagrams behind the catalog.",
+                    href: "#/boards/edit",
+                }
             }
         }
     }
