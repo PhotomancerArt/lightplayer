@@ -73,12 +73,23 @@ const VERTEX_STRIDE: u64 = 16;
 
 /// The compiled sample pipeline plus its per-count resources. Built lazily
 /// on the first `sample_rgba16` call (render-only consumers — the gallery —
-/// never pay for it); resources are rebuilt only when the point count
-/// changes.
+/// never pay for it).
+///
+/// Resources are kept **per point count** (most-recently-used at the back,
+/// capped at [`MAX_RESOURCE_SETS`]): one shader instance serves every
+/// fixture sampling its product, so calls with different LED counts
+/// interleave within a frame. A single rebuilt-on-change set would churn
+/// buffers every call on native and, on wasm32, destroy the in-flight
+/// async readback before it ever landed — permanently black.
 pub(crate) struct SamplePass {
     pipeline: wgpu::RenderPipeline,
-    resources: Option<SampleResources>,
+    resources: Vec<SampleResources>,
 }
+
+/// Cap on retained per-count resource sets. Distinct counts come from
+/// distinct fixtures (few) and change only under editing; past the cap the
+/// least-recently-used set is dropped.
+const MAX_RESOURCE_SETS: usize = 8;
 
 /// Vertex buffer and row-major `W × H` grid target for one point count.
 struct SampleResources {
@@ -87,10 +98,10 @@ struct SampleResources {
     height: u32,
     vertex_buffer: wgpu::Buffer,
     target: GpuTexture,
-    /// Browser async readback state (see module docs); rebuilt with the
-    /// rest of the resources on a count change, which also abandons any
-    /// in-flight map (the dropped buffer's callback resolves into a state
-    /// handle nobody reads).
+    /// Browser async readback state (see module docs); dropped with the
+    /// rest of the set on LRU eviction, which also abandons any in-flight
+    /// map (the dropped buffer's callback resolves into a state handle
+    /// nobody reads).
     #[cfg(target_arch = "wasm32")]
     readback: AsyncReadback,
 }
@@ -182,7 +193,7 @@ impl SamplePass {
 
         Self {
             pipeline,
-            resources: None,
+            resources: Vec::new(),
         }
     }
 
@@ -214,7 +225,7 @@ impl SamplePass {
         self.ensure_resources(shared, count);
         let resources = self
             .resources
-            .as_ref()
+            .last()
             .expect("sample resources were just ensured");
         let (width, height) = (resources.width, resources.height);
 
@@ -278,7 +289,7 @@ impl SamplePass {
     fn read_back_into(&mut self, shared: &GpuShared, out: &mut [u16]) -> Result<(), GfxError> {
         let resources = self
             .resources
-            .as_ref()
+            .last()
             .expect("sample resources were just ensured");
         let pixels = read_back_f32(
             &shared.device,
@@ -305,7 +316,7 @@ impl SamplePass {
 
         let resources = self
             .resources
-            .as_mut()
+            .last_mut()
             .expect("sample resources were just ensured");
         let readback = &mut resources.readback;
 
@@ -393,55 +404,62 @@ impl SamplePass {
         Ok(())
     }
 
+    /// Ensure a resource set for `count` exists and sits at the back of
+    /// `self.resources` (the most-recently-used slot the callers read).
     fn ensure_resources(&mut self, shared: &GpuShared, count: u32) {
-        if self
+        if let Some(pos) = self
             .resources
-            .as_ref()
-            .is_none_or(|resources| resources.count != count)
+            .iter()
+            .position(|resources| resources.count == count)
         {
-            let max_dim = shared.device.limits().max_texture_dimension_2d;
-            let width = count.min(max_dim);
-            let height = count.div_ceil(width);
-            let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("lp-gfx-wgpu sample points"),
-                size: u64::from(count) * VERTEX_STRIDE,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let target = GpuTexture::new(
-                &shared.device,
-                width,
-                height,
-                TextureStorageFormat::Rgba16Unorm,
-                "lp-gfx-wgpu sample target",
-            );
-            #[cfg(target_arch = "wasm32")]
-            let readback = {
-                let bytes_per_pixel =
-                    gpu_channels(TextureStorageFormat::Rgba16Unorm) as u32 * 4;
-                let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-                let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(align) * align;
-                AsyncReadback {
-                    buffer: shared.device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("lp-gfx-wgpu sample read_back"),
-                        size: u64::from(padded_bytes_per_row) * u64::from(height),
-                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                        mapped_at_creation: false,
-                    }),
-                    padded_bytes_per_row,
-                    pending: None,
-                    last: vec![0; count as usize * 4],
-                }
-            };
-            self.resources = Some(SampleResources {
-                count,
-                width,
-                height,
-                vertex_buffer,
-                target,
-                #[cfg(target_arch = "wasm32")]
-                readback,
-            });
+            let existing = self.resources.remove(pos);
+            self.resources.push(existing);
+            return;
         }
+        if self.resources.len() >= MAX_RESOURCE_SETS {
+            self.resources.remove(0);
+        }
+        let max_dim = shared.device.limits().max_texture_dimension_2d;
+        let width = count.min(max_dim);
+        let height = count.div_ceil(width);
+        let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lp-gfx-wgpu sample points"),
+            size: u64::from(count) * VERTEX_STRIDE,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let target = GpuTexture::new(
+            &shared.device,
+            width,
+            height,
+            TextureStorageFormat::Rgba16Unorm,
+            "lp-gfx-wgpu sample target",
+        );
+        #[cfg(target_arch = "wasm32")]
+        let readback = {
+            let bytes_per_pixel = gpu_channels(TextureStorageFormat::Rgba16Unorm) as u32 * 4;
+            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(align) * align;
+            AsyncReadback {
+                buffer: shared.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("lp-gfx-wgpu sample read_back"),
+                    size: u64::from(padded_bytes_per_row) * u64::from(height),
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }),
+                padded_bytes_per_row,
+                pending: None,
+                last: vec![0; count as usize * 4],
+            }
+        };
+        self.resources.push(SampleResources {
+            count,
+            width,
+            height,
+            vertex_buffer,
+            target,
+            #[cfg(target_arch = "wasm32")]
+            readback,
+        });
     }
 }
