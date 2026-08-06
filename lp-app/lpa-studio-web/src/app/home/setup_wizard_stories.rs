@@ -496,7 +496,7 @@ fn device_home_simulator() -> Element {
 }
 
 #[story(
-    description = "CLOSED: the terminal state, drawn for completeness. In the live gallery the card is off the grid by the time this could paint. Three reasons reach it — Cancelled (✕, nothing written), IncompleteFlash (shown here: the board's card is left saying it needs re-flashing), and Adopted (the G2 follow-up's Done: the sighting is recorded, the port is kept, and the board's own card simply carries on)."
+    description = "CLOSED: the terminal state, drawn for completeness. In the live gallery the card is off the grid by the time this could paint. Four reasons reach it — Cancelled (✕ before anything was written), IncompleteFlash (shown here: the board's card is left saying it needs re-flashing), Adopted (Done on an already-LightPlayer board), and LeftConnected (✕ at PROVISION, after the flash landed). Only the first two release the port: a board that is flashed or adopted has earned its place on the roster, and dropping its session on the way out is how it ends up reading \"not connected\" one frame after being set up."
 )]
 fn closed() -> Element {
     frame(hardware(SetupState::Closed {

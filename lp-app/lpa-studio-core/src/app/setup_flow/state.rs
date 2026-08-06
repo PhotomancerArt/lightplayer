@@ -30,6 +30,14 @@ pub enum CloseReason {
     /// Abandoned during or after a flash: the card must say "incomplete
     /// flash — needs re-flash". An incomplete flash is never trusted.
     IncompleteFlash,
+    /// ✕ at PROVISION, after a flash that landed: the board is alive and
+    /// running our firmware, so the port is KEPT and the board stays on
+    /// the roster (G2 walk, 2026-08-05 — releasing it left a
+    /// just-flashed board reading "not connected", with a Reconnect that
+    /// then had to fight for the port it had just been given). Nothing is
+    /// marked: an incomplete flash is a different reason, and this flash
+    /// was complete.
+    LeftConnected,
     /// ALREADY_LP's "Done": the board was adopted — its sighting is
     /// recorded and the flow is over, WITHOUT a lens attach (G2 follow-up,
     /// 2026-08-05: adopt does not navigate; setup does). The port is

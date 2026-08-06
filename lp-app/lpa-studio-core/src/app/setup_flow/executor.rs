@@ -29,6 +29,12 @@ pub struct SetupExecutorContext {
     pub now: f64,
     /// The transport label recorded on a registry row at sighting.
     pub transport: String,
+    /// The uid the bound session's identity resolves to RIGHT NOW — the
+    /// impure fact the reducer cannot know. It is what a registry write
+    /// is addressed with when the probe anchored no identity of its own:
+    /// a blank board has none until the flash gives it one, and by
+    /// provision time the post-flash hello has (design §3, A1).
+    pub resolved_uid: Option<String>,
 }
 
 impl SetupExecutorContext {
@@ -37,11 +43,17 @@ impl SetupExecutorContext {
             card_key: None,
             now,
             transport: "USB".to_string(),
+            resolved_uid: None,
         }
     }
 
     pub fn with_card_key(mut self, card_key: impl Into<String>) -> Self {
         self.card_key = Some(card_key.into());
+        self
+    }
+
+    pub fn with_resolved_uid(mut self, uid: Option<String>) -> Self {
+        self.resolved_uid = uid;
         self
     }
 
@@ -86,6 +98,12 @@ pub enum SetupDispatch {
     /// Put the card in its Failed phase with the incomplete-flash copy
     /// (the card-owned op flow's own `CardOp::failed`, unchanged).
     MarkIncompleteFlash,
+    /// The command names work that cannot be ADDRESSED on this target, so
+    /// there is nothing to run. The only case today: a registry write for
+    /// a board no identity anchors — neither the probe nor the live
+    /// session could name it, and a row under an empty uid is worse than
+    /// no row. The caller logs `reason`; the flow carries on.
+    Skip { reason: &'static str },
 }
 
 /// Resolve one command. Pure: it builds op values, it does not run them.
@@ -118,17 +136,32 @@ pub fn dispatch_for(command: &SetupCommand, context: &SetupExecutorContext) -> S
             hardware_origin,
             name,
             board_id,
-        } => SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(RegisteredDevice {
-            uid: hardware_uid.clone(),
-            name: name.clone(),
-            transport: context.transport.clone(),
-            last_seen_at: context.now,
-            // Sight-only: the merge upsert keeps whatever was last pushed.
-            association: None,
-            board_id: Some(board_id.clone()),
-            hardware_id: hardware_origin.clone(),
-            previous_uids: Vec::new(),
-        })),
+        } => {
+            // The SESSION's resolved uid leads: by provision time the
+            // flashed board has said hello, and that identity is the one
+            // the push gate will read. The probe's uid is the fallback for
+            // the boards that anchored one before the flash.
+            let Some(uid) = context
+                .resolved_uid
+                .clone()
+                .or_else(|| hardware_uid.clone())
+            else {
+                return SetupDispatch::Skip {
+                    reason: "no identity anchors this board, so there is no row to write it to",
+                };
+            };
+            SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(RegisteredDevice {
+                uid,
+                name: name.clone(),
+                transport: context.transport.clone(),
+                last_seen_at: context.now,
+                // Sight-only: the merge upsert keeps what was last pushed.
+                association: None,
+                board_id: Some(board_id.clone()),
+                hardware_id: hardware_origin.clone(),
+                previous_uids: Vec::new(),
+            }))
+        }
         SetupCommand::RecordSighting { hardware_uid } => {
             SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(RegisteredDevice {
                 uid: hardware_uid.clone(),
@@ -218,14 +251,18 @@ mod tests {
         assert_eq!(board_id, C6);
     }
 
-    #[test]
-    fn the_registry_write_carries_name_board_and_origin_under_the_probed_uid() {
-        let op = catalog_op(&SetupCommand::WriteRegistry {
-            hardware_uid: "dev_000000029EVDlKLX".to_string(),
+    fn write_registry(hardware_uid: Option<&str>) -> SetupCommand {
+        SetupCommand::WriteRegistry {
+            hardware_uid: hardware_uid.map(str::to_string),
             hardware_origin: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
             name: "Porch sign".to_string(),
             board_id: C6.to_string(),
-        });
+        }
+    }
+
+    #[test]
+    fn the_registry_write_carries_name_board_and_origin_under_the_probed_uid() {
+        let op = catalog_op(&write_registry(Some("dev_000000029EVDlKLX")));
         let CatalogOp::UpsertRegisteredDevice(row) = op else {
             panic!("the registry write is a catalog op")
         };
@@ -235,6 +272,47 @@ mod tests {
         assert_eq!(row.hardware_id.as_deref(), Some("efuse:aa:bb:cc:dd:ee:ff"));
         assert_eq!(row.association, None, "a sighting never invents a push");
         assert_eq!(row.last_seen_at, 1_754_000_000.0);
+    }
+
+    #[test]
+    fn the_registry_write_falls_back_to_the_sessions_resolved_uid() {
+        // G2 blank-C6 walk: the probe of a blank board anchors nothing —
+        // the identity arrives with the post-flash hello. The write is
+        // addressed with THAT uid, or the typed name lands nowhere and
+        // the push refuses a board with no name.
+        let context = context().with_resolved_uid(Some("dev_fromthehello".to_string()));
+        let SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(row)) =
+            dispatch_for(&write_registry(None), &context)
+        else {
+            panic!("an un-probed uid still writes a row")
+        };
+        assert_eq!(row.uid, "dev_fromthehello");
+        assert_eq!(row.name, "Porch sign");
+    }
+
+    #[test]
+    fn the_sessions_uid_wins_over_the_probes() {
+        // They are the same board, and the session's is the one the push
+        // gate will read — a probe uid that somehow disagreed would write
+        // the name onto a row nothing looks at.
+        let context = context().with_resolved_uid(Some("dev_fromthehello".to_string()));
+        let SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(row)) =
+            dispatch_for(&write_registry(Some("dev_fromtheprobe")), &context)
+        else {
+            panic!("a catalog op")
+        };
+        assert_eq!(row.uid, "dev_fromthehello");
+    }
+
+    #[test]
+    fn a_board_no_identity_anchors_writes_no_row_at_all() {
+        // Neither the probe nor the session can name it: a row under an
+        // empty uid is worse than no row, so the command is skipped and
+        // the reason is said out loud.
+        let SetupDispatch::Skip { reason } = dispatch_for(&write_registry(None), &context()) else {
+            panic!("an un-anchored board has no row to write")
+        };
+        assert!(reason.contains("no identity anchors"), "{reason}");
     }
 
     #[test]

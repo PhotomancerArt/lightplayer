@@ -435,15 +435,26 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
             }
             let mut commands = Vec::new();
             // The registry write is the whole of provisioning's persistence:
-            // name and board under the probed identity. No stamp step —
+            // name and board under the device's identity. No stamp step —
             // identity is anchored in silicon and survives an erase.
-            if caps.can_rename
-                && let Some(probe) = provision.probe.as_ref()
-                && let Some(hardware_uid) = probe.hardware_uid.clone()
-            {
+            //
+            // The probe's uid is ADVISORY, not a gate (G2 blank-C6 walk):
+            // a blank board anchors no identity while it sits in its boot
+            // loop, and the flash we just ran is what gives it one. Gating
+            // the write on the PROBE's uid meant the name the user typed
+            // was written nowhere, and the push then refused the board for
+            // having no name. The executor addresses the row with the
+            // session's resolved uid when the probe anchored none.
+            if caps.can_rename {
                 commands.push(SetupCommand::WriteRegistry {
-                    hardware_uid,
-                    hardware_origin: probe.hardware_origin.clone(),
+                    hardware_uid: provision
+                        .probe
+                        .as_ref()
+                        .and_then(|probe| probe.hardware_uid.clone()),
+                    hardware_origin: provision
+                        .probe
+                        .as_ref()
+                        .and_then(|probe| probe.hardware_origin.clone()),
                     name: provision.name.clone(),
                     board_id: provision.board_id.clone(),
                 });
@@ -471,6 +482,17 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
                 },
                 vec![SetupCommand::OpenDeviceHome],
             )
+        }
+
+        // ✕ at PROVISION on hardware: the flash ALREADY LANDED, so this is
+        // not a cancel — the board is alive, running our firmware, and
+        // belongs on the roster. Releasing its port here is what left a
+        // freshly flashed board reading "not connected" one click after
+        // it was flashed (G2 walk, 2026-08-05). Nothing to mark, nothing
+        // to release: the takeover ends and the card carries on with its
+        // own body. (Listed BEFORE the cross-cutting close so it wins.)
+        (SetupState::Provision(_), SetupEvent::CloseRequested) if caps.needs_connect => {
+            SetupStep::go(closed(CloseReason::LeftConnected))
         }
 
         // ---- cross-cutting -------------------------------------------------
@@ -859,7 +881,8 @@ mod tests {
                 // from Editing, a late ProjectGenerated/PushCompleted is
                 // inert — the phase-ordered variants are tested separately
                 (E::PortLost, S::ConnectIntro, &["release-port"]),
-                (E::CloseRequested, S::Closed, &["release-port"]),
+                // ✕ after a landed flash keeps the board: no release.
+                (E::CloseRequested, S::Closed, &[]),
             ],
             // Terminal: the card owns the surface from here.
             S::DeviceHome | S::Closed => &[],
@@ -1185,9 +1208,14 @@ mod tests {
     }
 
     #[test]
-    fn an_anonymous_board_writes_no_registry_row() {
-        // Nothing anchored an identity: there is no key to remember it
-        // under, and inventing one is what the silicon anchor replaced.
+    fn a_board_the_probe_could_not_anchor_still_asks_for_the_registry_write() {
+        // G2 blank-C6 walk, 2026-08-05: this used to emit NO write, on the
+        // reasoning that an un-anchored board has no key to be remembered
+        // under. True at probe time — and wrong by provision time, because
+        // the flash in between is what gave the board its identity. The
+        // reducer asks with an ADVISORY uid (`None` here); the executor,
+        // which can see the live session, addresses the row (or refuses
+        // it — `executor::tests::a_board_no_identity_anchors_writes_no_row_at_all`).
         let context = hardware();
         let state = SetupState::Provision(ProvisionState {
             board_id: C6.to_string(),
@@ -1212,7 +1240,14 @@ mod tests {
                 .iter()
                 .map(SetupCommand::label)
                 .collect::<Vec<_>>(),
-            vec!["push-project"]
+            vec!["write-registry", "push-project"]
+        );
+        let Some(SetupCommand::WriteRegistry { hardware_uid, .. }) = step.commands.first() else {
+            panic!("the write leads")
+        };
+        assert_eq!(
+            *hardware_uid, None,
+            "the reducer does not invent an identity it cannot see"
         );
     }
 
@@ -1666,7 +1701,6 @@ mod tests {
             SetupStateKind::WledFound,
             SetupStateKind::AlreadyLp,
             SetupStateKind::ProbeFailed,
-            SetupStateKind::Provision,
         ] {
             let step = reduce(&hardware(), state_of(kind), SetupEvent::CloseRequested);
             assert_eq!(
@@ -1684,5 +1718,41 @@ mod tests {
                 kind.label()
             );
         }
+    }
+
+    #[test]
+    fn closing_at_provision_keeps_the_flashed_board_connected() {
+        // G2 walk, 2026-08-05: ✕ at PROVISION released the port, and a
+        // board that had just been flashed successfully went straight to
+        // "not connected" — with a Reconnect that then had to fight for
+        // the port it had just been handed. The flash landed; the board is
+        // alive; it stays.
+        let step = reduce(
+            &hardware(),
+            state_of(SetupStateKind::Provision),
+            SetupEvent::CloseRequested,
+        );
+        assert_eq!(step.state, closed(CloseReason::LeftConnected));
+        assert!(
+            step.commands.is_empty(),
+            "nothing to release and nothing to mark, got {:?}",
+            step.commands
+                .iter()
+                .map(SetupCommand::label)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_simulators_provision_close_is_still_a_plain_cancel() {
+        // "Left connected" is a statement about a board on a wire. The sim
+        // has neither, so its ✕ stays the ordinary cancel.
+        let step = reduce(
+            &simulator(),
+            state_of(SetupStateKind::Provision),
+            SetupEvent::CloseRequested,
+        );
+        assert_eq!(step.state, closed(CloseReason::Cancelled));
+        assert!(step.commands.is_empty());
     }
 }
