@@ -112,6 +112,22 @@ pub(crate) fn editor_repeated_sector() -> Element {
 }
 
 #[story(
+    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the popover breadcrumbs the scope."
+)]
+pub(crate) fn editor_repeat_scoped() -> Element {
+    rsx! {
+        EditorCanvasFrame {
+            MapEditor {
+                doc_epoch: 0,
+                doc: lpc_mapping::corpus::repeated_sector(),
+                initial_selection: vec![0],
+                initial_descend: true,
+            }
+        }
+    }
+}
+
+#[story(
     description = "Reference image under the authored geometry: a traceable background at half opacity, dot grid visible through it — the sketch-to-mapping flow."
 )]
 pub(crate) fn editor_reference_trace() -> Element {
