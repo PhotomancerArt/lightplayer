@@ -19,6 +19,7 @@ pub use editor_core::doc_refusal::{DocOpen, DocRefusal};
 pub use editor_core::editor_session::MapEditorSession;
 pub use editor_core::map_selection::MapSelection;
 pub use editor_core::map_tool::MapTool;
+pub use editor_core::shape_path::ShapePath;
 pub use editor_core::view_geometry::{
     ArrowInput, LAMPS_PER_UNIVERSE, MapArrowOverlay, MapArrowSeg, lamp_universe, neutral_lamp_rgb,
     universe_rgb, wiring_arrows,

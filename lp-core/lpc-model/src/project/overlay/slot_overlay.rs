@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn same_path_upserts_to_latest_intent() {
         let mut overlay = SlotOverlay::new();
-        let path = SlotPath::parse("controls.rate").unwrap();
+        let path = SlotPath::parse("transport.rate").unwrap();
 
         assert!(overlay.put_edit(SlotEdit::assign_value(path.clone(), LpValue::F32(1.0))));
         assert!(overlay.put_edit(SlotEdit::assign_value(path.clone(), LpValue::F32(2.0))));
@@ -172,7 +172,7 @@ mod tests {
     fn parent_remove_clears_pending_descendants() {
         let mut overlay = SlotOverlay::new();
         overlay.put_edit(SlotEdit::assign_value(
-            SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            SlotPath::parse("entries[0].node.transport.rate").unwrap(),
             LpValue::F32(2.0),
         ));
         overlay.put_edit(SlotEdit::remove(
@@ -195,7 +195,7 @@ mod tests {
             SlotPath::parse("entries[0].node").unwrap(),
         ));
         overlay.put_edit(SlotEdit::assign_value(
-            SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            SlotPath::parse("entries[0].node.transport.rate").unwrap(),
             LpValue::F32(2.0),
         ));
 
@@ -203,7 +203,7 @@ mod tests {
         assert!(
             overlay
                 .edits
-                .contains_key(&SlotPath::parse("entries[0].node.controls.rate").unwrap())
+                .contains_key(&SlotPath::parse("entries[0].node.transport.rate").unwrap())
         );
     }
 
@@ -211,7 +211,7 @@ mod tests {
     fn structural_ensure_clears_stale_descendants() {
         let mut overlay = SlotOverlay::new();
         overlay.put_edit(SlotEdit::assign_value(
-            SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            SlotPath::parse("entries[0].node.transport.rate").unwrap(),
             LpValue::F32(2.0),
         ));
         overlay.put_edit(SlotEdit::ensure_present(
