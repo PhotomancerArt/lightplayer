@@ -536,6 +536,13 @@ label:has(> input:not(:disabled)) {
     border: 1px solid var(--studio-color-border);
 }
 
+/* A frame with a display layout wears the LAYOUT's aspect ratio (inline
+   `aspect-ratio`, clamped core-side) and the card grows to fit — the
+   picture is never squished into a fixed box (G1b, 2026-08-05). */
+.ux-play-frame-fit {
+    height: auto;
+}
+
 /* Offline / not-responding: the last frame is still the truth about what
    the board was doing, so it stays — desaturated and dimmed, the card
    grammar's "last known, not current". */

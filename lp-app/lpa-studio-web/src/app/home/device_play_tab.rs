@@ -34,7 +34,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::time_ago::time_ago;
 use lpa_studio_core::{
-    FRAME_STALE_AFTER_SECS, RosterCardState, UiAction, UiDeviceCard, UiDeviceProjectChip,
+    ControlDisplayLayout, FRAME_STALE_AFTER_SECS, RosterCardState, UiAction, UiDeviceCard,
+    UiDeviceProjectChip,
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
@@ -87,16 +88,26 @@ pub(crate) fn PlayTabBody(
     );
     let liveness = play_liveness(&card, muted);
 
-    let frame_class = if liveness == PlayLiveness::Offline {
-        "ux-play-frame ux-play-frame-dim"
-    } else {
-        "ux-play-frame"
-    };
+    let mut frame_class = String::from("ux-play-frame");
+    if liveness == PlayLiveness::Offline {
+        frame_class.push_str(" ux-play-frame-dim");
+    }
+    // The frame wears the LAYOUT's own aspect ratio, so a strip is wide,
+    // a dome is square, and nothing is ever squished to fit a fixed box —
+    // the card grows instead (G1b feedback, 2026-08-05). Clamped so a
+    // 60:1 strip stays a readable bar and a tall portrait cannot swallow
+    // the gallery; no layout keeps the CSS default height.
+    let frame_style = play_frame_aspect(&card)
+        .map(|aspect| format!("aspect-ratio: {aspect:.4};"))
+        .unwrap_or_default();
+    if !frame_style.is_empty() {
+        frame_class.push_str(" ux-play-frame-fit");
+    }
     let pill = play_pill_text(&card, liveness, sim, now);
     let meta = play_meta_text(&card, liveness, sim, now);
 
     rsx! {
-        div { class: "{frame_class}",
+        div { class: "{frame_class}", style: "{frame_style}",
             // The session's own frames. `live` stays true even on an
             // offline card: the neutral-lamp mode is for a layout with no
             // data, whereas here there IS data — just old, which the
@@ -153,6 +164,19 @@ fn project_chip(chip: &UiDeviceProjectChip) -> Element {
             span { class: "ux-play-project-name", title: "{chip.name}", "{chip.name}" }
         }
     }
+}
+
+/// The frame's aspect ratio (width / height) from the current frame's
+/// display layout hints, when there is one. Clamped to [0.75, 4.0]: the
+/// picture stays honest in PROPORTION while the card's growth stays
+/// bounded — beyond the clamp the lamp field letterboxes inside its own
+/// normalized square rather than distorting.
+pub(crate) fn play_frame_aspect(card: &UiDeviceCard) -> Option<f32> {
+    let layout = card.frame_preview.as_ref()?.display_layout.as_deref()?;
+    let ControlDisplayLayout::Layout2d(layout) = layout;
+    let width = layout.width_hint.max(1) as f32;
+    let height = layout.height_hint.max(1) as f32;
+    Some((width / height).clamp(0.75, 4.0))
 }
 
 /// Which state the tab is in.
