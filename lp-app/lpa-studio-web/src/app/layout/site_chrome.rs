@@ -9,9 +9,10 @@
 //!   things) sits by the brand at full weight; the secondary family
 //!   (Explore, Boards, Docs — the world's things) rides the right
 //!   cluster, lighter, with no divider between the families.
-//! - **The brand lockup is the way to Home.** The logo links to `/home`
-//!   — there is deliberately no Home tab, and no Studio tab either (the
-//!   sections replaced it).
+//! - **The brand lockup is the way to Home.** The logo links to `/` —
+//!   Home is the root landing (Yona 2026-08-06) — and there is
+//!   deliberately no Home tab, and no Studio tab either (the sections
+//!   replaced it).
 //! - **One overflow menu** (G3 ruling, 2026-08-05: a row of separate
 //!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
 //!   end always holds the tools and the full session list, and grows the
@@ -89,13 +90,13 @@ pub fn SiteChrome(
             // IS Home's tab, so it marks the place like one).
             span {
                 class: if section == SiteSection::Home { LOGO_HOME_ACTIVE_WRAP } else { "tw:flex tw:flex-none" },
-                LogoLockup { href: "/home".to_string() }
+                LogoLockup { href: "/".to_string() }
             }
             // Primary family: your things, by the brand, full weight.
             nav { class: "tw:flex tw:items-center tw:gap-1",
                 NavTab {
                     label: "Devices",
-                    href: "/",
+                    href: "/devices",
                     active: section == SiteSection::Devices,
                 }
                 NavTab {
@@ -285,7 +286,8 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
 /// detach anymore — navigation to a gallery route detaches through the
 /// route listener, the same path as the back button, and returning to
 /// the editor is the active session chip's job. (The old Studio-tab
-/// direct dispatch existed for the URL-less D29 device editor at `/`;
+/// direct dispatch existed for the URL-less D29 device editor on the
+/// gallery route;
 /// identity-at-probe made device lenses addressable, closing that gap.)
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

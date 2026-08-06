@@ -37,6 +37,18 @@ embedded nodes as the teaching strategy — both point at in-app.
 > decision; the structural rules (one bar, in-app sections, nothing
 > unloads, tools stay chromeless) all carry forward unchanged.
 
+> **Amended 2026-08-06** (Yona's ruling): the root and Devices **swap
+> slugs**. `/` is now the **Home** landing — the logo links to `/` — and
+> Devices moved to its own `/devices`. The 2026-08-05 amendment above
+> put Devices at the root on the gallery vision's Q2 *lean* ("are my
+> devices up?" is a returning user's first question), explicitly marked
+> revisit-when-Home-is-real; this is that revisit. Unknown and malformed
+> paths follow the root and land on Home. `/home` stays a parsed alias so
+> old links keep working, but only `/` is emitted; a legacy `#/` bookmark
+> follows the root's new meaning and now lands on Home. Nothing else about
+> the bar changes — the logo is still the only way to Home, and it still
+> wears the you're-here underline there.
+
 - **One shared top bar** (`lpa-studio-web::app::layout::SiteChrome`) renders
   on the studio app, the boards catalog, and the docs section, with
   **Studio / Boards / Docs** nav tabs. Boards and docs are in-app sections,
