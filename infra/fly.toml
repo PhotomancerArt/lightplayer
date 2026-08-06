@@ -73,7 +73,7 @@ primary_region = "sjc"  # Seattle (sea) was retired for new fly orgs; San Jose i
   destination = "/data"
 
 [http_service]
-  internal_port = 8080
+  internal_port = 2812
   force_https = true
 
   # Machines never stop. A stopped machine means a cold start on the first

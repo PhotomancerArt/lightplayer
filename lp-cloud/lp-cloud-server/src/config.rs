@@ -8,7 +8,7 @@
 //! | Variable | Meaning | Default |
 //! |---|---|---|
 //! | `LP_CLOUD_BIND` | Address to listen on | `127.0.0.1` |
-//! | `LP_CLOUD_PORT` | Port to listen on | `8080` |
+//! | `LP_CLOUD_PORT` | Port to listen on | `2812` |
 //! | `LP_CLOUD_STORE` | `mem` \| `sqlite` | `mem` |
 //! | `LP_CLOUD_DATA_DIR` | SQLite file + fs blob root | `target/cloud-data` |
 //! | `LP_CLOUD_BLOBS` | `mem` \| `fs` \| `s3` | `fs` |
@@ -77,7 +77,7 @@ impl ServerConfig {
     /// `std::env`.
     pub fn from_vars(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let bind: IpAddr = parse_var(&get, "LP_CLOUD_BIND", "127.0.0.1")?;
-        let port: u16 = parse_var(&get, "LP_CLOUD_PORT", "8080")?;
+        let port: u16 = parse_var(&get, "LP_CLOUD_PORT", "2812")?;
         let meta = MetaBackend::parse(&value(&get, "LP_CLOUD_STORE", "mem"))?;
         let blobs = BlobBackend::parse(&value(&get, "LP_CLOUD_BLOBS", "fs"))?;
         let data_dir = PathBuf::from(value(&get, "LP_CLOUD_DATA_DIR", "target/cloud-data"));
@@ -377,7 +377,7 @@ mod tests {
         let config = from(&[]);
         assert_eq!(config.meta, MetaBackend::Mem);
         assert_eq!(config.blobs, BlobBackend::Fs);
-        assert_eq!(config.base_url, "http://127.0.0.1:8080");
+        assert_eq!(config.base_url, "http://127.0.0.1:2812");
         assert!(!config.dev_auth);
         assert!(!config.cookies_are_secure());
     }

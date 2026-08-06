@@ -106,13 +106,13 @@ COPY target/pages/studio /app/web
 ARG GIT_SHA=dev
 ENV LP_CLOUD_BUILD_SHA=${GIT_SHA}
 ENV LP_CLOUD_BIND=0.0.0.0 \
-    LP_CLOUD_PORT=8080 \
+    LP_CLOUD_PORT=2812 \
     LP_CLOUD_STORE=sqlite \
     LP_CLOUD_DATA_DIR=/data \
     LP_CLOUD_STATIC_DIR=/app/web \
     RUST_LOG=info
 
-EXPOSE 8080
+EXPOSE 2812
 
 # Not a plain `CMD lp-cloud-server`: litestream must restore before the server
 # opens the database and must stay PID 1's child so it can checkpoint on

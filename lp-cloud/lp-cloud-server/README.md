@@ -64,7 +64,7 @@ project that owns the app:
 
    ```
    https://lightplayer.app/auth/google/callback
-   http://localhost:8080/auth/google/callback
+   http://localhost:2812/auth/google/callback
    ```
 
    Google matches these **character for character, port included**. The
@@ -74,7 +74,14 @@ project that owns the app:
    redirect URI Google has not seen is a `redirect_uri_mismatch` refusal:
 
    ```sh
-   LP_CLOUD_PORT=8080 LP_CLOUD_BASE_URL=http://localhost:8080 just cloud-serve
+   LP_CLOUD_PORT=2812 LP_CLOUD_BASE_URL=http://localhost:2812 just cloud-serve
+```
+
+Note: `lp-cli serve` (device emulation) also defaults to port 2812 — the
+WS2812 homage is popular around here. They collide only if you run both at
+once; give one of them a different port when you do.
+
+```bash
    ```
 
    Day-to-day local work needs none of this — use `/auth/dev` instead, and
