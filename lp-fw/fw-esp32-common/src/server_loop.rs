@@ -222,6 +222,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                             status
                         },
                     ),
+                    outputs: crate::output::wire_stats_source::current(),
                 },
             );
 

@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::thread;
 
 use common::ramp_frame;
-use lp_ws281x::{ChannelTiming, MockRmt, Ws281xDriver};
+use lp_ws281x::{ChannelTiming, MockRmt, PadOps, Pusher, WireMailbox, Ws281xDriver};
 
 /// Iteration budget: Miri is orders of magnitude slower than native — and the
 /// canonical run adds `-Zmiri-preemption-rate=0.5`, which multiplies that
@@ -190,6 +190,224 @@ fn aborting_one_channel_never_touches_the_siblings_frame() {
 
     assert!(driver.abort(1));
     drop(sibling);
+    stop.store(true, Ordering::Relaxed);
+    isr.join().unwrap();
+}
+
+// --- The pusher topology (three actors) ---------------------------------
+//
+// fw-esp32v3's dual-core overlap deployment adds a third actor: a pusher
+// thread on the ISR's own core that owns every channel verb, with the
+// posting core interacting purely through the [`WireMailbox`] (frame
+// descriptor + sequence atomics). The tests below run the REAL scheduler —
+// `lp_ws281x::Pusher`, the code the firmware deploys — with all three
+// actors as fully concurrent threads, which is strictly MORE adversarial
+// than the same-core deployment (there, the ISR preempts the pusher and
+// the two can never overlap). What they prove:
+//
+// * the completion chain — ISR `finish` (Release) → pusher `is_complete`
+//   (Acquire) → pusher `completed_seq` (Release) → poster (Acquire) →
+//   free — lets the poster free bytes with NO `isr_seq` handshake;
+// * a close request quiesced by the pusher's `abort` lets the poster free
+//   immediately on the ack;
+// * rapid abort→restart recycling on one channel is UAF-free.
+//
+// The mailbox pointer is an `AtomicPtr` on purpose: round-tripping a frame
+// pointer through an address-sized integer loses provenance (Miri flags
+// it).
+//
+// **Negative control (2026-08-05, against the PRODUCTION orderings):**
+// with `pusher.rs`'s `finish_wire` completion store and close-ack store
+// both weakened to `Relaxed`, the canonical Miri invocation reports the
+// data race between the ISR thread's frame-byte read and the poster
+// reclaiming the box. An earlier control against a hand-modelled mailbox
+// taught the harness a lesson worth keeping: weakening only the completion
+// pair did NOT fail, because at Miri speeds every round quiesced through
+// the close path, whose ack still carried the chain — a negative control
+// must break the path the schedule actually takes. Do not weaken these
+// tests to make a future failure go away.
+
+/// A [`PadOps`] that does nothing — these tests have no pads, only bytes.
+struct NoopPads;
+
+impl PadOps for NoopPads {
+    fn route_to(&mut self, _slot_channel: u8, _gpio: u8) {}
+    fn park(&mut self, _gpio: u8) {}
+}
+
+/// The headline three-actor chain: the poster frees each frame's bytes the
+/// moment the mailbox reports an outcome — no abort, no `isr_seq` handshake
+/// — while refills stream on the ISR thread and the real `Pusher` schedules
+/// on its own thread. A broken link anywhere in
+/// finish→is_complete→completed_seq→free is a use-after-free Miri flags.
+#[test]
+fn pusher_forwards_completion_and_the_poster_frees_safely() {
+    let driver = shared_driver();
+    let mailboxes: [WireMailbox; 1] = [WireMailbox::new()];
+    let stop = AtomicBool::new(false);
+
+    thread::scope(|s| {
+        let driver_ref: &Ws281xDriver<MockRmt, 2> = &driver;
+        s.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                driver_ref.hw().advance_all(3);
+                driver_ref.on_interrupt();
+                thread::yield_now();
+            }
+        });
+        s.spawn(|| {
+            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, || 0, &[0], 1);
+            // The poster finishes every round (outcome or ack) before it
+            // sets `stop`, so exiting on quiet-and-stopped strands nothing.
+            loop {
+                let progress = pusher.service();
+                if stop.load(Ordering::Relaxed) && !progress && pusher.transmitting() == 0 {
+                    return;
+                }
+                thread::yield_now();
+            }
+        });
+
+        for round in 0..ITERS as u32 {
+            let frame: Box<[u8]> = ramp_frame(60).into_boxed_slice();
+            // SAFETY: freed only once the mailbox reports the sequence
+            // disposed (outcome observed, or close acked below).
+            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len(), 0) };
+            let mut waits = 0u32;
+            while mailboxes[0].completed_outcome(seq).is_none() && waits < WAIT_BOUND {
+                thread::yield_now();
+                waits += 1;
+            }
+            if mailboxes[0].completed_outcome(seq).is_none() {
+                // A stalled schedule: quiesce through the close path before
+                // the frame goes out of scope. Not bounded — the pusher
+                // always acks, and a wedged pusher would hang the scope
+                // join regardless. (Miri taught this the honest way: even
+                // *moving* the Box while refills stream is a race.)
+                let close = mailboxes[0].request_close();
+                while !mailboxes[0].close_acked(close) {
+                    thread::yield_now();
+                }
+            }
+            drop(frame); // The point of the test: free on the forwarded ack.
+            let _ = round;
+        }
+        stop.store(true, Ordering::Relaxed);
+    });
+}
+
+/// A close request mid-transmission: the pusher aborts (with the handshake)
+/// and acks; the poster frees the bytes immediately on the ack while the ISR
+/// thread keeps hammering. The teardown path of the wire lifecycle, against
+/// the real scheduler.
+#[test]
+fn close_request_lets_the_poster_free_immediately_on_the_ack() {
+    let driver = shared_driver();
+    let mailboxes: [WireMailbox; 1] = [WireMailbox::new()];
+    let stop = AtomicBool::new(false);
+
+    thread::scope(|s| {
+        let driver_ref: &Ws281xDriver<MockRmt, 2> = &driver;
+        s.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                driver_ref.hw().advance_all(3);
+                driver_ref.on_interrupt();
+                thread::yield_now();
+            }
+        });
+        s.spawn(|| {
+            let mut pusher = Pusher::new(driver_ref, &mailboxes, NoopPads, || 0, &[0], 1);
+            loop {
+                let progress = pusher.service();
+                if stop.load(Ordering::Relaxed) && !progress && pusher.transmitting() == 0 {
+                    return;
+                }
+                thread::yield_now();
+            }
+        });
+
+        for round in 0..ITERS as u32 {
+            let frame: Box<[u8]> = ramp_frame(60).into_boxed_slice();
+            // SAFETY: freed only after the close below is acked (or the
+            // frame completed first — either way the mailbox has disposed
+            // of the sequence).
+            let seq = unsafe { mailboxes[0].post(10, frame.as_ptr(), frame.len(), 0) };
+
+            // Let refills stream before closing — an instant close never
+            // lands inside a live transmission and validates much less.
+            // Varying depth moves the close around the refill stream.
+            let target = driver_ref.stats(0).refill_lag_count + 1 + (round as i32 % 5);
+            let mut waits = 0u32;
+            while driver_ref.stats(0).refill_lag_count < target
+                && mailboxes[0].completed_outcome(seq).is_none()
+                && waits < WAIT_BOUND
+            {
+                thread::yield_now();
+                waits += 1;
+            }
+
+            let close = mailboxes[0].request_close();
+            while !mailboxes[0].close_acked(close) {
+                thread::yield_now();
+            }
+            drop(frame); // Freed on the ack, exactly like the wire teardown.
+        }
+        stop.store(true, Ordering::Relaxed);
+    });
+}
+
+/// Rapid abort→restart recycling on one channel from the verb-owning thread —
+/// the slot-takeover shape at pusher speed, with the ISR fully concurrent
+/// (more adversarial than the same-core deployment, where a pending stale
+/// cause preempts the pusher before the restart; see the module docs in
+/// `driver.rs` on abort→start recycling).
+#[test]
+fn pusher_recycles_a_channel_abort_then_restart() {
+    let driver = shared_driver();
+    let stop = Arc::new(AtomicBool::new(false));
+    let isr = spawn_isr_thread(Arc::clone(&driver), Arc::clone(&stop));
+
+    let verbs = {
+        let driver = Arc::clone(&driver);
+        thread::spawn(move || {
+            for round in 0..ITERS as i32 {
+                let first: Box<[u8]> = ramp_frame(60).into_boxed_slice();
+                // SAFETY: freed only after `abort` returns with its handshake
+                // confirmed.
+                if unsafe { driver.start_frame(0, &first) }.is_ok() {
+                    // Land the abort at varying depths of the refill stream.
+                    let target = driver.stats(0).refill_lag_count + 1 + (round % 3);
+                    let mut waits = 0u32;
+                    while driver.stats(0).refill_lag_count < target
+                        && !driver.is_complete(0)
+                        && waits < WAIT_BOUND
+                    {
+                        thread::yield_now();
+                        waits += 1;
+                    }
+                    assert!(driver.abort(0), "handshake must confirm idle");
+                }
+                drop(first);
+
+                // Restart the same channel immediately — back to back with
+                // the abort, the recycling window the invariant is about.
+                let second: Box<[u8]> = ramp_frame(60).into_boxed_slice();
+                // SAFETY: freed only after natural completion or the abort
+                // below.
+                if unsafe { driver.start_frame(0, &second) }.is_ok() {
+                    let mut waits = 0u32;
+                    while !driver.is_complete(0) && waits < WAIT_BOUND {
+                        thread::yield_now();
+                        waits += 1;
+                    }
+                    assert!(driver.abort(0), "handshake must confirm idle");
+                }
+                drop(second);
+            }
+        })
+    };
+
+    verbs.join().unwrap();
     stop.store(true, Ordering::Relaxed);
     isr.join().unwrap();
 }

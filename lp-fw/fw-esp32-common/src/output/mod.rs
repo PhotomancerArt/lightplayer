@@ -8,3 +8,5 @@
 //! per-channel state lives now, one implementation for all three targets.
 
 pub mod provider;
+#[cfg(feature = "server")]
+pub mod wire_stats_source;

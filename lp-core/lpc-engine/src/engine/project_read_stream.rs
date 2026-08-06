@@ -1207,7 +1207,7 @@ mod tests {
         .expect("write container manifest");
         fs.write_file_mut(
             lpfs::LpPath::new("/clock.json"),
-            br#"{ "kind": "Clock", "controls": { "rate": 1.0 } }"#,
+            br#"{ "kind": "Clock", "transport": { "rate": 1.0 } }"#,
         )
         .expect("write clock def");
         let shapes = lpc_model::SlotShapeRegistry::default();
@@ -1244,7 +1244,7 @@ mod tests {
         ));
 
         let clock = lpc_model::ArtifactLocation::file("/clock.json");
-        let rate = lpc_model::SlotPath::parse("controls.rate").expect("slot path");
+        let rate = lpc_model::SlotPath::parse("transport.rate").expect("slot path");
 
         // Settled at the load revision: nothing is due at since == 1.
         assert!(

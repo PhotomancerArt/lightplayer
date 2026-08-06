@@ -231,6 +231,16 @@ mod ser_write_json_tests {
                         crash_count: 1,
                     }],
                 }),
+                outputs: Some(vec![crate::server::OutputWireStatus {
+                    wire: 4,
+                    gpio: 13,
+                    posted: 100,
+                    sent: 99,
+                    torn: 1,
+                    waved: 99,
+                    mux: 99,
+                    queue_wait_max_us: 9_800,
+                }]),
             },
         );
 
