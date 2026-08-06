@@ -29,14 +29,14 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    PanelAutoSaveOp, PanelClearOp, PanelWriteOp, UiAction, UiNodeFace, UiPanelGroup, UiStudioView,
-    UiViewContent,
+    ControllerId, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, ProjectController, ProjectOp,
+    UiAction, UiNodeFace, UiPanelGroup, UiStudioView, UiViewContent,
 };
 
 use crate::app::module::{ModulePanel, panel_gesture_actions};
 use crate::app::node::slot_edit_actions::panel_clear_scope_action;
 
-use super::docs_sims::DocsSimRegistry;
+use super::docs_sims::{DocsSim, DocsSimRegistry};
 use super::embed_frame::{EmbedFrame, EmbedLoading, EmbedProblem};
 
 /// How the article asked for the panel.
@@ -113,21 +113,10 @@ pub(crate) fn PanelEmbed(
     });
     // Reset puts every named sim back: the article's Reset means "put this
     // page back the way it was", not "put one of these two back".
-    //
-    // TWO steps, and both are needed. Re-deploying the example restores the
-    // FILES, but a panel write is runtime state that outlives the reload —
-    // verified in the browser: after a redeploy alone the panel still read
-    // "1 held control" and the knob stayed where the reader had dragged it.
-    // So each sim's root scope is cleared first (the same clear the panel's
-    // own ↺ raises, which descends into nested groups), and the pristine
-    // re-deploy follows on the same ordered queue.
     let reset_sims = sims;
     let on_reset = EventHandler::new(move |()| {
         for sim in &reset_sims {
-            if let Some(scope) = root_panel(&sim.view.read()).and_then(|panel| panel.target) {
-                sim.dispatch(panel_clear_scope_action(scope));
-            }
-            sim.reset();
+            reset_docs_sim(sim);
         }
     });
 
@@ -188,6 +177,10 @@ pub(crate) fn DocsPanelSurface(
                             play: true,
                             on_panel: live.map(panel_gesture_actions),
                             on_action: live,
+                            // R6: the chrome's always-mounted Reset is this
+                            // embed's one reset — the panel's transient
+                            // glyph would double it and reflow on hold.
+                            show_reset: false,
                         }
                     }
                 },
@@ -200,6 +193,37 @@ pub(crate) fn DocsPanelSurface(
             }
         }
     }
+}
+
+/// The docs Reset, shared by every embed that offers one: "put this page
+/// back the way it started" is one gesture, so the panel's chip and the
+/// editor's chip must do the identical thing.
+///
+/// THREE steps, and each earns its place:
+///
+/// 1. **Clear the root panel scope** — a panel write is runtime state that
+///    outlives a redeploy. Verified in the browser during round 1: after a
+///    redeploy alone the panel still read "1 held control" and the knob
+///    stayed where the reader had dragged it. This is the same clear the
+///    panel's own ↺ raises, and it descends into nested groups.
+/// 2. **Revert every applied edit** — the editor's auto-apply parks an
+///    overlay edit on the artifact, which is likewise runtime state; the
+///    project-wide revert is the one gesture that clears them all without
+///    the embed having to enumerate artifacts.
+/// 3. **Re-deploy the pristine example**, which restores the files (and,
+///    through the normal doc-resync path, the editor's text).
+///
+/// All three ride the same ordered queue, so the order above is the order
+/// the controller executes them in.
+pub(crate) fn reset_docs_sim(sim: &DocsSim) {
+    if let Some(scope) = root_panel(&sim.view.read()).and_then(|panel| panel.target) {
+        sim.dispatch(panel_clear_scope_action(scope));
+    }
+    sim.dispatch(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::RevertAllEdits,
+    ));
+    sim.reset();
 }
 
 /// The root module's panel from a docs sim's view: the workspace ROOT's

@@ -71,12 +71,10 @@ pub const PAGES: &[DocPage] = &[
         slug: "what-is-a-shader",
         title: "What's a shader?",
         markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.md"),
-        sims: &[
-            DocsSimSpec {
-                name: "main",
-                example_id: "examples/plasma-duo",
-            },
-        ],
+        sims: &[DocsSimSpec {
+            name: "main",
+            example_id: "examples/plasma-duo",
+        }],
     },
 ];
 

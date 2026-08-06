@@ -13,11 +13,11 @@
     "grid": {
       "ref": "./grid.json"
     },
-    "disc-out": {
-      "ref": "./disc-out.json"
+    "disc_out": {
+      "ref": "./disc_out.json"
     },
-    "grid-out": {
-      "ref": "./grid-out.json"
+    "grid_out": {
+      "ref": "./grid_out.json"
     }
   },
   "provenance": {

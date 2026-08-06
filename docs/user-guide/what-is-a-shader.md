@@ -28,10 +28,9 @@ different shapes, live:
 ```
 
 Both of these are fixtures in one project, fed by the one shader above.
-Strip, ring, matrix, or a dome you soldered at 2 a.m. — write the
-effect once and point it at every shape you own. (In WLED, 2D lives in
-a separate world with its own effect list. Here there's no separate
-world.)
+Strip, ring, matrix, dome — write the effect once and point it at every
+shape you own. (In WLED, 2D lives in a separate world with its own
+effect list. Here there's no separate world.)
 
 ## Now edit it
 

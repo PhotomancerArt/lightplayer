@@ -1215,6 +1215,16 @@ label:has(> input:not(:disabled)) {
     margin-inline: auto;
 }
 
+/* The docs article's hero (`sim-canvas view=product`): the SAME real
+   ProductPreview the map boxes below it use, presented larger — an article
+   opens on the thing it is about, and 320px reads as a thumbnail there.
+   Only the cap moves; the frame keeps its aspect ratio, so the reserved
+   loading height in `sim_canvas.rs` (HERO_HEIGHT) matches what arrives. */
+.ux-docs-hero-product .ux-produced-product-frame-capped {
+    width: 512px;
+    max-height: 512px;
+}
+
 .ux-produced-product-pixel-canvas {
     display: block;
     position: absolute;

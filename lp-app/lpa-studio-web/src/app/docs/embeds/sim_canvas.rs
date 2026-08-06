@@ -14,6 +14,21 @@
 //! product appears in the view before its first frame does, and
 //! `ProductPreview` already draws its own settling skeleton at the right
 //! aspect ratio, so the box never resizes under the reader.
+//!
+//! # `fixture=` (G1 round 2)
+//!
+//! One project with two fixtures makes "first of the family" ambiguous:
+//! both `disc` and `grid` produce a control product. `fixture=<node>`
+//! names which one, matched against the node's own identity in the view
+//! (`UiNodeChild::label` / `UiNodeView::header.title`, falling back to the
+//! last segment of its address) — the same names `module.json` keys its
+//! nodes by. A `fixture=` that resolves to nothing renders the loading
+//! box rather than silently drawing the *other* shape: a map labelled
+//! "the ring" that shows the grid is worse than one that has not arrived.
+//!
+//! `view=product` (no `fixture=`) stays first-of-family — the shader's own
+//! render, which the article uses as its hero and which this embed
+//! presents wider than the map boxes (`ux-docs-hero-product`).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -25,6 +40,14 @@ use crate::app::node::ProductPreview;
 
 use super::docs_sims::DocsSimRegistry;
 use super::embed_frame::{EmbedFrame, EmbedLoading, EmbedProblem};
+
+/// Reserved height for a map box — `ux-produced-product-frame-capped`'s own
+/// 320px cap, so a square-ish map lands exactly where the loading box was.
+const MAP_HEIGHT: u32 = 320;
+
+/// Reserved height for the hero, matching `ux-docs-hero-product`'s widened
+/// cap (a square visual product fills it exactly).
+const HERO_HEIGHT: u32 = 512;
 
 /// Which face of a sim's output the fence asked for.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -75,10 +98,15 @@ pub(crate) fn SimCanvasEmbed(
     /// The article's `sim=` handle.
     sim: String,
     #[props(default)] view: SimCanvasView,
+    /// The article's `fixture=` handle: which node's product to draw when
+    /// the sim has more than one of the asked-for family.
+    #[props(default)]
+    fixture: Option<String>,
 ) -> Element {
+    let hero = view == SimCanvasView::Product && fixture.is_none();
     let Some(registry) = try_consume_context::<DocsSimRegistry>() else {
         return rsx! {
-            DocsSimCanvas { view }
+            DocsSimCanvas { view, hero }
         };
     };
     let Some(entry) = registry.get(&sim) else {
@@ -90,9 +118,9 @@ pub(crate) fn SimCanvasEmbed(
             }
         };
     };
-    let product = canvas_product(&entry.view.read(), view);
+    let product = canvas_product(&entry.view.read(), view, fixture.as_deref());
     rsx! {
-        DocsSimCanvas { product, view }
+        DocsSimCanvas { product, view, hero }
     }
 }
 
@@ -111,44 +139,51 @@ pub(crate) fn DocsSimCanvas(
     /// Which face was asked for (drives the loading copy).
     #[props(default)]
     view: SimCanvasView,
+    /// The article's hero presentation: the same real preview, widened past
+    /// the map boxes' 320px cap. Reserved height follows, so the swap from
+    /// loading to live is still a no-jump swap.
+    #[props(default)]
+    hero: bool,
     /// Caption above the surface.
     #[props(default)]
     caption: Option<String>,
 ) -> Element {
+    let body_class = if hero { "ux-docs-hero-product" } else { "" };
+    let reserved = if hero { HERO_HEIGHT } else { MAP_HEIGHT };
     rsx! {
         EmbedFrame {
             caption,
             note: if product.is_none() { Some("Loading".to_string()) } else { None },
-            match product {
-                Some(product) => rsx! {
-                    // The real preview component, dispatch-free: a docs
-                    // canvas is something to look at, not a control.
-                    ProductPreview {
-                        kind: product.kind,
-                        preview: product.preview.clone(),
-                        tracking: product.tracking,
-                        frame: product.frame,
-                        focus_action: None,
-                        on_action: None,
-                    }
-                },
-                None => rsx! {
-                    // 320px is `ux-produced-product-frame-capped`'s own cap:
-                    // a square-ish map (both of the article's) lands exactly
-                    // there, so the box does not resize when it arrives.
-                    EmbedLoading { message: view.waiting_for().to_string(), min_height: 320 }
-                },
+            div { class: "{body_class}",
+                match product {
+                    Some(product) => rsx! {
+                        // The real preview component, dispatch-free: a docs
+                        // canvas is something to look at, not a control.
+                        ProductPreview {
+                            kind: product.kind,
+                            preview: product.preview.clone(),
+                            tracking: product.tracking,
+                            frame: product.frame,
+                            focus_action: None,
+                            on_action: None,
+                        }
+                    },
+                    None => rsx! {
+                        EmbedLoading { message: view.waiting_for().to_string(), min_height: reserved }
+                    },
+                }
             }
         }
     }
 }
 
-/// The first product of `view`'s family anywhere in the lensed session's
-/// node tree — the fixture's control product for a map, the module's
-/// visual mirror for a product.
+/// The product `view` asks for in the lensed session's node tree: the one
+/// belonging to the node `fixture` names, or — with no `fixture` — the
+/// first of the family (the module's visual mirror, for the hero).
 pub(crate) fn canvas_product(
     studio_view: &UiStudioView,
     view: SimCanvasView,
+    fixture: Option<&str>,
 ) -> Option<UiProducedProduct> {
     let kind = view.kind();
     studio_view.panes.iter().find_map(|pane| {
@@ -158,27 +193,62 @@ pub(crate) fn canvas_product(
         editor
             .nodes
             .iter()
-            .find_map(|node| node_product(node, kind))
+            .find_map(|node| node_product(node, kind, fixture))
     })
 }
 
 /// Depth-first over a workspace node and everything under it.
-fn node_product(node: &UiNodeView, kind: UiProductKind) -> Option<UiProducedProduct> {
-    face_product(node.face.as_ref(), kind).or_else(|| {
-        node.children
-            .iter()
-            .find_map(|child| child_product(child, kind))
-    })
+fn node_product(
+    node: &UiNodeView,
+    kind: UiProductKind,
+    fixture: Option<&str>,
+) -> Option<UiProducedProduct> {
+    named(&node.header.title, &node.header.path, fixture)
+        .then(|| face_product(node.face.as_ref(), kind))
+        .flatten()
+        .or_else(|| {
+            node.children
+                .iter()
+                .find_map(|child| child_product(child, kind, fixture))
+        })
 }
 
 /// Depth-first over a nested child card and everything under it.
-fn child_product(child: &UiNodeChild, kind: UiProductKind) -> Option<UiProducedProduct> {
-    face_product(child.face.as_ref(), kind).or_else(|| {
-        child
-            .children
-            .iter()
-            .find_map(|nested| child_product(nested, kind))
-    })
+fn child_product(
+    child: &UiNodeChild,
+    kind: UiProductKind,
+    fixture: Option<&str>,
+) -> Option<UiProducedProduct> {
+    named(&child.label, &child.detail, fixture)
+        .then(|| face_product(child.face.as_ref(), kind))
+        .flatten()
+        .or_else(|| {
+            child
+                .children
+                .iter()
+                .find_map(|nested| child_product(nested, kind, fixture))
+        })
+}
+
+/// Whether this node answers to the article's `fixture=` handle. No handle
+/// asked means every node answers (the first-of-family walk).
+///
+/// A node carries two identities in the view — its display label (the use
+/// name `module.json` keyed it by) and its address — and the article's
+/// handle may legitimately be either spelling, so both are tried. Case is
+/// ignored because a display label may be title-cased where the file's key
+/// is not.
+fn named(label: &str, address: &str, fixture: Option<&str>) -> bool {
+    let Some(wanted) = fixture else {
+        return true;
+    };
+    if label.eq_ignore_ascii_case(wanted) {
+        return true;
+    }
+    address
+        .rsplit(['/', '.'])
+        .next()
+        .is_some_and(|segment| segment.eq_ignore_ascii_case(wanted))
 }
 
 /// The product a face carries, when it is of the wanted family. Faces
@@ -223,12 +293,30 @@ mod tests {
     #[test]
     fn an_empty_view_has_no_product_yet() {
         let view = UiStudioView::empty();
-        assert!(canvas_product(&view, SimCanvasView::Map).is_none());
-        assert!(canvas_product(&view, SimCanvasView::Product).is_none());
+        assert!(canvas_product(&view, SimCanvasView::Map, None).is_none());
+        assert!(canvas_product(&view, SimCanvasView::Product, None).is_none());
+        assert!(canvas_product(&view, SimCanvasView::Map, Some("disc")).is_none());
     }
 
     #[test]
     fn a_faceless_node_contributes_nothing() {
         assert!(face_product(None, UiProductKind::Control).is_none());
+    }
+
+    /// The whole point of `fixture=`: with two fixtures in one project,
+    /// only the named node's product may answer.
+    #[test]
+    fn a_fixture_handle_matches_the_nodes_label_or_its_address_tail() {
+        assert!(named("disc", "/plasma.module/disc", Some("disc")));
+        assert!(named("Disc", "/plasma.module/disc", Some("disc")));
+        assert!(named("Ring", "/plasma.module/disc", Some("disc")));
+        assert!(!named("grid", "/plasma.module/grid", Some("disc")));
+    }
+
+    /// No `fixture=` is the first-of-family walk, so every node answers.
+    #[test]
+    fn no_fixture_handle_matches_every_node() {
+        assert!(named("grid", "/plasma.module/grid", None));
+        assert!(named("", "", None));
     }
 }
