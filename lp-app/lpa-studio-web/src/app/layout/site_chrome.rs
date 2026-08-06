@@ -1,13 +1,12 @@
 //! [`SiteChrome`]: the one top bar shared by every section of the app.
 //!
-//! Studio (the gallery + editor), Boards, and Docs are sections of a single
-//! cohesive app; this bar is their common navigation. Two deliberate
-//! product decisions live here (gate-judged, spike PR #269 —
-//! `spikes/top-bar/index.html` is the design record):
+//! Home, Devices, Projects, Explore, Boards, and Docs are sections of a
+//! single cohesive app; this bar is their common navigation (vision D1,
+//! spike `spikes/gallery-rework/index.html`; the original three-tab bar
+//! was gate-judged at spike PR #269, `spikes/top-bar/index.html`):
 //!
-//! - **The brand lockup is inert.** The logo is reserved for a future
-//!   landing/marketing page; navigating home is the Studio tab's job, so
-//!   the lockup renders as a plain span, not a link.
+//! - **The brand lockup is the way to Home.** The logo links to `#/home`
+//!   — there is deliberately no Home tab (vision D11).
 //! - **The editors are tools, not sections.** The mapping editor and board
 //!   editor stay outside the tab row, reachable from the overflow menu.
 //!
@@ -21,10 +20,15 @@ use lpa_studio_core::UiAction;
 
 use crate::base::{IconMenuButton, IconMenuTone, LogoLockup, StudioIcon, StudioIconName};
 
-/// Which nav tab renders as the current section.
+/// Which nav tab renders as the current section. Home has no tab (the
+/// logo is its affordance) but is still a section the chrome can be "at"
+/// — no tab lights up there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
-    Studio,
+    Home,
+    Devices,
+    Projects,
+    Explore,
     Boards,
     Docs,
 }
@@ -45,13 +49,22 @@ pub fn SiteChrome(
 ) -> Element {
     rsx! {
         header { class: "tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
-            // Brand lockup — inert by design (see module docs).
-            LogoLockup {}
+            // Brand lockup — the way to Home (see module docs).
+            LogoLockup { href: "#/home".to_string() }
             nav { class: "tw:flex tw:items-center tw:gap-1",
+                // Interim P07 bar: the new sections exist under the old
+                // three tabs until the chrome C layout lands (P08). The
+                // Studio tab stands in for every shell section.
                 NavTab {
                     label: "Studio",
                     href: "#/",
-                    active: section == SiteSection::Studio,
+                    active: matches!(
+                        section,
+                        SiteSection::Home
+                            | SiteSection::Devices
+                            | SiteSection::Projects
+                            | SiteSection::Explore
+                    ),
                     on_action,
                 }
                 NavTab {

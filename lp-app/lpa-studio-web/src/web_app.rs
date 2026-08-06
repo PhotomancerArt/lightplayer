@@ -268,7 +268,7 @@ pub fn App() -> Element {
                     if let Some(target) = bound
                         && !target.same_session(&current)
                     {
-                        if matches!(current, StudioRoute::Home) {
+                        if matches!(current, StudioRoute::Devices | StudioRoute::Projects) {
                             // a gallery open: a real navigation, so a real
                             // history entry (back returns to the gallery)
                             router::navigate(&target);
@@ -296,8 +296,8 @@ pub fn App() -> Element {
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
                     if open_ended {
-                        router::replace(&StudioRoute::Home);
-                        route.set(StudioRoute::Home);
+                        router::replace(&StudioRoute::Devices);
+                        route.set(StudioRoute::Devices);
                     }
                 }
 
@@ -366,7 +366,7 @@ pub fn App() -> Element {
             }
             route.set(new_route.clone());
             match &new_route {
-                StudioRoute::Home => {
+                StudioRoute::Devices | StudioRoute::Projects => {
                     if nav_editor_open.get() {
                         // back to the gallery = lens detach (runtime-pool
                         // P3): the editor closes, every runtime session
@@ -426,11 +426,18 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Boards { .. } | StudioRoute::Docs { .. } => {
+                StudioRoute::Home
+                | StudioRoute::Explore
+                | StudioRoute::Boards { .. }
+                | StudioRoute::Docs { .. } => {
                     // In-app sections: setting the route signal above already
                     // re-rendered the body. Nothing unloads — the runtime
                     // pool, sims, and device sessions keep running while the
-                    // user reads docs or browses boards.
+                    // user reads docs or browses boards. (Home and Explore
+                    // don't render the shell, so an attached lens survives
+                    // a visit; Devices/Projects above DO detach — they
+                    // render the shell, and the shell shows the editor
+                    // whenever a lens is attached.)
                 }
                 StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
@@ -500,6 +507,9 @@ pub fn App() -> Element {
                         )));
                 }
                 StudioRoute::Home
+                | StudioRoute::Devices
+                | StudioRoute::Projects
+                | StudioRoute::Explore
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
@@ -596,9 +606,14 @@ pub fn App() -> Element {
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
     let section = match &current_route {
+        StudioRoute::Home => SiteSection::Home,
+        StudioRoute::Projects => SiteSection::Projects,
+        StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
-        _ => SiteSection::Studio,
+        // Lens routes light Devices until the session strip (P12) gives
+        // the open session its own place in the nav.
+        _ => SiteSection::Devices,
     };
     let settings = current_view.settings.clone();
 
@@ -618,6 +633,12 @@ pub fn App() -> Element {
             }
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {
+                StudioRoute::Home => rsx! {
+                    crate::app::HomePage {}
+                },
+                StudioRoute::Explore => rsx! {
+                    crate::app::ExplorePage {}
+                },
                 StudioRoute::Boards { board } => rsx! {
                     // The detected OS drives per-bridge driver warnings
                     // (plan D5) — detected here at the platform edge;
