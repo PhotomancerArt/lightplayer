@@ -143,42 +143,73 @@ fn normalize_const_in_one_line(line: &str) -> String {
 //
 // Naga’s GLSL-IN does not list `sampler2D` as a built-in type name (`naga::front::glsl::types::parse_type`):
 // the lexer feeds `sampler2D` as an identifier, so `uniform sampler2D name;` does not parse.
-// LightPlayer’s public surface is still `uniform sampler2D` (classic GLSL), so we rewrite **only**
-// simple, top-level, single lines of the form (optional `layout(…)`)`uniform sampler2D <ident>;`
-// to use `texture2D` and, when there is no `layout` yet, a synthetic `layout(set=0, binding=n)`.
-//
-// **Not** rewritten here (must keep using `texture2D` + explicit `layout` or fix the grammar later):
-// - `usampler2D` / `isampler2D`, `sampler2DShadow`, arrays (`uniform sampler2D s[3];`), multiple
-//   declarators (`uniform sampler2D a, b;`), or precision/interpolation between `uniform` and the type.
+// LightPlayer’s public surface is still `uniform sampler2D` (classic GLSL), so we rewrite the
+// declarations `lps_shared::scan_uniform_sampler2d_decls` recognizes — the recognizer is shared
+// with the GPU tier (`lp-gfx-wgpu::texture_lowering`) so the two can never disagree about *which*
+// declarations are rewritten (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md).
+// Non-declaration `sampler2D` sites (function parameters, arrays, multi-declarators) pass through
+// untouched and get Naga's own diagnostic; the GPU tier makes them hard errors instead.
 //
 // Naga needs a `(texture2D, sampler)` pair for `texture()`; we synthesize `uniform sampler __lp_samp_X`
 // and rewrite `texture(X,` → `texture(sampler2D(X, __lp_samp_X),` after emitting the two uniforms.
+//
+// Every synthesized binding (companion samplers, and both bindings of an unqualified declaration)
+// numbers from one past the source's highest explicit `binding = N`, so it can never collide with
+// an authored or generated slot. The numbers are decorative on this path — LP lowering keys globals
+// on (name, address space) in declaration order and never reads `gv.binding` (`lower.rs::
+// compute_global_layout`) — but collision-free numbering keeps them honest for a reader.
 
 fn rewrite_user_uniform_sampler2d_decls_for_naga(user_snippet: &str) -> String {
+    use core::fmt::Write as _;
+    use lps_shared::sampler2d_decl::{Sampler2DSite, scan_uniform_sampler2d_decls};
+
     if user_snippet.is_empty() {
         return String::new();
     }
+    let scan = scan_uniform_sampler2d_decls(user_snippet);
+    let mut next_binding: u32 = scan.max_explicit_binding.map_or(0, |b| b.saturating_add(1));
     let mut out = String::new();
-    let mut next_default_binding: u32 = 0;
+    let mut cursor = 0usize;
     let mut texture_idents: Vec<String> = Vec::new();
-    for chunk in user_snippet.split_inclusive('\n') {
-        let (line, nl) = if let Some(s) = chunk.strip_suffix('\n') {
-            (s, "\n")
-        } else {
-            (chunk, "")
+    for site in &scan.sites {
+        let Sampler2DSite::Decl(d) = site else {
+            continue;
         };
-        if let Some((rew, id)) =
-            try_rewrite_top_level_uniform_sampler2d_line(line, &mut next_default_binding)
-        {
-            if let Some(id) = id {
-                texture_idents.push(id);
-            }
-            out.push_str(&rew);
+        out.push_str(&user_snippet[cursor..d.span.start]);
+        // Indentation for the synthesized companion line: the whitespace run
+        // between the declaration and its line start (empty when code precedes).
+        let line_start = user_snippet[..d.span.start].rfind('\n').map_or(0, |i| i + 1);
+        let lead = &user_snippet[line_start..d.span.start];
+        let lead_ws = if lead.chars().all(char::is_whitespace) {
+            lead
         } else {
-            out.push_str(line);
+            ""
+        };
+        let ident = &user_snippet[d.ident.clone()];
+        if let Some(lay) = &d.layout {
+            // Keep the authored layout verbatim on the texture; the companion
+            // joins the same set at the next free binding.
+            let lay = &user_snippet[lay.clone()];
+            let bind = next_binding;
+            next_binding = next_binding.saturating_add(1);
+            let _ = write!(
+                out,
+                "{lay} uniform texture2D {ident};\n{lead_ws}layout(set={set}, binding={bind}) uniform sampler __lp_samp_{ident};",
+                set = d.set
+            );
+        } else {
+            let bind = next_binding;
+            let bind2 = next_binding.saturating_add(1);
+            next_binding = next_binding.saturating_add(2);
+            let _ = write!(
+                out,
+                "layout(set=0, binding={bind}) uniform texture2D {ident};\n{lead_ws}layout(set=0, binding={bind2}) uniform sampler __lp_samp_{ident};"
+            );
         }
-        out.push_str(nl);
+        cursor = d.span.end;
+        texture_idents.push(String::from(ident));
     }
+    out.push_str(&user_snippet[cursor..]);
     rewrite_texture_calls_to_use_sampler2d_ctor(&mut out, &texture_idents);
     out
 }
@@ -196,189 +227,6 @@ fn rewrite_texture_calls_to_use_sampler2d_ctor(out: &mut String, texture_idents:
             out.replace_range(i..i + from.len(), &to);
         }
     }
-}
-
-/// Parse `layout(…)` for the qualifiers the companion sampler needs (allows
-/// spaces around `=`). Returns `(set, binding)`.
-///
-/// Only `binding` is required. `set` is optional in GLSL and means set 0 when
-/// absent — the same default Naga itself applies (`front::glsl::variables`
-/// builds `ResourceBinding { group: set.unwrap_or(0), … }`). Nothing in this
-/// tree writes a `set` on an authored sampler, and `lpc-model`'s
-/// `generate_compute_shader_header` emits
-/// `layout(binding = N) uniform sampler2D <name>;`, so requiring `set` here
-/// declined the rewrite for every qualified palette declaration.
-///
-/// Entries that are not `key = value` (bare qualifiers) are skipped rather
-/// than failing the parse.
-fn parse_glsl_layout_set_binding(layout: &str) -> Option<(u32, u32)> {
-    let inner = layout.strip_prefix("layout(")?.strip_suffix(')')?.trim();
-    let mut set_v: Option<u32> = None;
-    let mut bind_v: Option<u32> = None;
-    for part in inner.split(',') {
-        let p = part.trim();
-        let Some((key, val)) = p.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        let val = val.trim();
-        match key {
-            "set" => set_v = parse_ascii_u32(val),
-            "binding" => bind_v = parse_ascii_u32(val),
-            _ => {}
-        }
-    }
-    Some((set_v.unwrap_or(0), bind_v?))
-}
-
-fn parse_ascii_u32(s: &str) -> Option<u32> {
-    let end = s
-        .as_bytes()
-        .iter()
-        .position(|b| !b.is_ascii_digit())
-        .unwrap_or(s.len());
-    if end == 0 {
-        return None;
-    }
-    s.get(..end)?.parse().ok()
-}
-
-fn try_rewrite_top_level_uniform_sampler2d_line(
-    line: &str,
-    next_default_binding: &mut u32,
-) -> Option<(String, Option<String>)> {
-    // Ignore line comments for shape matching; comments are not preserved in rewritten line.
-    let code = line.split_once("//").map(|(a, _)| a).unwrap_or(line);
-    let lead_ws = &line[..line.len() - line.trim_start().len()];
-    let t = code.trim();
-    if t.is_empty() {
-        return None;
-    }
-
-    let (layout_str, rem) = parse_optional_leading_layout(t)?;
-    if rem.is_empty() {
-        return None;
-    }
-    // Parse: `uniform` `sampler2D` <ident> `;` from `rem`
-    let b = rem.as_bytes();
-    let w_at = |i: usize, w: &str| -> bool {
-        i + w.len() <= b.len() && &b[i..i + w.len()] == w.as_bytes()
-    };
-    let mut p = 0usize;
-    while p < b.len() && b[p].is_ascii_whitespace() {
-        p += 1;
-    }
-    if !w_at(p, "uniform") {
-        return None;
-    }
-    p += "uniform".len();
-    if p < b.len() {
-        let c = b[p];
-        if c == b'_' || c.is_ascii_alphanumeric() {
-            return None;
-        }
-    }
-    while p < b.len() && b[p].is_ascii_whitespace() {
-        p += 1;
-    }
-    if !w_at(p, "sampler2D") {
-        return None;
-    }
-    p += "sampler2D".len();
-    if p < b.len() {
-        let c = b[p];
-        if c == b'_' || c.is_ascii_alphanumeric() {
-            return None; // e.g. usampler2D
-        }
-    }
-    while p < b.len() && b[p].is_ascii_whitespace() {
-        p += 1;
-    }
-    // ident
-    if p >= b.len() {
-        return None;
-    }
-    if !(b[p] == b'_' || b[p].is_ascii_alphabetic()) {
-        return None;
-    }
-    let id0 = p;
-    let mut id1 = id0 + 1;
-    while id1 < b.len() && (b[id1] == b'_' || b[id1].is_ascii_alphanumeric()) {
-        id1 += 1;
-    }
-    let ident = rem.get(id0..id1)?;
-    while id1 < b.len() && b[id1].is_ascii_whitespace() {
-        id1 += 1;
-    }
-    if id1 >= b.len() || b[id1] != b';' {
-        return None; // multi-decl, array, or trailing junk
-    }
-    id1 += 1;
-    while id1 < b.len() && b[id1].is_ascii_whitespace() {
-        id1 += 1;
-    }
-    if id1 != b.len() {
-        return None;
-    }
-
-    let samp = format!("__lp_samp_{ident}");
-    let new_core = if let Some(lay) = layout_str {
-        let (set, bind) = parse_glsl_layout_set_binding(lay)?;
-        let bind2 = bind.checked_add(1)?;
-        format!(
-            "{lay} uniform texture2D {ident};\n{lead_ws}layout(set={set}, binding={bind2}) uniform sampler {samp};"
-        )
-    } else {
-        let bind = *next_default_binding;
-        *next_default_binding = next_default_binding.saturating_add(2);
-        let bind2 = bind.checked_add(1)?;
-        format!(
-            "layout(set=0, binding={bind}) uniform texture2D {ident};\n{lead_ws}layout(set=0, binding={bind2}) uniform sampler {samp};"
-        )
-    };
-    let mut s = String::new();
-    s.push_str(lead_ws);
-    s.push_str(&new_core);
-    // Restore line // comment if any
-    if let Some((_, c)) = line.split_once("//") {
-        s.push_str("//");
-        s.push_str(c);
-    }
-    Some((s, Some(String::from(ident))))
-}
-
-/// `t` is trimmed line code without a line `//` comment.
-/// On success, returns `Some((optional layout "layout(…)" slice, text after the layout for uniform))`.
-/// `None` if `layout(…` is unclosed (invalid GLSL); caller skips rewriting that line.
-fn parse_optional_leading_layout(t: &str) -> Option<(Option<&str>, &str)> {
-    let s = t.trim_start();
-    if !s.starts_with("layout") {
-        return Some((None, t));
-    }
-    if s.as_bytes()
-        .get(6)
-        .is_some_and(|c| *c == b'_' || c.is_ascii_alphanumeric())
-    {
-        // e.g. `layout2` — not a `layout` qualifier
-        return Some((None, t));
-    }
-    let open = s.find('(')?;
-    let from_open = s.get(open..)?;
-    let mut depth = 0i32;
-    for (i, c) in from_open.char_indices() {
-        if c == '(' {
-            depth += 1;
-        } else if c == ')' {
-            depth -= 1;
-            if depth == 0 {
-                let end = open + i + 1;
-                let layout = s.get(0..end)?;
-                let after = s.get(end..).unwrap_or("").trim_start();
-                return Some((Some(layout), after));
-            }
-        }
-    }
-    None
 }
 
 fn prepend_lpfn_prototypes(source: &str) -> String {
@@ -595,6 +443,37 @@ mod uniform_sampler2d_compat_tests {
             "{o}"
         );
     }
+
+    /// Synthesized bindings number from one past the source's highest explicit
+    /// `binding = N` — across *all* declarations, not just the sampler's own
+    /// layout. The old `binding + 1` scheme put the companion on the next
+    /// slot's binding (inert here, since LP lowering never reads `gv.binding`,
+    /// but a collision nonetheless); this is the GPU tier's scheme.
+    #[test]
+    fn companion_binding_clears_every_explicit_slot() {
+        let s = "layout(binding = 0) uniform float speed;\n\
+                 layout(binding = 1) uniform sampler2D palette;\n\
+                 layout(binding = 2) uniform float bright;\n";
+        let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
+        assert!(o.contains("layout(binding = 1) uniform texture2D palette;"), "{o}");
+        assert!(
+            o.contains("layout(set=0, binding=3) uniform sampler __lp_samp_palette;"),
+            "{o}"
+        );
+    }
+
+    /// An unqualified declaration alongside explicit slots also numbers past
+    /// them (both the texture and its companion).
+    #[test]
+    fn default_binding_clears_every_explicit_slot() {
+        let s = "layout(binding = 4) uniform float speed;\nuniform sampler2D tex;\n";
+        let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
+        assert!(o.contains("layout(set=0, binding=5) uniform texture2D tex;"), "{o}");
+        assert!(
+            o.contains("layout(set=0, binding=6) uniform sampler __lp_samp_tex;"),
+            "{o}"
+        );
+    }
 }
 
 /// A palette sampler declared with an explicit binding must reach Naga IR.
@@ -616,11 +495,12 @@ mod generated_palette_header_compiles_tests {
     }
 
     /// A palette between two other consumed slots: the synthesized companion
-    /// sampler lands on the next slot's binding number. Binding numbers do not
-    /// drive LP layout (`compute_global_layout` keys on name + address space in
-    /// declaration order), so the overlap must stay inert.
+    /// sampler numbers past the highest explicit binding in the header, so it
+    /// never lands on the next slot's number. (Binding numbers do not drive LP
+    /// layout anyway — `compute_global_layout` keys on name + address space in
+    /// declaration order — but the header must still reach Naga IR whole.)
     #[test]
-    fn palette_between_slots_compiles_despite_companion_binding_overlap() {
+    fn palette_between_slots_compiles_with_collision_free_companion_binding() {
         let glsl = "layout(binding = 0) uniform float speed;\n\
              layout(binding = 1) uniform sampler2D palette;\n\
              layout(binding = 2) uniform float bright;\n\

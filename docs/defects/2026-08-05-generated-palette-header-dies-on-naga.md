@@ -96,11 +96,17 @@ needed — the vendored Naga is untouched, and routing palettes to `LpsGlsl` on 
 browser (the other candidate fix) is not needed either, so the browser CPU tier
 keeps a single frontend.
 
-The synthesized companion sampler still takes `binding + 1`, which in a generated
-header is the *next slot's* binding number. That overlap is inert and is now
-asserted so: LP lowering keys globals on `(name, address space)` in declaration
-order (`lps-frontend/src/lower.rs`, `compute_global_layout`) and never reads
-`gv.binding`, and the sampler itself lowers to a reserved, uninterpreted lane.
+At fix time the synthesized companion sampler still took `binding + 1` — in a
+generated header, the *next slot's* binding number. That overlap was inert (LP
+lowering keys globals on `(name, address space)` in declaration order,
+`lps-frontend/src/lower.rs::compute_global_layout`, and never reads
+`gv.binding`) and was asserted so. A follow-up unification then removed it:
+recognition of the declaration now lives in one shared scanner,
+`lps_shared::sampler2d_decl::scan_uniform_sampler2d_decls`, consumed by both
+the CPU rewrite and the GPU tier's `texture_lowering.rs` — the two textual
+rewrites whose divergence this defect is about — and every synthesized binding
+numbers past the source's highest explicit `binding = N` (the GPU tier's
+scheme), so companions no longer collide with anything.
 
 ## Regression coverage
 
@@ -109,8 +115,8 @@ order (`lps-frontend/src/lower.rs`, `compute_global_layout`) and never reads
 - `…::bare_layout_qualifier_does_not_defeat_rewrite` — a layout entry with no
   `=` no longer makes the whole declaration decline.
 - `…::generated_palette_header_compiles_tests` — the generated header reaches
-  Naga IR, including the case with a palette *between* two other slots, where
-  the companion sampler's binding collides.
+  Naga IR, including the case with a palette *between* two other slots (whose
+  companion-binding collision the unification later removed outright).
 - `lps-frontend/src/lower_texture.rs::generated_palette_header_lowers_to_texture1d_builtin_call`
   — the same header all the way to the height-one texture builtin with a real
   `TextureBindingSpec`.
