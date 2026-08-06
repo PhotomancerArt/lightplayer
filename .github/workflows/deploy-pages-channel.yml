@@ -120,7 +120,7 @@ jobs:
         with:
           app-id: ${{ secrets.LIGHTPLAYER_PAGES_APP_ID }}
           private-key: ${{ secrets.LIGHTPLAYER_PAGES_PRIVATE_KEY }}
-          owner: light-player
+          owner: PhotomancerArt
           repositories: |
             lightplayer-beta-pages
             lightplayer-demo-pages
@@ -135,8 +135,8 @@ jobs:
           set -euo pipefail
           target_repo=""
           case "$CHANNEL" in
-            beta) target_repo="light-player/lightplayer-beta-pages" ;;
-            demo) target_repo="light-player/lightplayer-demo-pages" ;;
+            beta) target_repo="PhotomancerArt/lightplayer-beta-pages" ;;
+            demo) target_repo="PhotomancerArt/lightplayer-demo-pages" ;;
             *) echo "unknown channel: $CHANNEL" >&2; exit 2 ;;
           esac
 
