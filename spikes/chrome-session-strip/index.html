@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chrome session strip — running sessions in the bar, design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via top-bar spike) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 860px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .ctl {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .ctl:hover { color: var(--text); }
+  .ctl[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- frames + captions ---- */
+  .barwrap { margin: 14px 0 22px; }
+  .caprow { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+  .cname { font-size: 12px; font-weight: 700; color: var(--text); }
+  .cnote { font-size: 11.5px; color: var(--dim); }
+  .frames { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .appframe {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 140px), var(--bg);
+    position: relative;
+  }
+  .bplabel { font: 600 10px/1 var(--mono); color: var(--dim); margin: 0 0 4px; letter-spacing:.06em; }
+
+  /* ---- shared chrome bones (top-bar spike winner A → gallery-rework chrome C) ---- */
+  .bar { display: flex; align-items: center; gap: 14px; padding: 9px 20px; min-height: 44px;
+    border-bottom: 1px solid var(--border-subtle); }
+  .bar.sm { padding: 9px 12px; gap: 8px; }
+  .bar.md { padding: 9px 14px; gap: 10px; }
+  .brand { display: inline-flex; align-items: center; gap: 8px; flex: none; cursor: pointer;
+    appearance: none; border: 0; background: transparent; padding: 4px 6px; margin: -4px 0 -4px -6px;
+    border-radius: 8px; }
+  .brand svg { color: var(--accent); }
+  .brand .word { font-size: 12.5px; font-weight: 700; color: var(--strong); letter-spacing: .01em; white-space: nowrap; }
+  .brand:hover { background: var(--bg-wash); }
+  .navrow { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+  .navlink {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--subtle);
+    padding: 8px 10px 9px; border-radius: 6px; position: relative; white-space: nowrap;
+  }
+  .sm .navlink { padding: 8px 8px 9px; }
+  .navlink:hover { color: var(--text); background: var(--bg-wash); }
+  .navlink.active { color: var(--heading); }
+  .navlink.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+    height: 2px; border-radius: 2px; background: var(--accent);
+  }
+  .navlink.secondary { color: color-mix(in srgb, var(--subtle) 72%, transparent); font-weight: 500; }
+  .navlink.secondary:hover { color: var(--text); }
+  .navlink.secondary.active { color: var(--heading); font-weight: 600; }
+  .rside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; position: relative; }
+  .vchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: none;
+    font: 600 10.5px/1 var(--mono); color: var(--subtle);
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    border-radius: 999px; padding: 4px 10px; max-width: 180px; min-width: 0;
+  }
+  .vchip .vtxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iconbtn {
+    appearance: none; display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 27px; height: 27px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--border-strong); background: transparent; color: var(--subtle);
+  }
+  .iconbtn:hover { color: var(--text); background: var(--bg-wash); }
+  .iconbtn.ai { color: var(--accent); border-color: var(--accent-border); }
+
+  /* ---- the session strip ---- */
+  .sdiv { width: 1px; height: 16px; background: var(--border-strong); margin: 0 6px; flex: none; }
+  .strip { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  .schip {
+    appearance: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 600 11.5px/1 var(--sans); color: var(--subtle);
+    border: 1px solid var(--border-muted); background: transparent;
+    padding: 5px 10px 5px 8px; min-width: 0; max-width: 165px;
+  }
+  .schip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .schip:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-wash); }
+  .schip.here { color: var(--strong); border-color: var(--accent-border);
+    background: rgba(123,224,178,.09); }
+  .schip.open { color: var(--muted); border-color: var(--border-strong); background: var(--bg-wash); }
+  .md .schip { max-width: 112px; padding: 4px 8px 4px 7px; }
+  /* chip glyphs */
+  .schip .glyph { flex: none; color: var(--subtle); display: inline-flex; }
+  .schip.sim .glyph { color: var(--bound-text); }
+  .schip.here .glyph { color: var(--accent); }
+  .schip.sim.here .glyph { color: var(--bound-text); }
+  .icowrap { position: relative; display: inline-flex; flex: none; }
+  .icowrap .dot.corner { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px;
+    box-shadow: 0 0 0 2px var(--bg); }
+  /* presentation variants */
+  .st-pill .schip { border-radius: 999px; }
+  .st-tab .schip { border-radius: 6px; }
+  .st-tile .schip { border-radius: 7px; padding: 4px 10px 4px 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.run { background: var(--accent); }
+  .dot.behind { background: var(--warn-text); }
+  .dot.empty { background: transparent; border: 1.4px solid var(--neutral-border); }
+  .morechip {
+    appearance: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+    font: 600 10.5px/1 var(--mono); color: var(--subtle);
+    border: 1px solid var(--border-muted); background: transparent;
+    border-radius: 999px; padding: 5px 8px;
+  }
+  .st-tab .morechip, .st-tile .morechip { border-radius: 6px; }
+  .morechip:hover { color: var(--text); border-color: var(--border-strong); }
+  /* the narrow collapse: one pill of stacked dots + count */
+  .countpill {
+    appearance: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--border-strong); background: transparent; border-radius: 999px;
+    padding: 5px 9px; font: 600 11px/1 var(--mono); color: var(--subtle);
+  }
+  .st-tab .countpill, .st-tile .countpill { border-radius: 6px; }
+  .countpill:hover { color: var(--text); background: var(--bg-wash); }
+  .countpill.herein { border-color: var(--accent-border); color: var(--muted); }
+  .countpill .dots { display: inline-flex; }
+  .countpill .dots .dot { width: 6px; height: 6px; margin-left: -2px; box-shadow: 0 0 0 2px var(--bg); }
+  .countpill .dots .dot:first-child { margin-left: 0; }
+
+  /* ---- anatomy strips ---- */
+  .anat { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle);
+    padding: 14px 16px 12px; margin: 10px 0 4px; max-width: 1100px; cursor: pointer; }
+  .anat:hover { border-color: var(--border-strong); }
+  .anat.sel { border-color: var(--accent-border); }
+  .anat .ahead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .anat .aname { font: 700 12px/1 var(--sans); color: var(--text); }
+  .anat.sel .aname::after { content: " · selected"; color: var(--accent); font-weight: 600; }
+  .anat .anote { font: 400 11.5px/1.4 var(--sans); color: var(--dim); }
+  .anat .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+  /* ---- session flyout menu ---- */
+  .popmenu {
+    position: absolute; top: calc(100% + 6px); z-index: 30;
+    background: var(--surface-raised); border: 1px solid var(--border-strong);
+    border-radius: 9px; min-width: 190px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    padding: 4px;
+  }
+  .popmenu .mhead { font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); padding: 6px 9px 5px; }
+  .popmenu .mi {
+    appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+    background: transparent; border: 0; border-radius: 6px; text-align: left;
+    font: 600 12px/1 var(--sans); color: var(--muted); padding: 8px 9px;
+  }
+  .popmenu .mi:hover { background: var(--bg-wash); color: var(--text); }
+  .popmenu .mi.here { color: var(--strong); background: rgba(123,224,178,.09); }
+  .popmenu .mi .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .popmenu .mi .tag { font: 600 9.5px/1 var(--mono); color: var(--dim); }
+  .popmenu .mi.here .tag { color: var(--accent); }
+  .popmenu .mi .glyph { display: inline-flex; flex: none; color: var(--subtle); }
+  .popmenu .mi.simmi .glyph { color: var(--bound-text); }
+
+  /* ---- frame bodies (context peeks) ---- */
+  .peek { padding: 14px 16px 16px; display: flex; gap: 10px; align-items: stretch; min-height: 86px; }
+  .sm .bar + .peek, .peek.tight { padding: 10px 12px 12px; }
+  .pane { border: 1px solid var(--border-muted); border-radius: 8px; background: var(--surface);
+    min-height: 62px; flex: 1; padding: 8px 10px; min-width: 0; }
+  .pane .pt { font: 600 10px/1 var(--mono); color: var(--dim); letter-spacing: .06em;
+    text-transform: uppercase; margin-bottom: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pane .ln { height: 7px; border-radius: 4px; background: var(--bg-wash); margin: 6px 0; }
+  .pane .ln.w60 { width: 60%; } .pane .ln.w80 { width: 80%; } .pane .ln.w40 { width: 40%; }
+  .pane.glow { border-color: var(--good-border); }
+  .pane.glow .pt { color: var(--accent); }
+  .gstrip { height: 18px; border-radius: 5px; margin-top: 8px;
+    background: linear-gradient(90deg,#123328,#7be0b2 30%,#e4c065 55%,#123328 90%); opacity: .8; }
+  .gstrip.dim { filter: saturate(.4) brightness(.55); }
+  .bodylabel { font: 600 10.5px/1.5 var(--mono); color: var(--dim); padding: 0 16px 12px; }
+  .bodylabel b { color: var(--muted); }
+
+  .dcard { border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+    flex: 1; min-width: 0; padding: 9px 10px; }
+  .dcard .dh { display: flex; align-items: center; gap: 6px; }
+  .dcard .dh .nm { font: 700 11.5px/1.2 var(--sans); color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dcard .sub { font: 500 10px/1.4 var(--sans); color: var(--dim); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dcard.offline { opacity: .55; }
+  .dcard.simc { border-color: var(--bound-border); }
+
+  .leannote { border: 1px solid var(--border-muted); border-left: 3px solid var(--accent-border);
+    border-radius: 8px; background: var(--surface-subtle); color: var(--muted);
+    font-size: 12px; padding: 12px 14px; max-width: 860px; margin-top: 26px; }
+  .leannote b { color: var(--text); }
+  .rejnote { border: 1px solid var(--border-muted); border-left: 3px solid var(--border-strong);
+    border-radius: 8px; background: var(--surface-subtle); color: var(--dim);
+    font-size: 12px; padding: 10px 14px; max-width: 860px; margin-top: 10px; }
+  .rejnote b { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="mark-e" viewBox="0 0 32 32">
+    <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke="currentColor" stroke-width="1.7" fill="none"/>
+    <g fill="currentColor" opacity=".75">
+      <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/><rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+      <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/><rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+    </g>
+    <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-sim" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round">
+      <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></g>
+  </symbol>
+  <symbol id="i-usb" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v14M12 21v-4M8 8l4-5 4 5M7 14l5 3 5-3"/></g>
+    <circle cx="7" cy="12" r="1.6" fill="currentColor"/>
+    <rect x="15.4" y="10.4" width="3.2" height="3.2" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-wifi" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <path d="M2.5 6.5a8.4 8.4 0 0 1 11 0M4.8 9.1a5 5 0 0 1 6.4 0"/></g>
+    <circle cx="8" cy="12" r="1.3" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-bt" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2v12l3.5-3L4.5 5M8 2l3.5 3L4.5 11"/></g>
+  </symbol>
+  <symbol id="i-board" viewBox="0 0 16 16">
+    <rect x="2.5" y="4" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+    <circle cx="5.4" cy="6.6" r=".8" fill="currentColor"/><circle cx="5.4" cy="9.4" r=".8" fill="currentColor"/>
+    <rect x="8.2" y="6" width="3.4" height="4" rx=".6" stroke="currentColor" stroke-width="1.1" fill="none"/>
+  </symbol>
+  <symbol id="b-generic" viewBox="0 0 84 46">
+    <rect x="2" y="2" width="80" height="42" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.5"/>
+    <rect x="26" y="8" width="32" height="20" rx="2" fill="#1a2027" stroke="#3e4852"/>
+    <g fill="#8b93a0"><circle cx="9" cy="9" r="2.4"/><circle cx="9" cy="37" r="2.4"/>
+      <circle cx="75" cy="9" r="2.4"/><circle cx="75" cy="37" r="2.4"/></g>
+    <rect x="34" y="32" width="16" height="9" rx="1.5" fill="#26313a"/>
+  </symbol>
+  <symbol id="b-sim" viewBox="0 0 84 46">
+    <rect x="2" y="2" width="80" height="42" rx="4" fill="#17121f" stroke="#5f4a85" stroke-width="1.5"/>
+    <rect x="18" y="9" width="48" height="24" rx="2" fill="#241a33" stroke="#5f4a85"/>
+    <path d="M34 40h16M42 33v7" stroke="#8f77b8" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-bot" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="3" y="5" width="10" height="7.4" rx="2"/><path d="M8 5V2.8"/>
+      <circle cx="8" cy="2.2" r=".9" fill="currentColor" stroke="none"/></g>
+    <circle cx="5.9" cy="8.4" r="1" fill="currentColor"/><circle cx="10.1" cy="8.4" r="1" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="4.5" cy="3.5" r="1.7"/><circle cx="4.5" cy="12.5" r="1.7"/><circle cx="11.5" cy="6" r="1.7"/>
+      <path d="M4.5 5.2v5.6M11.5 7.7c0 2.6-3 3-5 3.4"/></g>
+  </symbol>
+</defs></svg>
+
+<h1>Chrome session strip — running sessions in the bar</h1>
+<p class="hint">
+  <b>Converged 2026-08-05, two gate rounds:</b> concept A (strip docked with your-stuff, behind a
+  divider) with <b>P2 tab-chips</b>, and the chip glyph is the <b>transport</b> — USB icon for
+  hardware (the registry's `transport` field is the source), violet sim glyph for the simulator;
+  network/Bluetooth glyphs arrive with those transports. Invariants: one chip per <b>live</b>
+  session (D36 rule — chip exists exactly while the session does, registry-offline devices never
+  appear), name + status only (<b>D43: wayfinding, never a device surface</b>), lensed chip marked,
+  click = open in the editor. Chrome C per D11.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Sessions</b>
+    <button class="ctl" data-ds="none">none</button>
+    <button class="ctl" data-ds="solo">sim only</button>
+    <button class="ctl" data-ds="trio" aria-pressed="true">sim + 2 devices</button>
+    <button class="ctl" data-ds="five">5 · long names</button>
+  </span>
+  <span class="group"><b>Lens</b>
+    <button class="ctl" data-lens="none">nothing</button>
+    <button class="ctl" data-lens="porch" aria-pressed="true">Porch sign</button>
+    <button class="ctl" data-lens="sim">Simulator</button>
+  </span>
+  <span class="group"><b>You're on</b>
+    <button class="ctl" data-route="editor" aria-pressed="true">editor</button>
+    <button class="ctl" data-route="devices">devices</button>
+    <button class="ctl" data-route="boards">boards</button>
+  </span>
+</div>
+
+<!-- ==================== 1 · anatomy ==================== -->
+<h2 id="s1"><span class="n">1</span> Chip anatomy — states and transports</h2>
+<p class="sub">The chosen chip: squared tab-chip, <b>transport glyph</b> + status dot + name.
+  States: idle / <b>here</b> (accent — lensed, editor is the current page) / <b>open</b> (washed —
+  lensed but you're elsewhere) / behind (amber) / connected-empty (hollow dot) / long-name ellipsis.
+  Sim is violet-marked.</p>
+
+<div class="anat" data-anat="st-tab" style="cursor:default">
+  <div class="ahead"><span class="aname">States</span>
+    <span class="anote">every state the strip must render, side by side</span></div>
+  <div class="row" data-anatrow></div>
+</div>
+<div class="anat" data-anat="transports" style="cursor:default">
+  <div class="ahead"><span class="aname">The glyph slot is the transport</span>
+    <span class="anote">USB today (registry `transport`); network and Bluetooth glyphs land with those transports; sim is just another transport</span></div>
+  <div class="row st-tab" id="transportrow"></div>
+</div>
+
+<!-- ==================== 2 · in context ==================== -->
+<h2 id="s2"><span class="n">2</span> A in context — wide (~1100px)</h2>
+<p class="sub">The chosen shape: chips after Devices·Projects behind a hairline divider.
+  Flip the controls to see every state in place.</p>
+
+<div class="barwrap">
+  <div class="appframe" style="max-width:1100px" data-frame data-concept="a" data-bp="wide"></div>
+</div>
+
+<!-- ==================== 3 · breakpoints ==================== -->
+<h2 id="s3"><span class="n">3</span> 768 and 390</h2>
+<p class="sub">At 768 chips tighten (harder ellipsis, +n past two). At 390 the strip collapses to
+  <b>one count chip</b> — stacked status dots + count, accent-ringed when your editor is inside —
+  opening the session flyout (same grammar as D11's ⋯ menu). The collapse chip inherits the
+  selected style's shape.</p>
+
+<div class="barwrap">
+  <div class="frames">
+    <div>
+      <p class="bplabel">768px</p>
+      <div class="appframe" style="width:768px" data-frame data-concept="a" data-bp="md"></div>
+    </div>
+    <div>
+      <p class="bplabel">390px</p>
+      <div class="appframe" style="width:390px" data-frame data-concept="a" data-bp="sm"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 4 · the return trip ==================== -->
+<h2 id="s4"><span class="n">4</span> The return trip — a working miniature</h2>
+<p class="sub">You're editing <b>Porch sign</b>; wander to Boards; the chip stays lit ("open");
+  click it and you're back, lens intact. <b>Garage matrix</b> is registered but offline — card on
+  the devices page, <b>no chip</b>. Everything is clickable: brand, tabs, chips, cards.</p>
+
+<div class="barwrap">
+  <div class="appframe" style="max-width:1100px" id="miniapp"></div>
+</div>
+
+<p class="leannote"><b>Settled (gate round 2, 2026-08-05): P2 · tab-chip, glyph = transport.</b>
+  Squared corners put the chips in the app's entity grammar — small <i>places</i>, not status
+  pills — and Yona's ruling makes the glyph slot semantic: <b>USB icon for hardware</b> (from the
+  registry's `transport`), network/Bluetooth icons when those transports land, violet sim glyph
+  for the simulator. P1 (round pill) and P3 (board silhouette — detail turns to noise at 13px,
+  fixed-color art fights the accent/washed states) rejected.</p>
+
+<p class="rejnote"><b>Settled at gate round 1:</b> concept A (strip with your-stuff) over
+  B · right-dock (chips read as status lights; right side already contended) and C · devices-tab
+  badge (hides the one thing we want visible; no presence for the lensed session). Narrow collapse =
+  count chip opening the flyout. <b>Deliberately absent</b> per D43 + small-scope: live thumbnails
+  in chips, any control on a chip, offline/registry devices in the strip, any second sim.</p>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------- data ---------- */
+  const SESSIONS = {
+    sim:   { key:'sim',   name:'Simulator',  sim:true,  status:'run'   },
+    porch: { key:'porch', name:'Porch sign', sim:false, status:'run'   },
+    zook:  { key:'zook',  name:'Zook dome',  sim:false, status:'behind'},
+    bike:  { key:'bike',  name:'Burning man bike — rear wheel', sim:false, status:'run' },
+    shelf: { key:'shelf', name:'Kitchen shelf', sim:false, status:'empty' },
+  };
+  const DATASETS = {
+    none: [], solo: ['sim'], trio: ['sim','porch','zook'],
+    five: ['sim','porch','zook','bike','shelf'],
+  };
+  const STATUS_LABEL = { run:'running', behind:'behind', empty:'connected — empty' };
+
+  const state = {
+    style: 'st-tab',   // settled: P2 tab-chip (gate round 2)
+    ds: 'trio',
+    lens: 'porch',
+    route: 'editor',
+    miniRoute: 'editor',
+  };
+
+  function sessions(){ return DATASETS[state.ds].map(k => Object.assign({}, SESSIONS[k])); }
+  function lensKey(){
+    if (state.lens === 'none') return null;
+    return DATASETS[state.ds].includes(state.lens) ? state.lens : null;
+  }
+
+  /* ---------- tiny dom helpers ---------- */
+  function h(tag, cls, html){
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (html != null) el.innerHTML = html;
+    return el;
+  }
+  const svg = (id, w, hh) => `<svg width="${w}" height="${hh||w}"><use href="#${id}"/></svg>`;
+
+  /* chip glyph = the session's transport: usb | sim (future: wifi, bt) */
+  function glyphFor(s){
+    const icon = s.sim ? svg('i-sim', 12) : svg('i-usb', 13);
+    return `<span class="glyph">${icon}</span>`;
+  }
+
+  /* ---------- chrome renderer ---------- */
+  function renderBar(opts){
+    const bp = opts.bp, route = opts.route;
+    const live = sessions(), lens = lensKey();
+    const bar = h('div', 'bar' + (bp !== 'wide' ? ' ' + bp : ''));
+
+    const brand = h('button', 'brand', (bp === 'sm')
+      ? svg('mark-e', 22)
+      : svg('mark-e', 22) + '<span class="word">LightPlayer</span>');
+    brand.title = 'Home';
+    if (opts.onNav) brand.onclick = () => opts.onNav('home');
+    bar.appendChild(brand);
+
+    const nav = h('span', 'navrow');
+    nav.appendChild(navBtn('Devices', 'devices', route, opts));
+    nav.appendChild(navBtn('Projects', 'projects', route, opts));
+    bar.appendChild(nav);
+
+    if (live.length){
+      bar.appendChild(h('span', 'sdiv'));
+      bar.appendChild(buildStrip(live, lens, route, bp, opts));
+    }
+
+    bar.appendChild(rightSide(bp, opts));
+    return bar;
+  }
+
+  function navBtn(label, key, route, opts){
+    const btn = h('button', 'navlink' + (route === key ? ' active' : ''), label);
+    if (opts.onNav) btn.onclick = () => opts.onNav(key);
+    return btn;
+  }
+
+  function rightSide(bp, opts){
+    const rs = h('span', 'rside');
+    if (bp === 'sm'){
+      const more = h('button', 'iconbtn', '⋯');
+      more.title = 'Explore, Boards, Docs';
+      more.style.cssText = 'width:25px;height:25px;font-size:15px;line-height:1';
+      rs.appendChild(more);
+    } else {
+      const sec = h('span', 'navrow'); sec.style.marginRight = '6px';
+      [['Explore','explore'], ['Boards','boards'], ['Docs','docs']].forEach(([label, key]) => {
+        const btn = h('button', 'navlink secondary' + (opts.route === key ? ' active' : ''), label);
+        if (opts.onNav) btn.onclick = () => opts.onNav(key);
+        sec.appendChild(btn);
+      });
+      rs.appendChild(sec);
+    }
+    if (bp === 'wide'){
+      rs.appendChild(h('button', 'vchip',
+        svg('i-branch', 12) + '<span class="vtxt">device-setup-17510d</span>'));
+    }
+    const ai = h('button', 'iconbtn ai', svg('i-bot', bp === 'sm' ? 14 : 15));
+    if (bp === 'sm') ai.style.cssText = 'width:25px;height:25px';
+    rs.appendChild(ai);
+    return rs;
+  }
+
+  /* ---------- the strip ---------- */
+  function buildStrip(live, lens, route, bp, opts){
+    const strip = h('span', 'strip');
+    if (bp === 'sm'){
+      strip.appendChild(countPill(live, lens, opts));
+      return strip;
+    }
+    const maxChips = (bp === 'md') ? 2 : 4;
+    const shown = live.slice(0, maxChips);
+    const rest = live.slice(maxChips);
+    shown.forEach(s => strip.appendChild(chip(s, lens, route, opts)));
+    if (rest.length){
+      const more = h('button', 'morechip', '+' + rest.length);
+      more.title = rest.map(s => s.name).join(', ');
+      more.onclick = (e) => { e.stopPropagation(); toggleMenu(more, opts, rest); };
+      strip.appendChild(more);
+    }
+    return strip;
+  }
+
+  function chip(s, lens, route, opts){
+    const isLens = lens === s.key;
+    const cls = 'schip' + (s.sim ? ' sim' : '')
+      + (isLens ? (route === 'editor' ? ' here' : ' open') : '');
+    const showDot = state.style !== 'st-tile';
+    const el = h('button', cls,
+      glyphFor(s) +
+      (showDot ? `<span class="dot ${s.status}"></span>` : '') +
+      `<span class="nm">${s.name}</span>`);
+    el.title = s.name + ' — ' + STATUS_LABEL[s.status] + (isLens ? ' · open in editor' : '');
+    if (opts.onNav) el.onclick = () => opts.onNav('chip:' + s.key);
+    return el;
+  }
+
+  function countPill(live, lens, opts){
+    const dots = live.slice(0, 3).map(s => `<span class="dot ${s.status}"></span>`).join('');
+    const pill = h('button', 'countpill' + (lens ? ' herein' : ''),
+      `<span class="dots">${dots}</span>${live.length}`);
+    pill.title = live.length + ' running session' + (live.length > 1 ? 's' : '');
+    pill.onclick = (e) => { e.stopPropagation(); toggleMenu(pill, opts); };
+    return pill;
+  }
+
+  /* ---------- session flyout ---------- */
+  let openMenu = null;
+  function closeMenu(){ if (openMenu){ openMenu.remove(); openMenu = null; } }
+  document.addEventListener('click', closeMenu);
+
+  function toggleMenu(anchor, opts, subset){
+    const was = openMenu && openMenu._anchor === anchor;
+    closeMenu();
+    if (was) return;
+    const live = subset || sessions(), lens = lensKey();
+    const menu = h('div', 'popmenu');
+    menu._anchor = anchor;
+    menu.appendChild(h('div', 'mhead', 'Running'));
+    live.forEach(s => {
+      const isLens = lens === s.key;
+      const mi = h('button', 'mi' + (isLens ? ' here' : '') + (s.sim ? ' simmi' : ''),
+        `<span class="dot ${s.status}"></span>` +
+        `<span class="glyph">${s.sim ? svg('i-sim', 11) : svg('i-board', 12)}</span>` +
+        `<span class="nm">${s.name}</span>` +
+        `<span class="tag">${isLens ? 'open' : STATUS_LABEL[s.status]}</span>`);
+      mi.onclick = () => { closeMenu(); if (opts.onNav) opts.onNav('chip:' + s.key); };
+      menu.appendChild(mi);
+    });
+    const frame = anchor.closest('.appframe');
+    frame.appendChild(menu);
+    const fr = frame.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+    menu.style.top = (ar.bottom - fr.top + 6) + 'px';
+    menu.style.left = Math.max(8, Math.min(ar.left - fr.left, fr.width - 206)) + 'px';
+    menu.onclick = (e) => e.stopPropagation();
+    openMenu = menu;
+  }
+
+  /* ---------- frame bodies ---------- */
+  function peekFor(route, bp){
+    const lens = lensKey(); const live = sessions();
+    const peek = h('div', 'peek' + (bp === 'sm' ? ' tight' : ''));
+    if (route === 'editor'){
+      const who = lens ? live.find(s => s.key === lens) : null;
+      if (!who){
+        peek.appendChild(h('div', 'pane', '<div class="pt">no lens — gallery</div><div class="ln w80"></div><div class="ln w60"></div>'));
+        return peek;
+      }
+      const tree = h('div', 'pane', '<div class="pt">project</div><div class="ln w80"></div><div class="ln w60"></div><div class="ln w40"></div>');
+      const node = h('div', 'pane', '<div class="pt">clock · face</div><div class="ln w60"></div><div class="ln w80"></div>');
+      const card = h('div', 'pane glow', `<div class="pt">${who.name}</div><div class="gstrip"></div>`);
+      if (bp === 'sm'){ peek.appendChild(node); peek.appendChild(card); }
+      else { peek.appendChild(tree); peek.appendChild(node); peek.appendChild(card); }
+      node.style.flex = '1.4'; card.style.flex = '1.1';
+      return peek;
+    }
+    if (route !== 'devices'){
+      const titles = { boards: 'board catalog', projects: 'project library', explore: 'explore', docs: 'docs', home: 'home — in-app marketing' };
+      peek.appendChild(h('div', 'pane', `<div class="pt">${titles[route] || route}</div><div class="ln w80"></div><div class="ln w80"></div><div class="ln w60"></div>`));
+      return peek;
+    }
+    live.slice(0, bp === 'sm' ? 2 : 3).forEach(s => {
+      peek.appendChild(h('div', 'dcard' + (s.sim ? ' simc' : ''),
+        `<div class="dh"><span class="dot ${s.status}"></span><span class="nm">${s.name}</span></div>` +
+        `<div class="sub">${STATUS_LABEL[s.status]}</div><div class="gstrip ${s.status==='empty'?'dim':''}"></div>`));
+    });
+    peek.appendChild(h('div', 'dcard offline',
+      '<div class="dh"><span class="dot empty"></span><span class="nm">Garage matrix</span></div>' +
+      '<div class="sub">offline · last seen 2d ago</div><div class="gstrip dim"></div>'));
+    return peek;
+  }
+
+  /* ---------- anatomy strips ---------- */
+  function renderAnatomy(){
+    const row = document.querySelector('[data-anatrow]');
+    row.innerHTML = '';
+    row.className = 'row st-tab';
+    const demo = [
+      Object.assign({}, SESSIONS.sim),
+      Object.assign({}, SESSIONS.porch),                 // rendered as "here"
+      Object.assign({}, SESSIONS.zook),                  // behind
+      { key:'shelf', name:'Kitchen shelf', sim:false, status:'empty' },
+      { key:'bike', name:'Burning man bike — rear wheel', sim:false, status:'run' },
+    ];
+    demo.forEach(s => {
+      const el = chip(s, 'porch', 'editor', {});
+      el.onclick = null;
+      row.appendChild(el);
+    });
+    const open = chip(Object.assign({}, SESSIONS.porch), 'porch', 'boards', {});
+    open.onclick = null;
+    row.appendChild(h('span', 'anote', '· and open-elsewhere: '));
+    row.appendChild(open);
+
+    // transport row: usb today, wifi/bt ghosted future, sim
+    const trow = document.getElementById('transportrow');
+    trow.innerHTML = '';
+    const mk = (icon, name, dot, extra) => {
+      const el = h('button', 'schip', `<span class="glyph">${svg(icon, 13)}</span>` +
+        `<span class="dot ${dot}"></span><span class="nm">${name}</span>`);
+      if (extra) el.style.cssText = extra;
+      el.onclick = null;
+      return el;
+    };
+    trow.appendChild(mk('i-usb', 'Porch sign', 'run'));
+    trow.appendChild(mk('i-wifi', 'Porch sign', 'run', 'opacity:.45'));
+    trow.appendChild(mk('i-bt', 'Porch sign', 'run', 'opacity:.45'));
+    const simchip = chip(Object.assign({}, SESSIONS.sim), null, 'editor', {});
+    simchip.onclick = null;
+    trow.appendChild(simchip);
+    trow.appendChild(h('span', 'anote', '— wifi/bt are future transports, ghosted'));
+  }
+
+  /* ---------- static frames ---------- */
+  function renderFrames(){
+    document.querySelectorAll('[data-frame]').forEach(frame => {
+      frame.innerHTML = '';
+      frame.classList.remove('st-pill','st-tab','st-tile');
+      frame.classList.add(state.style);
+      const opts = { bp: frame.dataset.bp, route: state.route, onNav: null };
+      frame.appendChild(renderBar(opts));
+      frame.appendChild(peekFor(state.route, frame.dataset.bp));
+      frame.appendChild(h('div', 'bodylabel',
+        'body · ' + state.route + (state.route === 'editor' && lensKey() ? ' → ' + SESSIONS[lensKey()].name : '')));
+    });
+  }
+
+  /* ---------- mini-app ---------- */
+  const mini = document.getElementById('miniapp');
+  function renderMini(){
+    mini.innerHTML = '';
+    mini.classList.remove('st-pill','st-tab','st-tile');
+    mini.classList.add(state.style);
+    const opts = {
+      bp: 'wide', route: state.miniRoute,
+      onNav: (target) => {
+        if (target.startsWith('chip:')){
+          state.lens = target.slice(5);
+          state.miniRoute = 'editor';
+        } else {
+          state.miniRoute = target;
+        }
+        renderAll();
+      },
+    };
+    mini.appendChild(renderBar(opts));
+    mini.appendChild(peekFor(state.miniRoute, 'wide'));
+    const lens = lensKey();
+    const msg = state.miniRoute === 'editor'
+      ? (lens ? `editing <b>${SESSIONS[lens].name}</b> — its chip is the accent one` : 'no lens attached — pick a chip')
+      : (lens ? `<b>${SESSIONS[lens].name}</b> still open in the editor (washed chip) — click it to return, lens intact` : 'nothing open in the editor');
+    mini.appendChild(h('div', 'bodylabel', msg));
+  }
+
+  function renderAll(){ closeMenu(); renderAnatomy(); renderFrames(); renderMini(); syncControls(); }
+
+  /* ---------- controls ---------- */
+  function syncControls(){
+    document.querySelectorAll('.ctl[data-ds]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ds === state.ds));
+    document.querySelectorAll('.ctl[data-lens]').forEach(b => b.setAttribute('aria-pressed', b.dataset.lens === state.lens));
+    document.querySelectorAll('.ctl[data-route]').forEach(b => b.setAttribute('aria-pressed', b.dataset.route === state.route));
+  }
+  document.querySelectorAll('.ctl[data-ds]').forEach(b => b.onclick = () => { state.ds = b.dataset.ds; renderAll(); });
+  document.querySelectorAll('.ctl[data-lens]').forEach(b => b.onclick = () => { state.lens = b.dataset.lens; renderAll(); });
+  document.querySelectorAll('.ctl[data-route]').forEach(b => b.onclick = () => { state.route = b.dataset.route; state.miniRoute = b.dataset.route; renderAll(); });
+
+  renderAll();
+
+  /* hash-boot for capture / linking: #flyout=sm opens the sm frame's flyout */
+  const m = location.hash.match(/flyout=(wide|md|sm)/);
+  if (m){
+    const frame = document.querySelector(`[data-frame][data-bp="${m[1]}"]`);
+    const trigger = frame && frame.querySelector('.countpill, .morechip');
+    if (trigger) trigger.click();
+  }
+})();
+</script>
+</body>
+</html>

@@ -348,6 +348,7 @@ mod tests {
             sim_rich_object(&SimRichInput {
                 state: &RosterCardState::RunningUpToDate,
                 project_name: Some("porch-sign"),
+                board_id: None,
                 now_secs: NOW,
             }),
             true,
@@ -374,6 +375,7 @@ mod tests {
             sim_rich_object(&SimRichInput {
                 state: &RosterCardState::ConnectedEmpty,
                 project_name: None,
+                board_id: None,
                 now_secs: NOW,
             }),
             false,

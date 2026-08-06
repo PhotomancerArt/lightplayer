@@ -64,6 +64,7 @@ pub(crate) fn simulator_lens_card() -> UiDeviceCard {
         )],
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 

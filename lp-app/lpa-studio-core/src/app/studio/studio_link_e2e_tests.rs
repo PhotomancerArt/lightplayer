@@ -1550,6 +1550,94 @@ fn open_sim_project_reattaches_the_lens_to_the_sim() {
     assert!(studio.view().home.is_none(), "the editor is back");
 }
 
+/// Gallery-rework P04 (vision D4): the sim INHERITS its board identity
+/// from the project it runs — the advisory `target` on that project's
+/// manifest (P02), which is where the fact persists. Load-as-push carries
+/// it onto the session, `lens_board_id` hands it to the output face's pin
+/// diagram, and the card renders it as its "as \<board\>" line. Nothing
+/// about the worker changes: the identity is advisory, exactly like a
+/// device's registry `board_id`.
+#[test]
+fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let open_on_sim = |target: Option<&str>| {
+        let (store, host) = library();
+        let files = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| {
+                let body = match (*name, target) {
+                    ("project.json", Some(target)) => {
+                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                    }
+                    _ => body.to_string(),
+                };
+                (name.to_string(), body.into_bytes())
+            })
+            .collect::<Vec<_>>();
+        let package = store
+            .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+
+        let mut studio = StudioController::new(|| 1.0);
+        studio.attach_library(host);
+        let sim_io = InProcessServerIo {
+            server: Rc::new(RefCell::new(edit_e2e_server())),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(sim_io),
+        ));
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        studio
+    };
+
+    // An UNTARGETED project leaves the sim exactly as it is today.
+    let studio = open_on_sim(None);
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        None,
+        "no target, no board — today's behavior"
+    );
+
+    // A TARGETED one gives the sim the board the project names.
+    let studio = open_on_sim(Some("seeed/xiao-esp32-c6"));
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        Some("seeed/xiao-esp32-c6"),
+        "the sim wears the board its project targets"
+    );
+    assert_eq!(
+        studio
+            .view()
+            .lens_card
+            .expect("the editor's lens card is the sim's")
+            .board_id
+            .as_deref(),
+        Some("seeed/xiao-esp32-c6"),
+        "and the card carries it — the \"as <board>\" line"
+    );
+}
+
 /// Poisoned-instance recovery, part 1 (worker crash): the link layer
 /// reports a sticky instance-fatal for the sim session; the tick-cadence
 /// recovery edge-detects it, surfaces the primary panic on the console,

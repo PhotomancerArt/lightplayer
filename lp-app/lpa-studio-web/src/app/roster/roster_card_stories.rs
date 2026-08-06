@@ -498,6 +498,25 @@ fn simulator_runtime() -> Element {
 }
 
 #[story(
+    description = "Gallery-rework P04 (vision D4): the sim with a BOARD identity — it inherited the running project's advisory `target`, so the card's fact line says \"as ESP32-C6 (Seeed XIAO)\" under the status line. Advisory only: nothing about the worker changes, and a sim running an untargeted project (every other sim story here) shows no such line at all."
+)]
+fn simulator_as_board() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
+                    ..sim_card(true)
+                },
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
     description = "D36: the live sim card with nothing loaded — the session exists, no project has been pushed; the grow control renders disabled (always visible, never a dead click)."
 )]
 fn simulator_nothing_loaded() -> Element {
@@ -1048,6 +1067,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -1080,6 +1100,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         console_tail: Vec::new(),
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 

@@ -442,7 +442,7 @@ async fn prune_directory_husks(store: &LpFsOpfs) {
 
 /// Local wall-clock `YYYY-MM-DD-HHMM` for new-package slugs (the sans-IO
 /// core takes this injected — it never reads a clock).
-fn local_slug_stamp() -> String {
+pub(crate) fn local_slug_stamp() -> String {
     let now = js_sys::Date::new_0();
     format!(
         "{:04}-{:02}-{:02}-{:02}{:02}",

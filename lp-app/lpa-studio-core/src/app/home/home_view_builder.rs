@@ -85,6 +85,10 @@ pub struct HomeSimEvidence {
     pub frame_age_secs: Option<f64>,
     /// The sim engine's reported fps, when known.
     pub fps: Option<f32>,
+    /// The board the sim claims to be (vision D4), inherited from the
+    /// project it runs — `vendor/product`, the registry's vocabulary.
+    /// `None` = no board known, the ordinary default.
+    pub board_id: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
 }
@@ -249,6 +253,7 @@ pub fn build_home_view(
             opening,
             issue,
             backup: None,
+            setup: None,
         };
     };
 
@@ -278,6 +283,7 @@ pub fn build_home_view(
         // The controller overlays a finished backup after the build (it is
         // controller state, not library/roster evidence).
         backup: None,
+        setup: None,
     }
 }
 
@@ -397,6 +403,39 @@ fn assemble_roster(
     (connections, devices)
 }
 
+/// Give the card an open setup flow is bound to the roster's LEADING
+/// position and report its [`UiDeviceCard::identity_key`] — the key the
+/// wizard's body takeover rides (G2 ruling, 2026-08-05: the wizard is a
+/// state of the device card, not a card of its own).
+///
+/// `session_key` is the flow's binding: the bound session's `RuntimeId`
+/// rendering on the hardware path, the sim's reserved card key on the sim
+/// path. It is matched against `session_key` FIRST because that is the
+/// thread that does not move — a board's `identity_key` becomes its uid
+/// the instant identity lands mid-flow, and a takeover keyed by the uid
+/// would lose its card at exactly that moment. The sim card carries no
+/// session key, so its reserved `identity_key` is the second rung.
+///
+/// `None` (no flow, or a flow with nothing attached yet) leaves the roster
+/// exactly as assembled: the wizard renders standalone in the entry-cards
+/// slot, because there is no card to be the body of.
+pub(crate) fn pin_setup_card(
+    devices: &mut Vec<UiDeviceCard>,
+    session_key: Option<&str>,
+) -> Option<String> {
+    let session_key = session_key?;
+    let index = devices.iter().position(|card| {
+        card.session_key.as_deref() == Some(session_key) || card.identity_key() == session_key
+    })?;
+    let card = devices.remove(index);
+    let key = card.identity_key().to_string();
+    // Ahead of everything, including the sim's own pin: a card mid-setup
+    // is the one the user is looking at, and a leading slot is what keeps
+    // it from hopping columns as facts (and other cards) land.
+    devices.insert(0, card);
+    Some(key)
+}
+
 /// The live sim card (D36): the shared card grammar in the sim
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
@@ -422,6 +461,8 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         hardware: None,
         detected_chip: None,
+        // D4: the sim's inherited board — the one card that carries this
+        board_id: sim.board_id.clone(),
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -535,6 +576,8 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        // a device's board is a REGISTRY fact, read there (see the field doc)
+        board_id: None,
         port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
@@ -717,6 +760,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
+        board_id: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -951,6 +995,7 @@ mod tests {
                 frame: None,
                 frame_age_secs: None,
                 fps: None,
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         }
@@ -1138,6 +1183,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
             UiDeviceCard {
                 frame_preview: None,
@@ -1157,6 +1203,7 @@ mod tests {
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
                 detected_chip: None,
+                board_id: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -1564,6 +1611,7 @@ mod tests {
                 frame: None,
                 frame_age_secs: None,
                 fps: None,
+                board_id: None,
                 console_tail: Vec::new(),
             }),
         };

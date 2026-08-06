@@ -218,8 +218,22 @@ target that exists in the matrix but not in the suite is a configuration nothing
 can falsify. It needed all three axes at once, and it was found within hours of
 the combination first being registered as a target.
 
+**2026-08-05 makes it two on the frontend axis, pointing the other way.**
+`generated-palette-header-dies-on-naga` is the mirror of the entry above: there,
+Naga's parameter copying masked a defect only `lps-glsl` could expose; here,
+`lps-glsl`'s native `sampler2D` masked one only Naga's textual bridge could
+expose. Two entries, one axis, opposite directions — which retires the idea that
+either frontend is the reference the other is checked against. They are each
+other's blind spot, so a contract carried by both (textures, uniforms, anything
+in the shared header) is untested until it runs through both, and the cheap
+mitigation is to parameterize the *existing* suite by frontend rather than to
+grow a second one. Worth watching: if a third lands, the argument stops being
+"register the target" and becomes "the frontend axis belongs in the default
+matrix".
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
