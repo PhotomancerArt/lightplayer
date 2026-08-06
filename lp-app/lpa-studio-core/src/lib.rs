@@ -114,10 +114,12 @@ pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
     ShareFile, ShareHeader, peek_header,
 };
+pub use app::docs_host::DocsSimHost;
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
     LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
-    StudioActor, StudioCommand, StudioController, StudioHandle, StudioLogSink, StudioSnapshot,
+    StudioActor, StudioActorOptions, StudioCommand, StudioController, StudioHandle, StudioLogSink,
+    StudioSnapshot,
     StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
     UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
     UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,

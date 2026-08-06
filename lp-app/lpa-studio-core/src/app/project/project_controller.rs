@@ -2175,6 +2175,32 @@ impl ProjectController {
         Ok(loaded.logs)
     }
 
+    /// Docs-host deploy (interactive docs D2): push a compiled-in example
+    /// straight to the runtime as deploy files — **never** through the
+    /// library. No catalog transaction, no OPFS seeding, regardless of
+    /// whether a library is attached: docs sims must not plant cards in
+    /// the user's gallery. The storage dir is derived from the example id
+    /// so a docs deploy never collides with the demo's `studio` dir.
+    pub(crate) async fn load_example_direct(
+        &mut self,
+        server: &mut StudioServerClient,
+        example_id: &str,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let files = crate::app::preview_host::example_deploy_files(example_id)
+            .map_err(UiError::MissingSession)?;
+        // `examples/plasma` → `docs-plasma`: a filesystem-safe storage id.
+        let short = example_id.rsplit('/').next().unwrap_or(example_id);
+        let storage_id = format!("docs-{short}");
+        let loaded = server
+            .load_deployed_files(&storage_id, example_id, files)
+            .await?;
+        self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+        self.project_fs_root = loaded.fs_root;
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
     /// Load-as-push (D19): open a library package by key (slug or `prj_…`
     /// uid) — the host acquires the project lock, then the head is pushed
     /// to the runtime, replacing whatever project is loaded. A page
