@@ -1189,7 +1189,8 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       // stamps data-preview-painted on each canvas after its first blit;
       // demand it on every preview canvas in the story.
       const unpainted = el.querySelectorAll(
-        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted])',
+        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted]),' +
+          'canvas.ux-produced-product-lamp-canvas:not([data-preview-painted])',
       );
       if (unpainted.length > 0) {
         return false;

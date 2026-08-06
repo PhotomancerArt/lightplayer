@@ -8,6 +8,8 @@
   (the document stays an opaque, format-versioned asset; this ADR is the
   first exercise of that format gate).
 - **Superseded by:** None
+- **Related:** `2026-08-05-map2d-editor-selection-tree-model.md` (how the
+  editor selects and edits through the tree this construct created)
 
 ## Context
 
