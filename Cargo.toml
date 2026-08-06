@@ -46,6 +46,7 @@ members = [
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -133,6 +134,7 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",

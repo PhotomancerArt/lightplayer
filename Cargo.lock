@@ -5952,6 +5952,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-cloud-api"
+version = "40.0.0"
+dependencies = [
+ "lpc-history",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpc-engine"
 version = "40.0.0"
 dependencies = [
