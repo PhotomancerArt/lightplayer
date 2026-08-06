@@ -44,8 +44,9 @@ pub use app::device::{
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes, generate_board_project,
+    HomePoolEvidence, HomeSimEvidence, SIM_CARD_KEY, UiCardConnection, UiDeviceCard,
+    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
+    generate_board_project,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

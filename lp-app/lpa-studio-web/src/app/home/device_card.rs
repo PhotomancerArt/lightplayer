@@ -27,7 +27,7 @@ use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
     CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
     DeviceDetailAffordance, DeviceOp, DeviceRichInput, DeviceTarget, HomeOp, LinkProviderKind,
-    PreviewSource, ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
+    ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
     RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput,
     UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
     device_rich_object, sim_rich_object,
@@ -37,7 +37,7 @@ use lpa_studio_core::{UiLogEntry, UiLogLevel};
 use crate::app::home::card_sheet::{
     CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
 };
-use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_play_tab::PlayTabBody;
 use crate::app::home::package_card::home_action;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
@@ -615,8 +615,8 @@ pub(crate) fn DeviceCard(
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
     let status_line = card.state.status_line(now);
     let faded = matches!(card.state, RosterCardState::Offline { .. });
-    // last-known, not current, on offline/error cards (card grammar)
-    let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
+    // (the "last-known, not current" dimming moved onto the ▶ tab with the
+    // hero strip's removal — `PlayTabBody` owns it now)
     // Needs-a-name opens the name-stamping SHEET (D41 — ratified spike
     // round 3); renaming a stamped device stays the title-bar inline edit
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
@@ -656,7 +656,11 @@ pub(crate) fn DeviceCard(
     };
     let view = RichObjectView::new(sections);
     let edge_tone = view.rollup().tone;
-    let mut tabs = device_card_tabs(view);
+    // The ▶ tab exists exactly when the card holds a project: that is the
+    // one condition under which there is something honest to draw (the
+    // device's frames, or the sim's own re-simulation). A board with
+    // nothing on it gets no picture tab — its Status body says so instead.
+    let mut tabs = device_card_tabs(view, card.project.is_some());
     // M8′: the Connected-empty device offers the Project-tab PICKER —
     // the tab exists exactly when there is something honest to offer
     // (choices in the library), mirroring the data-adaptive rule.
@@ -665,8 +669,15 @@ pub(crate) fn DeviceCard(
         && !project_choices.is_empty()
         && !tabs.iter().any(|tab| tab.tab == DeviceCardTab::Project);
     if picker_mode {
+        // Straight after Status, wherever Status sits — the ▶ tab now
+        // leads the row on cards that have one, so index 1 is no longer a
+        // synonym for "after the front door".
+        let after_status = tabs
+            .iter()
+            .position(|tab| tab.tab == DeviceCardTab::Status)
+            .map_or(0, |index| index + 1);
         tabs.insert(
-            1,
+            after_status,
             CardTabView {
                 tab: DeviceCardTab::Project,
                 sections: Vec::new(),
@@ -889,25 +900,14 @@ pub(crate) fn DeviceCard(
                     }
                 }
             }
-            // D12 hero strip (gallery-rework P05): the held/last-run
-            // project as the card's default identity treatment —
-            // replacing the small in-body chip. Live cards lease a real
-            // preview by project uid, reusing the gallery's PreviewHost
-            // machinery (gradient fallback until a frame presents);
-            // offline/not-responding cards get no lease — there is no
-            // snapshot seam yet (`card_thumb`'s M6 seam) — so the frame
-            // itself dims instead (identity, not health, per
-            // `UiDeviceProjectChip`'s doc comment). No project, no strip:
-            // the body's own "nothing on it yet" line carries that case.
-            if let Some(chip) = card.project.as_ref() {
-                CardThumb {
-                    seed: chip.uid.clone(),
-                    label: chip.name.clone(),
-                    hero: true,
-                    muted: chip_muted,
-                    source: (!chip_muted).then(|| PreviewSource::ProjectUid(chip.uid.clone())),
-                }
-            }
+            // NO hero strip. The D12/P05 strip re-simulated the project in
+            // the browser and presented the result as the board's face —
+            // which the 2026-08-05 G2 ruling called what it was:
+            // dishonest, and letterboxed besides. What the device is
+            // actually doing lives on the ▶ tab now, drawn from frames the
+            // board published; the project's identity rides that tab's
+            // meta row.
+            //
             // Everything below the title bar shares one wrapper: a D41
             // sheet dims exactly this region, so the name above it stays
             // readable (spike round 3: sheets spare the title bar).
@@ -949,6 +949,9 @@ pub(crate) fn DeviceCard(
                     }
                     div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                         match active_tab {
+                            DeviceCardTab::Play => rsx! {
+                                PlayTabBody { card: card.clone(), sim, now }
+                            },
                             DeviceCardTab::Status => rsx! {
                                 {status_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
                             },
@@ -1222,8 +1225,8 @@ fn tab_button<A>(
 
 /// The Status tab: the Health section with the status line up front, and
 /// the state-table affordance — today's card body, re-homed. The project's
-/// identity now rides the hero strip (gallery-rework P05) rather than a
-/// row here.
+/// identity rides the ▶ tab's meta row (honest-device preview P3) rather
+/// than a row here.
 fn status_tab_body(
     card: &UiDeviceCard,
     tabs: &[CardTabView<CardRowAction>],
@@ -1827,11 +1830,12 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
-        // The ▶ tab has no renderer yet (P2 landed the variant so core's
-        // card feed can gate on it); P3 settles the Status-vs-Play icon
-        // pick, which is a G1 gate question.
+        // ▶ goes to the tab that actually plays something. Status inherits
+        // the activity waveform (lucide Activity) — the heartbeat glyph the
+        // converged spike drew for it, and a better fit for "how is this
+        // board doing" than a play triangle ever was.
         DeviceCardTab::Play => StudioIconName::Play,
-        DeviceCardTab::Status => StudioIconName::Play,
+        DeviceCardTab::Status => StudioIconName::MapLive,
         DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
         DeviceCardTab::Settings => StudioIconName::Settings,
         DeviceCardTab::Performance => StudioIconName::Performance,

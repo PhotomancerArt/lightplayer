@@ -19,9 +19,12 @@ use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
-    BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
-    DegradedReason, DeviceCardTab, DeviceFormatStanding, RosterCardState, UiDeviceCard,
-    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
+    BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ColorOrder,
+    ConnectPhase, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, DegradedReason, DeviceCardTab,
+    DeviceFormatStanding, Revision, RosterCardState, UiControlProductPreview,
+    UiControlSampleFormat, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiLogSource,
 };
 use lpc_wire::{BuildFacts, HardwareFacts};
 
@@ -43,7 +46,7 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
 const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
-    description = "Green filled edge: running the local project's tip. The hero strip (gallery-rework P05, vision D12) is the card's default identity treatment now — the project's art under the title bar with its name pill bottom-left, replacing the small in-body chip."
+    description = "Green filled edge: running the local project's tip. The card opens on its ▶ tab in the live app (the default-when-connected rule); this sheet pins the Status tab so the vocabulary stays comparable across states. The hero strip that used to sit under the title bar is GONE — honest-device preview P3."
 )]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
@@ -130,7 +133,7 @@ fn operation_pushing() -> Element {
 }
 
 #[story(
-    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′). No project means no hero strip (gallery-rework P05) — the body's own \"nothing loaded\" status line carries the empty case."
+    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′). No project means no ▶ tab either (honest-device preview P3) — there is nothing to draw, and the body's own \"nothing loaded\" status line carries the empty case."
 )]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
@@ -438,25 +441,45 @@ fn in_use_elsewhere() -> Element {
 }
 
 #[story(
-    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired). The hero strip dims to match (gallery-rework P05) — last-known art, not current, per the project chip's identity-not-health contract; no live preview lease for an offline card."
+    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired). An offline card keeps its ▶ tab — the last frame it saw, dimmed and veiled — but opens on Status, because there is nothing live to open onto."
 )]
 fn offline() -> Element {
     sheet(vec![card(offline_state(), true)])
 }
 
 #[story(
-    description = "Gallery-rework P05 gate: the hero strip's three device-card states side by side — Running (live art + name pill), Offline (dimmed, last-known art — identity, not health), and Connected-empty (no project, so no strip; the status line's \"nothing loaded\" carries it)."
+    description = "The ▶ play tab (honest-device preview P3, converged spike section 1), left to right: LIVE — the board's own published frame with the calm green \"live · N fps\" pill; STALE — frames stopped for longer than the 5 s threshold, so the picture holds and only the label changes to amber; OFFLINE — the last frame this session saw, desaturated and veiled (last known, NOT current); WAITING — a remembered card that never fed a frame, which shows an empty frame and a sentence rather than a plausible-looking pattern. Nothing here is re-simulated in the browser: that is the whole point of the tab, and the reason the hero strip it replaces was ruled dishonest at G2."
 )]
-fn hero_strip_states() -> Element {
+fn play_tab_states() -> Element {
     sheet(vec![
-        card(RosterCardState::RunningUpToDate, true),
-        card(offline_state(), true),
-        card(RosterCardState::ConnectedEmpty, false),
+        play_card(RosterCardState::RunningUpToDate, Some((0.0, Some(30.0)))),
+        play_card(RosterCardState::RunningUpToDate, Some((41.0, None))),
+        play_card(offline_state(), Some((7200.0, None))),
+        play_card(offline_state(), None),
     ])
 }
 
 #[story(
-    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session. The sim wears the same hero strip (gallery-rework P05) — no special-casing in the renderer."
+    description = "The sim's ▶ tab: the same surface, marked SIM in the bound-violet family and captioned \"browser simulation\". Re-simulating is honest HERE and only here — the sim card IS the simulator — so the pill never borrows the green a device's own frames earn. (The canvas itself is inert under story capture; the chrome is what this story fixes.)"
+)]
+fn play_tab_simulator() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Play, None),
+                    ..sim_card(true)
+                },
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session. The sim carries the same ▶ tab as a device card, marked SIM — no special-casing in the renderer."
 )]
 fn simulator_runtime() -> Element {
     sheet(vec![rsx! {
@@ -885,6 +908,83 @@ fn card(state: RosterCardState, with_project: bool) -> Element {
                 on_action: |_| {},
             }
         }
+    }
+}
+
+/// A device card opened on its ▶ tab. `frame` is `(age_secs, fps)` — `None`
+/// is a card that never fed one.
+fn play_card(state: RosterCardState, frame: Option<(f64, Option<f32>)>) -> Element {
+    let (frame_preview, frame_age_secs, frame_fps) = match frame {
+        Some((age, fps)) => (Some(story_frame()), Some(age), fps),
+        None => (None, None, None),
+    };
+    rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Play, None),
+                    frame_preview,
+                    frame_age_secs,
+                    frame_fps,
+                    ..device_card(state, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The canned frame the ▶ stories draw: a dome-ish arc of 96 lamps under a
+/// fixed rainbow.
+///
+/// Deterministic by construction — no clock, no device, no re-simulation —
+/// because these baselines are CI-canonical. The bytes are LINEAR unorm16,
+/// which is what the wire carries and what `LampView` decodes; feeding it
+/// display-sRGB here would make the story disagree with the real card.
+fn story_frame() -> UiControlProductPreview {
+    const LAMPS: u32 = 96;
+    let mut lamps = Vec::with_capacity(LAMPS as usize);
+    let mut bytes = Vec::with_capacity(LAMPS as usize * 6);
+    for index in 0..LAMPS {
+        let phase = index as f32 / LAMPS as f32;
+        // Three stacked arcs — enough shape to read as a fixture rather
+        // than a strip, without pretending to be any particular dome.
+        let row = index / 32;
+        let along = (index % 32) as f32 / 31.0;
+        let sweep = (0.12 + along * 0.76) * core::f32::consts::PI;
+        let radius = 0.30 + row as f32 * 0.13;
+        lamps.push(ControlLamp2d {
+            lamp_index: index,
+            sample_start: index * 3,
+            center: [0.5 - sweep.cos() * radius, 0.92 - sweep.sin() * radius],
+            radius: 0.028,
+        });
+        for channel in 0..3_u32 {
+            let turn = (phase + channel as f32 / 3.0) * core::f32::consts::TAU;
+            let level = (turn.sin() * 0.5 + 0.5).powi(2);
+            bytes.extend_from_slice(&((level * f32::from(u16::MAX)) as u16).to_le_bytes());
+        }
+    }
+    UiControlProductPreview {
+        revision: 104,
+        extent: ControlExtent::new(1, LAMPS * 3),
+        sample_format: UiControlSampleFormat::U16,
+        sample_layout: ControlSampleLayout {
+            spans: vec![ControlSampleSpan {
+                row: 0,
+                start: 0,
+                len: LAMPS * 3,
+                encoding: ControlSampleEncoding::RgbPixels {
+                    count: LAMPS,
+                    color_order: ColorOrder::Rgb,
+                },
+            }],
+        },
+        display_layout: Some(std::rc::Rc::new(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(Revision::new(104), 1, 1, lamps),
+        ))),
+        bytes: bytes.into(),
     }
 }
 
