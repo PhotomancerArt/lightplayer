@@ -101,11 +101,15 @@ else
     umask 077
 
     info "creating bucket ${BUCKET} (credentials go to ${CREDS_FILE}, not to this terminal)"
+    info "note: --yes accepts the Tigris terms of service on your behalf"
     # Output is captured, never echoed: it contains the secret access key.
     # `|| true` is NOT used — a failure here must stop the script, and the
     # captured output is dumped to the creds file first so the failure is
     # diagnosable without re-running a half-successful create.
-    if fly storage create --name "$BUCKET" --app "$APP" --org "$ORG" >"$CREDS_FILE" 2>&1; then
+    # --yes: with stdout captured this runs non-interactively, and the
+    # Tigris provisioning includes a terms-of-service agreement that
+    # otherwise dies with "the --yes flag must be specified".
+    if fly storage create --name "$BUCKET" --app "$APP" --org "$ORG" --yes >"$CREDS_FILE" 2>&1; then
         chmod 600 "$CREDS_FILE"
         info "bucket created; credentials saved to ${CREDS_FILE} (mode 600)"
         info "copy them into your password manager, then: rm ${CREDS_FILE}"
