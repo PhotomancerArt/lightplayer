@@ -102,13 +102,27 @@ If the copy's owner wants their own line instead, that is a fork
 
 | Concept | File |
 |---|---|
-| Transport trait, `TransportError`, `request` helper | `cloud_port.rs` |
+| Transport trait, `TransportError`, the `call`/`request` helpers | `cloud_port.rs` |
 | The in-process service + client + offline switch | `in_process_cloud.rs` |
 | Per-project binding record (D23: per project, not per folder) | `cloud_binding.rs` |
 | A local project: package fs + history root + the composed moves | `local_project.rs` |
 | Share address parsing/rendering | `project_link.rs` |
 | The operations | `sync/*.rs`, one per file |
 | Null-waker driver for immediately-ready futures | `block_on.rs` |
+
+### One call helper, no response matching
+
+Every request the engine makes goes through `call(port, GetProject { uid })`,
+which returns that request's own response type — the pairing comes from
+`lpc_cloud_api::CloudCallSpec`, so no operation carries a `match` for an
+answer it cannot get. `sync/service_calls.rs` is just the named list of the
+calls this engine makes; it unwraps nothing.
+
+A reply carrying some *other* response variant is a bug on one side of the
+wire, and it is reported as one:
+`SyncError::Transport(TransportError::Protocol(..))`, not a `CloudError`. A
+`CloudError` is the service having considered the request and said no; a
+wrong-shaped answer means the conversation did not really happen.
 
 ## Two things worth knowing about the wire
 

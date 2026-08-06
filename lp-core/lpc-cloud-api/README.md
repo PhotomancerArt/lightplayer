@@ -16,6 +16,32 @@ plain-HTTP plane — this crate only carries the hashes (`HaveBlobs`,
 `Actor::User` identity) and `ContentHash` (blob/tree hashes), and for
 `HistoryEvent`, which a `PushCommit` carries verbatim.
 
+## Every message is a struct; the pairing is a compile-time fact
+
+Each of the eleven requests is a struct in `request.rs` (`GetProject { uid }`,
+`PushCommit { .. }`, and the two payload-free `WhoAmI` / `ListMyProjects`);
+each response is a struct in `response.rs` (`ProjectInfo`, `Heads`,
+`MissingBlobs`, …). `CloudRequest` and `CloudResponse` are the closed sets of
+them — a unit variant where the message carries nothing, a newtype variant
+wrapping the struct otherwise. The per-message structs stay behind
+`request::` / `response::` rather than being re-exported at the crate root:
+`Events` and `Heads` only read unambiguously with their module in front.
+
+`CloudCallSpec` (in `call_spec.rs`) is the pairing table — one hand-written
+impl per request naming its `Response` and how to `extract` it. Eleven impls
+in one greppable file, deliberately not a macro. It is what lets a client
+write `call(port, GetProject { uid })` and get a `ProjectInfo` back, and what
+lets the service's handlers return the concrete response type; the "what if
+the answer is the wrong variant" branch then exists once per request instead
+of at every call site.
+
+**This restructuring did not move a byte on the wire.** Serde's external
+tagging writes a newtype variant exactly as it wrote the struct variant —
+`{"getProject":{"uid":"prj_…"}}` — and the enums' `rename_all = "camelCase"`
+renames variants, never fields, so the message structs carry no `rename_all`
+of their own and `next_since` stays snake_case. The pinned JSON literal tests
+in `request.rs` and `response.rs` are the check.
+
 ## fw-graph-clean
 
 Nothing in `lp-fw` may ever depend on this crate. Cloud sync is a client/

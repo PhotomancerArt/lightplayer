@@ -18,6 +18,12 @@ use crate::cloud_port::TransportError;
 /// library being in a state the operation will not act on
 /// ([`SyncError::UncommittedLocalEdits`], [`SyncError::UnbankedVersion`]).
 ///
+/// There is no "wrong response shape" variant: which response answers which
+/// request is a compile-time fact
+/// ([`CloudCallSpec`](lpc_cloud_api::CloudCallSpec)), so a reply that does not
+/// match is a wire-level protocol violation and arrives as
+/// `Transport(TransportError::Protocol(..))`.
+///
 /// No `PartialEq`: `HistoryError` and `FsError` do not have one, and a
 /// hand-written impl that skipped those arms would be a trap. Match on the
 /// variant instead.
@@ -34,9 +40,6 @@ pub enum SyncError {
     Fs(FsError),
     /// Reading or writing a client-side JSON record failed.
     Encode(String),
-    /// The service answered a request with a response of the wrong shape.
-    /// A bug on one side of the wire, never a user-facing condition.
-    UnexpectedResponse(&'static str),
     /// The project has no local history at all — its event log is empty.
     /// [`open_shared`](crate::sync::open_shared) creates one; every other
     /// operation expects one to exist.
@@ -89,9 +92,6 @@ impl fmt::Display for SyncError {
             SyncError::History(e) => write!(f, "history: {e}"),
             SyncError::Fs(e) => write!(f, "filesystem: {e}"),
             SyncError::Encode(msg) => write!(f, "encode: {msg}"),
-            SyncError::UnexpectedResponse(what) => {
-                write!(f, "service answered {what} with the wrong response")
-            }
             SyncError::NoLocalHistory => f.write_str("the project has no local history"),
             SyncError::NoLocalHead => f.write_str("the project has no saved version yet"),
             SyncError::NoRemoteHead => f.write_str("the service has no commits for this project"),

@@ -1,94 +1,69 @@
-//! Typed wrappers over the request/response vocabulary.
+//! The requests this engine makes, named.
 //!
-//! One function per request the engine makes, each unwrapping the one
-//! response shape that request can legally produce. Written once here so no
-//! operation below has to carry a `match` for a response that cannot happen —
-//! and so that when one does happen, exactly one place says
-//! [`SyncError::UnexpectedResponse`].
+//! One function per request, each a thin call to
+//! [`call`](crate::cloud_port::call) — which already knows, from
+//! [`CloudCallSpec`](lpc_cloud_api::CloudCallSpec), which response answers
+//! which request. Nothing here unwraps a `CloudResponse`; these exist so the
+//! operations below read as `get_heads(port, uid)` rather than as envelope
+//! construction, and so the argument lists stay positional at the call sites.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_cloud_api::{
-    CloudRequest, CloudResponse, HeadInfo, ProjectMeta, PushOutcome, SidecarMeta, Visibility,
+use lpc_cloud_api::request::{
+    GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
 };
+use lpc_cloud_api::response::{Events, ProjectInfo, PushResult};
+use lpc_cloud_api::{HeadInfo, SidecarMeta, Visibility};
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 
-use crate::cloud_port::{CloudPort, request};
+use crate::cloud_port::{CloudPort, call};
 use crate::sync_error::SyncError;
-
-/// A project as the service currently holds it.
-pub(crate) struct RemoteProject {
-    pub meta: ProjectMeta,
-    pub heads: Vec<HeadInfo>,
-    pub sidecar: SidecarMeta,
-}
-
-/// A stretch of the service's event log.
-pub(crate) struct RemoteEvents {
-    pub events: Vec<HistoryEvent>,
-    pub next_since: u64,
-}
 
 pub(crate) async fn publish_project<P: CloudPort + ?Sized>(
     port: &P,
     uid: PrefixedUid,
     visibility: Visibility,
     slug: String,
-) -> Result<RemoteProject, SyncError> {
-    project_info(
-        request(
-            port,
-            CloudRequest::PublishProject {
-                uid,
-                visibility,
-                slug,
-            },
-        )
-        .await?,
-        "publishProject",
+) -> Result<ProjectInfo, SyncError> {
+    call(
+        port,
+        PublishProject {
+            uid,
+            visibility,
+            slug,
+        },
     )
+    .await
 }
 
 pub(crate) async fn get_project<P: CloudPort + ?Sized>(
     port: &P,
     uid: PrefixedUid,
-) -> Result<RemoteProject, SyncError> {
-    project_info(
-        request(port, CloudRequest::GetProject { uid }).await?,
-        "getProject",
-    )
+) -> Result<ProjectInfo, SyncError> {
+    call(port, GetProject { uid }).await
 }
 
 pub(crate) async fn get_heads<P: CloudPort + ?Sized>(
     port: &P,
     uid: PrefixedUid,
 ) -> Result<Vec<HeadInfo>, SyncError> {
-    match request(port, CloudRequest::GetHeads { uid }).await? {
-        CloudResponse::Heads { heads } => Ok(heads),
-        _ => Err(SyncError::UnexpectedResponse("getHeads")),
-    }
+    Ok(call(port, GetHeads { uid }).await?.heads)
 }
 
 pub(crate) async fn get_events<P: CloudPort + ?Sized>(
     port: &P,
     uid: PrefixedUid,
     since: u64,
-) -> Result<RemoteEvents, SyncError> {
-    match request(port, CloudRequest::GetEvents { uid, since }).await? {
-        CloudResponse::Events { events, next_since } => Ok(RemoteEvents { events, next_since }),
-        _ => Err(SyncError::UnexpectedResponse("getEvents")),
-    }
+) -> Result<Events, SyncError> {
+    call(port, GetEvents { uid, since }).await
 }
 
 pub(crate) async fn have_blobs<P: CloudPort + ?Sized>(
     port: &P,
     hashes: Vec<ContentHash>,
 ) -> Result<Vec<ContentHash>, SyncError> {
-    match request(port, CloudRequest::HaveBlobs { hashes }).await? {
-        CloudResponse::MissingBlobs { hashes } => Ok(hashes),
-        _ => Err(SyncError::UnexpectedResponse("haveBlobs")),
-    }
+    Ok(call(port, HaveBlobs { hashes }).await?.hashes)
 }
 
 pub(crate) async fn push_commit<P: CloudPort + ?Sized>(
@@ -98,10 +73,10 @@ pub(crate) async fn push_commit<P: CloudPort + ?Sized>(
     tree: ContentHash,
     events: Vec<HistoryEvent>,
     sidecar: SidecarMeta,
-) -> Result<(PushOutcome, Vec<HeadInfo>), SyncError> {
-    match request(
+) -> Result<PushResult, SyncError> {
+    call(
         port,
-        CloudRequest::PushCommit {
+        PushCommit {
             uid,
             parents,
             tree,
@@ -109,24 +84,5 @@ pub(crate) async fn push_commit<P: CloudPort + ?Sized>(
             sidecar,
         },
     )
-    .await?
-    {
-        CloudResponse::PushResult { outcome, heads } => Ok((outcome, heads)),
-        _ => Err(SyncError::UnexpectedResponse("pushCommit")),
-    }
-}
-
-fn project_info(response: CloudResponse, what: &'static str) -> Result<RemoteProject, SyncError> {
-    match response {
-        CloudResponse::ProjectInfo {
-            meta,
-            heads,
-            sidecar,
-        } => Ok(RemoteProject {
-            meta,
-            heads,
-            sidecar,
-        }),
-        _ => Err(SyncError::UnexpectedResponse(what)),
-    }
+    .await
 }

@@ -10,6 +10,8 @@ mod edge_harness;
 
 use axum::http::{StatusCode, header};
 use edge_harness::{ASSET_BODY, ASSET_PATH, INDEX_HTML, TestServer, body_text, header_value};
+use lpc_cloud_api::request::{PublishProject, PushCommit};
+use lpc_cloud_api::response::PushResult;
 use lpc_cloud_api::{CloudRequest, CloudResponse, SidecarMeta, Visibility};
 use lpc_history::{
     ContentHash, EventKind, HistoryEvent, PrefixedUid, TreeEntry, TreeManifest, UidPrefix,
@@ -192,11 +194,11 @@ async fn publish(
 ) -> ContentHash {
     let published = server
         .call(
-            CloudRequest::PublishProject {
+            CloudRequest::PublishProject(PublishProject {
                 uid,
                 visibility,
                 slug: slug.to_string(),
-            },
+            }),
             Some(session),
         )
         .await;
@@ -241,7 +243,7 @@ async fn push(
 
     let pushed = server
         .call(
-            CloudRequest::PushCommit {
+            CloudRequest::PushCommit(PushCommit {
                 uid,
                 parents: vec![],
                 tree,
@@ -263,12 +265,15 @@ async fn push(
                     format_version: 5,
                     preview_png,
                 },
-            },
+            }),
             Some(session),
         )
         .await;
     assert!(
-        matches!(pushed.result, Ok(CloudResponse::PushResult { .. })),
+        matches!(
+            pushed.result,
+            Ok(CloudResponse::PushResult(PushResult { .. }))
+        ),
         "{:?}",
         pushed.result
     );

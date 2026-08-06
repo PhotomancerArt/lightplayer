@@ -182,6 +182,7 @@ fn open_s3(config: &ServerConfig) -> lp_cloud_store_sqlite::S3BlobStore {
 mod tests {
     use super::*;
     use crate::config::ServerConfig;
+    use lpc_cloud_api::response::UserInfo;
     use lpc_cloud_api::{CloudRequest, CloudResponse};
 
     /// The wrapping is the point: a store call made from an async context
@@ -195,9 +196,9 @@ mod tests {
 
         assert_eq!(
             answer,
-            Ok(CloudResponse::UserInfo {
+            Ok(CloudResponse::UserInfo(UserInfo {
                 actor: Actor::Anonymous
-            })
+            }))
         );
     }
 

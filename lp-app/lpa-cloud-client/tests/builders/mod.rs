@@ -22,10 +22,11 @@ use std::rc::Rc;
 
 use lpa_cloud_client::{
     ApplyReport, ClobberReport, ClobberSide, InProcessCloud, InProcessServer, LocalProject,
-    ProjectLink, PullReport, PushReport, SyncError, apply_fast_forward, block_on, open_shared,
-    publish, pull, push, request, resolve_clobber,
+    ProjectLink, PullReport, PushReport, SyncError, apply_fast_forward, block_on, call,
+    open_shared, publish, pull, push, request, resolve_clobber,
 };
-use lpc_cloud_api::{CloudRequest, CloudResponse, SidecarMeta, Visibility};
+use lpc_cloud_api::request::{AddMember, GetHeads, SetVisibility};
+use lpc_cloud_api::{CloudRequest, SidecarMeta, Visibility};
 use lpc_history::{
     ContentHash, EventKind, HistoryEvent, PrefixedUid, ProjectHistory, SyncRelation, UidPrefix,
 };
@@ -246,15 +247,12 @@ impl Project {
 
     /// The service's head frontier for this project.
     pub fn server_heads(&self) -> Vec<ContentHash> {
-        let reply = block_on(request(
-            &*self.client,
-            CloudRequest::GetHeads { uid: self.uid },
-        ))
-        .expect("ask the service for its heads");
-        match reply {
-            CloudResponse::Heads { heads } => heads.into_iter().map(|head| head.tree).collect(),
-            other => panic!("expected heads, got {other:?}"),
-        }
+        block_on(call(&*self.client, GetHeads { uid: self.uid }))
+            .expect("ask the service for its heads")
+            .heads
+            .into_iter()
+            .map(|head| head.tree)
+            .collect()
     }
 
     /// Put the project on the cloud and return its share link.
@@ -272,7 +270,7 @@ impl Project {
 
     /// Change who can reach the project.
     pub fn set_visibility(&self, visibility: Visibility) {
-        self.call(CloudRequest::SetVisibility {
+        self.send(SetVisibility {
             uid: self.uid,
             visibility,
         });
@@ -280,7 +278,7 @@ impl Project {
 
     /// Grant access by email — to an account that may not exist yet.
     pub fn add_member(&self, email: &str) {
-        self.call(CloudRequest::AddMember {
+        self.send(AddMember {
             uid: self.uid,
             email: email.to_string(),
         });
@@ -382,8 +380,8 @@ impl Project {
         }
     }
 
-    fn call(&self, request_: CloudRequest) {
-        block_on(request(&*self.client, request_)).expect("the service accepted the request");
+    fn send(&self, what: impl Into<CloudRequest>) {
+        block_on(request(&*self.client, what.into())).expect("the service accepted the request");
     }
 
     fn write(&self, path: &str, contents: impl AsRef<[u8]>) {

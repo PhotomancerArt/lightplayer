@@ -4,7 +4,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpc_cloud_api::{CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest, CloudResponse};
+use lpc_cloud_api::{
+    CLOUD_API_VERSION, CloudCall, CloudCallSpec, CloudReply, CloudRequest, CloudResponse,
+};
 use lpc_history::{ContentHash, TreeManifest};
 
 use crate::sync_error::SyncError;
@@ -74,7 +76,9 @@ pub enum TransportError {
     /// is the caller's loop, not this crate's.
     Offline,
     /// The service was reached but the answer could not be read (a truncated
-    /// body, an unparseable frame, a blob that did not hash to its address).
+    /// body, an unparseable frame, a blob that did not hash to its address,
+    /// or a reply whose response variant is not the one the request pairs
+    /// with — see [`call`]).
     Protocol(String),
     /// The content plane does not hold this hash.
     MissingBlob(ContentHash),
@@ -92,7 +96,35 @@ impl fmt::Display for TransportError {
     }
 }
 
-/// Make one call and unwrap it to a typed response.
+/// Make one call and get back the response its request pairs with.
+///
+/// This is the helper every operation in this crate uses. The request type
+/// names its own answer through
+/// [`CloudCallSpec`](lpc_cloud_api::CloudCallSpec), so no caller carries a
+/// `match` for a response that cannot happen — and when one *does* happen, it
+/// is reported here as [`TransportError::Protocol`]. That placement is
+/// deliberate: an answer of the wrong shape is a bug on one side of the wire,
+/// which belongs with "the conversation did not happen", not with
+/// [`CloudError`](lpc_cloud_api::CloudError), which is the service having
+/// considered the request and said no.
+pub async fn call<P: CloudPort + ?Sized, R: CloudCallSpec>(
+    port: &P,
+    spec: R,
+) -> Result<R::Response, SyncError> {
+    let response = request(port, spec.into()).await?;
+    R::extract(response).ok_or_else(|| {
+        SyncError::Transport(TransportError::Protocol(alloc::format!(
+            "service answered {} with a response of another shape",
+            core::any::type_name::<R>()
+        )))
+    })
+}
+
+/// Make one call and unwrap it to an untyped [`CloudResponse`].
+///
+/// Prefer [`call`], which names the response type. This is the layer below
+/// it, kept public for a caller that genuinely holds a dynamic
+/// [`CloudRequest`].
 ///
 /// Folds the three failure shapes into [`SyncError`]: the transport not
 /// reaching the service, the service running a different
@@ -151,9 +183,9 @@ mod tests {
         let port = FakePort {
             reply: Ok(CloudReply {
                 version: CLOUD_API_VERSION + 1,
-                result: Ok(CloudResponse::UserInfo {
+                result: Ok(CloudResponse::UserInfo(lpc_cloud_api::response::UserInfo {
                     actor: lpc_cloud_api::Actor::Anonymous,
-                }),
+                })),
             }),
         };
         let error = block_on(request(&port, CloudRequest::WhoAmI)).unwrap_err();
@@ -161,6 +193,40 @@ mod tests {
             error,
             SyncError::Cloud(CloudError::VersionMismatch { .. })
         ));
+    }
+
+    /// A well-formed reply carrying the wrong response variant is a protocol
+    /// violation, not a refusal: it never reaches [`SyncError::Cloud`].
+    #[test]
+    fn a_wrong_shaped_answer_is_a_protocol_violation() {
+        let port = FakePort {
+            reply: Ok(CloudReply {
+                version: CLOUD_API_VERSION,
+                result: Ok(CloudResponse::Heads(lpc_cloud_api::response::Heads {
+                    heads: Vec::new(),
+                })),
+            }),
+        };
+        let error = block_on(call(&port, lpc_cloud_api::request::WhoAmI)).unwrap_err();
+        assert!(matches!(
+            error,
+            SyncError::Transport(TransportError::Protocol(_))
+        ));
+    }
+
+    /// The paired answer comes back typed, with no match at the call site.
+    #[test]
+    fn a_paired_answer_comes_back_typed() {
+        let port = FakePort {
+            reply: Ok(CloudReply {
+                version: CLOUD_API_VERSION,
+                result: Ok(CloudResponse::UserInfo(lpc_cloud_api::response::UserInfo {
+                    actor: lpc_cloud_api::Actor::Anonymous,
+                })),
+            }),
+        };
+        let info = block_on(call(&port, lpc_cloud_api::request::WhoAmI)).unwrap();
+        assert_eq!(info.actor, lpc_cloud_api::Actor::Anonymous);
     }
 
     struct FakePort {

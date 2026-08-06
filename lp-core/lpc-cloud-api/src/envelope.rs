@@ -52,9 +52,9 @@ mod tests {
     fn serde_round_trip_reply_ok() {
         let reply = CloudReply {
             version: CLOUD_API_VERSION,
-            result: Ok(CloudResponse::UserInfo {
+            result: Ok(CloudResponse::UserInfo(crate::response::UserInfo {
                 actor: Actor::Anonymous,
-            }),
+            })),
         };
         let json = serde_json::to_string(&reply).unwrap();
         let back: CloudReply = serde_json::from_str(&json).unwrap();

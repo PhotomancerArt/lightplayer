@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use lpc_cloud_api::response::PushResult;
 use lpc_cloud_api::{HeadInfo, PushOutcome, SidecarMeta};
 use lpc_history::ContentHash;
 
@@ -121,7 +122,7 @@ pub async fn push<P: CloudPort + ?Sized>(
     let uploaded_objects = upload_version(port, project, head, &preview).await?;
 
     let sent_events = outgoing.len();
-    let (outcome, heads) = push_commit(
+    let PushResult { outcome, heads } = push_commit(
         port,
         project.uid(),
         parents,
