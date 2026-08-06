@@ -29,6 +29,7 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "HtmlElement",
     "HtmlImageElement",
+    "NodeList",
     "PointerEvent",
     "ResizeObserver",
     "Storage",
