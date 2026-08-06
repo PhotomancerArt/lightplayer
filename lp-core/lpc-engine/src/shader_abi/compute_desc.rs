@@ -278,6 +278,7 @@ void tick() {{
             String::from("phase"),
             ShaderSlotDef {
                 default_bind: lpc_model::OptionSlot::none(),
+                panel: lpc_model::OptionSlot::none(),
                 kind: ValueSlot::new(lpc_model::ShaderSlotKind::Value),
                 value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
                 key: lpc_model::OptionSlot::none(),

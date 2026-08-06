@@ -6,9 +6,17 @@ instead.
 
 Each article teaches the *why* behind one part of making LED art look good:
 short, concrete, and written for people who think in scenes and fixtures,
-not in code. These pages render in-app at `#/docs` (each article needs a
-manifest entry in `lp-app/lpa-studio-web/src/app/docs/mod.rs`); richer,
-interactive docs are a separate, later initiative.
+not in code. These pages render in-app at `#/docs`, and some of them are
+**alive** — running simulators and real Studio controls you can poke,
+right inside the article. Writing conventions live in [STYLE.md](STYLE.md);
+each article needs a manifest entry in
+`lp-app/lpa-studio-web/src/app/docs/mod.rs`.
+
+## Start here
+
+- [What's a shader?](what-is-a-shader.md) — the heart of LightPlayer, live:
+  drag real knobs, meet the line of code behind them, and watch one effect
+  run on two different shapes at once.
 
 ## Articles
 

@@ -35,7 +35,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView};
 
 use crate::app::node::value_display::fixed_decimal_display;
-use crate::app::node::{ProductPreview, SlotPane, SlotPaneTreatment};
+use crate::app::node::{
+    GradientDisplayDensity, GradientValueDisplay, ProductPreview, SlotPane, SlotPaneTreatment,
+};
 
 /// A writer wire's tone — always matching its chip, so the drawing needs
 /// no legend: orange = engaged panel writer, violet = a node write that
@@ -267,6 +269,18 @@ fn ChannelValueBody(channel: UiBusChannelView) -> Element {
                 if let Some(value) = channel.value.clone() {
                     code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[10px] tw:text-subtle-foreground",
                         "{value}"
+                    }
+                }
+                ContentionBadge { contended: channel.contended }
+            }
+        } else if let Some(config) = channel.gradient.clone() {
+            // A palette on the channel is shown, not spelled — the same
+            // rule the product preview above follows.
+            div { class: "tw:grid tw:w-full tw:min-w-0 tw:justify-items-center tw:gap-1",
+                div { class: "tw:w-full tw:max-w-[120px]",
+                    GradientValueDisplay {
+                        config,
+                        density: GradientDisplayDensity::Compact,
                     }
                 }
                 ContentionBadge { contended: channel.contended }

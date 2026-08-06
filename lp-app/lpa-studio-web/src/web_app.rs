@@ -245,6 +245,16 @@ pub fn App() -> Element {
                 let editor_showing = !next.panes.is_empty();
                 loop_editor_open.set(editor_showing);
                 let bound = editor_showing.then(|| router::lens_route(&next)).flatten();
+                // A NEW document took the lens this emission (none → some,
+                // or a different session): that is a navigation the user
+                // caused from wherever they are — an example opened from
+                // Explore must land in the editor — so it rewrites the URL
+                // even off the shell routes below.
+                let bound_changed = match (&*loop_bound_route.borrow(), &bound) {
+                    (None, Some(_)) => true,
+                    (Some(previous), Some(next_bound)) => !previous.same_session(next_bound),
+                    _ => false,
+                };
                 *loop_bound_route.borrow_mut() = bound.clone();
                 let opening_now = next
                     .home
@@ -260,7 +270,23 @@ pub fn App() -> Element {
                 // the focused document): lens on the sim + open project →
                 // #/sim/<slug>; lens on a device → #/device/<uid>.
                 let current = route.peek().clone();
-                if editor_showing {
+                // A STEADY lens follows the URL only while a shell route
+                // is what's rendered (the gallery routes, where a card
+                // open resolves into the lens URL, and the lens routes,
+                // where boot/slug/identity resolution lands). In any
+                // other section — Home, Explore, Boards, Docs — the user
+                // deliberately left the editor surface; yanking the URL
+                // back would make those sections unreachable while a
+                // lens is attached (seen live with `#/home` bouncing).
+                // A lens CHANGE (`bound_changed`) rewrites from anywhere.
+                let on_shell_route = matches!(
+                    current,
+                    StudioRoute::Devices
+                        | StudioRoute::Projects
+                        | StudioRoute::Sim { .. }
+                        | StudioRoute::Device { .. }
+                );
+                if editor_showing && (on_shell_route || bound_changed) {
                     // `same_session`, not `!=`: play is a lens ZOOM on the
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
@@ -268,13 +294,19 @@ pub fn App() -> Element {
                     if let Some(target) = bound
                         && !target.same_session(&current)
                     {
-                        if matches!(current, StudioRoute::Home) {
-                            // a gallery open: a real navigation, so a real
-                            // history entry (back returns to the gallery)
-                            router::navigate(&target);
-                        } else {
-                            // boot/forward resolution: no duplicate entries
+                        if matches!(
+                            current,
+                            StudioRoute::Sim { .. } | StudioRoute::Device { .. }
+                        ) {
+                            // boot/forward resolution on a lens route
+                            // (uid → slug, identity landing): same place,
+                            // no duplicate entries
                             router::replace(&target);
+                        } else {
+                            // an open from a page (gallery card, Explore
+                            // example): a real navigation, so a real
+                            // history entry (back returns to that page)
+                            router::navigate(&target);
                         }
                         route.set(target);
                     }
@@ -296,8 +328,8 @@ pub fn App() -> Element {
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
                     if open_ended {
-                        router::replace(&StudioRoute::Home);
-                        route.set(StudioRoute::Home);
+                        router::replace(&StudioRoute::Devices);
+                        route.set(StudioRoute::Devices);
                     }
                 }
 
@@ -366,7 +398,7 @@ pub fn App() -> Element {
             }
             route.set(new_route.clone());
             match &new_route {
-                StudioRoute::Home => {
+                StudioRoute::Devices | StudioRoute::Projects => {
                     if nav_editor_open.get() {
                         // back to the gallery = lens detach (runtime-pool
                         // P3): the editor closes, every runtime session
@@ -426,11 +458,18 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Boards { .. } | StudioRoute::Docs { .. } => {
+                StudioRoute::Home
+                | StudioRoute::Explore
+                | StudioRoute::Boards { .. }
+                | StudioRoute::Docs { .. } => {
                     // In-app sections: setting the route signal above already
                     // re-rendered the body. Nothing unloads — the runtime
                     // pool, sims, and device sessions keep running while the
-                    // user reads docs or browses boards.
+                    // user reads docs or browses boards. (Home and Explore
+                    // don't render the shell, so an attached lens survives
+                    // a visit; Devices/Projects above DO detach — they
+                    // render the shell, and the shell shows the editor
+                    // whenever a lens is attached.)
                 }
                 StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
@@ -500,6 +539,9 @@ pub fn App() -> Element {
                         )));
                 }
                 StudioRoute::Home
+                | StudioRoute::Devices
+                | StudioRoute::Projects
+                | StudioRoute::Explore
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
@@ -596,9 +638,19 @@ pub fn App() -> Element {
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
     let section = match &current_route {
+        StudioRoute::Home => SiteSection::Home,
+        // Explicit, not the catch-all: `#/` must light the Devices tab
+        // (a catch-all once carried it and silently stopped when lens
+        // routes moved to Session — G3 finding).
+        StudioRoute::Devices => SiteSection::Devices,
+        StudioRoute::Projects => SiteSection::Projects,
+        StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
-        _ => SiteSection::Studio,
+        // Lens routes light NO tab — the active session chip is the
+        // current-place marker (D15). The other catch-all routes
+        // (stories, the standalone editors) never render this chrome.
+        _ => SiteSection::Session,
     };
     let settings = current_view.settings.clone();
 
@@ -606,7 +658,10 @@ pub fn App() -> Element {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
-            SiteChrome { section, on_action,
+            SiteChrome {
+                section,
+                sessions: current_view.sessions.clone(),
+                on_editor: current_route.is_lens(),
                 if let Some(href) = play_toggle {
                     // A plain hash link, like the nav tabs: the route
                     // listener picks it up, sees the same session, and
@@ -618,15 +673,41 @@ pub fn App() -> Element {
             }
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {
+                StudioRoute::Home => rsx! {
+                    crate::app::HomePage { on_action }
+                },
+                StudioRoute::Explore => rsx! {
+                    crate::app::ExplorePage {
+                        home: current_view.home.clone().map(|home| *home),
+                        on_action,
+                    }
+                },
                 StudioRoute::Boards { board } => rsx! {
                     // The detected OS drives per-bridge driver warnings
                     // (plan D5) — detected here at the platform edge;
                     // lpa-boards stays platform-blind.
                     lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
                 },
-                StudioRoute::Docs { page } => rsx! {
-                    crate::app::DocsPage { page }
+                StudioRoute::Docs { page, anchor } => rsx! {
+                    // The section gets the app's real dispatcher: the
+                    // `open-in-studio` embed runs the same `OpenExample`
+                    // flow a gallery card does, into the user's own
+                    // library. Docs SIMS never come through here — they
+                    // are leased controllers of their own (D2).
+                    crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
+                StudioRoute::Projects => rsx! {
+                    StudioShell {
+                        view: current_view,
+                        running: false,
+                        gallery: crate::app::layout::ShellGallery::Projects,
+                        opening_frame,
+                        play,
+                        on_action,
+                    }
+                },
+                // Devices (`#/`) and the lens routes: the shell's default
+                // gallery page is Devices.
                 _ => rsx! {
                     StudioShell {
                         view: current_view,
@@ -669,13 +750,13 @@ fn detect_host_os() -> lpa_boards::HostOs {
     }
 }
 
-fn make_pull_timer(delay: Duration) -> TimeoutFuture {
+pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }
 
 /// DeviceSession timers on wasm: the same `setTimeout` future, boxed for
 /// the session's injected factory (the `make_pull_timer` pattern).
-fn make_device_timers() -> DeviceTimers {
+pub(crate) fn make_device_timers() -> DeviceTimers {
     DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
 }
 
@@ -769,14 +850,14 @@ fn install_library_listeners(tx: &CommandSender) {
 /// The controller's log-stamping clock on wasm: seconds since the Unix epoch
 /// from `Date.now()`. Core takes the closure so it stays platform-free.
 #[cfg(target_arch = "wasm32")]
-fn now_secs() -> f64 {
+pub(crate) fn now_secs() -> f64 {
     js_sys::Date::now() / 1000.0
 }
 
 /// Host builds of this crate only run unit tests and never spawn the actor,
 /// so the clock stub mirrors the JS-console stubs below.
 #[cfg(not(target_arch = "wasm32"))]
-fn now_secs() -> f64 {
+pub(crate) fn now_secs() -> f64 {
     0.0
 }
 

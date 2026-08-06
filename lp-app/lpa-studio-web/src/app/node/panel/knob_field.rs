@@ -69,7 +69,7 @@ pub fn KnobField(
     /// produces it.
     #[props(default = false)]
     invert: bool,
-    /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Deliberately NOT the
     /// violet bound family — bound means "wired", engaged means "captured"
     /// — and it outranks violet, because a captured control has stopped
@@ -114,7 +114,7 @@ pub fn KnobField(
     let pointer_deg = knob_pointer_deg(frac);
     let stroke = knob_value_stroke(&state, bound, engaged, editable);
     let body_stroke = if engaged {
-        "var(--studio-status-attention-border)"
+        "var(--studio-status-engaged-border)"
     } else if bound {
         "var(--studio-status-bound-border)"
     } else {
@@ -609,7 +609,7 @@ fn knob_value_stroke(
     editable: bool,
 ) -> &'static str {
     if engaged {
-        "var(--studio-status-attention-text)"
+        "var(--studio-status-engaged-text)"
     } else if bound {
         "var(--studio-status-bound-text)"
     } else if state.invalid.is_some() {
@@ -867,7 +867,7 @@ mod tests {
         // amber engaged family wins over the violet bound family — the
         // three panel states must stay visibly distinct (panel.md P-Q2).
         let stroke = knob_value_stroke(&UiSlotFieldState::editable(), true, true, true);
-        assert_eq!(stroke, "var(--studio-status-attention-text)");
+        assert_eq!(stroke, "var(--studio-status-engaged-text)");
         assert!(!stroke.contains("bound"));
     }
 
