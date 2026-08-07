@@ -19,7 +19,7 @@ use lpa_studio_core::{
     UiViewContent,
 };
 
-use crate::app::home::HomeGallery;
+use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -58,11 +58,19 @@ fn studio_hero() -> Element {
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            HomeGallery {
-                home: readme_home_view(),
-                now_secs: Some(STORY_NOW),
-                has_ever_granted: Some(true),
-                on_action: |_| {},
+            div { class: "tw:grid tw:gap-10",
+                DevicesPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    has_ever_granted: Some(true),
+                    on_action: |_| {},
+                }
+                ProjectsPage {
+                    home: readme_home_view(),
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+                ExplorePage { home: Some(readme_home_view()), on_action: |_| {} }
             }
         }
     }
@@ -199,6 +207,9 @@ fn readme_lens_card() -> UiDeviceCard {
         )
     };
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: None,
@@ -221,6 +232,7 @@ fn readme_lens_card() -> UiDeviceCard {
         ],
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 
@@ -274,6 +286,9 @@ fn readme_home_view() -> UiHomeView {
     ];
     let devices = vec![
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: None,
@@ -291,8 +306,12 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
@@ -310,6 +329,7 @@ fn readme_home_view() -> UiHomeView {
             console_tail: Vec::new(),
             ui: Default::default(),
             detected_chip: None,
+            board_id: None,
         },
     ];
     UiHomeView {
@@ -324,5 +344,6 @@ fn readme_home_view() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }

@@ -41,27 +41,29 @@ pub use app::device::{
     DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, DeviceTarget, EndpointChoice,
     ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
+pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes, generate_board_project,
+    HomePoolEvidence, HomeSimEvidence, SIM_CARD_KEY, SetupSession, UiCardConnection, UiDeviceCard,
+    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
+    UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiConfigSlot, UiConfigSlotBody,
-    UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace,
-    UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin,
-    UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
-    UiPanelTarget, UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
-    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
-    UiTimebaseState, phasor_rate_display, phasor_speed_display,
+    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot,
+    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiFixtureFace,
+    UiFixturePower, UiLedBudget, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
+    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
+    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPhasorReading,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -88,6 +90,7 @@ pub use app::project::{
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
+pub use app::roster::board_display_name;
 pub use app::roster::{
     BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
     DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
@@ -96,8 +99,9 @@ pub use app::roster::{
     firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
-    DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
-    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLoadedProject,
+    CardFeedApply, CardFeedState, DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId,
+    RuntimeKind, RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment,
+    SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
@@ -111,28 +115,36 @@ pub use app::settings::{
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
     UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
+pub use app::setup_flow::{
+    BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
+    ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities, SetupCommand, SetupContext,
+    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupGesture,
+    SetupState, SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
+    derive_device_name, dispatch_for, known_device_for, month_day_label, unique_device_name,
+};
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
     ShareFile, ShareHeader, peek_header,
 };
 pub use app::studio::{
-    ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
-    LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
-    StudioActor, StudioCommand, StudioController, StudioHandle, StudioLogSink, StudioSnapshot,
-    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
-    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
-    UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
-    ViewPublisher, has_unsaved_work, studio_view_channel,
+    ConsoleCommand, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL,
+    FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand,
+    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
+    StudioViewSender, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiConsoleView,
+    UiError, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
+    UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
     ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
-    PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
-    UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus,
-    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
+    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
+    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
+    UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

@@ -36,6 +36,24 @@ pub struct StudioServerClient {
     /// this refreshes on every wire operation — the lens pull cadence while
     /// editing, the attach sequence on connect.
     last_recovery: Option<lpc_wire::server::RecoveryStatus>,
+    /// The latest heartbeat-reported per-wire output status — same cadence
+    /// and freshness caveats as [`Self::last_recovery`].
+    last_output_status: Option<Vec<lpc_wire::server::OutputWireStatus>>,
+    /// The latest heartbeat-reported average engine fps — the number the
+    /// device card's ▶ meta row shows. It is the DEVICE's render rate, not
+    /// the rate frames reach the card: those are different facts and the
+    /// card says so (fps · frame age).
+    ///
+    /// Real firmware only: `fw-esp32-common`'s server loop heartbeats every
+    /// 5 s, the host/browser runtimes never do — so this stays `None` on a
+    /// simulator session and for the first seconds of a device one.
+    last_fps: Option<f32>,
+    /// The projects the latest heartbeat said are loaded. The device card's
+    /// frame feed needs a `WireProjectHandle`, and the heartbeat already
+    /// carries one for every loaded project — so a non-lens session
+    /// acquires its handle for free, and re-acquires it after a device-side
+    /// reload, without spending a wire op.
+    last_loaded_projects: Option<Vec<lpc_wire::server::LoadedProject>>,
 }
 
 impl StudioServerClient {
@@ -46,6 +64,9 @@ impl StudioServerClient {
             protocol: protocol.into(),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
+            last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         }
     }
 
@@ -64,6 +85,9 @@ impl StudioServerClient {
             protocol,
             pending_logs,
             last_recovery: None,
+            last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         })
     }
 
@@ -76,6 +100,9 @@ impl StudioServerClient {
             protocol: connection_protocol(&session.connection().kind),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
+            last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
         }
     }
 
@@ -84,9 +111,28 @@ impl StudioServerClient {
     }
 
     pub async fn load_demo_project(&mut self) -> Result<LoadedDemoProject, UiError> {
+        self.load_deployed_files(
+            DEMO_PROJECT_STORAGE_ID,
+            DEMO_PROJECT_ID,
+            demo_project_deploy_files(),
+        )
+        .await
+    }
+
+    /// Deploy a file set as a project and load it: the storeless
+    /// load-as-push. `storage_id` is the runtime's project storage dir,
+    /// `display_id` the identity Studio shows (an example id for the demo
+    /// and the docs sims). The docs host rides this so its examples never
+    /// touch the library.
+    pub async fn load_deployed_files(
+        &mut self,
+        storage_id: &str,
+        display_id: &str,
+        files: Vec<lpa_client::ProjectDeployFile>,
+    ) -> Result<LoadedDemoProject, UiError> {
         let deploy = self
             .client
-            .deploy_project_files(DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files())
+            .deploy_project_files(storage_id, files)
             .await
             .map_err(map_client_error)?;
         let handle = deploy.value;
@@ -95,9 +141,9 @@ impl StudioServerClient {
             .project_inventory_read(handle)
             .await
             .map_err(map_client_error)?;
-        // The demo's display identity (`DEMO_PROJECT_ID`) is not its server
-        // filesystem path — resolve the real path by handle so server-root
-        // file reads (asset editor base bodies) can target it.
+        // The display identity (`display_id`) is not the server filesystem
+        // path — resolve the real path by handle so server-root file reads
+        // (asset editor base bodies) can target it.
         let loaded = self
             .client
             .project_list_loaded()
@@ -114,7 +160,7 @@ impl StudioServerClient {
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedDemoProject {
-            project_id: DEMO_PROJECT_ID.to_string(),
+            project_id: display_id.to_string(),
             handle_id: handle.id(),
             fs_root,
             inventory: ProjectInventorySummary::from(&inventory.value),
@@ -134,6 +180,13 @@ impl StudioServerClient {
         if let Some(recovery) = latest_recovery(&events) {
             self.last_recovery = Some(recovery.clone());
         }
+        if let Some(outputs) = latest_output_status(&events) {
+            self.last_output_status = Some(outputs.clone());
+        }
+        if let Some((fps, loaded)) = latest_heartbeat_telemetry(&events) {
+            self.last_fps = Some(fps);
+            self.last_loaded_projects = Some(loaded.clone());
+        }
         map_client_events(events)
     }
 
@@ -141,6 +194,31 @@ impl StudioServerClient {
     /// arrived on this client yet.
     pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
         self.last_recovery.as_ref()
+    }
+
+    /// The latest heartbeat-reported per-wire output status, if any
+    /// heartbeat carrying one has arrived on this client yet.
+    pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
+        self.last_output_status.as_deref()
+    }
+
+    /// The latest heartbeat-reported average engine fps (`None` until a
+    /// heartbeat lands on this client).
+    pub fn engine_fps(&self) -> Option<f32> {
+        self.last_fps
+    }
+
+    /// The handle of the project the latest heartbeat reported loaded — the
+    /// device card feed's read target, acquired without a wire op. `None`
+    /// until a heartbeat lands, or when the device has nothing loaded.
+    ///
+    /// The first entry is the answer: firmware loads one project, and a
+    /// host server with several has no card to feed.
+    pub fn loaded_project_handle(&self) -> Option<u32> {
+        self.last_loaded_projects
+            .as_ref()?
+            .first()
+            .map(|project| project.handle.id())
     }
 
     /// Open a library project on the runtime: whole-project replace →
@@ -818,6 +896,35 @@ fn latest_recovery(events: &[ClientEvent]) -> Option<&lpc_wire::server::Recovery
     })
 }
 
+/// The newest heartbeat-reported per-wire output status in an event batch.
+fn latest_output_status(
+    events: &[ClientEvent],
+) -> Option<&Vec<lpc_wire::server::OutputWireStatus>> {
+    events.iter().rev().find_map(|event| match event {
+        ClientEvent::Heartbeat {
+            outputs: Some(outputs),
+            ..
+        } => Some(outputs),
+        _ => None,
+    })
+}
+
+/// The newest heartbeat's fps + loaded-project list in an event batch: the
+/// two telemetry facts the device card reads off a heartbeat rather than
+/// spending a wire op on.
+fn latest_heartbeat_telemetry(
+    events: &[ClientEvent],
+) -> Option<(f32, &Vec<lpc_wire::server::LoadedProject>)> {
+    events.iter().rev().find_map(|event| match event {
+        ClientEvent::Heartbeat {
+            fps,
+            loaded_projects,
+            ..
+        } => Some((fps.avg, loaded_projects)),
+        _ => None,
+    })
+}
+
 /// Map side-channel client events to console log drafts.
 ///
 /// Healthy heartbeats are telemetry, not log content: they arrive every
@@ -1085,6 +1192,7 @@ mod tests {
             uptime_ms: 1_000,
             memory: None,
             recovery,
+            outputs: None,
         }
     }
 

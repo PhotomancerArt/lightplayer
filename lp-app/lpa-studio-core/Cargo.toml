@@ -23,6 +23,10 @@ lpa-link = { path = "../lpa-link", features = ["device-session"] }
 # lists, and opening an older-but-supported one migrates it in place.
 lpa-upgrade = { path = "../lpa-upgrade" }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
+# The client-side display-layout fallback resolves map2d documents with the
+# same resolver the engine and the device run (see
+# `app/project/control_display_layout_fallback`).
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }

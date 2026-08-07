@@ -84,8 +84,8 @@ pub use bus::{
 pub use color::{
     COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_CONFIG_SHAPE_NAME, GRADIENT_SHAPE_NAME, Gradient,
     GradientConfig, GradientError, GradientStop, INTERP_METHOD_SHAPE_NAME, InterpMethod,
-    MAX_CYCLE_SET, MAX_GRADIENT_STOPS, MIN_CYCLE_SET, MIN_GRADIENT_STOPS, gradient_config_lp_type,
-    gradient_lp_type,
+    MAX_CYCLE_SET, MAX_GRADIENT_STOPS, MIN_CYCLE_SET, MIN_GRADIENT_STOPS, StopsParseError,
+    gradient_config_lp_type, gradient_lp_type, parse_stops, print_stops,
 };
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Legacy semantic value kind used by the pre-slot property model.
@@ -118,13 +118,13 @@ pub use node::{
 };
 pub use nodes::{
     ArtifactPathResolutionError, Brightness, ButtonDef, ButtonDefView, ButtonState,
-    ButtonStateView, ChannelMetaDef, ChannelMetaDefView, ClockControls, ClockDef, ClockDefView,
-    ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, ControlRadioDef,
-    ControlRadioDefView, ControlRadioState, ControlRadioStateView, FixtureDef, FixtureDefView,
-    FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView,
-    FloatMode, FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType,
-    MappingConfig, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OutputChannelDef,
-    OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    ButtonStateView, CLOCK_TRANSPORT_SHAPE_NAME, ChannelMetaDef, ChannelMetaDefView, ClockDef,
+    ClockDefView, ClockState, ClockTransport, ColorOrder, ComputeShaderDef, ComputeShaderDefView,
+    ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView, FixtureDef,
+    FixtureDefView, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, FixtureState,
+    FixtureStateView, FloatMode, FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite,
+    LampType, MappingConfig, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter,
+    OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
     PlaylistEntryView, PlaylistState, PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL,
     STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,

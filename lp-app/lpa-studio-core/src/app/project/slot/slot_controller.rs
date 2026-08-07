@@ -581,10 +581,18 @@ impl SlotController {
         }
         let value = self.value()?;
         let ui_value = UiSlotValue::from_lp_value(value);
+        let gradient = crate::app::project::gradient_config_value(value);
         // Composite values don't fit the scalar stat hero: surface the type
-        // name as the compact value and the per-field readings as rows.
-        let mut produced = match &ui_value.kind {
-            crate::UiSlotValueKind::Struct { name, fields } => {
+        // name as the compact value and the per-field readings as rows. A
+        // palette is a struct too, but its fields (`space`, `method`,
+        // `count`, and the stop array) say nothing the strip does not say
+        // better — it carries the summary line and no field rows (M4 P2).
+        let mut produced = match (&gradient, &ui_value.kind) {
+            (Some(config), _) => UiProducedValue::new(
+                self.label.clone(),
+                crate::app::project::format_gradient_summary(config),
+            ),
+            (None, crate::UiSlotValueKind::Struct { name, fields }) => {
                 let type_name = name
                     .clone()
                     .unwrap_or_else(|| String::from(ui_value.kind.type_label()));
@@ -597,6 +605,7 @@ impl SlotController {
             }
             _ => UiProducedValue::new(self.label.clone(), ui_value.display),
         };
+        produced.gradient = gradient;
         produced.key = self.ui_key();
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();
@@ -661,10 +670,13 @@ impl SlotController {
 
     /// Split one settings row into its Debug part — appended **flat** to
     /// `debug_slots`, so a Debug field never renders nested under the record
-    /// that declared it (D4: the clock's `controls.running/rate/
-    /// scrub_offset_seconds` become three top-level Debug rows, not a
-    /// "Controls › Controls" group) — and the Setting remainder, returned for
-    /// the settings section. `None` when nothing but Debug fields remained.
+    /// that declared it (D4: a Debug field inside a record becomes a
+    /// top-level Debug row keyed by its full path, never a nested group;
+    /// the clock's `transport.*` fields flatten this way too, though their
+    /// rows then retire into the tape face —
+    /// `node_controller::retire_face_claimed_debug_rows`) — and the Setting
+    /// remainder, returned for the settings section. `None` when nothing
+    /// but Debug fields remained.
     ///
     /// A row with no Debug descendant takes the fast path and is built exactly
     /// as before, so the common case is unchanged.
@@ -1637,6 +1649,7 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
         ValueEditorHint::Dimensions => UiSlotEditorHint::Dimensions,
         ValueEditorHint::Affine2d => UiSlotEditorHint::Affine2d,
         ValueEditorHint::Power => UiSlotEditorHint::Power,
+        ValueEditorHint::Gradient => UiSlotEditorHint::Gradient,
         ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
             min: min.map(|value| value.0),
             max: max.map(|value| value.0),

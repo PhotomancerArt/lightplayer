@@ -919,6 +919,44 @@ impl Engine {
         };
         host.render_node_control_probe(product, request, target, display_layout)
     }
+
+    /// Ask a control producer for its display layout WITHOUT rendering it.
+    ///
+    /// The geometry half of [`Self::render_control_product_probe`], split out
+    /// for the published-frame read: that read already has the samples (the
+    /// output node published them last tick) and needs only the lamp
+    /// positions to draw them. Producers answer from cached mapping state, so
+    /// the cost is O(lamps) with no graph resolve and no shader work — which
+    /// is the whole point of not going through the control-product probe.
+    pub(crate) fn control_display_layout_probe(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+        display_layout: ControlDisplayLayoutRead,
+    ) -> Result<ControlDisplayLayoutProbeResult, SessionResolveError> {
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
+        };
+        host.node_control_display_layout(product, display_layout)
+    }
 }
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
@@ -2038,7 +2076,103 @@ impl EngineResolveHost<'_> {
             }
         }
     }
+
+    /// The geometry-only half of [`Self::render_node_control_probe`].
+    ///
+    /// Steals the producer exactly like the render probe does — the same
+    /// re-entrancy guard applies, since `control_display_layout` takes
+    /// `&mut self` on the node — but calls ONLY
+    /// [`crate::node::ControlNode::control_display_layout`]. No render, no
+    /// target, no samples touched.
+    fn node_control_display_layout(
+        &mut self,
+        product: ControlProduct,
+        request: ControlDisplayLayoutRead,
+    ) -> Result<ControlDisplayLayoutProbeResult, SessionResolveError> {
+        let node_id = product.node();
+        let revision = self.frame_revision;
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!(
+                    "display layout probe: unknown node {node_id:?}"
+                ))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Control { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                other => {
+                    let executing = other.is_executing();
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(if executing {
+                        format!(
+                            "display layout probe: node {node_id:?} is already executing; \
+                             re-entry through EngineSession is unsupported"
+                        )
+                    } else {
+                        format!("display layout probe: node {node_id:?} not alive")
+                    }));
+                }
+            }
+        };
+
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
+        let result = {
+            let Some(control_node) = node_runtime.control_node() else {
+                if let Some(entry) = self.tree.get_mut(node_id) {
+                    entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+                }
+                return Ok(ControlDisplayLayoutProbeResult::Unsupported {
+                    reason: format!(
+                        "node {node_id:?} renders no control product output {}",
+                        product.output()
+                    ),
+                });
+            };
+            let mut ctx = ControlRenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.frame_time_seconds,
+                self.safe_output_clamp_q16,
+                self,
+            );
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                control_display_layout_result(control_node, product, request, &mut ctx)
+            })
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("display layout probe: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        // A layout failure is NOT a node health event: the read is a passive
+        // observer of a node the tick is driving fine, so it reports the
+        // refusal in-band and leaves the node's status alone.
+        result.map_err(|e| SessionResolveError::other(format!("display layout probe: {e}")))
+    }
 }
+
+/// The most bytes a serialized display layout may occupy and still ride one
+/// project-read frame alongside its probe header and frame envelope.
+///
+/// The transport rejects any single event larger than
+/// [`lpc_wire::PROJECT_READ_FRAME_MAX_BYTES`], and that rejection is terminal
+/// for the whole read stream — an over-budget layout wedges the entire
+/// project view, not just one probe. Until layouts stream in bounded chunks
+/// (the "semantic layout split" escalation noted in
+/// `lpc-wire`'s probe tests), an oversized layout is refused here as
+/// `Unsupported`, which clients already render as a graceful fallback. The
+/// 2 KiB margin covers the probe header (extent, sample layout, product) and
+/// the frame envelope around the event.
+const DISPLAY_LAYOUT_WIRE_BUDGET: usize = lpc_wire::PROJECT_READ_FRAME_MAX_BYTES - 2048;
 
 fn control_display_layout_result(
     control_node: &mut dyn crate::node::ControlNode,
@@ -2063,7 +2197,19 @@ fn control_display_layout_result(
                 } if known == revision => {
                     Ok(ControlDisplayLayoutProbeResult::Unchanged { revision })
                 }
-                _ => Ok(ControlDisplayLayoutProbeResult::Layout(layout)),
+                _ => {
+                    let layout_len = lpc_wire::ser_write_json_len(&layout);
+                    if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
+                        return Ok(ControlDisplayLayoutProbeResult::Unsupported {
+                            reason: alloc::format!(
+                                "display layout is {layout_len} bytes serialized, over the \
+                                 {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
+                                 large need chunked streaming (not yet implemented)"
+                            ),
+                        });
+                    }
+                    Ok(ControlDisplayLayoutProbeResult::Layout(layout))
+                }
             }
         }
     }
@@ -2128,9 +2274,11 @@ fn slot_path_semantics_segments(
 
 /// The declared panel hint of the slot a binding consumes: the hint sits on
 /// the TOP-LEVEL declared field (`brightness.some` reads field
-/// `brightness`) in the node's def shape. `None` for undeclared slots
-/// (shader dynamic slots have no hint spelling yet) and for defs that are
-/// not loaded.
+/// `brightness`) in the node's def shape — or, for a shader's dynamic
+/// slots, as the `panel` field of the slot's authored def (a shader slot is
+/// authored data, so it spells the hint as a value where a native def
+/// spells it as `#[slot(panel = "show")]` shape metadata). `None` for
+/// undeclared slots and for defs that are not loaded.
 pub(crate) fn authored_def_slot_panel_hint(
     registry: &ProjectRegistry,
     slot_shapes: &SlotShapeRegistry,
@@ -2138,11 +2286,19 @@ pub(crate) fn authored_def_slot_panel_hint(
     slot: &SlotPath,
 ) -> Option<lpc_model::PanelHint> {
     let def = loaded_registry_def(registry, location).ok()?;
-    let shape = slot_shapes.get_shape(def.shape_id())?;
-    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
     let SlotPathSegment::Field(name) = slot.segments().first()? else {
         return None;
     };
+    let dynamic_slots = match def {
+        NodeDef::Shader(shader) => Some(&shader.consumed_slots),
+        NodeDef::ComputeShader(compute) => Some(&compute.consumed_slots),
+        _ => None,
+    };
+    if let Some(slots) = dynamic_slots {
+        return slots.entries.get(name.as_str())?.panel_hint();
+    }
+    let shape = slot_shapes.get_shape(def.shape_id())?;
+    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
     let (_, field) = shape.record_field_by_name(name)?;
     field.panel()
 }

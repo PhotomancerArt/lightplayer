@@ -44,6 +44,24 @@
 //!   is what keeps the counters plain `Relaxed` (staleness in a cross-core
 //!   stats snapshot is harmless) and the load/compare/store maxima in
 //!   [`Self::record_lag`] / [`Self::record_entry_delay`] lossless.
+//!
+//! * **Completion forwarding (the pusher deployment).** When a thread on the
+//!   ISR's own core observes a naturally completed frame through
+//!   [`ChannelState::is_complete`] (`Acquire`, pairing with the ISR's
+//!   `Release` in `finish`), every ISR access to the frame bytes
+//!   happens-before that observation — passes are serial in the single ISR
+//!   instance, and the last pass to touch the frame is the one that
+//!   published the completion. The observer may therefore forward
+//!   completion to a third core with its own `Release` store, and that core
+//!   may free or reuse the bytes after an `Acquire` load of the forwarded
+//!   flag, with **no `isr_seq` handshake involved**. The handshake remains
+//!   required exactly where it always was: aborting a frame that has *not*
+//!   completed. See `driver.rs`'s "pusher deployment" section for the full
+//!   three-actor contract, and note the mailbox that carries a frame
+//!   descriptor between cores must use `AtomicPtr` for the pointer —
+//!   round-tripping it through an address-sized integer loses provenance
+//!   (Miri flags it, and it is exactly the kind of thing that breaks under
+//!   a smarter compiler).
 
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU8, AtomicUsize};

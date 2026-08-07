@@ -1,0 +1,53 @@
+[package]
+name = "lp-cloud-store-sqlite"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Persistent lp-cloud-domain adapters: a rusqlite MetaStore plus filesystem and S3 blob stores"
+
+[dependencies]
+lp-cloud-domain = { path = "../lp-cloud-domain" }
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+lpc-history = { path = "../../lp-core/lpc-history" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# `bundled` compiles a known SQLite with the crate rather than linking
+# whatever the host happens to ship. The store's correctness rests on WAL
+# behaviour and pragma semantics, so the version is something we pin, not a
+# property of the deployment box.
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+# S3-compatible blob storage (Tigris). Optional but on by default: a
+# feature-gated adapter nobody compiles locally is an adapter that breaks in
+# CI. See `s3_blob_store` for the async bridge.
+#
+# Pinned to 0.13 rather than 0.14 on purpose: 0.14 moved to reqwest 0.13 and
+# an aws-lc-rs (cmake + C) crypto provider, which would put a second reqwest
+# and a second TLS stack in a workspace that already carries reqwest 0.12 and
+# ring. 0.13 reuses both.
+object_store = { version = "0.13", default-features = false, features = [
+    "aws",
+], optional = true }
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "net",
+    "time",
+], optional = true }
+
+[features]
+default = ["s3"]
+s3 = ["dep:object_store", "dep:tokio"]
+
+[dev-dependencies]
+# The conformance suite runs the same battery against the mem adapters and
+# these — a fake that drifts from the real store is a data-corruption bug
+# that keeps the tests green.
+lp-cloud-store-mem = { path = "../lp-cloud-store-mem" }
+tempfile = "3"
+
+[lints]
+workspace = true

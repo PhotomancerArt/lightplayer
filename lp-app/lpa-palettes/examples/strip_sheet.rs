@@ -11,8 +11,7 @@
 //! easing curve). Interpolation happens in the gradient's own colorspace,
 //! then the sampled color is converted to display sRGB for the PNG.
 
-use lpa_palettes::{PaletteCategory, all_palettes};
-use lpc_model::{Colorspace, Gradient, InterpMethod};
+use lpa_palettes::{PaletteCategory, all_palettes, sample_gradient_as_srgb};
 
 const SAMPLES: usize = 220;
 const ROW_HEIGHT: usize = 28;
@@ -87,98 +86,6 @@ fn category_tag(category: PaletteCategory) -> &'static str {
         PaletteCategory::CptCity => "cpt-city",
         PaletteCategory::LightplayerOriginal => "original",
     }
-}
-
-/// Sample `gradient` at `t` and convert the result to display sRGB.
-fn sample_gradient_as_srgb(gradient: &Gradient, t: f32) -> [f32; 3] {
-    let mut stops = gradient.stops.clone();
-    stops.sort_by(|a, b| a.at.total_cmp(&b.at));
-
-    let raw = match gradient.method {
-        InterpMethod::Step => sample_step(&stops, t),
-        InterpMethod::Linear | InterpMethod::Smooth => sample_linear(&stops, t),
-    };
-
-    to_display_srgb(gradient.space, raw)
-}
-
-fn sample_step(stops: &[lpc_model::GradientStop], t: f32) -> [f32; 3] {
-    let mut chosen = stops[0].c;
-    for stop in stops {
-        if stop.at <= t {
-            chosen = stop.c;
-        } else {
-            break;
-        }
-    }
-    chosen
-}
-
-fn sample_linear(stops: &[lpc_model::GradientStop], t: f32) -> [f32; 3] {
-    if t <= stops[0].at {
-        return stops[0].c;
-    }
-    let last = stops.len() - 1;
-    if t >= stops[last].at {
-        return stops[last].c;
-    }
-    for window in stops.windows(2) {
-        let [a, b] = window else { unreachable!() };
-        if t >= a.at && t <= b.at {
-            let span = (b.at - a.at).max(f32::EPSILON);
-            let f = (t - a.at) / span;
-            return [
-                a.c[0] + (b.c[0] - a.c[0]) * f,
-                a.c[1] + (b.c[1] - a.c[1]) * f,
-                a.c[2] + (b.c[2] - a.c[2]) * f,
-            ];
-        }
-    }
-    stops[last].c
-}
-
-/// Convert a sampled color from the gradient's authoring space to display
-/// (gamma-encoded) sRGB, for the PNG. `Srgb` is already display-encoded;
-/// `Oklab` goes through the standard Oklab -> linear sRGB matrices, then
-/// gamma-encodes.
-fn to_display_srgb(space: Colorspace, c: [f32; 3]) -> [f32; 3] {
-    match space {
-        Colorspace::Srgb => c,
-        Colorspace::LinearSrgb => c.map(linear_to_srgb),
-        Colorspace::Oklab => oklab_to_display_srgb(c),
-        // Hsl/Hsv/Oklch aren't used by the M3 catalog; fall back to a
-        // clamp so the sheet never panics if one is added later.
-        Colorspace::Hsl | Colorspace::Hsv | Colorspace::Oklch => [
-            c[0].clamp(0.0, 1.0),
-            c[1].clamp(0.0, 1.0),
-            c[2].clamp(0.0, 1.0),
-        ],
-    }
-}
-
-fn linear_to_srgb(c: f32) -> f32 {
-    if c <= 0.0031308 {
-        (c * 12.92).clamp(0.0, 1.0)
-    } else {
-        (1.055 * c.powf(1.0 / 2.4) - 0.055).clamp(0.0, 1.0)
-    }
-}
-
-fn oklab_to_display_srgb(lab: [f32; 3]) -> [f32; 3] {
-    let [l, a, b] = lab;
-    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
-    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
-    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
-
-    let l3 = l_ * l_ * l_;
-    let m3 = m_ * m_ * m_;
-    let s3 = s_ * s_ * s_;
-
-    let r = 4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3;
-    let g = -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3;
-    let bl = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
-
-    [linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(bl)]
 }
 
 /// One tick mark per non-space character — not legible text (a bitmap font

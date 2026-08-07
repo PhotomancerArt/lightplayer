@@ -25,9 +25,10 @@ use lpa_client::BackoffPolicy;
 use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSession};
 
 use crate::app::places::{DeviceSyncState, HardwareId};
+use crate::app::runtime_pool::card_feed::CardFeedState;
 use crate::app::studio::refresh_cadence::{
-    DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX,
-    REFRESH_DUE_SLACK, RefreshCadence,
+    DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE,
+    PASSIVE_REFRESH_BACKOFF_MAX, REFRESH_DUE_SLACK, RefreshCadence,
 };
 use crate::{
     RuntimeId, ServerFailureKind, ServerState, StudioServerClient, UiError, UiIssue, UiLogDraft,
@@ -248,11 +249,34 @@ pub struct RuntimeSession {
     /// on device sessions — their loaded project is reconcile-bundle
     /// evidence (`device_sync`), never this field.
     sim_loaded_project: Option<SimLoadedProject>,
+    /// The board the SIM session claims to be (gallery-rework vision D4),
+    /// in the registry's `vendor/product` vocabulary — the same strings as
+    /// `RegisteredDevice.board_id` and `ProjectManifest.target`.
+    ///
+    /// Advisory context ONLY: nothing about the worker changes, exactly as
+    /// the registry's `board_id` changes nothing about a device. It feeds
+    /// the card's "as \<board\>" line and the output face's pin diagram.
+    ///
+    /// INHERITED from the project the sim runs: load-as-push sets it from
+    /// that project's manifest `target`, so the persisted fact lives in
+    /// `project.json` and is re-derived on every load (the sim itself
+    /// persists nothing — D22, its card exists only while the session
+    /// does). It is also settable directly, for the moment at sim
+    /// (re)creation before any project has landed. `None` — no board known
+    /// — is the ordinary default.
+    sim_board_id: Option<String>,
     /// The per-device console tail (D42): the last [`CONSOLE_TAIL_LEN`]
     /// stamped lines this session's drains produced. The card's console
     /// strip + tab render this; it dies with the session (the console is
     /// the session's, not the app's).
     console_tail: VecDeque<UiLogEntry>,
+    /// This session's live frame feed — the ▶ card tab's state
+    /// (honest-device preview P2). Deliberately NOT cleared when the server
+    /// protocol detaches: the last in-session frame is what an offline card
+    /// shows (Q4). Only its connection-scoped half (project handle,
+    /// geometry) is invalidated, in [`Self::disconnect_server`] and at each
+    /// fresh attach.
+    card_feed: CardFeedState,
 }
 
 impl RuntimeSession {
@@ -276,7 +300,9 @@ impl RuntimeSession {
             last_refresh_completed_at: None,
             heartbeat_device_state: None,
             sim_loaded_project: None,
+            sim_board_id: None,
             console_tail: VecDeque::new(),
+            card_feed: CardFeedState::default(),
         }
     }
 
@@ -347,6 +373,23 @@ impl RuntimeSession {
         }
     }
 
+    /// The board manifest's measured total-LED envelope from the hello, when
+    /// the device reported one (a SOFT limit — evidence, never a refusal).
+    pub fn total_led_budget(&self) -> Option<u32> {
+        match self.device_state() {
+            Some(DeviceState::Ready { hello }) => hello.hardware.total_led_budget,
+            _ => None,
+        }
+    }
+
+    /// The latest heartbeat-reported per-wire output status, if one has
+    /// arrived on this session yet.
+    pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::output_wire_status)
+    }
+
     /// The project this SIM session runs, when one has been pushed onto it
     /// (`None` on device sessions and on a sim with nothing loaded).
     pub fn sim_loaded_project(&self) -> Option<&SimLoadedProject> {
@@ -359,6 +402,21 @@ impl RuntimeSession {
     pub fn set_sim_loaded_project(&mut self, project: Option<SimLoadedProject>) {
         if self.is_sim() {
             self.sim_loaded_project = project;
+        }
+    }
+
+    /// The board this SIM session claims to be (see [`Self::sim_board_id`]'s
+    /// field doc). Always `None` on device sessions — a device's board is
+    /// the registry's `board_id`, never this.
+    pub fn sim_board_id(&self) -> Option<&str> {
+        self.sim_board_id.as_deref()
+    }
+
+    /// Give the SIM session a board identity (D4), or clear it. Ignored on
+    /// device sessions. Advisory: no engine or worker behavior follows.
+    pub fn set_sim_board_id(&mut self, board_id: Option<String>) {
+        if self.is_sim() {
+            self.sim_board_id = board_id;
         }
     }
 
@@ -418,6 +476,40 @@ impl RuntimeSession {
         }
     }
 
+    // -----------------------------------------------------------------
+    // Card feed (honest-device preview P2)
+    // -----------------------------------------------------------------
+
+    /// This session's live frame feed (the ▶ card tab's state).
+    pub fn card_feed(&self) -> &CardFeedState {
+        &self.card_feed
+    }
+
+    pub(crate) fn card_feed_mut(&mut self) -> &mut CardFeedState {
+        &mut self.card_feed
+    }
+
+    /// The completion-gap between this session's frame reads.
+    pub fn card_feed_interval(&self) -> Duration {
+        DEVICE_CARD_FEED_INTERVAL
+    }
+
+    /// The engine fps the latest heartbeat on this session reported — the
+    /// number the card's ▶ meta row shows next to the frame age.
+    pub fn engine_fps(&self) -> Option<f32> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::engine_fps)
+    }
+
+    /// The loaded-project handle the latest heartbeat reported, if one has
+    /// arrived (the feed's free handle acquisition).
+    pub fn heartbeat_project_handle(&self) -> Option<u32> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::loaded_project_handle)
+    }
+
     fn install_client(&mut self, client: StudioServerClient) {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
@@ -425,6 +517,8 @@ impl RuntimeSession {
         // A fresh connection means a fresh server process/boot: its effective
         // log level is back at the init default.
         self.requested_log_level = UiLogLevel::Info;
+        // …and a fresh set of project handles. The last frame survives.
+        self.card_feed.invalidate_connection();
     }
 
     /// The session's wire client, or the `MissingSession` surface every
@@ -616,6 +710,9 @@ impl RuntimeSession {
     pub fn disconnect_server(&mut self) {
         self.client = None;
         self.server_state = ServerState::Disconnected;
+        // The handle and the geometry were claims about the connection that
+        // just ended; the last frame is a fact about the board and stays.
+        self.card_feed.invalidate_connection();
     }
 
     // -----------------------------------------------------------------

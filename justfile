@@ -182,7 +182,7 @@ web-demo-deploy: web-demo-build
     # Commit and push
     cd "$tmp_dir/wt"
     git add -A
-    url="https://light-player.github.io/lightplayer/"
+    url="https://photomancerart.github.io/lightplayer/"
     if git diff --cached --quiet; then
         echo "No changes to deploy. $url"
     else
@@ -554,6 +554,35 @@ studio-web: studio-web-build
     echo "Serving LightPlayer Studio at http://127.0.0.1:${port}/"
     cd target/dx/lpa-studio-web/release/web/public
     python3 -m http.server "${port}" --bind 127.0.0.1
+
+# ============================================================================
+# Cloud service (lp-cloud-server)
+# ============================================================================
+
+# Run the cloud edge locally: in-memory state, filesystem blobs, dev auth on.
+#
+# Builds NOTHING web — with no LP_CLOUD_STATIC_DIR the service serves a
+# placeholder page and the API/blob planes work as normal. To serve the real
+# app, build the artifact once (`just studio-web-deploy-dir`) and pass it:
+#
+#   LP_CLOUD_STATIC_DIR=target/pages/studio just cloud-serve
+#
+# Persist across restarts with LP_CLOUD_STORE=sqlite (data under
+# LP_CLOUD_DATA_DIR, default target/cloud-data). The printed URL is the
+# source of truth — the port comes from scripts/dev-port.sh, never a pin.
+cloud-serve:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="$(scripts/dev-port.sh cloud-serve "${LP_CLOUD_PORT:-}")"
+    echo "Serving the LightPlayer cloud service at http://127.0.0.1:${port}/"
+    echo "Dev login:  http://127.0.0.1:${port}/auth/dev?email=you@example.com"
+    LP_CLOUD_PORT="${port}" \
+    LP_CLOUD_BASE_URL="http://127.0.0.1:${port}" \
+    LP_CLOUD_STORE="${LP_CLOUD_STORE:-mem}" \
+    LP_CLOUD_BLOBS="${LP_CLOUD_BLOBS:-fs}" \
+    LP_CLOUD_STATIC_DIR="${LP_CLOUD_STATIC_DIR:-}" \
+    LP_CLOUD_DEV_AUTH=1 \
+        cargo run -p lp-cloud-server
 
 # ============================================================================
 # Schema artifacts (schemas/) - generated from the model shape catalog
@@ -1711,8 +1740,24 @@ test-xt-host:
 test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
+# The browser CPU tier's shader frontend, on the engine's own palette suite.
+#
+# `fw-browser` pins `ShaderFrontend::Naga` while devices and native servers use
+# `LpsGlsl`, so the Naga half of the palette contract has no coverage in a
+# default-feature build: `lpc-engine`'s `naga` feature is off, and the
+# `#[cfg(feature = "naga")]` test compiles to nothing and passes having run
+# nothing (the failure mode `test-xt-host` documents above). Separate
+# invocation because turning `naga` on unifies it across the whole
+# default-members build.
+#
+# This is the only test that couples the engine's *generated* shader header to
+# the frontend the browser actually compiles it with, so a change to either
+# side that blacks out Studio's palette previews fails here.
+test-browser-shader-frontend:
+    cargo test -p lpc-engine --features naga --lib -- shader_palette
+
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host test-xt-host
+test-rust: test-rust-core test-studio-host test-xt-host test-browser-shader-frontend
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the

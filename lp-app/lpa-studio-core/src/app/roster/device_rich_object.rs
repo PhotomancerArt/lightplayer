@@ -86,6 +86,10 @@ pub struct DeviceRichInput<'a> {
     /// The port as the app can name it (endpoint label + grant short id).
     /// Web Serial never exposes the OS path, so this is the whole truth.
     pub port_label: Option<&'a str>,
+    /// The REMEMBERED board (registry `board_id`), for the Details line
+    /// when no live hardware report carries one (G1b ruling 9). Live
+    /// links prefer `hardware.board_id` — the unit's own claim.
+    pub board_id: Option<&'a str>,
     /// f64 epoch seconds for status-line recency copy.
     pub now_secs: f64,
 }
@@ -117,21 +121,21 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
     if let Some(sub_line) = input.state.sub_line(input.now_secs) {
         lines.push(RichLine::new("note", sub_line));
     }
-    // The running family also offers the editor entry as a visible CTA
-    // on the card face (2026-07-26 walk: the grow ⤢ alone was too easy
-    // to miss — it stays, but the Status tab now says it out loud).
-    // Running-up-to-date's STATE affordance already is the open — only
-    // the drifted states need it added beside their Push/Review.
-    let state_affordance = input.state.affordance();
-    let open_editor = (matches!(
-        input.state,
-        RosterCardState::RunningUpToDate
-            | RosterCardState::RunningBehind { .. }
-            | RosterCardState::EditedOnDevice { .. }
-    ) && state_affordance != Some(RosterAffordance::OpenEditor))
-    .then_some(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
+    // No standalone editor CTA here (G1b ruling 5): the 2026-07-26
+    // "⤢ is too easy to miss" fix moved onto the ▶ tab's Editor button,
+    // so the front door carries only the state-table verbs.
+    //
+    // …and Reconnect moved out too (G1b ruling 8): a card WITH a ▶ tab
+    // (project_name present — the same has_play rule the tab set uses)
+    // carries Reconnect inside the picture box, where the gone device
+    // actually shows. A card with no ▶ keeps it here: there is no other
+    // surface.
+    let state_affordance = input
+        .state
+        .affordance()
+        .filter(|a| !(*a == RosterAffordance::Reconnect && input.project_name.is_some()));
     // §3c-2: the diverged face carries BOTH verbs — Keep-both rides
-    // beside the state's Use-board-copy, then the editor CTA.
+    // beside the state's Use-board-copy.
     let keep_both = matches!(input.state, RosterCardState::EditedOnDevice { .. })
         .then_some(DeviceDetailAffordance::Roster(RosterAffordance::KeepBoth));
     RichSection {
@@ -140,13 +144,11 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         lines,
         chip: None,
         // The state-table affordance stays FIRST (it is the rollup's
-        // primary — Push/Review must not be demoted); the editor CTA
-        // rides second.
+        // primary — Push/Review must not be demoted).
         affordances: state_affordance
             .map(DeviceDetailAffordance::Roster)
             .into_iter()
             .chain(keep_both)
-            .chain(open_editor)
             .collect(),
         weight: RichWeight::Actionable,
     }
@@ -224,6 +226,18 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     let mut lines = Vec::new();
     if let Some(uid) = input.uid {
         lines.push(RichLine::new("uid", uid));
+    }
+    // The REMEMBERED board (registry fact), when no live hardware report
+    // carries one — an offline card's Details still say what the unit is
+    // (G1b ruling 9: the front door shows everything we remember). A live
+    // hello's own `hardware.board_id` claim renders via capability_lines.
+    if input.hardware.and_then(|hw| hw.board_id.as_ref()).is_none()
+        && let Some(board_id) = input.board_id
+    {
+        lines.push(RichLine::new(
+            "board",
+            crate::app::roster::board_display_name(board_id),
+        ));
     }
     // Everything knowable about an unprovisioned board rides here too
     // (gate-1 sitting, 2026-08-03): before any firmware hello the tab
@@ -657,10 +671,9 @@ mod tests {
 
         let rollup = view.rollup();
         assert_eq!(rollup.tone, UiStatusKind::Neutral);
-        assert_eq!(
-            rollup.affordance,
-            Some(&DeviceDetailAffordance::Roster(RosterAffordance::Reconnect))
-        );
+        // G1b ruling 8: this card has a project (a ▶ tab), so Reconnect
+        // renders in the picture box instead of the front door.
+        assert_eq!(rollup.affordance, None);
         assert_eq!(
             view.sections.last().unwrap().affordances,
             vec![
@@ -913,6 +926,7 @@ mod tests {
             bundled_fw: None,
             detected_chip: None,
             port_label: None,
+            board_id: None,
             now_secs: NOW,
         }
     }

@@ -1,8 +1,8 @@
-pub mod clock_controls;
 pub mod clock_def;
 pub mod clock_state;
+pub mod clock_transport;
 
 pub use crate::slot_views::ClockDefView;
-pub use clock_controls::ClockControls;
 pub use clock_def::ClockDef;
 pub use clock_state::ClockState;
+pub use clock_transport::{CLOCK_TRANSPORT_SHAPE_NAME, ClockTransport};

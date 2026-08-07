@@ -13,9 +13,9 @@ use lpa_studio_core::{
     UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
     UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
     UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
-    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
-    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
-    UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
+    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview,
+    UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
 
 use crate::app::node::node_story_fixtures::{
@@ -136,6 +136,57 @@ pub(crate) fn toggle_control(
         state,
         aspects: aspect_slot.visible_aspects(),
     }
+}
+
+/// One palette swatch control (M4 P3): the closed face of the chooser.
+///
+/// Its value is the WHOLE `GradientConfig` — built through the model's own
+/// storage, exactly as the projection builds one — and its emit family says
+/// a pick replaces the config outright. `shared` is the channel-driven
+/// case: an authored config channel puts the swatch on the module panel and
+/// every reader of that channel takes the config whole.
+pub(crate) fn palette_swatch_control(
+    label: &str,
+    config: &lpc_model::GradientConfig,
+    state: UiSlotFieldState,
+    shared: bool,
+) -> UiPanelControl {
+    let source = if shared {
+        UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:palette"))
+    } else {
+        UiSlotSourceState::Unset
+    };
+    let slot_value = crate::app::node::node_story_fixtures::gradient_slot_value(config);
+    let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
+        .with_state(state.clone())
+        .with_source(source);
+    // Same rule as the knob fixture: a label is display text, a story
+    // address is a slot PATH, and a path rejects spaces.
+    let slug = label.replace(' ', "_");
+    let mut control = UiPanelControl {
+        emit: UiPanelEmit::Gradient,
+        label: label.to_string(),
+        address: Some(story_slot_address(&format!(
+            "consumed[{slug}].gradient.some"
+        ))),
+        widget: UiPanelWidget::PaletteSwatch,
+        value: slot_value,
+        live_value: None,
+        panel_target: None,
+        unit: None,
+        state,
+        aspects: aspect_slot.visible_aspects(),
+    };
+    if shared {
+        control.panel_target = Some(lpa_studio_core::UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpa_studio_core::NodeId::new(1),
+            },
+            channel: "palette".to_string(),
+            engaged: false,
+        });
+    }
+    control
 }
 
 /// Bus binding used by every "bound" control state.
@@ -268,11 +319,61 @@ pub(crate) fn phasor_reading(
     }
 }
 
-/// A clock face in one of the listing's three states.
+/// A deterministic transport block: the tape anchors on these values and
+/// story capture needs a frame-zero paint that never depends on wall time.
+pub(crate) fn clock_transport(
+    seconds: f32,
+    running: bool,
+    rate: f32,
+    scrub_offset_seconds: f32,
+) -> lpa_studio_core::UiClockTransport {
+    lpa_studio_core::UiClockTransport {
+        seconds,
+        running,
+        rate,
+        scrub_offset_seconds,
+        running_address: Some(story_slot_address("transport.running")),
+        rate_address: Some(story_slot_address("transport.rate")),
+        scrub_address: Some(story_slot_address("transport.scrub_offset_seconds")),
+        running_override: None,
+        rate_override: None,
+        scrub_override: None,
+    }
+}
+
+/// [`clock_transport`] with every value carrying an ACTIVE debug override
+/// — the changed-tint + per-value Clear state (the paused/fast/scrubbed
+/// stories stay clean on purpose: staged values and overrides are
+/// different facts).
+pub(crate) fn clock_transport_overridden(
+    seconds: f32,
+    running: bool,
+    rate: f32,
+    scrub_offset_seconds: f32,
+) -> lpa_studio_core::UiClockTransport {
+    let mut transport = clock_transport(seconds, running, rate, scrub_offset_seconds);
+    transport.running_override = transport.running_address.clone();
+    transport.rate_override = transport.rate_address.clone();
+    transport.scrub_override = transport.scrub_address.clone();
+    transport
+}
+
+/// A clock face in one of the listing's three states, transport running at
+/// ×1 from the spike's 7:27 (447 s).
 pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
+    clock_face_with_transport(timebase, phasors, clock_transport(447.0, true, 1.0, 0.0))
+}
+
+/// [`clock_face`] with the transport block a story chooses (paused,
+/// scrubbed, fast, long-running).
+pub(crate) fn clock_face_with_transport(
+    timebase: UiTimebaseState,
+    phasors: Vec<UiPhasorReading>,
+    transport: lpa_studio_core::UiClockTransport,
+) -> UiClockFace {
     let mut face =
         UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
-    face.seconds = Some("42.35".to_string());
+    face.transport = Some(transport);
     face.timebase = timebase;
     face.phasors = phasors;
     face
@@ -703,6 +804,7 @@ fn output_slot_address(path: &str) -> ProjectSlotAddress {
 /// (an absent option has nothing to write to until it is included).
 pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutputChannelRow {
     UiOutputChannelRow {
+        wire_status: None,
         key,
         endpoint_display: format!("ws281x:local:{pin}"),
         pin_label: pin.to_string(),
@@ -786,6 +888,7 @@ pub(crate) fn output_face(
         }
     }
     let mut face = UiOutputFace {
+        led_budget: None,
         channels,
         channels_address: Some(output_slot_address("channels")),
         input_binding: Some("bus:show.control".to_string()),

@@ -116,3 +116,19 @@ too old to migrate shows an honest card/pane state naming the remedy, not
 a parser error. All three are now true; the entry stays open (`paying-
 down`, not `retired`) only for the two remaining items above, each with
 its own trigger.
+
+**Cloud surfaces (2026-08-06, `2026-08-06-cloud-service-architecture.md`)**
+— the lp-cloud service added three format-bearing surfaces, all
+version-and-refuse, none migrated:
+
+- **`CLOUD_API_VERSION`** in every `CloudCall`/`CloudReply` envelope —
+  checked at both edges; a mismatch is a named refusal (stale open tabs
+  reload; sync state is derived from local history, so refusals never
+  strand data).
+- **Server-stored event logs** — the server validates pushed events by
+  replay through its own `lpc-history` build; a client pushing an event
+  kind the server's build predates is refused as malformed. Server and
+  clients deploy from the same repo, so the skew window is deploy-sized,
+  but it exists.
+- **`SidecarMeta.format_version`** — stored and served verbatim, never
+  interpreted server-side; the consuming client applies its own gate.

@@ -65,6 +65,16 @@ pub enum EventKind {
         device: PrefixedUid,
         observed: ContentHash,
     },
+    /// A divergence was resolved by choosing one side wholesale (a
+    /// clobber join — the DAG's only non-linear node; see the
+    /// project-history-dag-joins ADR). The head after this event is
+    /// `kept`; `set_aside` remains reachable — nothing is destroyed,
+    /// and the history UI can restore it. A future *computed* merge
+    /// will reuse this join shape with derived content.
+    Joined {
+        kept: ContentHash,
+        set_aside: ContentHash,
+    },
 }
 
 impl EventKind {
@@ -133,6 +143,10 @@ mod tests {
             EventKind::PulledFromDevice {
                 device: uid(UidPrefix::Device),
             },
+            EventKind::Joined {
+                kept: ContentHash::of(b"mine"),
+                set_aside: ContentHash::of(b"theirs"),
+            },
         ];
         for kind in events {
             let event = HistoryEvent {
@@ -170,6 +184,22 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&created).unwrap(),
             "{\"at\":2.0,\"kind\":\"Created\"}"
+        );
+
+        let joined = HistoryEvent {
+            at: 3.0,
+            kind: EventKind::Joined {
+                kept: ContentHash::of(b"mine"),
+                set_aside: ContentHash::of(b"theirs"),
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&joined).unwrap(),
+            alloc::format!(
+                "{{\"at\":3.0,\"kind\":{{\"Joined\":{{\"kept\":\"{}\",\"set_aside\":\"{}\"}}}}}}",
+                ContentHash::of(b"mine"),
+                ContentHash::of(b"theirs")
+            )
         );
     }
 

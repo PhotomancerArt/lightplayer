@@ -17,5 +17,11 @@ mod unsaved_gate;
 mod web_app;
 
 fn main() {
+    // Before ANYTHING reads the URL — the router's boot parse, but also the
+    // story book's and the preview lab's own early-return checks inside
+    // `App` — turn a legacy `#/…` location into its path equivalent. Old
+    // bookmarks, pasted links and the story-capture harness all still speak
+    // hash; this keeps them working, and it is remove-never.
+    router::install_legacy_hash_shim();
     dioxus::launch(web_app::App);
 }

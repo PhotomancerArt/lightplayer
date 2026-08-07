@@ -7,6 +7,13 @@
   constraint in part — see below), `2026-08-02-classic-hli-refill.md` (the masking
   family this sidesteps)
 
+> **Superseded in part (2026-08-05)** by
+> `2026-08-05-ws281x-transmission-on-app-core.md`: core 1 no longer merely
+> idles in `waiti 0` between interrupts — it runs the wire pusher
+> (admission, slot binding, pad re-mux, frame starts), and the "nothing on
+> this core ever masks interrupts" phrasing is amended to a two-instruction
+> masked window in the pusher's idle path. Everything else here stands.
+
 ## Context
 
 M4 (concurrent flush) established that on the classic ESP32, WS281x transmission was

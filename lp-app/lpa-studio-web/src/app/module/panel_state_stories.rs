@@ -6,17 +6,18 @@
 //! *visibly distinct* states. These stories put them next to each other so
 //! that is a judgement about pixels rather than about prose.
 //!
-//! The shipped treatment: **amber** (`status-attention`) for engaged. Not
-//! violet — bound means *wired*, engaged means *captured* (P6). Not green
-//! — green is valid-only. Not the blue live family — that is a transient
-//! unsaved edit. A dedicated `status-engaged` token family is the eventual
-//! home; what is under test is whether amber reads as "held".
+//! The shipped treatment: **gold** (`status-engaged`, minted at the M4 P6
+//! gate) for engaged. Not violet — bound means *wired*, engaged means
+//! *captured* (P6). Not green — green is valid-only. Not the blue live
+//! family — that is a transient unsaved edit. Not attention-orange — that
+//! stays device/roster health.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, root_module_node_view, three_state_panel,
+    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, palette_panel, root_module_node_view,
+    three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -33,7 +34,7 @@ fn PanelCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "The three panel states across all three widget families, with NO sublabels — a control is a widget, a label, and a value. Read-at-default = quiet accent, subtle label. Read-following = violet at the LIVE value. Engaged = amber arc/fill/ring plus the per-control reset glyph. Everything the old captions said now lives behind the label (see control-detail)."
+    description = "The three panel states across all three widget families, with NO sublabels — a control is a widget, a label, and a value. Read-at-default = quiet accent, subtle label. Read-following = violet at the LIVE value. Engaged = gold arc/fill/ring plus the per-control reset glyph. Everything the old captions said now lives behind the label (see control-detail)."
 )]
 fn three_states() -> Element {
     rsx! {
@@ -48,7 +49,7 @@ fn three_states() -> Element {
 }
 
 #[story(
-    description = "Reset granularity (P2 clear): per control — the amber revert glyph beside the label, present ONLY while engaged — per nested group, in its box border beside the name, and per module, upper right, counting everything under the scope. An untouched panel shows no destructive control at all, so the glyph's presence is itself part of the state signal."
+    description = "Reset granularity (P2 clear): per control — the gold revert glyph beside the label, present ONLY while engaged — per nested group, in its box border beside the name, and per module, upper right, counting everything under the scope. An untouched panel shows no destructive control at all, so the glyph's presence is itself part of the state signal."
 )]
 fn reset_gestures() -> Element {
     rsx! {
@@ -82,7 +83,7 @@ fn auto_save_off() -> Element {
 }
 
 #[story(
-    description = "Walkable Read → Latch → Clear (P2). Drag any knob: the first touch materializes its panel writer and the control turns amber and captures the channel; the reset glyph or the panel-level reset drops the writer and the control falls back to following the project. Latch, not Touch — letting go changes nothing."
+    description = "Walkable Read → Latch → Clear (P2). Drag any knob: the first touch materializes its panel writer and the control turns engaged gold and captures the channel; the reset glyph or the panel-level reset drops the writer and the control falls back to following the project. Latch, not Touch — letting go changes nothing."
 )]
 fn latch_walkthrough() -> Element {
     // Start from the pristine Read face, so the FIRST touch is the thing
@@ -147,7 +148,22 @@ fn group_detail() -> Element {
 }
 
 #[story(
-    description = "Engaged amber vs bound violet, one channel, one range, side by side — the direct comparison behind P-Q2. The left knob is wired and following its writer; the right one has been captured and holds. Nothing on this panel is green."
+    description = "Palette swatches on a module panel, in the three panel states (M4 P3). The closed face is mode-adaptive: a HELD palette is one full-width strip reading `5 stops`; a CYCLE is its member set as equal segments of one band, reading `↻ 4 · 20 s` — the P6 gate's Step voice, plain seconds. The chevron says a chooser lives behind the band (it arrives in P4; the band is deliberately inert here). Colors are the existing families — violet following, engaged gold held with its reset glyph — and no live member ring, because a panel control has no phase reading in hand."
+)]
+fn palette_swatches() -> Element {
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: palette_panel(),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Engaged gold vs bound violet, one channel, one range, side by side — the direct comparison behind P-Q2. The left knob is wired and following its writer; the right one has been captured and holds. Nothing on this panel is green."
 )]
 fn engaged_vs_bound() -> Element {
     let mut panel = three_state_panel();

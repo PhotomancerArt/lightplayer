@@ -1,27 +1,24 @@
-//! Mapping view options for the control-product lamp display.
+//! Mapping view options and the toggle bar shared across the output
+//! section's view ⇄ edit flip.
 //!
-//! The lamp view is one renderer with options (D7 of the 2D mapping plan):
-//! `live` colors lamps from the control frame (the classic preview),
-//! `universes` colors by derived DMX universe, `numbers` prints wiring-order
-//! indices inside lamps, and `arrows` overlays wiring-direction arrows —
-//! per-path runs plus a dashed chain hop between consecutive paths. Options
-//! compose; precedence for lamp fill is live > universes > neutral.
+//! Wiring instruments — `numbers`, `arrows`, `universes` — are **edit-mode
+//! tools**: inspecting how a fixture is wired is an authoring activity, so
+//! only the mapping editor renders them and only edit mode offers their
+//! toggles. View mode is a product display: `live` colors lamps from the
+//! control frame, off paints the neutral layout, and that is the whole
+//! surface (see `LampView`).
 //!
-//! The palette and arrow geometry live in `lpa-mapping-editor` (shared with
-//! the editor canvas); this module adapts `ControlLayout2d` to that neutral
-//! input and keeps the Studio-side SVG overlay + toggle chrome components.
+//! These options are still the bridge type for the shared toggle state: the
+//! bar survives the flip, so one state feeds the display renderer and the
+//! editor canvas.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{ArrowInput, EditorViewOptions, wiring_arrows};
-use lpa_studio_core::ControlLayout2d;
+use lpa_mapping_editor::EditorViewOptions;
 
 use crate::base::icon::{StudioIcon, StudioIconName};
 
-// The palette/derivation and arrow geometry live in the editor crate so the
-// face renderer and the mapping editor share one implementation.
-pub use lpa_mapping_editor::{MapArrowOverlay, neutral_lamp_rgb, universe_rgb};
-
-/// View options for the lamp map display.
+/// View options for the lamp map display. `numbers`/`arrows`/`universes`
+/// drive the mapping editor only — nothing in view mode reads them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapViewOptions {
     pub numbers: bool,
@@ -66,6 +63,7 @@ impl MapViewOptions {
             universes: self.universes,
             live: self.live,
             fit_preview: false,
+            reference: true,
         }
     }
 
@@ -79,72 +77,6 @@ impl MapViewOptions {
     }
 }
 
-/// Build wiring arrows from a control display layout: adapt the layout to
-/// the shared neutral geometry (1000-unit-wide view, aspect from the hints).
-#[must_use]
-pub fn wiring_arrow_overlay(layout: &ControlLayout2d) -> MapArrowOverlay {
-    const VIEW_W: f32 = 1000.0;
-    let aspect = layout.width_hint.max(1) as f32 / layout.height_hint.max(1) as f32;
-    let view_height = VIEW_W / aspect;
-    let positions: Vec<[f32; 2]> = layout
-        .lamps
-        .iter()
-        .map(|lamp| [lamp.center[0] * VIEW_W, lamp.center[1] * view_height])
-        .collect();
-    let spans: Vec<(u32, u32)> = layout
-        .paths
-        .iter()
-        .map(|span| (span.first_lamp, span.lamp_count))
-        .collect();
-    wiring_arrows(&ArrowInput {
-        positions: &positions,
-        spans: &spans,
-        view_width: VIEW_W,
-        view_height,
-        end_gap: 16.0,
-        min_len: 34.0,
-    })
-}
-
-/// The wiring-arrow SVG overlay, absolutely positioned over the lamp layout.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn MapArrowsOverlay(overlay: MapArrowOverlay) -> Element {
-    if overlay.segs.is_empty() {
-        return rsx! {};
-    }
-    rsx! {
-        svg {
-            class: "ux-map-arrows",
-            view_box: "0 0 {overlay.view_width} {overlay.view_height}",
-            preserve_aspect_ratio: "none",
-            defs {
-                marker {
-                    id: "ux-map-arrow-head",
-                    view_box: "0 0 8 8",
-                    ref_x: "7",
-                    ref_y: "4",
-                    marker_width: "5",
-                    marker_height: "5",
-                    orient: "auto-start-reverse",
-                    path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "currentColor" }
-                }
-            }
-            for (index, seg) in overlay.segs.iter().enumerate() {
-                line {
-                    key: "{index}",
-                    class: if seg.chain { "ux-map-arrow-chain" } else { "ux-map-arrow-wire" },
-                    x1: "{seg.x1}",
-                    y1: "{seg.y1}",
-                    x2: "{seg.x2}",
-                    y2: "{seg.y2}",
-                    marker_end: "url(#ux-map-arrow-head)",
-                }
-            }
-        }
-    }
-}
-
 /// Pinned icon-toggle bar for the map view options (sits above the lamp
 /// display in the output section — pinned, not floating, per the M3 gate).
 #[component]
@@ -155,6 +87,11 @@ pub fn MapViewToggles(
     /// Render only the buttons (the host provides the bar wrapper).
     #[props(default = false)]
     bare: bool,
+    /// Offer the wiring instruments (numbers, arrows, universe colors).
+    /// Edit mode only — view mode is a product display, so its bar carries
+    /// the live toggle alone.
+    #[props(default = false)]
+    wiring: bool,
 ) -> Element {
     let toggle = move |apply: fn(MapViewOptions) -> MapViewOptions| {
         let next = apply(value);
@@ -168,23 +105,25 @@ pub fn MapViewToggles(
         }
     };
     let buttons = rsx! {
-            button {
-                class: class_for(value.numbers),
-                title: "wiring numbers (N)",
-                onclick: toggle(|mut v| { v.numbers = !v.numbers; v }),
-                StudioIcon { name: StudioIconName::MapNumbers, size: 13 }
-            }
-            button {
-                class: class_for(value.arrows),
-                title: "wiring arrows (A)",
-                onclick: toggle(|mut v| { v.arrows = !v.arrows; v }),
-                StudioIcon { name: StudioIconName::MapArrows, size: 13 }
-            }
-            button {
-                class: class_for(value.universes),
-                title: "universe colors, 170 lamps each (U)",
-                onclick: toggle(|mut v| { v.universes = !v.universes; v }),
-                StudioIcon { name: StudioIconName::MapUniverses, size: 13 }
+            if wiring {
+                button {
+                    class: class_for(value.numbers),
+                    title: "wiring numbers (N)",
+                    onclick: toggle(|mut v| { v.numbers = !v.numbers; v }),
+                    StudioIcon { name: StudioIconName::MapNumbers, size: 13 }
+                }
+                button {
+                    class: class_for(value.arrows),
+                    title: "wiring arrows (A)",
+                    onclick: toggle(|mut v| { v.arrows = !v.arrows; v }),
+                    StudioIcon { name: StudioIconName::MapArrows, size: 13 }
+                }
+                button {
+                    class: class_for(value.universes),
+                    title: "universe colors, 170 lamps each (U)",
+                    onclick: toggle(|mut v| { v.universes = !v.universes; v }),
+                    StudioIcon { name: StudioIconName::MapUniverses, size: 13 }
+                }
             }
             button {
                 class: class_for(value.live),
@@ -198,48 +137,6 @@ pub fn MapViewToggles(
     } else {
         rsx! {
             div { class: "ux-map-toggle-bar", {buttons} }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lpa_studio_core::{ControlLamp2d, ControlPathSpan2d, Revision};
-
-    // Geometry semantics are tested in lpa-mapping-editor; this covers the
-    // ControlLayout2d adapter only.
-    #[test]
-    fn adapter_scales_hints_and_forwards_spans() {
-        let lamps = vec![
-            lamp(0, [0.1, 0.5]),
-            lamp(1, [0.3, 0.5]),
-            lamp(2, [0.5, 0.5]),
-            lamp(3, [0.7, 0.5]),
-        ];
-        let layout = ControlLayout2d::new(Revision::new(1), 4, 1, lamps).with_paths(vec![
-            ControlPathSpan2d {
-                first_lamp: 0,
-                lamp_count: 2,
-            },
-            ControlPathSpan2d {
-                first_lamp: 2,
-                lamp_count: 2,
-            },
-        ]);
-        let overlay = wiring_arrow_overlay(&layout);
-        assert_eq!(overlay.view_width, 1000.0);
-        assert_eq!(overlay.view_height, 250.0); // 4:1 hints
-        assert_eq!(overlay.segs.iter().filter(|seg| !seg.chain).count(), 2);
-        assert_eq!(overlay.segs.iter().filter(|seg| seg.chain).count(), 1);
-    }
-
-    fn lamp(index: u32, center: [f32; 2]) -> ControlLamp2d {
-        ControlLamp2d {
-            lamp_index: index,
-            sample_start: index * 3,
-            center,
-            radius: 0.02,
         }
     }
 }

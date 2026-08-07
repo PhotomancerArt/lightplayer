@@ -1632,14 +1632,14 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.running").unwrap(),
+                        SlotPath::parse("transport.running").unwrap(),
                         LpValue::Bool(false),
                     ),
                 },
@@ -1653,8 +1653,8 @@ mod tests {
         assert_accepted(&results[1], true);
 
         let def = effective_clock_def(&registry);
-        assert!(!*def.controls.running.value());
-        assert_eq!(*def.controls.rate.value(), 1.0);
+        assert!(!*def.transport.running.value());
+        assert_eq!(*def.transport.rate.value(), 1.0);
     }
 
     #[test]
@@ -1740,14 +1740,14 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::Bool(true),
                     ),
                 },
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -1762,7 +1762,7 @@ mod tests {
         assert!(message.contains("F32"), "{message}");
         assert!(message.contains("Bool"), "{message}");
         assert_accepted(&results[1], true);
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 2.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 2.0);
     }
 
     #[test]
@@ -1779,20 +1779,20 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/missing.json"),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.bogus").unwrap(),
+                        SlotPath::parse("transport.bogus").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
                 MutationOp::RemoveSlotEdit {
                     artifact: ArtifactLocation::file("/missing.json"),
-                    path: SlotPath::parse("controls.rate").unwrap(),
+                    path: SlotPath::parse("transport.rate").unwrap(),
                 },
             ],
         );
@@ -1826,7 +1826,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -1842,22 +1842,22 @@ mod tests {
             vec![
                 MutationOp::RemoveSlotEdit {
                     artifact: clock.clone(),
-                    path: SlotPath::parse("controls.rate").unwrap(),
+                    path: SlotPath::parse("transport.rate").unwrap(),
                 },
                 MutationOp::RemoveSlotEdit {
                     artifact: clock.clone(),
-                    path: SlotPath::parse("controls.no_longer_in_shape").unwrap(),
+                    path: SlotPath::parse("transport.no_longer_in_shape").unwrap(),
                 },
             ],
         );
 
         assert_accepted(&results[0], true);
         assert_accepted(&results[1], false);
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 1.0);
     }
 
     #[test]
-    fn clock_controls_debug_role_fields_accept_writes() {
+    fn clock_transport_debug_role_fields_accept_writes() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
 
@@ -1868,14 +1868,14 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock_artifact(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(0.5),
                 ),
             }],
         );
 
         assert_accepted(&results[0], true);
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 0.5);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 0.5);
     }
 
     #[test]
@@ -1891,7 +1891,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(2.5),
                 ),
             }],
@@ -1903,10 +1903,10 @@ mod tests {
             .commit_overlay(&fs, Revision::new(20), &ParseCtx { shapes: &shapes })
             .unwrap();
 
-        // Transient never serializes: the written def carries no controls.
+        // Transient never serializes: the written def carries no transport.
         let text = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();
         assert!(!text.contains("rate"), "{text}");
-        assert!(!text.contains("controls"), "{text}");
+        assert!(!text.contains("transport"), "{text}");
 
         // The transient edit stays pending; nothing was dropped, so the
         // overlay content (and hence its revision) is unchanged.
@@ -1917,11 +1917,11 @@ mod tests {
             .artifact(&clock)
             .and_then(ArtifactOverlay::as_slot)
             .expect("retained slot overlay");
-        assert!(retained.contains_path(&SlotPath::parse("controls.rate").unwrap()));
+        assert!(retained.contains_path(&SlotPath::parse("transport.rate").unwrap()));
 
         // The retained overlay survives the post-commit re-derivation: the
         // effective def still carries the transient value.
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 2.5);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 2.5);
     }
 
     #[test]
@@ -1942,7 +1942,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -1970,10 +1970,10 @@ mod tests {
             .and_then(ArtifactOverlay::as_slot)
             .expect("retained slot overlay");
         assert_eq!(retained.edits.len(), 1);
-        assert!(retained.contains_path(&SlotPath::parse("controls.rate").unwrap()));
+        assert!(retained.contains_path(&SlotPath::parse("transport.rate").unwrap()));
 
         let def = effective_clock_def(&registry);
-        assert_eq!(*def.controls.rate.value(), 2.0);
+        assert_eq!(*def.transport.rate.value(), 2.0);
         assert!(def.bindings.entries().contains_key(&String::from("speed")));
     }
 
@@ -2006,7 +2006,7 @@ mod tests {
         );
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
-        let rate = SlotPath::parse("controls.rate").unwrap();
+        let rate = SlotPath::parse("transport.rate").unwrap();
 
         // A produced path is not client-writable, so it can only be staged
         // through the dedicated-op path (W9 keeps `mutate` validated).
@@ -2064,7 +2064,7 @@ mod tests {
         // entry through any validated path — which is the point.)
         let mut ghost = lpc_model::SlotOverlay::new();
         ghost.put_edit(SlotEdit::assign_value(
-            SlotPath::parse("controls.rate").unwrap(),
+            SlotPath::parse("transport.rate").unwrap(),
             LpValue::F32(2.0),
         ));
         let mut overlay = ProjectOverlay::new();
@@ -2091,7 +2091,7 @@ mod tests {
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
         let ctx = ParseCtx { shapes: &shapes };
-        let rate = SlotPath::parse("controls.rate").unwrap();
+        let rate = SlotPath::parse("transport.rate").unwrap();
 
         let not_writable = registry
             .mutate(
@@ -2116,7 +2116,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.no_longer_in_shape").unwrap(),
+                        SlotPath::parse("transport.no_longer_in_shape").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -2136,7 +2136,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.running").unwrap(),
+                        SlotPath::parse("transport.running").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -2190,7 +2190,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(2.0),
                 ),
             }],
@@ -2208,13 +2208,13 @@ mod tests {
                 id: MutationCmdId::new(99),
                 mutation: MutationOp::RemoveSlotEdit {
                     artifact: clock.clone(),
-                    path: SlotPath::parse("controls.rate").unwrap(),
+                    path: SlotPath::parse("transport.rate").unwrap(),
                 },
             }]),
             Revision::new(12),
             &ParseCtx { shapes: &shapes },
         );
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 1.0);
         assert_eq!(
             registry.def(&clock_def).expect("clock def").revision,
             Revision::new(12),
@@ -2259,7 +2259,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(2.0),
                 ),
             }],
@@ -2275,7 +2275,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 1.0);
         assert_eq!(
             registry.def(&clock_def).expect("clock def").revision,
             Revision::new(13),
@@ -2365,7 +2365,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock_artifact(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(1.0),
                 ),
             }],
@@ -2394,7 +2394,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock_artifact(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(1.000_000_1),
                 ),
             }],
@@ -2408,10 +2408,10 @@ mod tests {
                 .artifact(&clock_artifact())
                 .and_then(ArtifactOverlay::as_slot)
                 .expect("slot overlay")
-                .contains_path(&SlotPath::parse("controls.rate").unwrap())
+                .contains_path(&SlotPath::parse("transport.rate").unwrap())
         );
         assert_eq!(
-            *effective_clock_def(&registry).controls.rate.value(),
+            *effective_clock_def(&registry).transport.rate.value(),
             1.000_000_1
         );
     }
@@ -2429,7 +2429,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(2.0),
                 ),
             }],
@@ -2444,7 +2444,7 @@ mod tests {
             vec![MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
-                    SlotPath::parse("controls.rate").unwrap(),
+                    SlotPath::parse("transport.rate").unwrap(),
                     LpValue::F32(1.0),
                 ),
             }],
@@ -2452,7 +2452,7 @@ mod tests {
 
         assert_normalized(&results[0], true);
         assert!(registry.overlay().get().is_empty());
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 1.0);
     }
 
     #[test]
@@ -2463,7 +2463,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
-        let rate = SlotPath::parse("controls.rate").unwrap();
+        let rate = SlotPath::parse("transport.rate").unwrap();
         let ctx = ParseCtx { shapes: &shapes };
 
         registry
@@ -2491,7 +2491,7 @@ mod tests {
 
         assert!(result.overlay_changed);
         assert!(registry.overlay().get().is_empty());
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 1.0);
     }
 
     #[test]
@@ -3219,14 +3219,14 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls").unwrap(),
+                        SlotPath::parse("transport").unwrap(),
                         LpValue::F32(1.0),
                     ),
                 },
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("controls.rate").unwrap(),
+                        SlotPath::parse("transport.rate").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
@@ -3243,7 +3243,7 @@ mod tests {
             rejection_message(&results[0])
         );
         assert_accepted(&results[1], true);
-        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 2.0);
+        assert_eq!(*effective_clock_def(&registry).transport.rate.value(), 2.0);
     }
 
     #[test]
@@ -3576,7 +3576,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
-        let rate = SlotPath::parse("controls.rate").unwrap();
+        let rate = SlotPath::parse("transport.rate").unwrap();
 
         // A stored leaf assignment annotates with the base value's display.
         let results = mutate_batch(
@@ -3660,7 +3660,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
-        let rate = SlotPath::parse("controls.rate").unwrap();
+        let rate = SlotPath::parse("transport.rate").unwrap();
         let binding = SlotPath::parse("bindings[speed]").unwrap();
 
         let results = mutate_batch(
@@ -3709,7 +3709,7 @@ mod tests {
             "/clock.json",
             r#"{
   "kind": "Clock",
-  "controls": { "rate": 1.0 }
+  "transport": { "rate": 1.0 }
 }"#,
         );
 
@@ -3751,7 +3751,7 @@ mod tests {
             r#"{
   "kind": "Clock",
   "bindings": { "speed": { "value": 0.25 } },
-  "controls": { "rate": 1.0 }
+  "transport": { "rate": 1.0 }
 }"#,
         );
 
@@ -3860,22 +3860,22 @@ mod tests {
         (fs, registry)
     }
 
-    /// Shape registry where `controls.rate` on the clock definition is
+    /// Shape registry where `transport.rate` on the clock definition is
     /// read-only. No authored definition declares a non-writable field today,
     /// so the fixture flips one role in the real clock shape.
-    /// The clock def shape with `controls.rate`'s field shape rewritten by
+    /// The clock def shape with `transport.rate`'s field shape rewritten by
     /// `edit` — the seam behind the role/direction variants below.
     fn clock_shape_with(edit: impl FnOnce(&mut lpc_model::SlotFieldShape)) -> SlotShape {
         let mut shape = ClockDef::slot_shape();
         let SlotShape::Record { fields, .. } = &mut shape else {
             panic!("clock def shape must be a record");
         };
-        let controls = fields
+        let transport = fields
             .iter_mut()
-            .find(|field| field.name.as_str() == "controls")
-            .expect("controls field");
-        let SlotShape::Record { fields, .. } = &mut controls.shape else {
-            panic!("clock controls shape must be a record");
+            .find(|field| field.name.as_str() == "transport")
+            .expect("transport field");
+        let SlotShape::Record { fields, .. } = &mut transport.shape else {
+            panic!("clock transport shape must be a record");
         };
         let rate = fields
             .iter_mut()

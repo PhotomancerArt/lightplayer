@@ -39,6 +39,9 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
 /// "panes non-empty ⇒ lens card".
 pub(crate) fn simulator_lens_card() -> UiDeviceCard {
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: None,
@@ -61,6 +64,7 @@ pub(crate) fn simulator_lens_card() -> UiDeviceCard {
         )],
         ui: Default::default(),
         detected_chip: None,
+        board_id: None,
     }
 }
 

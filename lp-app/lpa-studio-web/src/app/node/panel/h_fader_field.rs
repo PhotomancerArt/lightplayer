@@ -13,6 +13,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
 
+use crate::app::node::face::{RATE_DETENTS, adjacent_detent, apply_detents, frac_rate, rate_frac};
 use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
@@ -35,7 +36,7 @@ pub fn HFaderField(
     /// Violet bound treatment on the fill, slot border, and grip ring.
     #[props(default = false)]
     bound: bool,
-    /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Outranks the violet
     /// bound family — bound means "wired", engaged means "captured".
     #[props(default = false)]
@@ -49,6 +50,14 @@ pub fn HFaderField(
     /// round).
     #[props(default)]
     emit: PanelEmit,
+    /// The clock transport's speed mode (G1: "we keep re-inventing faders
+    /// — use the normal skeuomorphic one"): the input rides the 0–1
+    /// fraction of the log ׼–×8 span, values map through the magnetic
+    /// octave detents (×1 pulls hardest), arrows step detent-to-detent,
+    /// and double-click seats ×1. The tick row becomes the detent stops.
+    /// `min`/`max`/`step` are ignored in this mode.
+    #[props(default = false)]
+    rate_log_detents: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
@@ -59,17 +68,40 @@ pub fn HFaderField(
     let base = live_value.unwrap_or(value);
     // The fill rides the step grid the native input's thumb already snaps
     // to, so a stepped fader never shows fill and thumb in different places.
-    let frac = knob_fraction(knob_snap(base, min, step), min, max);
+    let frac = if rate_log_detents {
+        rate_frac(base)
+    } else {
+        knob_fraction(knob_snap(base, min, step), min, max)
+    };
     let input_class = fader_input_class(bound, engaged);
     let fill_style = fader_fill_style(frac);
     let fill_class = fader_fill_class(&state, bound, engaged);
     let slot_class = fader_slot_class(&state, bound, engaged);
-    let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
+    // Rate mode drives the native input over the log-frac domain; the
+    // oninput mapping owns the value space.
+    let (input_min, input_max, input_value) = if rate_log_detents {
+        ("0".to_string(), "1".to_string(), frac.to_string())
+    } else {
+        (min.to_string(), max.to_string(), base.to_string())
+    };
+    let step = if rate_log_detents {
+        "any".to_string()
+    } else {
+        step.map_or_else(|| "any".to_string(), |step| step.to_string())
+    };
     let invalid_title = state.invalid.clone().unwrap_or_default();
+    let key_wired = wired.clone();
+    let dbl_wired = wired.clone();
+    let key_target = panel_target.clone();
+    let dbl_target = panel_target.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
-            FaderTicks {}
+            if rate_log_detents {
+                RateDetentTicks {}
+            } else {
+                FaderTicks {}
+            }
             div { class: "tw:relative tw:h-7 tw:min-w-0",
                 // The recessed slot + value fill; the input above is the
                 // gesture surface. Colors ride STATIC classes and the only
@@ -88,20 +120,74 @@ pub fn HFaderField(
                 input {
                     class: "{input_class}",
                     r#type: "range",
-                    min: "{min}",
-                    max: "{max}",
+                    min: "{input_min}",
+                    max: "{input_max}",
                     step: "{step}",
-                    value: "{base}",
+                    value: "{input_value}",
                     disabled,
                     title: "{invalid_title}",
                     oninput: move |event| {
-                        if let (Some((address, handler)), Ok(next)) =
-                            (wired.clone(), event.value().parse::<f32>())
-                        {
+                        let Ok(raw) = event.value().parse::<f32>() else {
+                            return;
+                        };
+                        let next = if rate_log_detents {
+                            apply_detents(frac_rate(raw))
+                        } else {
+                            raw
+                        };
+                        if let Some((address, handler)) = wired.clone() {
                             handler
                                 .call(panel_or_slot_action(&panel_target, address, emit.lp_value(next)));
                         }
                     },
+                    onkeydown: move |event| {
+                        if !rate_log_detents {
+                            return;
+                        }
+                        let Some((address, handler)) = key_wired.clone() else {
+                            return;
+                        };
+                        // The detent stops ARE the keyboard grid (native
+                        // range stepping would crawl the raw fraction).
+                        let next = match event.key() {
+                            Key::ArrowUp | Key::ArrowRight => adjacent_detent(base, true),
+                            Key::ArrowDown | Key::ArrowLeft => adjacent_detent(base, false),
+                            _ => return,
+                        };
+                        event.prevent_default();
+                        handler
+                            .call(panel_or_slot_action(&key_target, address, emit.lp_value(next)));
+                    },
+                    ondoubleclick: move |_| {
+                        if !rate_log_detents {
+                            return;
+                        }
+                        if let Some((address, handler)) = dbl_wired.clone() {
+                            handler
+                                .call(panel_or_slot_action(&dbl_target, address, emit.lp_value(1.0)));
+                        }
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// The rate fader's tick row: one stop per octave detent at its log-frac
+/// position, ×1 taller — the stops ARE the scale (spike round 2).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RateDetentTicks() -> Element {
+    rsx! {
+        div { class: "tw:pointer-events-none tw:relative tw:h-1.5 tw:px-2",
+            for detent in RATE_DETENTS {
+                span {
+                    key: "{detent}",
+                    class: if detent == 1.0 { "tw:absolute tw:bottom-0 tw:h-1.5 tw:w-px tw:bg-[var(--studio-color-text-subtle)] tw:opacity-80" } else { "tw:absolute tw:bottom-0 tw:h-1 tw:w-px tw:bg-[var(--studio-color-text-subtle)] tw:opacity-50" },
+                    style: format!(
+                        "left: calc(8px + (100% - 16px) * {});",
+                        rate_frac(detent),
+                    ),
                 }
             }
         }
@@ -149,7 +235,7 @@ pub(crate) fn fader_fill_class(
     engaged: bool,
 ) -> &'static str {
     if engaged {
-        "tw:bg-[color-mix(in_oklab,var(--studio-status-attention-text)_45%,var(--studio-color-surface-muted))]"
+        "tw:bg-[color-mix(in_oklab,var(--studio-status-engaged-text)_45%,var(--studio-color-surface-muted))]"
     } else if bound {
         "tw:bg-[color-mix(in_oklab,var(--studio-status-bound-text)_45%,var(--studio-color-surface-muted))]"
     } else if state.invalid.is_some() {
@@ -166,7 +252,7 @@ pub(crate) fn fader_slot_class(
     engaged: bool,
 ) -> &'static str {
     if engaged {
-        "tw:border-[var(--studio-status-attention-border)]"
+        "tw:border-[var(--studio-status-engaged-border)]"
     } else if bound {
         "tw:border-[var(--studio-status-bound-border)]"
     } else if state.invalid.is_some() {
@@ -213,7 +299,7 @@ mod tests {
         // binding, so the engaged family wins (panel.md P-Q2) — and the
         // amber rides a STATIC class, never a compound inline style.
         let fill = fader_fill_class(&UiSlotFieldState::editable(), true, true);
-        assert!(fill.contains("--studio-status-attention-text"));
+        assert!(fill.contains("--studio-status-engaged-text"));
         assert!(!fill.contains("bound"));
         assert!(fader_input_class(true, true).contains("is-engaged"));
     }

@@ -110,38 +110,107 @@ pub(in crate::app::project) fn kind_face(
     }
 }
 
-/// The clock card's face: the published time product, the tiny seconds
-/// readout for the PHASORS section header, and (after the decoration pass)
-/// the per-reading trace cards riding this timebase — parent D10, reshaped
-/// by clock-face v2.
-///
-/// The old produced-value rows are gone from the face: seconds shrank into
-/// the section header and the Delta row was deleted outright ("isn't useful
-/// at all" — G2). The rows still exist as produced slots; only the face
-/// stopped renting them space.
+/// The clock card's face: the published time product, the transport
+/// instrument (run/pause, rate, scrub, probe-anchored seconds), and (after
+/// the decoration pass) the per-reading trace cards riding this timebase —
+/// parent D10, reshaped by clock-face v2 and the tape-hero plan's P2.
 ///
 /// `None` — generic-sections fallback — when the node publishes no time
 /// product row, which is the state of a clock whose runtime state has not
-/// landed yet. The trace cards are deliberately NOT derivable here: they
-/// live in the engine's timebase store, not in any slot, so they arrive
-/// through `ProjectController::apply_clock_faces` exactly the way the
-/// output face's board facts do.
+/// landed yet. The trace cards, and the transport block's numeric
+/// `seconds`, are deliberately NOT derivable here: they live in the
+/// engine's timebase store, not in any slot, so they arrive through
+/// `ProjectController::apply_clock_faces` exactly the way the output
+/// face's board facts do.
 fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
     let product = product_of_kind(sections, UiProductKind::Time)?;
     let mut face = crate::UiClockFace::new(product);
-    face.seconds = sections
-        .iter()
-        .find_map(|section| match section {
-            UiNodeSection::ProducedValues(values) => Some(values.as_slice()),
-            _ => None,
-        })
-        .and_then(|values| {
-            values
-                .iter()
-                .find(|value| value.key == "seconds")
-                .map(|value| value.value.clone())
-        });
+    face.transport = clock_transport(sections);
     Some(face)
+}
+
+/// The clock's transport block, lifted from the flattened `transport.*`
+/// Debug rows (D4: `SlotController::collect_config` flattens every Debug
+/// field to a top-level row regardless of the record that declared it, so
+/// there is no `transport` record row to descend into — three sibling rows
+/// keyed by their full path).
+///
+/// Value + address + editability ride straight off each row exactly as the
+/// panel controls read them (`row_edit_address`, `UiSlotFieldState
+/// ::editable`) — staged edits flow through the same edit-buffer join the
+/// rows already carry, so the DTO reflects an in-flight drag immediately
+/// (the echo-suppression contract the tape widgets rely on, P3/P4).
+///
+/// `None` when the three rows have not landed (unread project — the Debug
+/// section is absent, or a differently-shaped clock). Numeric `seconds`
+/// starts at `0.0`; only `ProjectController::apply_clock_faces` can fill it
+/// in, from the cached timebase probe.
+fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport> {
+    let rows = debug_rows(sections);
+    let running_row = rows.iter().find(|row| row.key == "transport.running")?;
+    let rate_row = rows.iter().find(|row| row.key == "transport.rate")?;
+    let scrub_row = rows
+        .iter()
+        .find(|row| row.key == "transport.scrub_offset_seconds")?;
+    Some(crate::UiClockTransport {
+        seconds: 0.0,
+        running: row_bool(running_row)?,
+        rate: row_f32(rate_row)?,
+        scrub_offset_seconds: row_f32(scrub_row)?,
+        running_address: editable_row_address(running_row),
+        rate_address: editable_row_address(rate_row),
+        scrub_address: editable_row_address(scrub_row),
+        running_override: row_override(running_row),
+        rate_override: row_override(rate_row),
+        scrub_override: row_override(scrub_row),
+    })
+}
+
+/// The row's active debug-override entry: `Some` while the row is dirty
+/// (an override is live this session), carrying the address the per-value
+/// **Clear** dispatches — the row's own edit entry, or the row address for
+/// a scalar whose entry annotation has not landed yet. `None` = clean, no
+/// tint, no Clear.
+fn row_override(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if row.state.dirty == crate::UiNodeDirtyState::Clean {
+        return None;
+    }
+    row.edit_entry_address
+        .clone()
+        .or_else(|| row.address.clone())
+}
+
+/// A row's scalar `f32` value, when its body is a plain value of that kind.
+fn row_f32(row: &UiConfigSlot) -> Option<f32> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::F32(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A row's scalar `bool` value, when its body is a plain value of that kind.
+fn row_bool(row: &UiConfigSlot) -> Option<bool> {
+    match &row.body {
+        UiConfigSlotBody::Value(value) => match value.kind {
+            UiSlotValueKind::Bool(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// [`row_edit_address`], but `None` when the row itself is not editable —
+/// the DTO's own "not editable" signal (transport rows are ordinarily
+/// always writable Debug fields, but the address should never invite a
+/// dispatch the row can't accept).
+fn editable_row_address(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if !row.state.editable {
+        return None;
+    }
+    row_edit_address(row)
 }
 
 /// The shader card's face: visual hero, panel knobs, code drawer. `None`
@@ -270,6 +339,23 @@ fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
         .collect()
 }
 
+/// Flattened Debug rows — the `config_rows` twin over `UiNodeSection
+/// ::DebugSlots` instead. Debug rows are already flat at the section level
+/// (`SlotController::partition_debug` lifts every Debug field to a
+/// top-level row regardless of nesting depth in the record that declared
+/// it), so this needs no record-descent the way `config_rows` never needed
+/// one either.
+fn debug_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            UiNodeSection::DebugSlots(slots) => Some(slots),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 /// The first inline GLSL editor among the node's asset rows — the code
 /// drawer reuses it verbatim (it is the SAME editor the sections view
 /// renders, minus the studio-level agent decoration).
@@ -344,6 +430,9 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
             // `seconds` is unbounded time. There is nothing to set: no
             // period, no range, no default. It gets no knob at all.
             Some(SECONDS_SLOT_KIND) => None,
+            // A palette has no `default` either — its value is the whole
+            // `GradientConfig` on the slot's `gradient` option (M4 P3).
+            Some(PALETTE_SLOT_KIND) => palette_swatch_control(entry, &rows),
             _ => shader_uniform_control(entry, &rows),
         })
         .collect()
@@ -374,6 +463,8 @@ fn uniform_kind(entry: &UiConfigSlot) -> Option<String> {
 const PHASOR_SLOT_KIND: &str = "phasor";
 /// `ShaderSlotKind::Seconds`'s wire tag.
 const SECONDS_SLOT_KIND: &str = "seconds";
+/// `ShaderSlotKind::Palette`'s wire tag.
+const PALETTE_SLOT_KIND: &str = "palette";
 
 /// Widest period a phasor knob reaches when the uniform authors no range:
 /// one hour. The knob sweeps LOG-period, so the slow decades cost no
@@ -426,17 +517,16 @@ fn phasor_period_control(
     let min = option_f32_field(fields, "min").unwrap_or(0.0);
     let max = option_f32_field(fields, "max").unwrap_or(PHASOR_PERIOD_MAX_SECONDS);
     let mut control = UiPanelControl {
-        // The knob's LABEL is plain vocabulary (G2 feedback): "Speed" when
-        // the def has one phasor; the uniform's name joins only to
-        // disambiguate several. The web layer renders the value as the
-        // reciprocal ("1/100 s") and flips the drag so up = faster —
-        // PROVISIONAL pending the clock-face UX spike; the slot itself
-        // still stores period_seconds.
+        // The knob's LABEL: "Period" when the def has one phasor; the
+        // uniform's name joins only to disambiguate several. The M4 P6
+        // gate picked the plain-seconds voice (retiring the PROVISIONAL
+        // reciprocal Speed readout), so the knob speaks the seconds the
+        // slot actually stores — the clock face's own vocabulary.
         label: if lone_phasor {
-            "Speed".to_string()
+            "Period".to_string()
         } else {
             format!(
-                "{} speed",
+                "{} period",
                 string_field(fields, "label")
                     .filter(|label| !label.is_empty())
                     .unwrap_or_else(|| entry.label.clone())
@@ -451,8 +541,8 @@ fn phasor_period_control(
         },
         // The knob turns the PERIOD, so its value is that one number even
         // though the slot it writes is the whole record. The FACE readout
-        // presents it as an auto-denominated rate ("3/min") whose unit is
-        // part of the string, so the control carries no unit suffix.
+        // presents it in plain seconds ("100 s") with the unit riding the
+        // string, so the control carries no unit suffix.
         value: UiSlotValue::f32(period).with_unit(crate::UiSlotUnit::seconds()),
         emit: crate::UiPanelEmit::PhasorPeriod {
             waveform: struct_waveform(config),
@@ -481,6 +571,91 @@ fn phasor_period_control(
         .iter()
         .find(|row| row.key == name)
         .and_then(|row| bound_live_value(row));
+    Some(control)
+}
+
+/// One palette uniform → its **swatch** control (M4 P3).
+///
+/// The palette twin of [`phasor_period_control`], and the differences are
+/// the interesting part:
+///
+/// - the value is the WHOLE `GradientConfig` on the slot's `gradient`
+///   option, not one field of a record, so the emit family carries no
+///   shaping to preserve ([`crate::UiPanelEmit::Gradient`]);
+/// - there is no range, because a palette is not a number.
+///
+/// Everything else is the same rule: the control exists whether or not the
+/// wiring is public (a palette is the card's own affordance), and publicity
+/// only decides whether a pick becomes a PANEL WRITE on the config channel
+/// — where every reader of that channel takes the config whole
+/// (`resolve_gradient_config`) — or an ordinary slot edit at
+/// `consumed[<name>].gradient.some`.
+///
+/// An ABSENT `gradient` option still gets a control, seeded with
+/// `GradientConfig::default()` — exactly what the engine runs the slot on.
+/// This is the realistic authored case: most palette slots are authored
+/// with just a `default_bind` and no inline `gradient`, so the option
+/// arrives absent and the swatch is how the first palette gets picked at
+/// all. The first pick's `AssignValue` at `…gradient.some`
+/// materializes the option (the overlay's ensure-present rule).
+fn palette_swatch_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    let config_row = uniform_field(fields, "gradient")?;
+    let present = config_row.optionality.is_some_and(|opt| opt.included);
+    let (config_value, address) = if present {
+        let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+            return None;
+        };
+        // The value has to READ as a palette, or the swatch has nothing to
+        // sample and the web layer would fall back to a bare display anyway.
+        crate::app::project::gradient_config_value(&config_value.kind.to_lp_value())?;
+        (config_value.clone(), row_edit_address(config_row))
+    } else {
+        let default_value = crate::UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::default(),
+        ))
+        .with_editor(crate::UiSlotEditorHint::Gradient);
+        let address = config_row
+            .address
+            .as_ref()
+            .and_then(|address| address.child_field("some"));
+        (default_value, address)
+    };
+
+    let mut control = UiPanelControl {
+        label: string_field(fields, "label")
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| entry.label.clone()),
+        address,
+        widget: UiPanelWidget::PaletteSwatch,
+        value: config_value,
+        emit: crate::UiPanelEmit::Gradient,
+        live_value: None,
+        panel_target: None,
+        // A palette carries its own vocabulary in the readout (`5 stops`,
+        // `↻ 4 · 3/min`); a unit suffix has nothing to add.
+        unit: None,
+        state: config_row.state.clone(),
+        aspects: config_row.visible_aspects(),
+    };
+    // The wiring facts live on the binding-derived row keyed by the bare
+    // uniform name, exactly as they do for a knob.
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    let top_row = top_rows.iter().find(|row| row.key == name);
+    control.panel_target = top_row.and_then(|row| public_panel_target(row));
+    // A driven palette reads back as the channel's config summary (the
+    // `format_live_panel_value` gradient branch) — text, not a config the
+    // swatch could sample, so the strips keep showing the authored one.
+    control.live_value = top_row.and_then(|row| bound_live_value(row));
     Some(control)
 }
 
@@ -910,6 +1085,7 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
     resolve_authored_slices(&mut channels);
 
     Some(UiOutputFace {
+        led_budget: None,
         channels,
         channels_address: channels_row.address.clone(),
         input_binding: bound_endpoint_label(&rows, "input"),
@@ -952,6 +1128,7 @@ fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
     let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
 
     Some(UiOutputChannelRow {
+        wire_status: None,
         key,
         pin_label: endpoint_pin_label(&endpoint_display),
         endpoint_display,
@@ -1054,6 +1231,10 @@ fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
             max: *max,
             step: *step,
         }),
+        // The Gradient hint is what P1 declared on both palette storage
+        // forms, so any gradient-shaped row reads as a swatch here — the
+        // same hint the slot ROW dispatches its read-only strip on (P2).
+        UiSlotEditorHint::Gradient => Some(UiPanelWidget::PaletteSwatch),
         _ => matches!(value.kind, UiSlotValueKind::Bool(_)).then_some(UiPanelWidget::Toggle),
     }
 }
@@ -1912,7 +2093,7 @@ mod tests {
         assert_eq!(face.controls.len(), 1, "one control per phasor slot");
         let control = &face.controls[0];
         assert_eq!(
-            control.label, "Speed",
+            control.label, "Period",
             "a lone phasor knob wears the plain label"
         );
         assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
@@ -2068,6 +2249,222 @@ mod tests {
         );
     }
 
+    // -- palette swatch (M4 P3) --------------------------------------------
+
+    /// A palette uniform record: `kind = palette`, the authored config on a
+    /// present `gradient` option, and a label — the shape the shader
+    /// projection reads.
+    fn palette_uniform(name: &str, config: &lpc_model::GradientConfig) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(config)),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::included(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+    }
+
+    fn ramp(stops: usize) -> lpc_model::Gradient {
+        lpc_model::Gradient {
+            space: lpc_model::Colorspace::Oklab,
+            method: lpc_model::InterpMethod::Linear,
+            stops: (0..stops)
+                .map(|index| lpc_model::GradientStop {
+                    at: index as f32 / (stops - 1) as f32,
+                    c: [index as f32 / stops as f32, 0.1, -0.1],
+                })
+                .collect(),
+        }
+    }
+
+    /// A palette slot gets ONE swatch, whatever the wiring: like a phasor's
+    /// period, the palette is the card's own affordance. Slot-local means
+    /// the pick is an ordinary slot edit at `…gradient.some`, and the whole
+    /// config is what the control carries.
+    #[test]
+    fn a_palette_slot_gets_one_swatch_editing_its_config_slot() {
+        let config = lpc_model::GradientConfig::Static(ramp(3));
+        let face = phasor_face(&phasor_sections(palette_uniform("palette", &config), None));
+
+        assert_eq!(face.controls.len(), 1, "one control per palette slot");
+        let control = &face.controls[0];
+        assert_eq!(control.label, "Palette");
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(control.emit, crate::UiPanelEmit::Gradient);
+        assert_eq!(control.unit, None);
+        assert_eq!(
+            control.gradient_config(),
+            Some(config),
+            "the control carries the WHOLE config, not a field of it"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("palette picks are addressed")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
+        assert!(
+            control.panel_target.is_none(),
+            "unwired: the swatch is the card's own, not a panel entry"
+        );
+        // The row's display is the palette summary (P2), never the padded
+        // 24-entry storage dump.
+        assert_eq!(control.value.display, "oklab \u{b7} linear \u{b7} 3 stops");
+    }
+
+    /// The realistic authored case: a hand-authored palette slot usually
+    /// arrives with the `gradient` option ABSENT (just a `default_bind`) —
+    /// and still gets its swatch, seeded with the same default the engine
+    /// runs the slot on.
+    /// The first pick's `AssignValue` at `…gradient.some` materializes the
+    /// option (the overlay's ensure-present rule).
+    #[test]
+    fn an_absent_gradient_option_still_gets_a_default_seeded_swatch() {
+        let prefix = "consumed[palette]";
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::unset(),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::excluded(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        let uniform = UiConfigSlot::record(prefix.to_string(), "palette", fields)
+            .with_address(address(prefix));
+
+        let face = phasor_face(&phasor_sections(uniform, None));
+
+        assert_eq!(face.controls.len(), 1, "the absent option still presents");
+        let control = &face.controls[0];
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(
+            control.gradient_config(),
+            Some(lpc_model::GradientConfig::default()),
+            "the swatch shows what the engine actually runs"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("the first pick lands at the option's some")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
+    }
+
+    /// Publicity is the ordinary derived rule, and a wired palette's live
+    /// reading is the channel's own config summary.
+    #[test]
+    fn palette_publicity_follows_the_authored_binding() {
+        let config = lpc_model::GradientConfig::Cycle {
+            set: vec![ramp(2), ramp(3)],
+            step_seconds: 20.0,
+            fade_seconds: 0.5,
+        };
+        let mut endpoint = channel_endpoint("bus:palette", "palette", 3);
+        endpoint.live_value = crate::app::project::format_live_panel_value(
+            &lpc_model::ToLpValue::to_lp_value(&config),
+        );
+        let face = phasor_face(&phasor_sections(
+            palette_uniform("palette", &config),
+            Some(bound_row("palette", endpoint)),
+        ));
+
+        let control = &face.controls[0];
+        assert_eq!(
+            control
+                .panel_target
+                .as_ref()
+                .expect("an authored config channel is a panel write target")
+                .channel,
+            "palette"
+        );
+        assert_eq!(
+            control.live_value.as_deref(),
+            Some("cycle \u{b7} 2 palettes \u{b7} every 20 s \u{b7} 0.5 s fade"),
+            "a driven palette reads back as words; the strip keeps the authored config"
+        );
+    }
+
+    /// An absent `gradient` option has no slot to edit (the engine runs the
+    /// default palette), and a non-gradient payload has nothing to sample —
+    /// both fall back to the generic row rather than an empty swatch.
+    #[test]
+    fn a_palette_without_a_readable_config_gets_no_swatch() {
+        let config = lpc_model::GradientConfig::Static(ramp(2));
+        let mut absent = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut absent.body {
+            record
+                .fields
+                .retain(|field| !field.key.ends_with(".gradient"));
+        }
+        assert!(
+            phasor_face(&phasor_sections(absent, None))
+                .controls
+                .is_empty(),
+            "option off: nothing to pick into"
+        );
+
+        let mut mis_shaped = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut mis_shaped.body
+            && let Some(row) = record
+                .fields
+                .iter_mut()
+                .find(|field| field.key.ends_with(".gradient"))
+        {
+            row.body = UiConfigSlotBody::Value(UiSlotValue::f32(0.5));
+        }
+        assert!(
+            phasor_face(&phasor_sections(mis_shaped, None))
+                .controls
+                .is_empty(),
+            "a non-palette payload behind a palette slot renders no swatch"
+        );
+    }
+
+    /// The hint mapping is the other entry point: any `Gradient`-hinted
+    /// value row reads as a swatch, the same hint the slot row draws its
+    /// read-only strip from (P2).
+    #[test]
+    fn the_gradient_hint_maps_to_the_swatch_widget() {
+        let value = UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::Static(ramp(4)),
+        ))
+        .with_editor(UiSlotEditorHint::Gradient);
+        let slot = UiConfigSlot::value("palette", "Palette", value);
+
+        assert_eq!(panel_widget(&slot), Some(UiPanelWidget::PaletteSwatch));
+    }
+
     // -- clock face (P7 item 4) --------------------------------------------
 
     /// The clock's face is the published handle plus the tiny seconds
@@ -2094,12 +2491,122 @@ mod tests {
         };
         assert_eq!(face.product.kind, UiProductKind::Time);
         assert_eq!(
-            face.seconds.as_deref(),
-            Some("3.5"),
-            "seconds shrinks into the section header; delta is not carried at all"
+            face.transport, None,
+            "no Debug rows yet — the transport block waits, same as the probe"
         );
         assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
         assert!(face.phasors.is_empty());
+    }
+
+    fn transport_row(field: &str, value: UiSlotValue) -> UiConfigSlot {
+        let key = format!("transport.{field}");
+        UiConfigSlot::value(&key, field, value).with_address(clock_slot_address(&key))
+    }
+
+    fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.module/node.clock").expect("valid address"),
+            ProjectSlotRoot::Def,
+            SlotPath::parse(path).expect("valid path"),
+        )
+    }
+
+    /// The transport block lifts value + address + editability straight off
+    /// the flattened Debug rows — the tape widgets' whole read surface.
+    #[test]
+    fn clock_face_lifts_the_transport_block_from_the_debug_rows() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(false)),
+                transport_row("rate", UiSlotValue::f32(2.0)),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(-12.4)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("three rows present → block present");
+        assert!(!transport.running);
+        assert_eq!(transport.rate, 2.0);
+        assert_eq!(transport.scrub_offset_seconds, -12.4);
+        assert_eq!(transport.seconds, 0.0, "numeric seconds is probe-only");
+        assert_eq!(
+            transport.rate_address,
+            Some(clock_slot_address("transport.rate")),
+            "editable row → dispatch address"
+        );
+        assert!(transport.running_address.is_some());
+        assert!(transport.scrub_address.is_some());
+    }
+
+    /// A read-only row keeps its value but withholds the dispatch address —
+    /// the widgets render inert chrome instead of dead handlers (P4).
+    #[test]
+    fn a_read_only_transport_row_withholds_its_dispatch_address() {
+        let read_only = UiSlotFieldState {
+            editable: false,
+            ..UiSlotFieldState::editable()
+        };
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(1.0)).with_state(read_only),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("values still lift");
+        assert_eq!(transport.rate, 1.0);
+        assert_eq!(transport.rate_address, None, "read-only → no dispatch");
+        assert!(transport.running_address.is_some(), "siblings unaffected");
+    }
+
+    /// A dirty Debug row (an active session override) lifts its own edit
+    /// entry as the override marker — the tape's changed-tint flag and
+    /// per-value Clear target in one; clean rows lift `None`.
+    #[test]
+    fn an_active_override_lifts_its_clear_target() {
+        let dirty = UiSlotFieldState::editable().with_dirty(crate::UiNodeDirtyState::Dirty);
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(2.0))
+                    .with_state(dirty)
+                    .with_edit_entry_address(clock_slot_address("transport.rate")),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("block present");
+        assert_eq!(
+            transport.rate_override,
+            Some(clock_slot_address("transport.rate")),
+            "dirty row → its edit entry is the Clear target"
+        );
+        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.scrub_override, None);
     }
 
     /// A clock with no produced product row keeps the generic sections —

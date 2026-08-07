@@ -980,6 +980,129 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     );
 }
 
+/// Row 11b (G2 walk, 2026-08-05): forgetting the board in front of you
+/// revokes the transport's persistent access to it, not just its registry
+/// row. Deleting the row alone was silently undone on the next page load —
+/// the Web Serial grant outlives the page, so the app re-enumerated the
+/// port, re-derived the same uid from the board's silicon, and the sighting
+/// write recreated the row. Here the revocation must REACH the provider
+/// (the seam a defaulted trait method would swallow), the session must be
+/// gone, and an OFFLINE device must stay registry-only — nothing to revoke,
+/// nothing revoked.
+#[test]
+fn forgetting_a_live_device_revokes_its_port_grant_and_its_registry_row() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::app::places::RegisteredDevice;
+
+    let (store, host) = library();
+    seed_registry(
+        &store,
+        RegisteredDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            name: "Shed board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+            board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
+        },
+    );
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    assert!(
+        registry(&store)
+            .iter()
+            .any(|device| device.uid == STAMPED_UID),
+        "the connect sighting registered the live board"
+    );
+
+    // The connector outlives the session the forget tears down, so grab it
+    // while the pool still holds one.
+    let connector = live_device_connector(&studio);
+
+    let outcome = drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        crate::HomeOp::ForgetDevice {
+            uid: STAMPED_UID.to_string(),
+        },
+    )))
+    .expect("forget succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("forgotten")),
+        "the forget reports its result, got {:?}",
+        outcome.notices
+    );
+    assert_eq!(
+        fake_forgotten_endpoints(&connector),
+        vec![endpoint_id.clone()],
+        "the revocation reached the provider, naming the live board's endpoint"
+    );
+    assert_eq!(
+        studio.runtime_pool_for_test().device_sessions().count(),
+        0,
+        "the session was disconnected before its grant was revoked"
+    );
+    assert!(
+        !registry(&store)
+            .iter()
+            .any(|device| device.uid == STAMPED_UID),
+        "the registry row went with it"
+    );
+
+    // The offline board: its row goes, but no grant can be named for it —
+    // a specific offline board cannot be matched to a granted port.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        crate::HomeOp::ForgetDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+        },
+    )))
+    .expect("forgetting an offline device succeeds");
+    assert_eq!(
+        fake_forgotten_endpoints(&connector),
+        vec![endpoint_id],
+        "an offline device revokes nothing"
+    );
+    assert!(
+        registry(&store).is_empty(),
+        "the offline row went too, got {:?}",
+        registry(&store)
+    );
+}
+
+/// The connector behind the one live device session (the forget path drops
+/// the session, so tests capture this first).
+fn live_device_connector(studio: &StudioController) -> Rc<lpa_link::LinkConnector> {
+    studio
+        .runtime_pool_for_test()
+        .device_sessions()
+        .find_map(crate::RuntimeSession::hardware_session)
+        .expect("a live device session")
+        .connector()
+}
+
+fn fake_forgotten_endpoints(connector: &lpa_link::LinkConnector) -> Vec<LinkEndpointId> {
+    #[allow(
+        unreachable_patterns,
+        reason = "providers beyond Fake are feature/target-gated, so the \
+                  wildcard arm is unreachable in some test configurations"
+    )]
+    match connector {
+        lpa_link::LinkConnector::Fake(provider) => provider.forgotten_endpoints(),
+        _ => panic!("the scripted board runs on the fake connector"),
+    }
+}
+
 /// Row 12 (P2 coexistence): a fake device connected through the real link
 /// AND a project opened on the sim — both sessions live in the pool at
 /// once. The old `open_from_home` hardware refusal is gone: the open
@@ -994,7 +1117,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
 #[test]
 fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     use super::studio_edit_e2e_tests::{
-        InProcessServerIo, edit_e2e_files, edit_e2e_server, find_slot, slot_value_display,
+        InProcessServerIo, clock_transport_block, edit_e2e_files, edit_e2e_server,
     };
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, SlotEditOp, StudioServerClient, UiLogDraft, UiLogLevel, UiLogOrigin};
@@ -1088,8 +1211,10 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     // The editor mirror is live on the sim: a slot-edit round-trips.
     let view = studio.view();
     assert!(view.home.is_none(), "the open left the gallery");
-    let rate = find_slot(&view, "controls.rate");
-    let address = rate.address.clone().expect("rate slot carries an address");
+    let address = clock_transport_block(&view)
+        .rate_address
+        .clone()
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1099,7 +1224,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     )))
     .expect("slot edit lands on the sim session");
     let view = studio.view();
-    assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "2");
+    assert_eq!(clock_transport_block(&view).rate, 2.0);
 
     // The device heartbeat drains a buffered console line into the
     // SESSION's console tail (D42: the per-device console — session
@@ -1228,7 +1353,7 @@ fn push_replaces_the_running_project_with_a_different_one() {
 /// the detached session's own client is the worker-alive proxy.
 #[test]
 fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
-    use super::studio_edit_e2e_tests::{find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::clock_transport_block;
     use crate::{ProjectOp, SlotEditOp, UxUpdateSink};
     use lpc_model::LpValue;
 
@@ -1237,10 +1362,10 @@ fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
     // An acked edit on the sim mirror.
     let view = studio.view();
     assert!(view.home.is_none(), "the open left the gallery");
-    let address = find_slot(&view, "controls.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1284,8 +1409,8 @@ fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
     let view = studio.view();
     assert!(view.home.is_none(), "the editor is back");
     assert_eq!(
-        slot_value_display(find_slot(&view, "controls.rate")),
-        "2",
+        clock_transport_block(&view).rate,
+        2.0,
         "the acked edit survived detach → re-attach"
     );
 }
@@ -1425,6 +1550,294 @@ fn open_sim_project_reattaches_the_lens_to_the_sim() {
     assert!(studio.view().home.is_none(), "the editor is back");
 }
 
+/// Gallery-rework P04 (vision D4): the sim INHERITS its board identity
+/// from the project it runs — the advisory `target` on that project's
+/// manifest (P02), which is where the fact persists. Load-as-push carries
+/// it onto the session, `lens_board_id` hands it to the output face's pin
+/// diagram, and the card renders it as its "as \<board\>" line. Nothing
+/// about the worker changes: the identity is advisory, exactly like a
+/// device's registry `board_id`.
+#[test]
+fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let open_on_sim = |target: Option<&str>| {
+        let (store, host) = library();
+        let files = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| {
+                let body = match (*name, target) {
+                    ("project.json", Some(target)) => {
+                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                    }
+                    _ => body.to_string(),
+                };
+                (name.to_string(), body.into_bytes())
+            })
+            .collect::<Vec<_>>();
+        let package = store
+            .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+
+        let mut studio = StudioController::new(|| 1.0);
+        studio.attach_library(host);
+        let sim_io = InProcessServerIo {
+            server: Rc::new(RefCell::new(edit_e2e_server())),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(sim_io),
+        ));
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        studio
+    };
+
+    // An UNTARGETED project leaves the sim exactly as it is today.
+    let studio = open_on_sim(None);
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        None,
+        "no target, no board — today's behavior"
+    );
+
+    // A TARGETED one gives the sim the board the project names.
+    let studio = open_on_sim(Some("seeed/xiao-esp32-c6"));
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        Some("seeed/xiao-esp32-c6"),
+        "the sim wears the board its project targets"
+    );
+    assert_eq!(
+        studio
+            .view()
+            .lens_card
+            .expect("the editor's lens card is the sim's")
+            .board_id
+            .as_deref(),
+        Some("seeed/xiao-esp32-c6"),
+        "and the card carries it — the \"as <board>\" line"
+    );
+}
+
+/// G1b ruling 6 (2026-08-05): the sim's setup wizard used to sit at
+/// "select a board" after an **Open in sim** had already answered the
+/// question — the project's advisory `target` becomes the sim's board on
+/// the way in (D4, the test above), and the wizard never heard.
+///
+/// The repro end to end: open the wizard, click Open in sim on a project
+/// card (`HomeOp::OpenPackage` — the op `#/sim/<slug>` rides), then go
+/// back to the gallery and look at what the wizard is asking for.
+#[test]
+fn an_open_in_sim_stands_the_sims_board_picker_down() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp, SetupStateKind, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let back_on_the_gallery_after_opening = |target: Option<&str>| {
+        let (store, host) = library();
+        let files = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| {
+                let body = match (*name, target) {
+                    ("project.json", Some(target)) => {
+                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                    }
+                    _ => body.to_string(),
+                };
+                (name.to_string(), body.into_bytes())
+            })
+            .collect::<Vec<_>>();
+        let package = store
+            .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+
+        let mut studio = StudioController::new(|| 1.0);
+        studio.attach_library(host);
+        let sim_io = InProcessServerIo {
+            server: Rc::new(RefCell::new(edit_e2e_server())),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(sim_io),
+        ));
+
+        // The wizard is up and asking, exactly as the entry card leaves it.
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::StartSetup { sim: true },
+        )))
+        .expect("the sim entry card opens the wizard");
+        assert_eq!(
+            studio
+                .view()
+                .home
+                .expect("the gallery is up")
+                .setup
+                .expect("the wizard is on the grid")
+                .state
+                .kind(),
+            SetupStateKind::BoardPick,
+            "the sim path opens on the board pick (design §7.1)"
+        );
+
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        // "…then return to the Studio gallery."
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            ProjectOp::DetachLens,
+        )))
+        .expect("the lens detaches back to the gallery");
+        studio
+    };
+
+    // A TARGETED project answers the picker's only question, so the flow
+    // is over: no wizard on the grid, and the sim wears the board.
+    let studio = back_on_the_gallery_after_opening(Some("seeed/xiao-esp32-c6"));
+    assert_eq!(
+        studio.view().home.expect("the gallery is back").setup,
+        None,
+        "the landing supplied the board; the picker has nothing left to ask"
+    );
+    assert_eq!(
+        studio
+            .runtime_pool_for_test()
+            .sim_session()
+            .expect("the sim session runs the project")
+            .sim_board_id(),
+        Some("seeed/xiao-esp32-c6"),
+    );
+
+    // An UNTARGETED one infers nothing, so the picker stays — the ruling's
+    // "the wizard appears only when nothing can be inferred".
+    let studio = back_on_the_gallery_after_opening(None);
+    assert_eq!(
+        studio
+            .view()
+            .home
+            .expect("the gallery is back")
+            .setup
+            .expect("nothing was inferred, so the wizard is still asking")
+            .state
+            .kind(),
+        SetupStateKind::BoardPick,
+    );
+}
+
+/// The SECOND shape the same landing arrives in, found on the G1 dev-server
+/// walk (2026-08-06): when the sim ALREADY runs the requested project,
+/// "Open in sim" takes the D37 re-attach instead of pushing a head — so
+/// nothing loads, `note_sim_loaded_project` never runs, and the picker used
+/// to stay up on a sim that had been wearing its board since the last click.
+#[test]
+fn an_open_in_sim_that_re_attaches_stands_the_picker_down_too() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp, SetupStateKind, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let (store, host) = library();
+    let files = edit_e2e_files()
+        .iter()
+        .map(|(name, body)| {
+            let body = match *name {
+                "project.json" => {
+                    "{\n  \"format\": 5,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
+                }
+                _ => body.to_string(),
+            };
+            (name.to_string(), body.into_bytes())
+        })
+        .collect::<Vec<_>>();
+    let package = store
+        .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+        .unwrap();
+
+    let mut studio = StudioController::new(|| 1.0);
+    studio.attach_library(host);
+    let sim_io = InProcessServerIo {
+        server: Rc::new(RefCell::new(edit_e2e_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+        "in-process",
+        Box::new(sim_io),
+    ));
+
+    let open_in_sim = |studio: &mut StudioController| {
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: package.uid.to_string(),
+            },
+        )))
+        .expect("open on the sim succeeds");
+        drive(studio.dispatch(UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            ProjectOp::DetachLens,
+        )))
+        .expect("the lens detaches back to the gallery");
+    };
+
+    // First click: the push path lands the project (and its board).
+    open_in_sim(&mut studio);
+
+    // Now open the wizard, and click Open in sim on the project the sim is
+    // ALREADY running — the re-attach.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::StartSetup { sim: true },
+    )))
+    .expect("the sim entry card opens the wizard");
+    assert_eq!(
+        studio
+            .view()
+            .home
+            .expect("the gallery is up")
+            .setup
+            .expect("the wizard is on the grid")
+            .state
+            .kind(),
+        SetupStateKind::BoardPick,
+    );
+
+    open_in_sim(&mut studio);
+
+    assert_eq!(
+        studio.view().home.expect("the gallery is back").setup,
+        None,
+        "a re-attach is a landed open-in-sim too — the board was already inherited"
+    );
+}
+
 /// Poisoned-instance recovery, part 1 (worker crash): the link layer
 /// reports a sticky instance-fatal for the sim session; the tick-cadence
 /// recovery edge-detects it, surfaces the primary panic on the console,
@@ -1550,7 +1963,7 @@ fn arm_sim_fatal(studio: &StudioController, message: &str) {
 /// no URL work — D37 stays M5.)
 #[test]
 fn d29_click_opens_the_devices_running_project_in_the_editor() {
-    use super::studio_edit_e2e_tests::{edit_e2e_files, find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::{clock_transport_block, edit_e2e_files};
     use crate::{ProjectOp, SlotEditOp};
     use lpc_model::LpValue;
 
@@ -1606,10 +2019,10 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
     };
     let view = studio.view();
     assert!(view.home.is_none(), "the editor shows the device's project");
-    let address = find_slot(&view, "controls.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1618,10 +2031,7 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
         },
     )))
     .expect("slot edit round-trips over the device's wire");
-    assert_eq!(
-        slot_value_display(find_slot(&studio.view(), "controls.rate")),
-        "2"
-    );
+    assert_eq!(clock_transport_block(&studio.view()).rate, 2.0);
     assert_eq!(
         studio.runtime_pool_for_test().lens(),
         Some(device_id),
@@ -1742,7 +2152,11 @@ fn card_tab_and_sheet_drive_through_core_ops() {
             .iter()
             .find(|card| !card.sim)
             .expect("the connected device card");
-        assert_eq!(card.ui.tab, DeviceCardTab::Status, "fresh card = Status");
+        assert_eq!(
+            card.ui.tab,
+            DeviceCardTab::Details,
+            "fresh card = Settings front door"
+        );
         card.identity_key().to_string()
     };
 
@@ -1957,7 +2371,7 @@ fn d29_click_with_a_sim_project_open_moves_the_lens_and_keeps_the_sim() {
 #[test]
 fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
     use super::studio_edit_e2e_tests::{
-        InProcessServerIo, edit_e2e_files, edit_e2e_server, find_slot, slot_value_display,
+        InProcessServerIo, clock_transport_block, edit_e2e_files, edit_e2e_server,
     };
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, StudioServerClient};
@@ -2030,7 +2444,7 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
     // The sim mirror is untouched…
     let view = studio.view();
     assert!(view.home.is_none(), "the editor stayed open");
-    assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "1");
+    assert_eq!(clock_transport_block(&view).rate, 1.0);
     // …and the device reconciled in the background on its own client.
     let sync = studio
         .device_sync_for_test()
@@ -2106,7 +2520,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
 /// binds the sim lens with the loaded project's key (the URL's evidence).
 #[test]
 fn open_package_reattaches_when_the_sim_already_runs_it() {
-    use super::studio_edit_e2e_tests::{find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::clock_transport_block;
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, ProjectOp, SlotEditOp, UiLensRuntime};
     use lpc_model::LpValue;
@@ -2114,10 +2528,10 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     let (mut studio, _device, sim_id) = coexisting_sim_and_device();
     // an acked edit on the open sim project ("Sign")
     let view = studio.view();
-    let address = find_slot(&view, "controls.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -2161,8 +2575,8 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     let view = studio.view();
     assert!(view.home.is_none(), "the editor is back");
     assert_eq!(
-        slot_value_display(find_slot(&view, "controls.rate")),
-        "2",
+        clock_transport_block(&view).rate,
+        2.0,
         "the applied edit survived — re-attach, not a head re-push"
     );
     assert_eq!(
@@ -2837,6 +3251,26 @@ fn coexisting_sim_and_device_running() -> (StudioController, FakeEsp32Device, cr
 fn coexisting_fixture(
     device_project_loaded: bool,
 ) -> (StudioController, FakeEsp32Device, crate::RuntimeId) {
+    let (studio, device, sim_id, _server, _lamps) =
+        coexisting_fixture_with_sim_server(device_project_loaded);
+    (studio, device, sim_id)
+}
+
+/// [`coexisting_fixture`], also handing back the in-process sim SERVER
+/// (so a test can drive its render frames — the sim feed needs the engine
+/// to actually publish) and the uid of an installed "Lamps" package whose
+/// demand chain reaches an Output node with real mapped lamps (the
+/// embedded Plasma example; Sign stops at the fixture, so its engine
+/// never publishes a non-empty frame).
+fn coexisting_fixture_with_sim_server(
+    device_project_loaded: bool,
+) -> (
+    StudioController,
+    FakeEsp32Device,
+    crate::RuntimeId,
+    Rc<RefCell<lpa_server::LpServer>>,
+    String,
+) {
     use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, StudioServerClient};
@@ -2863,6 +3297,11 @@ fn coexisting_fixture(
             1.0,
         )
         .unwrap();
+    let plasma = crate::app::home::embedded_example("examples/plasma")
+        .expect("the plasma example is embedded");
+    let lamps = store
+        .install_package("Lamps", &plasma.files(), PackageProvenance::Created, 1.0)
+        .unwrap();
 
     let mut device_state = FakeLightPlayerState::new()
         .with_project_files(porch_files)
@@ -2878,8 +3317,9 @@ fn coexisting_fixture(
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
 
+    let sim_server = Rc::new(RefCell::new(edit_e2e_server()));
     let sim_io = InProcessServerIo {
-        server: Rc::new(RefCell::new(edit_e2e_server())),
+        server: Rc::clone(&sim_server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
         sent: Rc::new(RefCell::new(Vec::new())),
     };
@@ -2893,7 +3333,7 @@ fn coexisting_fixture(
         },
     )))
     .expect("open on the sim succeeds");
-    (studio, device, sim_id)
+    (studio, device, sim_id, sim_server, lamps.uid.to_string())
 }
 
 /// A studio whose link registry holds one fake provider with one scripted
@@ -3817,6 +4257,390 @@ fn device_card_key(studio: &StudioController) -> String {
         .expect("the board's card")
         .identity_key()
         .to_string()
+}
+
+// ---------------------------------------------------------------------
+// The device card's live frame feed (honest-device preview P2): the ▶ tab
+// pulls the frames a board ALREADY published, on a session the editor lens
+// is not on, and only while that tab is up.
+// ---------------------------------------------------------------------
+
+/// The feed, end to end through the real link: selecting ▶ on a connected
+/// board's card starts published-frame reads, and what lands on the card is
+/// the DEVICE's own output buffer plus the geometry to draw it with.
+///
+/// The geometry `Rc` is the second half of the promise: a steady feed ships
+/// the layout once and samples thereafter (`IfChanged`), and the renderer
+/// repaints on `Rc` POINTER identity — so a second pull that says
+/// "unchanged" must hand back the SAME `Rc`, not an equal one.
+#[test]
+fn the_play_tab_feeds_the_card_frames_the_device_published() {
+    let (mut studio, card_key, _device) = studio_feeding_a_loaded_device();
+
+    run_card_feeds(&mut studio);
+
+    let card = device_card(&studio, &card_key);
+    let frame = card.frame_preview.as_ref().expect("a published frame");
+    assert!(!frame.bytes.is_empty(), "the published buffer arrived");
+    assert!(frame.revision > 0, "the device stamped a publish revision");
+    assert!(
+        !frame.sample_layout.spans.is_empty(),
+        "the sample layout says how to read the buffer"
+    );
+    let geometry = frame
+        .display_layout
+        .as_ref()
+        .expect("this fixture's layout fits the wire budget");
+    assert_eq!(
+        card.frame_age_secs,
+        Some(0.0),
+        "a frame that just landed is not stale"
+    );
+
+    // Second pull: the layout is asked for `IfChanged` and comes back
+    // unchanged, so the SAME Rc rides the new frame.
+    let first = std::rc::Rc::clone(geometry);
+    run_card_feeds(&mut studio);
+    let card = device_card(&studio, &card_key);
+    let frame = card.frame_preview.as_ref().expect("a second frame");
+    assert!(
+        std::rc::Rc::ptr_eq(
+            &first,
+            frame.display_layout.as_ref().expect("geometry still there")
+        ),
+        "unchanged geometry keeps its Rc — a new one repaints the whole field"
+    );
+}
+
+/// P3's default rule, end to end: a connected board running a project opens
+/// its card on ▶ with NO tab selection anywhere — and because the tab and
+/// the feed's gate are the same answer (`effective_card_tab`), the feed is
+/// already running when the card is first drawn.
+///
+/// This is the whole "▶ is the default" promise: not a renderer preference,
+/// but a card that is already showing frames the first time you look at it.
+#[test]
+fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
+    let (store, host) = library();
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Play,
+        "a Ready board running a project opens on its picture"
+    );
+
+    run_card_feeds(&mut studio);
+    assert!(
+        device_card(&studio, &card_key).frame_preview.is_some(),
+        "the default tab feeds itself — no gesture required"
+    );
+
+    // And an explicit choice outranks the default, permanently: moving to
+    // Settings must not snap back to ▶ on the next view build.
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Details,
+        "the user's tab choice is sticky"
+    );
+}
+
+/// The gate, negative half: a card on any other tab issues NO frame read.
+/// The feed is the only wire traffic a non-lens device session generates
+/// between heartbeats, so a card nobody is watching must generate none.
+///
+/// The tab is selected EXPLICITLY here: a fresh card on a loaded, answering
+/// board now opens on ▶ (P3's default rule), so "no selection" is no longer
+/// a way to express "watching something else".
+#[test]
+fn a_card_on_another_tab_never_pulls_frames() {
+    let (store, host) = library();
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
+
+    run_card_feeds(&mut studio);
+
+    let feed = studio.card_feed_for_test().expect("the device session");
+    assert_eq!(
+        feed.pull_completed_at(),
+        None,
+        "no pull ran for a card whose ▶ tab is not up"
+    );
+    assert!(feed.frame().is_none());
+}
+
+/// The gate's other half plus Q4: a board that stops answering stops being
+/// read — and its card KEEPS the last frame it published, which is exactly
+/// what the offline treatment shows ("last frame · N s ago"), dimmed.
+#[test]
+fn an_unplugged_board_stops_feeding_and_keeps_its_last_frame() {
+    let (mut studio, card_key, device) = studio_feeding_a_loaded_device();
+    run_card_feeds(&mut studio);
+    let published = device_card(&studio, &card_key)
+        .frame_preview
+        .clone()
+        .expect("a frame while connected");
+    let fed_at = studio
+        .card_feed_for_test()
+        .and_then(crate::CardFeedState::pull_completed_at)
+        .expect("the feed ran");
+
+    // Unplug: the stream reports EOF on the next pull and the session
+    // goes Gone.
+    device.set_failure_plan(
+        FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes()),
+    );
+    drive(studio.refresh_device_sync_for_test());
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Gone)
+    ));
+
+    run_card_feeds(&mut studio);
+
+    assert_eq!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at),
+        Some(fed_at),
+        "a board that is not Ready is not read"
+    );
+    let card = device_card(&studio, &card_key);
+    assert_eq!(
+        card.frame_preview.as_ref().map(|frame| frame.revision),
+        Some(published.revision),
+        "the last in-session frame survives the unplug (Q4)"
+    );
+    assert_eq!(
+        card.frame_fps, None,
+        "a dead link reports no engine rate, however recently it did"
+    );
+}
+
+/// Completion-gap pacing: a feed pull that just finished is not due again
+/// until a full gap of IDLE time has passed, counted from the completion —
+/// so a slow dome frame spaces itself out instead of running back-to-back,
+/// and the UI timer is told about the shorter gap while a card feeds.
+#[test]
+fn the_feed_paces_itself_from_each_pulls_completion() {
+    let clock = Rc::new(std::cell::Cell::new(1.0_f64));
+    let (mut studio, _card_key, _device) = studio_feeding_a_loaded_device_at(Rc::clone(&clock));
+
+    run_card_feeds(&mut studio);
+    let first = studio
+        .card_feed_for_test()
+        .and_then(crate::CardFeedState::pull_completed_at)
+        .expect("the first pull ran");
+
+    // Same instant: not due, nothing touches the wire.
+    run_card_feeds(&mut studio);
+    assert_eq!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at),
+        Some(first),
+        "an early tick bounces off the gap without a wire op"
+    );
+    assert!(
+        studio.next_refresh_interval() <= crate::DEVICE_CARD_FEED_INTERVAL,
+        "a feeding card pulls the UI timer down to its own cadence"
+    );
+
+    clock.set(clock.get() + crate::DEVICE_CARD_FEED_INTERVAL.as_secs_f64());
+    run_card_feeds(&mut studio);
+    assert!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at)
+            > Some(first),
+        "once the gap elapsed the next frame is pulled"
+    );
+}
+
+/// G1 ruling 3 (Q5 overturned), end to end: the SIM session rides the same
+/// published-frame feed a device does. Its card defaults to ▶, the feed
+/// pulls the sim engine's OWN published frame over the in-proc wire, and
+/// the home view's sim card carries it — no browser re-simulation anywhere.
+#[test]
+fn the_sim_card_feeds_real_frames_like_a_device() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp};
+
+    let (mut studio, _device, _sim_id, sim_server, lamps_uid) =
+        coexisting_fixture_with_sim_server(false);
+
+    // Swap the sim onto the project whose chain reaches an Output node —
+    // only a publishing engine has a frame for the feed to read.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage { key: lamps_uid },
+    )))
+    .expect("open the output-chain project on the sim");
+
+    // The engine publishes on render ticks; give it a few so the chain
+    // settles — compile, render, publish (the wasm sim's rAF loop does
+    // this continuously).
+    for _ in 0..5 {
+        sim_server.borrow_mut().advance_frame(16).expect("tick");
+    }
+
+    run_card_feeds(&mut studio);
+    let frame_revision = {
+        let pool = studio.runtime_pool_for_test();
+        let session = pool.sim_session().expect("the sim session");
+        assert!(
+            session.sim_loaded_project().is_some(),
+            "the sim knows its loaded project"
+        );
+        let feed = session.card_feed();
+        assert!(feed.pull_completed_at().is_some(), "the feed pull ran");
+        assert!(feed.handle_id().is_some(), "the feed acquired a handle");
+        let frame = feed.frame().expect("the sim engine's published frame");
+        assert!(!frame.bytes.is_empty(), "the published buffer arrived");
+        frame.revision
+    };
+
+    // The gallery's sim card carries the frame the feed banked — the same
+    // view wiring a device card uses, through HomeSimEvidence.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+    let view = studio.view();
+    let home = view.home.as_ref().expect("detached editor = gallery");
+    let sim_card = home.devices.iter().find(|card| card.sim).expect("sim card");
+    assert_eq!(
+        sim_card.ui.tab,
+        crate::DeviceCardTab::Play,
+        "a loaded sim opens on its picture, same default rule as hardware"
+    );
+    let frame = sim_card
+        .frame_preview
+        .as_ref()
+        .expect("the sim card wears the fed frame");
+    assert_eq!(frame.revision, frame_revision, "the same frame, not a copy");
+}
+
+/// A connected board running the demo project, with its card's ▶ tab
+/// selected — the fixture every feed row starts from.
+fn studio_feeding_a_loaded_device() -> (StudioController, String, FakeEsp32Device) {
+    studio_feeding_a_loaded_device_at(Rc::new(std::cell::Cell::new(1.0)))
+}
+
+fn studio_feeding_a_loaded_device_at(
+    clock: Rc<std::cell::Cell<f64>>,
+) -> (StudioController, String, FakeEsp32Device) {
+    let (store, host) = library();
+    let (mut studio, card_key, device) = studio_with_loaded_device_at(&store, host, clock);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
+    (studio, card_key, device)
+}
+
+fn studio_with_loaded_device(
+    store: &LibraryStore,
+    host: Rc<MemoryLibraryHost>,
+) -> (StudioController, String, FakeEsp32Device) {
+    studio_with_loaded_device_at(store, host, Rc::new(std::cell::Cell::new(1.0)))
+}
+
+/// A fake board booted with the demo project LOADED and running (the real
+/// hardware shape), connected through the real link. The same package is
+/// installed in the library, so the board classifies as Known — the state
+/// the client-side layout fallback reads its files from.
+fn studio_with_loaded_device_at(
+    store: &LibraryStore,
+    host: Rc<MemoryLibraryHost>,
+    clock: Rc<std::cell::Cell<f64>>,
+) -> (StudioController, String, FakeEsp32Device) {
+    let files: Vec<(String, Vec<u8>)> = crate::app::project::demo_project::demo_project_files()
+        .iter()
+        .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
+        .collect();
+    let summary = store
+        .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+        .expect("the demo project installs");
+    let library_files = store
+        .open(summary.uid)
+        .expect("the installed package opens")
+        .read_all_files()
+        .expect("its files read back");
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let endpoint_id = LinkEndpointId::new("fake-device-0");
+    let provider =
+        FakeProvider::new().with_device_endpoint(endpoint_id.clone(), "Fake ESP32", script);
+    let device = provider.device(&endpoint_id).expect("device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let mut studio = StudioController::with_link_registry_for_test(
+        {
+            let clock = Rc::clone(&clock);
+            move || clock.get()
+        },
+        registry,
+    );
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        view.home
+            .as_ref()
+            .expect("gallery showing")
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card")
+            .identity_key()
+            .to_string()
+    };
+    (studio, card_key, device)
+}
+
+/// Run every due card feed to completion, the way the actor's tick does.
+fn run_card_feeds(studio: &mut StudioController) {
+    drive(studio.run_due_card_feeds(
+        |_budget: Duration| core::future::pending::<()>(),
+        &lpa_client::NeverCancel,
+    ));
+}
+
+fn select_card_tab(studio: &mut StudioController, card_key: &str, tab: crate::DeviceCardTab) {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{CardUiOp, HomeOp};
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CardUi(CardUiOp::SelectTab {
+            card: card_key.to_string(),
+            tab,
+        }),
+    )))
+    .expect("tab select dispatches");
+}
+
+/// The card wearing `card_key`, off a freshly built view.
+fn device_card(studio: &StudioController, card_key: &str) -> crate::UiDeviceCard {
+    studio
+        .view()
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the card by identity")
+        .clone()
 }
 
 fn studio_with_two_fake_devices(
