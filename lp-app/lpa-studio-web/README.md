@@ -130,7 +130,46 @@ local service running, the proxied calls simply fail and the session reads
 Nothing in `just check` compiles wasm32, and this crate takes
 `lpa-cloud-client` with `default-features = false` (no in-process transport
 in the browser bundle): `just check-wasm-cloud` is the cheap gate for that
-combination, `just studio-web-build` the full one.
+combination, `just studio-web-build` the full one. Neither recipe is wired
+into `just check` itself — see
+`docs/debt/wasm-cloud-check-not-in-just-check.md`.
+
+#### The account surface
+
+`app/layout/cloud_account.rs` renders the chrome control: a quiet "Sign in"
+text link (secondary-nav treatment) when `CloudSession` is signed out, an
+avatar button opening an identity dropdown when signed in, and a shimmer
+while the boot `whoami` is in flight — never a sign-in-then-pop-to-avatar
+flash. With exactly one `LoginOptionsInfo.oidc` entry and no dev picker the
+link goes straight to `start_path?next=<current path>`; otherwise it opens a
+popover built from the same `LoginOptionsInfo` (one row per OIDC option, plus
+the dev picker's seeded choices when present). The dropdown's switch-account
+group reads `account_memory`'s `lp_accounts` list (client-side only, sugar
+over "who has signed in on this browser before" — never a credential).
+`app/account/account_page.rs` is the `/account` route: Identity (provider
+photo, given/family name inputs, save-on-dirty), Account (email, provider
+badge, account id, member-since), and Sessions (list with created/user-agent,
+per-row revoke, "sign out everywhere" = revoke every other session then
+`POST /auth/logout`).
+
+**Walking the dev flow end to end** (no Google needed):
+
+```bash
+LP_CLOUD_PORT=2812 LP_CLOUD_DEV_AUTH=1 just cloud-serve   # dev auth on
+just studio-dev                                            # in another shell
+```
+
+Open the served URL. The chrome's "Sign in" opens the dev picker popover
+(seeded profiles from `MetaStore::users`, plus a link to mint a new one via
+`/auth/dev?email=…`); picking one lands a session and swaps the chrome to
+the avatar. The dropdown's Profile row goes to `/account`, where editing a
+name row reveals the Save button (dirty-tracked against the loaded record,
+not autosaved), Sessions lists the just-created session marked `current`,
+and "Add another account…" reopens the same dev picker to mint or switch to
+a second profile — the switch is a plain re-auth (one round trip through
+`/auth/dev` again), not an in-place swap. Without a local `lp-cloud`
+running, every proxied call fails and the session reads `Unreachable`,
+which renders nothing account-shaped (no login nag, no error banner).
 
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. `dx build` writes Studio app assets under
@@ -278,6 +317,23 @@ step state, pane emphasis, and project node status. Avoid adding broad new
 selector families to `src/style.css`; that file should stay limited to theme
 variables, base rules, keyframes, browser/measurement behavior, and explicitly
 transitional story or exploration surfaces.
+
+Two crate-wide traps `src/style.css`'s base rules set, found while building
+the cloud account popovers (`e9dcc99cd`, `dc7c41792`) — both bit a component
+that looked correct in markup and wrong on screen:
+
+- **The Tailwind build ships without preflight**, so a bare `<button>` keeps
+  the UA's default `buttonface` background/border at rest. A `<button>`
+  reusing another element's classes (an `<a>`-shaped nav class, for example)
+  needs an *explicit* `tw:bg-*`/`tw:border-*` — omitting one does not mean
+  "no background", it means "whatever the browser paints for a button".
+- **`button, input, textarea, select { font: inherit }` in `style.css` is
+  unlayered on purpose** (it has to beat Tailwind's own `@layer`d resets),
+  which means it also beats any `tw:font-*`/`tw:text-*` utility placed
+  directly on the button/input element itself — those utilities lose the
+  cascade every time. Put the font utility on a `<span>` (or other non-form
+  element) inside the control instead; see `cloud_account.rs`'s trigger
+  labels and `account_page.rs`'s field-row key spans for the pattern.
 
 Reusable Dioxus surfaces live under `src/base`, `src/core`, and `src/app`:
 
