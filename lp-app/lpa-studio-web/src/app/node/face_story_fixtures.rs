@@ -7,15 +7,15 @@
 //! content is byte-identical to what the backing slot row would show.
 
 use lpa_studio_core::{
-    ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
-    ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
-    UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
-    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
-    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
-    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview,
-    UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
+    ArtifactLocation, ControllerId, PlayState, ProjectEditorOp, ProjectNodeAddress,
+    ProjectSlotAddress, ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor,
+    UiAssetEditorKind, UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView,
+    UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit,
+    UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
+    UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
 
 use crate::app::node::node_story_fixtures::{
@@ -327,19 +327,19 @@ pub(crate) fn phasor_reading(
 /// story capture needs a frame-zero paint that never depends on wall time.
 pub(crate) fn clock_transport(
     seconds: f32,
-    running: bool,
+    play_state: PlayState,
     rate: f32,
     scrub_offset_seconds: f32,
 ) -> lpa_studio_core::UiClockTransport {
     lpa_studio_core::UiClockTransport {
         seconds,
-        running,
+        play_state,
         rate,
         scrub_offset_seconds,
-        running_address: Some(story_slot_address("transport.running")),
+        play_state_address: Some(story_slot_address("transport.play_state")),
         rate_address: Some(story_slot_address("transport.rate")),
         scrub_address: Some(story_slot_address("transport.scrub_offset_seconds")),
-        running_override: None,
+        play_state_override: None,
         rate_override: None,
         scrub_override: None,
     }
@@ -351,21 +351,25 @@ pub(crate) fn clock_transport(
 /// different facts).
 pub(crate) fn clock_transport_overridden(
     seconds: f32,
-    running: bool,
+    play_state: PlayState,
     rate: f32,
     scrub_offset_seconds: f32,
 ) -> lpa_studio_core::UiClockTransport {
-    let mut transport = clock_transport(seconds, running, rate, scrub_offset_seconds);
-    transport.running_override = transport.running_address.clone();
+    let mut transport = clock_transport(seconds, play_state, rate, scrub_offset_seconds);
+    transport.play_state_override = transport.play_state_address.clone();
     transport.rate_override = transport.rate_address.clone();
     transport.scrub_override = transport.scrub_address.clone();
     transport
 }
 
-/// A clock face in one of the listing's three states, transport running at
+/// A clock face in one of the listing's three states, transport playing at
 /// ×1 from the spike's 7:27 (447 s).
 pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
-    clock_face_with_transport(timebase, phasors, clock_transport(447.0, true, 1.0, 0.0))
+    clock_face_with_transport(
+        timebase,
+        phasors,
+        clock_transport(447.0, PlayState::Playing, 1.0, 0.0),
+    )
 }
 
 /// [`clock_face`] with the transport block a story chooses (paused,

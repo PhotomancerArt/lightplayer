@@ -172,7 +172,7 @@ impl Project {
     /// Debug slider does: a slot edit staged in the registry overlay, then
     /// applied to the engine.
     ///
-    /// This is the only way to drive `running` / `scrub_offset_seconds` —
+    /// This is the only way to drive `play_state` / `scrub_offset_seconds` —
     /// they are `Debug`-role slot data, which the project codec deliberately
     /// round-trips to defaults, so authoring them into the fixture's
     /// `clock.json` would be silently discarded (P2/P3 both hit this).
@@ -1007,7 +1007,10 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
         .expect("published");
     assert!(live_edge > 0.0, "the clock has to have run: {live_edge}");
 
-    project.write_clock_control("transport.running", LpValue::Bool(false));
+    project.write_clock_control(
+        "transport.play_state",
+        LpValue::String(lpc_model::PlayState::Paused.as_str().to_string()),
+    );
     project.frame(&[compute]);
     let paused_at = project
         .engine

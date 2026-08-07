@@ -167,7 +167,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         .transport
         .clone()
         .expect("the transport block rides the face (tape-hero P2)");
-    assert!(transport.running, "authored default: running");
+    assert_eq!(
+        transport.play_state,
+        lpc_model::PlayState::Playing,
+        "authored default: playing"
+    );
     assert_eq!(transport.rate, 1.0);
     assert_eq!(transport.scrub_offset_seconds, 0.0);
     assert_eq!(
@@ -203,7 +207,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         scrubbed.scrub_offset_seconds, -12.4,
         "the staged scrub value reads back through the face at once"
     );
-    assert!(scrubbed.running, "siblings untouched by the scrub");
+    assert_eq!(
+        scrubbed.play_state,
+        lpc_model::PlayState::Playing,
+        "siblings untouched by the scrub"
+    );
 
     // -- knob drag flood: coalesced SetValues flow back into the face -------
     for value in [1.4_f32, 1.9, 2.5] {
@@ -1425,7 +1433,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1548,7 +1556,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1963,7 +1971,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let playlist_json = r#"{
   "kind": "Playlist",
@@ -2075,7 +2083,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let playlist_json = format!(
         r#"{{
@@ -2175,7 +2183,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",

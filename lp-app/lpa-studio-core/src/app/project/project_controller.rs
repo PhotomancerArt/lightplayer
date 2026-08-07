@@ -10183,13 +10183,13 @@ mod tests {
             );
             face.transport = Some(crate::UiClockTransport {
                 seconds: 0.0,
-                running: true,
+                play_state: lpc_model::PlayState::Playing,
                 rate: 1.0,
                 scrub_offset_seconds: 0.0,
-                running_address: Some(transport_address("running")),
+                play_state_address: Some(transport_address("play_state")),
                 rate_address: Some(transport_address("rate")),
                 scrub_address: Some(transport_address("scrub_offset_seconds")),
-                running_override: None,
+                play_state_override: None,
                 rate_override: None,
                 scrub_override: None,
             });
@@ -10226,7 +10226,7 @@ mod tests {
         assert_eq!(after.seconds, 42.35, "the probe's seconds lands in the DTO");
         // Everything else the builder set stays untouched — this pass only
         // ever writes `seconds`.
-        assert!(after.running);
+        assert_eq!(after.play_state, lpc_model::PlayState::Playing);
         assert_eq!(after.rate, 1.0);
         assert_eq!(after.scrub_offset_seconds, 0.0);
     }

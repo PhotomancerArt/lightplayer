@@ -147,20 +147,20 @@ fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
 /// in, from the cached timebase probe.
 fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport> {
     let rows = debug_rows(sections);
-    let running_row = rows.iter().find(|row| row.key == "transport.running")?;
+    let play_state_row = rows.iter().find(|row| row.key == "transport.play_state")?;
     let rate_row = rows.iter().find(|row| row.key == "transport.rate")?;
     let scrub_row = rows
         .iter()
         .find(|row| row.key == "transport.scrub_offset_seconds")?;
     Some(crate::UiClockTransport {
         seconds: 0.0,
-        running: row_bool(running_row)?,
+        play_state: row_play_state(play_state_row)?,
         rate: row_f32(rate_row)?,
         scrub_offset_seconds: row_f32(scrub_row)?,
-        running_address: editable_row_address(running_row),
+        play_state_address: editable_row_address(play_state_row),
         rate_address: editable_row_address(rate_row),
         scrub_address: editable_row_address(scrub_row),
-        running_override: row_override(running_row),
+        play_state_override: row_override(play_state_row),
         rate_override: row_override(rate_row),
         scrub_override: row_override(scrub_row),
     })
@@ -191,11 +191,13 @@ fn row_f32(row: &UiConfigSlot) -> Option<f32> {
     }
 }
 
-/// A row's scalar `bool` value, when its body is a plain value of that kind.
-fn row_bool(row: &UiConfigSlot) -> Option<bool> {
+/// A row's [`PlayState`], when its body is the state's wire tag. The slot
+/// carries the enum as a string leaf, so an unknown tag reads as "no
+/// transport" rather than a guessed state.
+fn row_play_state(row: &UiConfigSlot) -> Option<lpc_model::PlayState> {
     match &row.body {
-        UiConfigSlotBody::Value(value) => match value.kind {
-            UiSlotValueKind::Bool(value) => Some(value),
+        UiConfigSlotBody::Value(value) => match &value.kind {
+            UiSlotValueKind::String(value) => lpc_model::PlayState::parse(value),
             _ => None,
         },
         _ => None,
@@ -2538,7 +2540,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(false)),
+                transport_row("play_state", UiSlotValue::string("paused")),
                 transport_row("rate", UiSlotValue::f32(2.0)),
                 transport_row("scrub_offset_seconds", UiSlotValue::f32(-12.4)),
             ]),
@@ -2550,7 +2552,7 @@ mod tests {
             panic!("expected a clock face");
         };
         let transport = face.transport.expect("three rows present → block present");
-        assert!(!transport.running);
+        assert_eq!(transport.play_state, lpc_model::PlayState::Paused);
         assert_eq!(transport.rate, 2.0);
         assert_eq!(transport.scrub_offset_seconds, -12.4);
         assert_eq!(transport.seconds, 0.0, "numeric seconds is probe-only");
@@ -2559,7 +2561,7 @@ mod tests {
             Some(clock_slot_address("transport.rate")),
             "editable row → dispatch address"
         );
-        assert!(transport.running_address.is_some());
+        assert!(transport.play_state_address.is_some());
         assert!(transport.scrub_address.is_some());
     }
 
@@ -2576,7 +2578,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("play_state", UiSlotValue::string("playing")),
                 transport_row("rate", UiSlotValue::f32(1.0)).with_state(read_only),
                 transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
             ]),
@@ -2590,7 +2592,10 @@ mod tests {
         let transport = face.transport.expect("values still lift");
         assert_eq!(transport.rate, 1.0);
         assert_eq!(transport.rate_address, None, "read-only → no dispatch");
-        assert!(transport.running_address.is_some(), "siblings unaffected");
+        assert!(
+            transport.play_state_address.is_some(),
+            "siblings unaffected"
+        );
     }
 
     /// A dirty Debug row (an active session override) lifts its own edit
@@ -2604,7 +2609,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("play_state", UiSlotValue::string("playing")),
                 transport_row("rate", UiSlotValue::f32(2.0))
                     .with_state(dirty)
                     .with_edit_entry_address(clock_slot_address("transport.rate")),
@@ -2623,7 +2628,7 @@ mod tests {
             Some(clock_slot_address("transport.rate")),
             "dirty row → its edit entry is the Clear target"
         );
-        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.play_state_override, None, "clean row → no tint");
         assert_eq!(transport.scrub_override, None);
     }
 

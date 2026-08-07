@@ -243,11 +243,14 @@ pub fn TapeTransport(
     driver.sync(&transport);
 
     let scrub_wired = transport_wiring(&transport.scrub_address, on_action);
-    let running_wired = transport_wiring(&transport.running_address, on_action);
+    let play_state_wired = transport_wiring(&transport.play_state_address, on_action);
 
     let offlive = transport.scrub_offset_seconds != 0.0;
     let return_live = transport.scrub_offset_seconds.abs() > OFFLIVE_CHIP_EPSILON_S;
-    let running = transport.running;
+    let playing = transport.play_state.is_playing();
+    // The run/pause button writes the OTHER state — a setpoint, never a
+    // verb: whoever applies it late still lands where the user asked.
+    let toggled_play_state = transport.play_state.toggled();
     let staged_scrub = transport.scrub_offset_seconds;
 
     // Scrub drag anchor: pointer x and staged scrub at pointerdown; None
@@ -276,15 +279,15 @@ pub fn TapeTransport(
     // The transport is Debug territory: a control with an ACTIVE session
     // override wears the debug family's orange tint (no hazard stripes —
     // "a bit strong" per gate feedback; the tint + Clear carry it).
-    let running_changed = transport.running_override.is_some();
+    let play_state_changed = transport.play_state_override.is_some();
     let rate_changed = transport.rate_override.is_some();
     // `button { font: inherit }` in the base sheet beats layered tw
     // utilities — the font is set explicitly here (wiring-UI lesson).
     // Changed-tint outranks the run-state accent: an overridden control
     // announces the override first (the glyph still says which state).
-    let run_class = if running_changed {
+    let run_class = if play_state_changed {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-status-attention-border tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-status-attention-foreground tw:disabled:cursor-default"
-    } else if running {
+    } else if playing {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-accent tw:disabled:cursor-default"
     } else {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default"
@@ -326,7 +329,7 @@ pub fn TapeTransport(
     let scrub_move_driver = driver.clone();
     let scrub_up_driver = driver.clone();
     let scrub_cancel_driver = driver.clone();
-    let run_wired = running_wired.clone();
+    let run_wired = play_state_wired.clone();
     let live_wired = scrub_wired.clone();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2",
@@ -398,8 +401,8 @@ pub fn TapeTransport(
                 button {
                     r#type: "button",
                     class: run_class,
-                    disabled: running_wired.is_none(),
-                    title: if running { "Pause the clock" } else { "Run the clock" },
+                    disabled: play_state_wired.is_none(),
+                    title: if playing { "Pause the clock" } else { "Run the clock" },
                     onclick: move |_| {
                         if let Some((address, handler)) = run_wired.clone() {
                             handler
@@ -407,17 +410,19 @@ pub fn TapeTransport(
                                     panel_or_slot_action(
                                         &None,
                                         address,
-                                        LpValue::Bool(!running),
+                                        LpValue::String(
+                                            toggled_play_state.as_str().to_string(),
+                                        ),
                                     ),
                                 );
                         }
                     },
                     span { class: "tw:text-xs tw:leading-none",
-                        if running { "\u{275a}\u{275a}" } else { "\u{25b6}" }
+                        if playing { "\u{275a}\u{275a}" } else { "\u{25b6}" }
                     }
                 }
                 {override_clear_slot(
-                    transport.running_override.clone(),
+                    transport.play_state_override.clone(),
                     "Clear the run/pause debug override \u{2014} session only",
                     on_action,
                 )}
