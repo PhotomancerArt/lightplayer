@@ -85,6 +85,18 @@ pub fn NodePane(
     // controller supplies a kind-specific face (shader/fixture/playlist
     // today); every other kind keeps the classic sections fallback.
     let face = view.face.clone();
+    // A module card's face carries two things the popup wants: the export
+    // designation row (module authoring unit, P3) and the provenance line.
+    let module_face = match view.face.as_ref() {
+        Some(lpa_studio_core::UiNodeFace::Module(face)) => Some(face.clone()),
+        _ => None,
+    };
+    // The DISPLAY-only export chip on a designated module's header (D12 —
+    // the chip never toggles anything; the popup owns the gesture).
+    let export_chip = module_face
+        .as_ref()
+        .and_then(|face| face.export.as_ref())
+        .is_some_and(|export| export.designated);
     let face_sections = main_tab_sections(&view);
     // Disclosure state is core-owned (`NodeCardUiState`), keyed by the
     // node's address path — the header path carries it for panes and
@@ -125,6 +137,13 @@ pub fn NodePane(
                     on_action,
                     trailing: rsx! {
                         NodeDebugMarker { count: debug_overrides }
+                        if export_chip {
+                            span {
+                                class: "tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-export-border tw:bg-status-export-bg tw:px-1.5 tw:py-0.5 tw:text-[10px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-status-export-foreground",
+                                title: "This module is exported from the project.",
+                                "export"
+                            }
+                        }
                         if !kind_label.is_empty() {
                             span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
                                 "{kind_label}"
@@ -154,6 +173,7 @@ pub fn NodePane(
                         NodeDetailPopover {
                             header,
                             pending_edits: pending_edits.clone(),
+                            module: module_face.clone(),
                             on_action,
                         }
                     },

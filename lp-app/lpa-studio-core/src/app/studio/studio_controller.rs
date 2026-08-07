@@ -25,13 +25,13 @@ use crate::core::log::{
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
-    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
-    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, ModuleExportOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
+    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
+    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
+    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -3519,6 +3519,10 @@ impl StudioController {
                 let op = action.into_op::<NodeCopyOp>()?;
                 return self.execute_node_copy_op(op).await;
             }
+            if action.op_as::<ModuleExportOp>().is_some() {
+                let op = action.into_op::<ModuleExportOp>()?;
+                return self.execute_module_export_op(op).await;
+            }
             if action.op_as::<NodePasteOp>().is_some() {
                 let op = action.into_op::<NodePasteOp>()?;
                 return self.execute_node_paste_op(op).await;
@@ -5590,6 +5594,19 @@ impl StudioController {
             }
         }
         self.record_project_edit_run(Ok(run))
+    }
+
+    /// Export designation (module authoring unit, P3): the manifest patch
+    /// runs against the OPEN project's own package handle, so nothing here
+    /// touches the catalog lock.
+    async fn execute_module_export_op(&mut self, op: ModuleExportOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .set_module_export(server, &op.folder, op.export)
+                .await
+        };
+        self.record_project_edit_run(run)
     }
 
     async fn execute_node_paste_op(&mut self, op: NodePasteOp) -> UiResult {

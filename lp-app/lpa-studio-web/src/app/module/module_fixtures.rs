@@ -17,8 +17,9 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
+    ExportFinding, ExportSeverity, LpValue, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView,
+    UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportRow, UiExportsSection, UiModuleExport,
     UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
     UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
@@ -324,6 +325,8 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
         wiring_open: false,
         provenance: Some("PhotomancerArt · v1.2 · CC0-1.0".to_string()),
         auto_save: None,
+        exports: None,
+        export: None,
     }
 }
 
@@ -462,6 +465,10 @@ pub(crate) fn root_face() -> UiModuleFace {
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
         // The project root owns panel persistence (P11).
         auto_save: Some(true),
+        // A plain project exports nothing, so the root card grows no
+        // exports rail (spike 2·ii).
+        exports: None,
+        export: None,
     }
 }
 
@@ -486,6 +493,8 @@ pub(crate) fn control_root_face() -> UiModuleFace {
         wiring_open: false,
         provenance: None,
         auto_save: Some(true),
+        exports: None,
+        export: None,
     }
 }
 
@@ -741,6 +750,135 @@ pub(crate) fn module_node_view(
     let mut view = UiNodeView::new(header, Vec::new()).with_node_id(path);
     view.face = Some(UiNodeFace::Module(face));
     view
+}
+
+// --------------------------------------------------------------- exports
+
+/// The exports family (module authoring unit, P3): the fixture project is
+/// `yona-noise`, a pattern project shipping three module folders. The three
+/// verdicts below are the three states the rail has to hold.
+pub(crate) const EXPORT_PROJECT: &str = "yona-noise";
+
+fn export_rows(worst: &[(&str, Option<ExportSeverity>)]) -> Vec<UiExportRow> {
+    worst
+        .iter()
+        .map(|(name, worst)| UiExportRow {
+            name: (*name).to_string(),
+            worst: *worst,
+        })
+        .collect()
+}
+
+/// The sibling-feed warning (P2's graph half): an exported module reads a
+/// channel only scaffolding writes, so an imported copy runs on the
+/// authored default.
+pub(crate) fn scaffolding_warning() -> ExportFinding {
+    ExportFinding::warning(
+        "fire",
+        "fire reads bus:noise.field, whose only writer is common — not exported. \
+         Imported copies run on the authored default."
+            .to_string(),
+        None,
+    )
+}
+
+/// The escaping-ref error (P2's static half): a file inside the export
+/// folder points outside it, so the vendored copy would not load.
+pub(crate) fn escaping_ref_error() -> ExportFinding {
+    ExportFinding::error(
+        "ripple_interference_cascade",
+        "wave.glsl references ../common/simplex.glsl, which escapes the export \
+         folder. Move it inside ripple_interference_cascade/ before exporting."
+            .to_string(),
+        Some("/ripple_interference_cascade/wave.glsl".to_string()),
+    )
+}
+
+/// Three exports, every one of them clean — the reassuring state.
+pub(crate) fn clean_exports() -> UiExportsSection {
+    UiExportsSection {
+        rows: export_rows(&[
+            ("fire", None),
+            ("noise_party", None),
+            ("ripple_interference_cascade", None),
+        ]),
+        findings: Vec::new(),
+    }
+}
+
+/// One export carrying a warning: it would still ship, just poorer for it.
+pub(crate) fn warning_exports() -> UiExportsSection {
+    UiExportsSection {
+        rows: export_rows(&[
+            ("fire", Some(ExportSeverity::Warning)),
+            ("noise_party", None),
+        ]),
+        findings: vec![scaffolding_warning()],
+    }
+}
+
+/// Both severities at once: the rail has to rank them without letting the
+/// warning hide the error.
+pub(crate) fn error_exports() -> UiExportsSection {
+    UiExportsSection {
+        rows: export_rows(&[
+            ("fire", Some(ExportSeverity::Warning)),
+            ("noise_party", None),
+            ("ripple_interference_cascade", Some(ExportSeverity::Error)),
+        ]),
+        findings: vec![scaffolding_warning(), escaping_ref_error()],
+    }
+}
+
+/// The root card of a pattern project, with `exports` filled in.
+pub(crate) fn exporting_root_face(exports: UiExportsSection) -> UiModuleFace {
+    let mut face = root_face();
+    face.exports = Some(exports);
+    face
+}
+
+/// `fire`'s designation row as its popup shows it: a live checkbox on a
+/// folder module directly under the root.
+pub(crate) fn fire_export(designated: bool) -> UiModuleExport {
+    UiModuleExport {
+        folder: "fire".to_string(),
+        project: EXPORT_PROJECT.to_string(),
+        designated,
+        disabled_reason: None,
+        upgrades_to_pattern: !designated,
+        findings: if designated {
+            vec![scaffolding_warning(), escaping_ref_error()]
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+/// The disabled row: a module with no folder of its own has nothing to
+/// vendor, and says so instead of vanishing.
+pub(crate) fn inline_module_export() -> UiModuleExport {
+    UiModuleExport {
+        folder: String::new(),
+        project: EXPORT_PROJECT.to_string(),
+        designated: false,
+        disabled_reason: Some(
+            "An export ships a folder. This module is a single file — move it into a \
+             folder of its own to export it."
+                .to_string(),
+        ),
+        upgrades_to_pattern: false,
+        findings: Vec::new(),
+    }
+}
+
+/// One module card wearing a designation row (and, when designated, the
+/// header's display-only export chip).
+pub(crate) fn module_card_with_export(name: &str, export: UiModuleExport) -> UiNodeView {
+    let mut face = plasma_face(plasma_read_panel(PLASMA_1_SCOPE), 0.2);
+    face.preview = None;
+    face.wiring = None;
+    face.export = Some(export);
+    module_node_view(name, PLASMA_1_SCOPE, "3 nodes · 1 shader", face)
 }
 
 // -------------------------------------------------------------- playlist

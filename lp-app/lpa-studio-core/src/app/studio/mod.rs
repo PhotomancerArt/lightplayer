@@ -17,6 +17,11 @@ pub mod studio_controller;
 mod studio_docs_e2e_tests;
 #[cfg(test)]
 mod studio_edit_e2e_tests;
+/// End-to-end export designation tests (module authoring unit, P3): the
+/// folder-sub-module fixture, the popup row, the root rail, and the
+/// library/runtime manifest mirror.
+#[cfg(test)]
+mod studio_export_e2e_tests;
 /// End-to-end node-card face tests: controller-derived shader/fixture faces
 /// with live knob/fader edits over the real overlay path (node-card P3).
 #[cfg(test)]

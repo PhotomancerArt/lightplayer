@@ -219,6 +219,130 @@ struct ExportLintCache {
     report: Rc<lpc_model::ExportLintReport>,
 }
 
+/// What every module card on one view build needs to know about the open
+/// library project's exports (module authoring unit, P3).
+///
+/// Built once by [`ProjectController::export_designation_context`] — the
+/// alternative is re-parsing `project.json` per module card.
+struct ExportDesignationContext {
+    /// The project's display name, for the checkbox copy ("Export from
+    /// yona-noise"). Falls back to the library slug.
+    project: String,
+    /// The project's authored kind, which decides whether ticking a box is
+    /// also an upgrade (`General` ⇒ `Pattern`).
+    kind: lpc_model::ProjectKind,
+    /// The manifest's `exports` list, in manifest order.
+    exports: Vec<String>,
+    /// P2's lint verdict for those exports.
+    report: Rc<lpc_model::ExportLintReport>,
+    /// The lens is a DEVICE: the manifest being edited would be the
+    /// library's, not the one in front of you, so designation disables with
+    /// a reason (planning Q4).
+    device_session: bool,
+}
+
+impl ExportDesignationContext {
+    /// Whether the popup offers designation at all. `Show` and `Rig`
+    /// projects keep the section hidden this round (P3 scope).
+    fn offers_designation(&self) -> bool {
+        matches!(
+            self.kind,
+            lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. }
+        )
+    }
+}
+
+/// What a module's def-artifact path says about its exportability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExportFolder<'a> {
+    /// `/fire/module.json` — a folder directly inside the project. The one
+    /// exportable shape.
+    Direct(&'a str),
+    /// `/effects/fire/module.json` — a folder, but not a direct child.
+    Nested,
+    /// `/fire.module.json` — no folder of its own.
+    Inline,
+    /// The def artifact is not in the connect-time map at all.
+    Unknown,
+}
+
+/// Classify a module def-artifact path for export purposes.
+///
+/// An export vendors `<folder>/` wholesale, so the only exportable shape is
+/// a module whose def IS a folder's `module.json` one level down from the
+/// project root. `/module.json` (the root module) classifies as `Nested`'s
+/// opposite — it never reaches here, because the root is excluded before
+/// the call (vision Q3: an export must not point at the root).
+fn export_folder_shape(def_path: &str) -> ExportFolder<'_> {
+    let segments: Vec<&str> = def_path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    match segments.as_slice() {
+        [folder, "module.json"] => ExportFolder::Direct(folder),
+        [.., "module.json"] if segments.len() > 2 => ExportFolder::Nested,
+        _ => ExportFolder::Inline,
+    }
+}
+
+/// The root card's exports rail, or `None` when the project exports
+/// nothing (a General project stays visually plain — spike 2·ii).
+fn exports_section(context: &ExportDesignationContext) -> Option<crate::UiExportsSection> {
+    if context.exports.is_empty() {
+        return None;
+    }
+    let rows = context
+        .exports
+        .iter()
+        .map(|name| crate::UiExportRow {
+            name: name.clone(),
+            worst: context
+                .report
+                .for_export(name)
+                .map(|finding| finding.severity)
+                .max(),
+        })
+        .collect();
+    Some(crate::UiExportsSection {
+        rows,
+        findings: context.report.findings.clone(),
+    })
+}
+
+/// The kind the manifest takes after one designation edit.
+///
+/// The first export on a `General` project makes it a `Pattern` (vision
+/// D14's upgrade gesture); removing the last one puts it back. A `Rig`
+/// keeps being a rig — its exports are its own list — and a `Show` has no
+/// list to edit, so it is left alone.
+fn next_project_kind(
+    current: &lpc_model::ProjectKind,
+    exports: &[String],
+    folder: &str,
+    export: bool,
+) -> lpc_model::ProjectKind {
+    let mut next: Vec<String> = exports
+        .iter()
+        .filter(|name| name.as_str() != folder)
+        .cloned()
+        .collect();
+    if export {
+        next.push(folder.to_string());
+        next.sort();
+    }
+    if next.is_empty() {
+        return lpc_model::ProjectKind::General;
+    }
+    match current {
+        lpc_model::ProjectKind::Rig { .. } => lpc_model::ProjectKind::Rig { exports: next },
+        lpc_model::ProjectKind::Show => lpc_model::ProjectKind::Show,
+        lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. } => {
+            lpc_model::ProjectKind::Pattern { exports: next }
+        }
+    }
+}
+
 /// One staged node removal (see `ProjectController::staged_removals`).
 struct StagedNodeRemoval {
     /// Display label of the removed node (for the save-panel row).
@@ -2896,8 +3020,13 @@ impl ProjectController {
         let Some(graph) = self.binding_graph() else {
             return;
         };
+        // Read once per view build, not once per module card: it costs a
+        // `project.json` parse and the lint verdict, and every module card
+        // in the workspace is asking the same question about the same
+        // project (P3).
+        let exports = self.export_designation_context();
         for node in nodes {
-            self.apply_child_module_faces(&mut node.children, graph);
+            self.apply_child_module_faces(&mut node.children, graph, exports.as_ref());
             if node.header.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2908,6 +3037,7 @@ impl ProjectController {
                 view_sections(node),
                 &node.children,
                 node.card_ui.wiring_open,
+                exports.as_ref(),
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2918,9 +3048,10 @@ impl ProjectController {
         &self,
         children: &mut [crate::UiNodeChild],
         graph: &lpc_wire::WireBindingGraph,
+        exports: Option<&ExportDesignationContext>,
     ) {
         for child in children {
-            self.apply_child_module_faces(&mut child.children, graph);
+            self.apply_child_module_faces(&mut child.children, graph, exports);
             if child.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2931,6 +3062,7 @@ impl ProjectController {
                 &child.sections,
                 &child.children,
                 child.card_ui.wiring_open,
+                exports,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -3086,6 +3218,7 @@ impl ProjectController {
         sections: &[crate::UiNodeSection],
         children: &[crate::UiNodeChild],
         wiring_open: bool,
+        exports: Option<&ExportDesignationContext>,
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
         let node = self.node(&address)?;
@@ -3179,6 +3312,218 @@ impl ProjectController {
                 .is_root_module(owner)
                 .then(|| self.panel_auto_save())
                 .flatten(),
+            // Exports are a property of the CONTAINER, so the rail rides
+            // the root card; designation is a property of one module, so
+            // the popup row rides every card but the root (an export must
+            // never point at the root — vision Q3).
+            exports: if self.is_root_module(owner) {
+                exports.and_then(exports_section)
+            } else {
+                None
+            },
+            export: if self.is_root_module(owner) {
+                None
+            } else {
+                exports.and_then(|context| self.module_export_row(context, owner))
+            },
+        })
+    }
+
+    /// Everything the export UI needs about the OPEN library project, read
+    /// once per view build (module authoring unit, P3).
+    ///
+    /// `None` when no library package backs the running project — the demo
+    /// path and a device-hosted project this library does not know have no
+    /// manifest to designate against, so neither the rail nor the popup row
+    /// appears at all (the `ProjectShareSection` precedent).
+    fn export_designation_context(&self) -> Option<ExportDesignationContext> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let fields = {
+            let view = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::read_manifest(&*view).ok()?
+        };
+        Some(ExportDesignationContext {
+            project: fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone()),
+            kind: fields.kind,
+            exports: fields.exports,
+            report: self.export_lint_report(),
+            // The manifest is library-owned. Looking at a project through a
+            // device lens, the bytes you would be editing are not the ones
+            // in front of you, so the row disables and says so (planning
+            // Q4).
+            device_session: matches!(self.lens_runtime_kind, Some(crate::RuntimeKind::Device)),
+        })
+    }
+
+    /// The export designation row for ONE module card's detail popup.
+    ///
+    /// `None` hides the section entirely — a `Show` or `Rig` project, which
+    /// this round does not offer designation for. Otherwise the row always
+    /// renders: when the module cannot be exported the row carries the
+    /// reason instead of vanishing, the add-node picker's disabled-row
+    /// precedent.
+    fn module_export_row(
+        &self,
+        context: &ExportDesignationContext,
+        owner: NodeId,
+    ) -> Option<crate::UiModuleExport> {
+        if !context.offers_designation() {
+            return None;
+        }
+        let def_path = self
+            .def_artifacts
+            .get(&owner)
+            .map(|artifact| artifact.file_path().as_str().to_string());
+        let shape = def_path
+            .as_deref()
+            .map_or(ExportFolder::Unknown, |path| export_folder_shape(path));
+        let (folder, mut disabled_reason) = match shape {
+            ExportFolder::Direct(folder) => (folder.to_string(), None),
+            ExportFolder::Nested => (
+                String::new(),
+                Some(
+                    "Only a folder directly inside this project can be exported; \
+                     this module sits deeper in the tree."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Inline => (
+                String::new(),
+                Some(
+                    "An export ships a folder. This module is a single file — \
+                     move it into a folder of its own to export it."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Unknown => (
+                String::new(),
+                Some(
+                    "This module's definition file is unknown, so its folder \
+                     cannot be identified."
+                        .to_string(),
+                ),
+            ),
+        };
+        if disabled_reason.is_none() && context.device_session {
+            disabled_reason = Some(
+                "Exports live in the project's own file, which is edited in your \
+                 library — not from a device session."
+                    .to_string(),
+            );
+        }
+        let designated = !folder.is_empty() && context.exports.iter().any(|name| *name == folder);
+        Some(crate::UiModuleExport {
+            findings: context
+                .report
+                .for_export(&folder)
+                .cloned()
+                .collect::<Vec<_>>(),
+            upgrades_to_pattern: !designated
+                && matches!(context.kind, lpc_model::ProjectKind::General),
+            folder,
+            project: context.project.clone(),
+            designated,
+            disabled_reason,
+        })
+    }
+
+    /// Add or remove one module folder from the open project's `exports`
+    /// list (module authoring unit, P3; [`crate::ModuleExportOp`]).
+    ///
+    /// The write goes through the OPEN project's own exclusive-locked
+    /// `package_fs` — not a [`crate::app::library::CatalogOp`], which would
+    /// refuse `OpenInThisTab` for the very project being edited — and is
+    /// then mirrored into the runtime copy so the save path's
+    /// library/runtime hash tripwire stays quiet. The canonical writer keeps
+    /// `project.json` byte-stable either way (P1).
+    pub async fn set_module_export(
+        &mut self,
+        server: &mut StudioServerClient,
+        folder: &str,
+        export: bool,
+    ) -> Result<ProjectEditRun, UiError> {
+        let folder = folder.trim();
+        if folder.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an export names a module folder".to_string(),
+            ));
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot change exports"
+                    .to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, project, upgraded, downgraded) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so it has no exports to change"
+                        .to_string(),
+                )
+            })?;
+            let fs = active.handle.package_fs.borrow();
+            let fields = crate::app::library::package_manifest::read_manifest(&*fs)
+                .map_err(library_ui_error)?;
+            let kind = next_project_kind(&fields.kind, &fields.exports, folder, export);
+            let upgraded = matches!(fields.kind, lpc_model::ProjectKind::General)
+                && !matches!(kind, lpc_model::ProjectKind::General);
+            let downgraded = !matches!(fields.kind, lpc_model::ProjectKind::General)
+                && matches!(kind, lpc_model::ProjectKind::General);
+            crate::app::library::package_manifest::set_kind_and_exports(&*fs, kind)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            let project = fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone());
+            (bytes, project, upgraded, downgraded)
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        // Without this the next save's tripwire would report the library
+        // copy as diverged from the running project — it hashes
+        // `project.json` too.
+        let logs = server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                // The bytes on disk moved without a runtime commit, so the
+                // history head is stale until this snapshot lands.
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+        }
+        // The package bytes changed without `last_synced` moving, which is
+        // exactly the case P2's manual epoch exists for.
+        self.invalidate_export_lint();
+
+        let notice = match (export, upgraded, downgraded) {
+            (true, true, _) => UiNotice::info(format!(
+                "{folder} is exported — {project} is now a pattern project"
+            )),
+            (true, false, _) => UiNotice::info(format!("{folder} is exported from {project}")),
+            (false, _, true) => UiNotice::info(format!(
+                "{folder} is no longer exported — {project} is a general project again"
+            )),
+            (false, _, false) => UiNotice::info(format!("{folder} is no longer exported")),
+        };
+        Ok(ProjectEditRun {
+            notices: UiNotices::new().with_notice(notice),
+            logs,
         })
     }
 
@@ -7111,6 +7456,95 @@ fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+/// The pure halves of export DESIGNATION (P3): which def-artifact shapes
+/// can be exported at all, and what one toggle does to the project kind.
+/// The wired path is `studio_export_e2e_tests`.
+#[cfg(test)]
+mod export_designation_tests {
+    use lpc_model::ProjectKind;
+
+    use super::{ExportFolder, export_folder_shape, next_project_kind};
+
+    /// Only a folder ONE level down from the project root is exportable —
+    /// an export vendors `<folder>/` wholesale, so a single-file module has
+    /// nothing to vendor and a nested one is not the project's to hand out.
+    #[test]
+    fn only_a_direct_folder_module_is_exportable() {
+        assert_eq!(
+            export_folder_shape("/fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        // the map is built from project-relative paths either way
+        assert_eq!(
+            export_folder_shape("fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        assert_eq!(
+            export_folder_shape("/effects/fire/module.json"),
+            ExportFolder::Nested
+        );
+        assert_eq!(
+            export_folder_shape("/fire.module.json"),
+            ExportFolder::Inline
+        );
+        assert_eq!(export_folder_shape("/module.json"), ExportFolder::Inline);
+    }
+
+    /// The upgrade gesture (vision D14): the first export makes a General
+    /// project a Pattern project, and removing the last one puts it back —
+    /// including clearing the `exports` key rather than leaving `[]`.
+    #[test]
+    fn the_first_export_upgrades_and_the_last_one_reverts() {
+        let upgraded = next_project_kind(&ProjectKind::General, &[], "fire", true);
+        assert_eq!(
+            upgraded,
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string()]
+            }
+        );
+        let reverted = next_project_kind(&upgraded, &["fire".to_string()], "fire", false);
+        assert_eq!(reverted, ProjectKind::General);
+    }
+
+    /// A pattern project with other exports just edits its list, in a
+    /// stable (sorted) order so the manifest does not churn.
+    #[test]
+    fn additional_exports_are_a_sorted_list_edit() {
+        let current = ProjectKind::Pattern {
+            exports: vec!["ripple".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "fire", true),
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string(), "ripple".to_string()]
+            }
+        );
+        // re-designating an already-listed folder is idempotent, never a
+        // duplicate entry
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "ripple", true),
+            ProjectKind::Pattern {
+                exports: vec!["ripple".to_string()]
+            }
+        );
+    }
+
+    /// A rig stays a rig: its exports are its own list, and designation
+    /// must never silently retype the project.
+    #[test]
+    fn a_rig_keeps_its_kind() {
+        let current = ProjectKind::Rig {
+            exports: vec!["stage".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["stage".to_string()], "wash", true),
+            ProjectKind::Rig {
+                exports: vec!["stage".to_string(), "wash".to_string()]
+            }
+        );
+    }
 }
 
 /// The controller's half of the export lint (P2): reaching a library

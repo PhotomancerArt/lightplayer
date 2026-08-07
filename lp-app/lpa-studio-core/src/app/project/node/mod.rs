@@ -5,6 +5,7 @@
 //! [`ProjectNodeTarget`] adds the current runtime `NodeId` for actions that
 //! need to talk back to the server.
 
+pub mod module_export_op;
 pub mod node_clear_debug_op;
 pub mod node_controller;
 pub mod node_create_op;
@@ -20,6 +21,7 @@ pub mod project_node_address;
 pub mod project_node_target;
 pub mod ui_add_node_menu;
 
+pub use module_export_op::ModuleExportOp;
 pub use node_clear_debug_op::NodeClearDebugOp;
 pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};

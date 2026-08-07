@@ -38,7 +38,7 @@ pub(crate) mod playlist_panel_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod wiring_drawer_stories;
 
-pub use module_face::ModuleFace;
+pub use module_face::{ExportFindingRow, ModuleFace};
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;
 pub use panel_gesture::{PanelGesture, panel_gesture_actions};
