@@ -128,7 +128,8 @@ pub use app::share::{
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL,
-    FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing, RefreshCadence,
+    FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,
+    PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence,
     SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand,
     StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
     StudioViewSender, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiConsoleView,
