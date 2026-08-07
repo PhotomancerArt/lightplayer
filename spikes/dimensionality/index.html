@@ -55,6 +55,12 @@
               border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
               margin: 12px 0 0; }
   .leannote b { color: var(--muted); }
+  details.archive { margin-top: 26px; border-top: 1px solid var(--border-muted); padding-top: 8px; }
+  details.archive > summary { cursor: pointer; font-size: 11px; letter-spacing: .1em;
+    color: var(--subtle); text-transform: uppercase; user-select: none; }
+  details.archive .row { margin-top: 14px; }
+  details.archive .aside-reason { color: var(--dim); font-size: 11px; font-style: italic;
+    text-transform: none; letter-spacing: 0; }
 
   /* ---- exploration controls ---- */
   .xcontrols {
@@ -368,12 +374,13 @@
 
 <div class="xcontrols">
   <span class="grp"><b>Time</b><label><input type="checkbox" id="xrun" checked> animate</label></span>
-  <span class="grp"><b>comet declares</b>
-    <select id="xdecl">
+  <span class="grp"><b>comet's opinion</b>
+    <select id="xdecl" data-syncop>
+      <option value="extrude">in 2D: extrude</option>
       <option value="radial" selected>in 2D: radial</option>
       <option value="angular">in 2D: angular</option>
       <option value="mirror">in 2D: mirror</option>
-      <option value="none">nothing (system default)</option>
+      <option value="none">no opinion (consumer default)</option>
     </select></span>
   <span class="grp"><label><input type="checkbox" id="xmismatch"> declaration mismatch (§2 error state)</label></span>
 </div>
@@ -385,7 +392,7 @@
   Not a screen — the engine rule made touchable, so the affordances in §2–§5 can be judged against
   it. <b>Try:</b> fire2012 × scarf (native 1D — the ring map is <i>ignored</i>), plasma × scarf
   (native 2D — same ring, now the map is used), comet × matrix (projected via its <i>declared</i>
-  radial; override it in the box), ripple × matrix (multi-entry: its own 2D look, no projection at
+  radial; flip <b>force</b> in the box to make the fixture win), ripple × matrix (multi-entry: its own 2D look, no projection at
   all), plasma × strip (2D→1D centre scanline, wearing the visible hint).
 </p>
 <div class="pickrow" id="fxpicks"></div>
@@ -404,14 +411,15 @@
       <span class="mode" id="negmode">native · 1D</span>
       <span class="why" id="negwhy"></span>
       <div class="ovrow" id="ovrow" hidden>
-        <span>fixture override:</span>
-        <select class="field" id="ovsel">
-          <option value="auto" selected>Auto — use source</option>
-          <option value="extrude">extrude</option>
+        <span>fixture default:</span>
+        <select class="field" data-syncdef>
+          <option value="extrude" selected>extrude</option>
           <option value="radial">radial</option>
           <option value="angular">angular</option>
           <option value="mirror">mirror</option>
         </select>
+        <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer">
+          <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label>
       </div>
     </div>
   </div>
@@ -427,48 +435,50 @@
 <section class="concept" id="s2">
 <h2>2. The shader card — where does the space declaration live?</h2>
 <p class="thesis">
-  Three homes for the same <code>ShaderSpace</code> slot (primary variant + per-target cells) on a
-  faithful shader-card face: <b>A</b> a control in the settings strip that expands in place ·
-  <b>B</b> a dedicated <code>space</code> section, always visible · <b>C</b> a header identity
-  badge, with the editor behind the advanced drawer. The <b>mismatch toggle</b> (top strip) shows
-  the D1 cross-validation: declared 1D but the GLSL defines <code>render(vec2)</code>.
-  All three edit the same state — flip the primary in one and the others follow.
+  <b>Decision log.</b> Gate 1 (2026-08-07): the dedicated <code>space</code> section is
+  <b>chosen</b> — "this is a first-order fundamental aspect… our UX teaches the problem and guides
+  a solution; more things may ride here in time." The <code>ShaderSpace</code> slot (primary
+  variant + per-target cells) renders as a segmented primary + one row per other space. The
+  <b>mismatch toggle</b> (top strip) shows the D1 cross-validation: declared 1D but the GLSL
+  defines <code>render(vec2)</code>. A and C are archived below; everything still edits one state.
 </p>
 <div class="row">
   <div class="ccol">
-    <h3>A — settings-strip control, expands in place</h3>
-    <div class="ncard" id="cardA"></div>
-    <p class="why">Space sits with the other knobs; the cells stay one click away. Cheap for the
-      90% of shaders that never touch their cells, but the declaration competes with performance
-      controls for the strip.</p>
-  </div>
-  <div class="ccol">
-    <h3>B — its own <code>space</code> section <span class="lean">✓ lean</span></h3>
+    <h3>the <code>space</code> section <span class="lean">✓ chosen at gate 1</span></h3>
     <div class="ncard" id="cardB"></div>
     <p class="why">The declaration is identity, and identity gets a rail label — same rank as
-      <code>output</code>/<code>settings</code>. Cells read as the unified enum they are. Cost:
-      permanent vertical space on every shader card.</p>
-  </div>
-  <div class="ccol">
-    <h3>C — header badge + advanced drawer</h3>
-    <div class="ncard" id="cardC"></div>
-    <p class="why">Ambient identity (the <code>1D</code> badge rides beside the kind label — click
-      it to open the editor), zero face cost. Risk: the projection cells are buried where nobody
-      learns they exist. A hybrid — C's badge opening B's section as a popover — is one gate answer
-      away.</p>
+      <code>output</code>/<code>settings</code>. This is the shader's half of the <b>mirror</b>:
+      the fixture card grows the same section with the inverse (consumer) cells and shared
+      controls — see §4B.</p>
   </div>
 </div>
+<details class="archive">
+  <summary>Explored and set aside at gate 1 <span class="aside-reason">— kept for contrast</span></summary>
+  <div class="row">
+    <div class="ccol">
+      <h3>A — settings-strip control <span class="aside-reason">— identity buried among performance knobs</span></h3>
+      <div class="ncard" id="cardA"></div>
+    </div>
+    <div class="ccol">
+      <h3>C — header badge + drawer <span class="aside-reason">— cells hidden where nobody learns they exist</span></h3>
+      <div class="ncard" id="cardC"></div>
+    </div>
+  </div>
+</details>
 </section>
 
 <!-- ==================== 3 · projection picker ==================== -->
 <section class="concept" id="s3">
 <h2>3. The projection picker — the guided moment, and who wins</h2>
 <p class="thesis">
-  When a 1D effect lands on a 2D fixture with no native answer, Studio asks — with <b>live
-  tiles</b>, because each option is a real coordinate map, not an icon. Picking one
-  <b>leaves a configured projection node in the wiring</b> (D4's escape valve made visible).
-  Right: the tri-state override ladder — source's declared default, fixture-side override,
-  explicit node — with the winner marked. The §1 override select drives the middle rung.
+  <b>Decision log.</b> Gate 1 (2026-08-07): projection is a <b>generic enum with a custom UI
+  treatment, declarable on either side of the binding</b> — sources state an <i>opinion</i> (or,
+  later, a custom native entry); consumers provide a <i>default</i> that fills silence, plus
+  <b>force</b> to win anyway. Same pair-specific core types on both sides
+  (<code>VisualProductSpace</code> / <code>VisualConsumerSpace</code>); 3D cells added lazily —
+  the matrix is sparse, nothing "rides on" 2D. The sheet (left) is the enum's custom treatment,
+  reachable from either side; used as the escape valve it <b>leaves a configured projection node
+  in the wiring</b>. Right: the mirrored slot pair and the who-wins ladder.
 </p>
 <div class="row">
   <div class="ccol" style="width: 380px">
@@ -490,15 +500,52 @@
       pre-picked.</p>
   </div>
   <div class="ccol">
-    <h3>B — the override ladder (who wins)</h3>
-    <div class="ladder" id="ladder"></div>
-    <p class="why">The ladder is the D4 tri-state as UI: rung 1 fires with zero nodes, rung 2 is
-      the fixture-side sampling option (still zero nodes), rung 3 is the explicit node — violet,
-      because a node in the wire is a binding-level fact. Toggle the node on to see it trump
-      everything:</p>
+    <h3>B — the mirrored slot pair (both sides of the binding)</h3>
+    <div class="spane">
+      <div class="sp-h"><b>comet — product side</b>
+        <span class="sp-i" style="font-family:var(--mono);font-size:9.5px">VisualProductSpace</span></div>
+      <div class="sp-b" style="place-items:stretch;padding:0;gap:0">
+        <div class="slotrow"><span class="sname">consumed in 2D</span>
+          <select class="field" data-syncop>
+            <option value="none">no opinion</option>
+            <option value="extrude">Opinion · extrude</option>
+            <option value="radial" selected>Opinion · radial</option>
+            <option value="angular">Opinion · angular</option>
+            <option value="mirror">Opinion · mirror</option>
+          </select><span class="sinfo">ⓘ</span></div>
+        <div class="slotrow"><span class="sname">consumed in 3D</span>
+          <span class="field ro">no opinion · soon</span><span class="sinfo">ⓘ</span></div>
+      </div>
+    </div>
+    <div class="spane" style="margin-top:10px">
+      <div class="sp-h"><b>Halo — consumer side</b>
+        <span class="sp-i" style="font-family:var(--mono);font-size:9.5px">VisualConsumerSpace</span></div>
+      <div class="sp-b" style="place-items:stretch;padding:0;gap:0">
+        <div class="slotrow"><span class="sname">from 1D sources</span>
+          <span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0">
+          <select class="field" data-syncdef>
+            <option value="extrude" selected>Default · extrude</option>
+            <option value="radial">Default · radial</option>
+            <option value="angular">Default · angular</option>
+            <option value="mirror">Default · mirror</option>
+          </select>
+          <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-size:11px;color:var(--subtle)">
+            <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label></span>
+          <span class="sinfo">ⓘ</span></div>
+        <div class="slotrow"><span class="sname">from 3D sources</span>
+          <span class="field ro">Default · slice · soon</span><span class="sinfo">ⓘ</span></div>
+      </div>
+    </div>
+    <div class="ladder" id="ladder" style="margin-top:10px"></div>
     <label style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--subtle);margin-top:6px;cursor:pointer">
       <input type="checkbox" id="nodetoggle" style="accent-color:var(--accent)"> explicit projection node in the wire
     </label>
+    <p class="why">One shared set of pair-specific projection enums, referenced from both sides:
+      the source's <b>opinion</b>, the consumer's <b>default</b> (fills silence) and <b>force</b>
+      (wins anyway); the explicit node trumps both by changing the arriving product's space. A 1D
+      fixture carries the inverse cells (<i>from 2D sources: centre scanline…</i>) — same shape,
+      mirrored pairs. These selects, §1's negotiation box, §4B's fixture card, and the top strip
+      are all one state.</p>
   </div>
 </div>
 </section>
@@ -507,11 +554,14 @@
 <section class="concept" id="s4">
 <h2>4. The fixture's declaration moment — identity, not preference</h2>
 <p class="thesis">
-  The wizard grows a <b>Shape</b> step. The entire authored burden of the two-sided model is one
-  question — <i>does strip order mean something here?</i> — and it only appears for mapped shapes
-  (D3: 2D/3D membership comes from authored maps; wire-order meaning is the one bit that must be
-  asked). Pick <b>Mapped shape</b> to see it. Right: what the answer produces — the fixture card
-  wearing its declared set.
+  <b>Decision log.</b> Gate 1 (2026-08-07): the step is right but <b>not wizard-owned</b> — it is
+  the fixture's <code>space</code> section <b>in guided clothing</b> (the tiles are presets that
+  fill the section), and it fires wherever a fixture node is created: setup wizard,
+  <i>+ fixture</i>, paste. The obvious symmetry: shader and fixture both grow a
+  <code>space</code> section, sharing controls, mirrors of each other. The one authored bit
+  stays — <i>does strip order mean something?</i> — appearing only for mapped shapes (D3). Preset
+  options need another pass. Pick <b>Mapped shape</b> to see the question; right: the same
+  section at rest on the card, now carrying the consumer cells from §3.
 </p>
 <div class="row">
   <div class="ccol" style="width:340px">
@@ -556,53 +606,44 @@
       <button class="drawer"><span class="chev">›</span><span class="lab">advanced</span>
         <span class="sum">slots · bindings · mapping</span></button>
     </div>
-    <p class="why">The declared set rides the card as chips; <i>primary</i> is a recommendation
-      fact (what Explore filters to first), never a sampling input — the sampling column shows
-      what each declared space is currently doing. The wizard answer on the left updates this
-      card live.</p>
+    <p class="why">The mirror made visible: primary + authored set as chips, then the consumer
+      cells — the same controls as the shader's product cells, inverse pairs. <i>Primary</i> stays
+      a recommendation fact (what Explore filters to first), never a sampling input. The wizard
+      answer on the left updates this card live; its selects share state with §1 and §3.</p>
   </div>
 </div>
 </section>
 
 <!-- ==================== 5 · preview space toggle ==================== -->
 <section class="concept" id="s5">
-<h2>5. Previewing across spaces — the hero grows a toggle</h2>
+<h2>5. Previewing across spaces — space checkboxes on the hero</h2>
 <p class="thesis">
-  The shader's output hero (and later the probe faces) gets a space toggle in the existing
-  toggle-bar idiom. <b>A</b>: toggle swaps the hero between the native 1D band and the projected 2D
-  look, caption naming the projection and its origin. <b>B</b>: both at once — the thin native
-  band above the projection, no mode to flip. The palette pane makes the any-1D-source point:
-  same toggle, same declared radial, zero shader involved.
+  <b>Decision log.</b> Gate 1 (2026-08-07): the toggle is <b>chosen, checkbox-style not
+  radio</b> — 1D and 2D are independent, so turning both on gives the stacked view as a free
+  best-of-both. The caption names the projection <i>and its origin</i> (declared / consumer
+  default / forced) — D11's honesty rule. The palette pane gets the identical treatment: any 1D
+  source previews across spaces with zero shader involved.
 </p>
 <div class="row">
   <div class="ccol">
-    <h3>A — toggle (1D ⇄ 2D) <span class="lean">✓ lean</span></h3>
+    <h3>space checkboxes on the hero <span class="lean">✓ chosen at gate 1</span></h3>
     <div class="ncard">
       <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
         <span class="trail"><span class="spacebadge">1D</span><span class="kind">shader</span></span></div>
       <div class="sect"><div class="srail">output</div><div class="sbody">
-        <div class="togglebar"><span class="tspring" id="tcapA"></span>
-          <button class="tgl on" data-ps="1d">1D</button><button class="tgl" data-ps="2d">2D</button></div>
-        <div class="hero"><canvas id="prevA" width="384" height="120"></canvas>
-          <span class="cap" id="prevAcap">native · 1D</span></div></div></div>
-      <div class="sect"><div class="srail">settings</div><div class="sbody">
-        <div class="settings" id="prevAknobs"></div></div></div>
-    </div>
-  </div>
-  <div class="ccol">
-    <h3>B — stacked (both, always)</h3>
-    <div class="ncard">
-      <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
-        <span class="trail"><span class="spacebadge">1D</span><span class="kind">shader</span></span></div>
-      <div class="sect"><div class="srail">output</div><div class="sbody">
-        <div class="hero"><canvas id="prevB1" width="384" height="26"></canvas>
+        <div class="togglebar"><span class="tspring">preview spaces</span>
+          <button class="tgl on" data-pv="1d">1D</button><button class="tgl" data-pv="2d">2D</button></div>
+        <div class="hero" id="pvwrap1"><canvas id="pv1" width="384" height="40"></canvas>
           <span class="cap">native · 1D</span></div>
-        <div class="hero" style="border-top:1px solid var(--border)">
-          <canvas id="prevB2" width="384" height="150"></canvas>
-          <span class="cap" id="prevB2cap">in 2D · radial (declared)</span></div></div></div>
+        <div class="hero" id="pvwrap2" hidden style="border-top:1px solid var(--border)">
+          <canvas id="pv2" width="384" height="150"></canvas>
+          <span class="cap" id="pv2cap">in 2D · radial (declared)</span></div></div></div>
       <div class="sect"><div class="srail">settings</div><div class="sbody">
-        <div class="settings" id="prevBknobs"></div></div></div>
+        <div class="settings" id="pvknobs"></div></div></div>
     </div>
+    <p class="why">1D only = today's card, unchanged. 2D only = "how will this look on my
+      matrix". Both on = the stacked ground-truth view, opt-in instead of a permanent tax on
+      every shader card. One box must stay on.</p>
   </div>
   <div class="ccol" style="width: 260px">
     <h3>…and the palette (any 1D source)</h3>
@@ -610,19 +651,19 @@
       <div class="sp-h"><b>palette</b><span class="bindchip">← palette</span></div>
       <div class="sp-b flush">
         <div class="togglebar"><span class="tspring">Sunset</span>
-          <button class="tgl on" data-pps="1d">1D</button><button class="tgl" data-pps="2d">2D</button></div>
-        <div class="hero"><canvas id="prevP" width="256" height="100"></canvas>
-          <span class="cap" id="prevPcap">gradient · 1D</span></div>
+          <button class="tgl on" data-ppv="1d">1D</button><button class="tgl" data-ppv="2d">2D</button></div>
+        <div class="hero" id="ppwrap1"><canvas id="pp1" width="256" height="44"></canvas>
+          <span class="cap">gradient · 1D</span></div>
+        <div class="hero" id="ppwrap2" hidden style="border-top:1px solid var(--border)">
+          <canvas id="pp2" width="256" height="120"></canvas>
+          <span class="cap">in 2D · radial (declared)</span></div>
       </div>
     </div>
-    <p class="why">palette → radial with no shader anywhere is why the projection <i>mechanism</i>
-      lives at the sampling boundary; the toggle just reads the same declaration.</p>
+    <p class="why">palette → radial with no shader anywhere is why the projection
+      <i>mechanism</i> lives at the sampling boundary; the checkboxes just read the same
+      declaration.</p>
   </div>
 </div>
-<p class="leannote"><b>What to feel for:</b> in A the flip is a mode (you can forget you're looking
-  at 2D); in B the band is always the ground truth and the projection is visibly derived from it —
-  but every shader card gets taller. The caption always names the projection <i>and its origin</i>
-  (declared / system default / override) — that's D11's honesty requirement.</p>
 </section>
 
 <script>
@@ -630,13 +671,14 @@
 /* state */
 const S = {
   t: 3.4, run: true,   // start mid-flight so the comet is on screen at first paint
-  fx: 'fire', fixture: 'scarf', override: 'auto',
+  fx: 'fire', fixture: 'scarf',
   cometDecl: 'radial', mismatch: false,
+  consDefault: 'extrude', consForce: false,   // the consumer side (shared everywhere)
   decl: { primary: 1, in2d: 'radial', in3d: 'default' },   // §2 shared editor state
   aOpen: false, cOpen: false,
   pick3a: 'radial', nodeOn: false,
   wizShape: null, wizStrip: null,
-  prevSpace: '1d', prevPSpace: '1d',
+  pv1: true, pv2: false, ppv1: true, ppv2: false,          // §5 checkbox toggles
 };
 
 /* ---------------- content library (real math) ---------------- */
@@ -743,7 +785,7 @@ function ledsOf(key){
 const LEDS = Object.fromEntries(Object.keys(FIXTURES).map(k => [k, ledsOf(k)]));
 
 /* ---------------- the negotiation (the ratified rule) ---------------- */
-function negotiate(fxKey, fixKey, override){
+function negotiate(fxKey, fixKey){
   const fx = EFFECTS[fxKey], fix = FIXTURES[fixKey];
   const inter = fx.set.filter(s => fix.set.includes(s));
   if (inter.length){
@@ -759,9 +801,10 @@ function negotiate(fxKey, fixKey, override){
       perLed: led => space === 1 ? fx.s1(led.x1d, S.t) : fx.s2(led.u, led.v, S.t) };
   }
   if (fx.primary === 1){ // 1D content on a {2D} fixture
-    const src = override !== 'auto' ? override : (fx.decl2d ?? 'extrude');
-    const origin = override !== 'auto' ? 'fixture override'
-      : fx.decl2d ? `declared by ${fx.label.split(' ·')[0]}` : 'system default';
+    const opinion = fx.decl2d;
+    const src = S.consForce ? S.consDefault : (opinion ?? S.consDefault);
+    const origin = S.consForce ? 'forced by fixture'
+      : opinion ? `declared by ${fx.label.split(' ·')[0]}` : 'consumer default';
     return { mode:'project', proj: src, origin,
       label: `project · 1D→2D`,
       why: `empty intersection → the 1D→2D cell fires: <b>${src}</b> (${origin}). ${PROJ[src].d}. Zero nodes in the wire.`,
@@ -850,20 +893,15 @@ fixPicksEl.innerHTML = '<b style="font-size:11px;color:var(--muted);text-transfo
     `<button class="pick" data-fixture="${k}">${esc(f.label)}</button>`).join('');
 fxPicksEl.addEventListener('click', e => {
   const b = e.target.closest('[data-fx]'); if (!b) return;
-  S.fx = b.dataset.fx; S.override = 'auto'; document.getElementById('ovsel').value = 'auto';
-  renderStage(true);
+  S.fx = b.dataset.fx; renderStage(true);
 });
 fixPicksEl.addEventListener('click', e => {
   const b = e.target.closest('[data-fixture]'); if (!b) return;
-  S.fixture = b.dataset.fixture; S.override = 'auto'; document.getElementById('ovsel').value = 'auto';
-  renderStage(true);
-});
-document.getElementById('ovsel').addEventListener('change', e => {
-  S.override = e.target.value; renderStage(true);
+  S.fixture = b.dataset.fixture; renderStage(true);
 });
 
 function renderStage(structural){
-  const fx = EFFECTS[S.fx], neg = negotiate(S.fx, S.fixture, S.override);
+  const fx = EFFECTS[S.fx], neg = negotiate(S.fx, S.fixture);
   if (structural){
     document.querySelectorAll('[data-fx]').forEach(b => b.classList.toggle('on', b.dataset.fx === S.fx));
     document.querySelectorAll('[data-fixture]').forEach(b => b.classList.toggle('on', b.dataset.fixture === S.fixture));
@@ -1012,7 +1050,7 @@ function renderProjGrid(){
       <span class="pl">${k}${sugg===k?' · suggested':''}</span>
       <span class="pd">${p.d}</span>
     </div>`).join('');
-  document.getElementById('sheetsugg').textContent = sugg ?? 'nothing — extrude';
+  document.getElementById('sheetsugg').textContent = sugg ?? 'nothing — the consumer default applies';
   document.getElementById('sheetuse').textContent = 'Use ' + S.pick3a;
 }
 document.getElementById('projgrid').addEventListener('click', e => {
@@ -1027,16 +1065,16 @@ function drawProjTiles(){
 }
 
 function renderLadder(){
-  const declared = EFFECTS.comet.decl2d;
-  const over = S.override !== 'auto' ? S.override : null;
-  const winner = S.nodeOn ? 3 : over ? 2 : 1;
+  const opinion = EFFECTS.comet.decl2d;
+  const winner = S.nodeOn ? 3 : (S.consForce ? 2 : (opinion ? 1 : 2));
   document.getElementById('ladder').innerHTML = `
     <div class="lrung ${winner===1?'win':''}"><span class="ln">1</span>
-      <span><b>source declares</b> — ${declared ? `comet: <b>${declared}</b>` : 'nothing (system default: extrude)'}
+      <span><b>source opinion</b> — ${opinion ? `comet: <b>${opinion}</b>` : 'none'}
         · zero nodes<span class="wintag">← in effect</span></span></div>
     <div class="lrung ${winner===2?'win':''}"><span class="ln">2</span>
-      <span><b>fixture override</b> — ${over ? `sampling option: <b>${over}</b>` : 'Auto (unset)'}
-        · zero nodes — set it from §1's negotiation box<span class="wintag">← in effect</span></span></div>
+      <span><b>consumer policy</b> — Default · <b>${S.consDefault}</b>${S.consForce
+        ? ' · <b>forced</b> (wins over opinions)' : ' (fills silence)'}
+        · zero nodes<span class="wintag">← in effect</span></span></div>
     <div class="lrung ${winner===3?'win':''}"><span class="ln">3</span>
       <span><b>explicit node</b> — ${S.nodeOn
         ? `<span class="bindchip">proj_radial_1 → visual</span> product arrives already-2D`
@@ -1109,13 +1147,32 @@ function renderFixtureCard(res){
       ${set.includes(2) && S.wizShape !== 'matrix' ? '<span class="field ro" style="font-size:11px">map: ring.map2d</span>' : ''}</div>
     <div class="cellsub" style="font-size:10.5px;color:var(--dim)">
       ${set.includes(1) ? '1D — strip order · native for 1D effects' : 'wire order not a coordinate'}
-      ${set.includes(2) ? (set.includes(1) ? ' · 2D — via map, for 2D effects' : '2D — native') : ''}</div>`;
+      ${set.includes(2) ? (set.includes(1) ? ' · 2D — via map, for 2D effects' : '2D — native') : ''}</div>
+    ${set.includes(2) ? `
+    <div class="cellrow"><span class="ct">from 1D</span><span class="cellsub">
+      <select class="field" data-syncdef>
+        <option value="extrude">Default · extrude</option>
+        <option value="radial">Default · radial</option>
+        <option value="angular">Default · angular</option>
+        <option value="mirror">Default · mirror</option>
+      </select>
+      <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-size:11px;color:var(--subtle)">
+        <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label></span></div>
+    <div class="cellrow"><span class="ct">from 3D</span><span class="cellsub">
+      <span class="field ro">Default · slice · soon</span></span></div>`
+    : `
+    <div class="cellrow"><span class="ct">from 2D</span><span class="cellsub">
+      <span class="field ro">Default · centre scanline + hint</span></span></div>
+    <div class="cellrow"><span class="ct">from 3D</span><span class="cellsub">
+      <span class="field ro">soon</span></span></div>`}`;
+  document.querySelectorAll('#fixspacegrid [data-syncdef]').forEach(el => el.value = S.consDefault);
+  document.querySelectorAll('#fixspacegrid [data-syncforce]').forEach(el => el.checked = S.consForce);
   const hcv = document.getElementById('fixherocanvas');
   const layoutKey = set.includes(2) && set.includes(1) ? 'scarf' : set.includes(2) ? 'matrix' : 'strip';
   hcv.height = layoutKey === 'strip' ? 70 : 200;
   document.getElementById('fixherocap').textContent =
     layoutKey === 'scarf' ? '2D · ring map' : layoutKey === 'matrix' ? '2D · grid' : '1D · strip';
-  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey, 'auto');
+  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey);
   drawLamps(hcv, layoutKey, neg.perLed);
   document.getElementById('fixsettings').innerHTML =
     knobCtl('brightness','80%',0.8,false) +
@@ -1125,53 +1182,61 @@ function renderFixtureCard(res){
 }
 
 /* ================================================================== */
-/* §5 — preview toggles */
-document.querySelectorAll('[data-ps]').forEach(b => b.addEventListener('click', () => {
-  S.prevSpace = b.dataset.ps;
-  document.querySelectorAll('[data-ps]').forEach(x => x.classList.toggle('on', x.dataset.ps === S.prevSpace));
+/* §5 — space checkboxes on the hero (checkbox-style: both can be on) */
+function pvToggle(key1, key2, isFirst){
+  const cur = isFirst ? S[key1] : S[key2], other = isFirst ? S[key2] : S[key1];
+  if (cur && !other) return;                    // one box must stay on
+  if (isFirst) S[key1] = !S[key1]; else S[key2] = !S[key2];
   renderPrev(true);
-}));
-document.querySelectorAll('[data-pps]').forEach(b => b.addEventListener('click', () => {
-  S.prevPSpace = b.dataset.pps;
-  document.querySelectorAll('[data-pps]').forEach(x => x.classList.toggle('on', x.dataset.pps === S.prevPSpace));
-  renderPrev(true);
-}));
-function declProj(){ return EFFECTS.comet.decl2d ?? 'extrude'; }
+}
+document.querySelectorAll('[data-pv]').forEach(b =>
+  b.addEventListener('click', () => pvToggle('pv1','pv2', b.dataset.pv === '1d')));
+document.querySelectorAll('[data-ppv]').forEach(b =>
+  b.addEventListener('click', () => pvToggle('ppv1','ppv2', b.dataset.ppv === '1d')));
+function declProj(){ return EFFECTS.comet.decl2d ?? S.consDefault; }
 function renderPrev(structural){
   const proj = declProj();
-  const originTxt = EFFECTS.comet.decl2d ? 'declared' : 'system default';
+  const origin = EFFECTS.comet.decl2d ? 'declared'
+    : S.consForce ? 'forced by fixture' : 'consumer default';
   if (structural){
-    document.getElementById('prevAcap').textContent =
-      S.prevSpace === '1d' ? 'native · 1D' : `in 2D · ${proj} (${originTxt})`;
-    document.getElementById('tcapA').textContent = 'preview space';
-    document.getElementById('prevA').height = S.prevSpace === '1d' ? 40 : 150;
-    document.getElementById('prevB2cap').textContent = `in 2D · ${proj} (${originTxt})`;
-    document.getElementById('prevPcap').textContent =
-      S.prevPSpace === '1d' ? 'gradient · 1D' : `in 2D · radial (declared)`;
-    document.getElementById('prevP').height = S.prevPSpace === '1d' ? 44 : 130;
+    document.querySelectorAll('[data-pv]').forEach(b =>
+      b.classList.toggle('on', b.dataset.pv === '1d' ? S.pv1 : S.pv2));
+    document.querySelectorAll('[data-ppv]').forEach(b =>
+      b.classList.toggle('on', b.dataset.ppv === '1d' ? S.ppv1 : S.ppv2));
+    document.getElementById('pvwrap1').hidden = !S.pv1;
+    document.getElementById('pvwrap2').hidden = !S.pv2;
+    document.getElementById('ppwrap1').hidden = !S.ppv1;
+    document.getElementById('ppwrap2').hidden = !S.ppv2;
+    document.getElementById('pv2cap').textContent = `in 2D · ${proj} (${origin})`;
+    document.getElementById('pvknobs').innerHTML = knobCtl('speed','0.62',0.62,true);
   }
-  const cvA = document.getElementById('prevA');
-  if (S.prevSpace === '1d') drawBand(cvA, EFFECTS.comet.s1);
-  else drawField(cvA, (u,v,t) => EFFECTS.comet.s1(PROJ[proj].f(u,v), t));
-  drawBand(document.getElementById('prevB1'), EFFECTS.comet.s1);
-  drawField(document.getElementById('prevB2'), (u,v,t) => EFFECTS.comet.s1(PROJ[proj].f(u,v), t));
-  const cvP = document.getElementById('prevP');
-  if (S.prevPSpace === '1d') drawBand(cvP, EFFECTS.palette.s1);
-  else drawField(cvP, (u,v,t) => EFFECTS.palette.s1(PROJ.radial.f(u,v), t));
-  if (!structural) return;
-  document.getElementById('prevAknobs').innerHTML = knobCtl('speed','0.62',0.62,true);
-  document.getElementById('prevBknobs').innerHTML = knobCtl('speed','0.62',0.62,true);
+  if (S.pv1) drawBand(document.getElementById('pv1'), EFFECTS.comet.s1);
+  if (S.pv2) drawField(document.getElementById('pv2'), (u,v,t) => EFFECTS.comet.s1(PROJ[proj].f(u,v), t));
+  if (S.ppv1) drawBand(document.getElementById('pp1'), EFFECTS.palette.s1);
+  if (S.ppv2) drawField(document.getElementById('pp2'), (u,v,t) => EFFECTS.palette.s1(PROJ.radial.f(u,v), t));
 }
 
 /* ================================================================== */
 /* global controls + tick */
 document.getElementById('xrun').addEventListener('change', e => { S.run = e.target.checked; });
-document.getElementById('xdecl').addEventListener('change', e => {
-  S.cometDecl = e.target.value;
-  renderStage(true); renderProjGrid(); drawProjTiles(); renderLadder(); renderPrev(true);
-});
 document.getElementById('xmismatch').addEventListener('change', e => {
   S.mismatch = e.target.checked; renderS2();
+});
+
+/* one shared state for opinion / default / force — every control is a [data-sync*] mirror */
+function syncSpaceControls(){
+  document.querySelectorAll('[data-syncop]').forEach(el => { el.value = S.cometDecl; });
+  document.querySelectorAll('[data-syncdef]').forEach(el => { el.value = S.consDefault; });
+  document.querySelectorAll('[data-syncforce]').forEach(el => { el.checked = S.consForce; });
+}
+function rerenderSpaceDependent(){
+  renderStage(true); renderProjGrid(); drawProjTiles(); renderLadder(); renderWiz(); renderPrev(true);
+  syncSpaceControls();
+}
+document.addEventListener('change', e => {
+  if (e.target.matches('[data-syncop]'))         { S.cometDecl  = e.target.value;   rerenderSpaceDependent(); }
+  else if (e.target.matches('[data-syncdef]'))   { S.consDefault = e.target.value;  rerenderSpaceDependent(); }
+  else if (e.target.matches('[data-syncforce]')) { S.consForce  = e.target.checked; rerenderSpaceDependent(); }
 });
 
 function tick(){
@@ -1192,7 +1257,7 @@ function renderFixtureCardLampsOnly(res){
   const decl = res ?? { chips: '{1D primary, 2D}' };
   const set = decl.chips.includes('1D primary') ? [1,2] : decl.chips === '{1D}' ? [1] : [2];
   const layoutKey = set.includes(2) && set.includes(1) ? 'scarf' : set.includes(2) ? 'matrix' : 'strip';
-  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey, 'auto');
+  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey);
   drawLamps(document.getElementById('fixherocanvas'), layoutKey, neg.perLed);
 }
 setInterval(tick, 66);
@@ -1203,9 +1268,12 @@ renderS2();
 renderProjGrid(); drawProjTiles(); renderLadder();
 renderWiz();
 renderPrev(true);
+syncSpaceControls();
 
 /* URL params (screenshot harness): ?only=<section-id>, ?fx=, ?fixture=, ?t=  */
 const params = new URLSearchParams(location.search);
+if (params.get('pv') === 'both') { S.pv2 = true; S.ppv2 = true; renderPrev(true); }
+if (params.get('force'))   { S.consForce = true; syncSpaceControls(); }
 if (params.get('wiz'))     { const [sh, st] = params.get('wiz').split('-');
                              S.wizShape = sh; S.wizStrip = st ?? null; renderWiz(); }
 if (params.get('mismatch')){ S.mismatch = true;
