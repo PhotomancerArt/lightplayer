@@ -84,7 +84,7 @@ mod tests {
         // fail loudly rather than silently dropping identity fields.
         for json in [
             r#"{ "kind": "Module", "format": 2, "nodes": {} }"#,
-            r#"{ "kind": "Module", "uid": "prj_0000000000000042", "nodes": {} }"#,
+            r#"{ "kind": "Module", "uid": "prj0000000000000042", "nodes": {} }"#,
             r#"{ "kind": "Module", "name": "basic", "nodes": {} }"#,
         ] {
             let err = NodeDef::read_json(&registry(), json)
