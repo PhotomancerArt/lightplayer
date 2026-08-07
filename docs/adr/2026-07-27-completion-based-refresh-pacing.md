@@ -53,6 +53,12 @@ the timer. `NotDue` and `Cancelled` outcomes deliberately do not
 stamp completion — stamping `NotDue` would starve the pull forever,
 and a preempted pull should redo promptly.
 
+> **Note (2026-08-06):** "redo promptly" needs the redo to be allowed to
+> FINISH. Under a continuous gesture stream — a live-control drag — every
+> redo was cancelled in turn, so nothing ever stamped completion and the
+> preview froze. The starvation floor that fixes it lives in
+> `2026-07-04-client-pull-loop-and-actor` (D3, amended).
+
 This is paired with event-driven receive on the sim path (wake on
 worker message instead of a 4 ms sleep-before-poll loop), so pull
 duration reflects actual work, not polling tax.

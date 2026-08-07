@@ -17,6 +17,16 @@
 //! next frame boundary and returns `Cancelled` cleanly (no dropped stream); the
 //! preempting action then runs, and refresh resumes on the next tick.
 //!
+//! Priority is not starvation, so the rule has a floor. A live control is a
+//! CONTINUOUS stream of foreground writes, and under the plain rule every one
+//! of them cancelled the pull at its first frame boundary — the preview froze
+//! for the whole drag. After
+//! [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`](crate::PASSIVE_PREEMPTIONS_BEFORE_PROMOTION)
+//! consecutive cancels the next passive run is promoted to a foreground
+//! action's [`PassiveStanding`], so only recovery work — which owns the
+//! connection — still preempts it. Both passive lanes (the lens project pull
+//! and the device cards' frame feeds) run at one standing per tick.
+//!
 //! # Runtime neutrality
 //!
 //! The loop is a plain `async fn` ([`StudioActor::run`]) with no runtime
