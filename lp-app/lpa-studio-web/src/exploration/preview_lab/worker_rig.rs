@@ -157,6 +157,10 @@ impl WorkerRig {
                 {
                     self.note(format!("worker {level}: {message}"));
                 }
+                // The lab never asks for the output side (`output_frame:
+                // None` on every request), so this arm is unreachable —
+                // matched so the envelope stays exhaustive here.
+                BrowserOutputEnvelope::PreviewOutputFrame { .. } => {}
                 BrowserOutputEnvelope::Status { .. } | BrowserOutputEnvelope::Log { .. } => {}
             }
         }
