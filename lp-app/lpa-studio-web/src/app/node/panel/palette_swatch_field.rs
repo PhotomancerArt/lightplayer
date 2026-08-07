@@ -53,6 +53,12 @@ use super::palette_chooser::{PaletteChooser, PaletteChooserTab, PaletteEditTarge
 
 static NEXT_SWATCH_ID: AtomicUsize = AtomicUsize::new(1);
 
+/// How wide the chooser gets to be regardless of the control it hangs from.
+/// Set at the M4 follow-up gate: a panel locked to a ~190px swatch truncated
+/// the editor's title to "Custom p…", pushed its interpolation-method segment
+/// outside the card, and broke the cycle's fade presets across two lines.
+const CHOOSER_MIN_WIDTH_PX: f64 = 300.0;
+
 /// The band's trigger button: no chrome of its own — the FRAME around it is
 /// the visual, and the frame is also the popover's outline anchor.
 const BAND_TRIGGER_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left";
@@ -129,9 +135,12 @@ pub fn PaletteSwatchField(
                 placement: PopoverPlacement::BottomMiddle,
                 initially_open: chooser_initially_open,
                 // The chooser is the control's own body unfolding, so it
-                // wears exactly the control's width — a panel a few px
-                // narrower than its anchor reads as a mistake.
+                // never renders NARROWER than the control — a panel a few px
+                // short reads as a mistake. It may be wider: a swatch on a
+                // module panel is ~190px, and the chooser has tabs, a search
+                // box, a two-line catalog and a whole editor to fit in.
                 match_anchor_width: true,
+                min_panel_width_px: Some(CHOOSER_MIN_WIDTH_PX),
                 anchor_id: Some(anchor_id.clone()),
                 // The top-layer copy of the control while open: the same
                 // band inside the frame's own padding, laid out exactly as

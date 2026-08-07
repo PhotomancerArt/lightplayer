@@ -403,8 +403,18 @@ fn CycleTabBody(
     }
 }
 
-/// One catalog row: mini strip, name, and — for a third-party palette — its
-/// license tag, with author and source in the row's tooltip.
+/// One catalog row: mini strip, name, and — for a third-party palette — the
+/// credit on a second line beneath it, with the full attribution in the row's
+/// tooltip.
+///
+/// The licence used to be a tag pinned to the row's right edge. It moved
+/// under the name at the M4 follow-up gate: a licence is not something the
+/// person choosing a palette is deciding on, and it took the width a name
+/// needs. Nothing legal rides on this row — attribution is pinned to
+/// `assets/palettes/third-party/COPYING.md` by ADR
+/// `2026-08-04-palette-catalog-licensing-and-isolation` and enforced by
+/// `tests/license_manifest.rs` — so the second line is a deliberate credit,
+/// not a compliance sticker.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PaletteRow(
@@ -420,7 +430,13 @@ fn PaletteRow(
     on_press: EventHandler<()>,
     on_edit: EventHandler<()>,
 ) -> Element {
-    let spdx = choice.license.as_ref().map(|license| license.spdx.clone());
+    // Credit, when there is anyone to credit: author and licence on their own
+    // dim line under the name. A LightPlayer original or a project palette
+    // has nobody to attribute and must not grow a blank second line.
+    let credit = choice
+        .license
+        .as_ref()
+        .map(|license| format!("{} · {}", credit_author(&license.author), license.spdx));
     let name = choice.name.clone();
     rsx! {
         // A row with a ✎ is two gestures, so the affordance is a sibling of
@@ -441,14 +457,21 @@ fn PaletteRow(
                 span { class: "tw:w-14 tw:flex-none",
                     GradientStripCanvas { gradient: choice.gradient.clone() }
                 }
-                span { class: "tw:min-w-0 tw:truncate tw:text-left", "{choice.name}" }
-                if let Some(spdx) = spdx {
-                    span { class: "tw:ml-auto tw:flex-none tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                        "{spdx}"
+                // The text column is the grower, so every row's strip, name
+                // and credit share one left edge and the add affordance sits
+                // flush right — the button itself is `w-full` for the same
+                // reason, or it would shrink-wrap and take the right edge
+                // with it.
+                span { class: "tw:grid tw:min-w-0 tw:grow tw:text-left",
+                    span { class: "tw:min-w-0 tw:truncate", "{choice.name}" }
+                    if let Some(credit) = credit {
+                        span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
+                            "{credit}"
+                        }
                     }
                 }
                 if adding {
-                    span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
+                    span { class: "tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
                         StudioIcon { name: StudioIconName::Add, size: 12 }
                     }
                 }
@@ -527,8 +550,11 @@ fn CycleMemberChip(
 
 /// Scroll containment: the list is the only thing in the popover that grows
 /// with the catalog, so the cap lives here rather than on the panel.
+/// Taller than the 210px it was: catalog rows carry a credit line now, so the
+/// same cap showed barely half as many palettes. The list still has to leave
+/// the popover shorter than a phone viewport.
 const PALETTE_LIST_CLASS: &str =
-    "tw:grid tw:max-h-[210px] tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto tw:px-2 tw:py-1";
+    "tw:grid tw:max-h-[264px] tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto tw:px-2 tw:py-1";
 
 const GROUP_HEADING_CLASS: &str = "tw:m-0 tw:px-1 tw:pt-1 tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
 
@@ -546,12 +572,26 @@ fn tab_class(active: bool) -> String {
 }
 
 fn palette_row_class(disabled: bool) -> String {
-    let base = "tw:flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-1 tw:text-xs tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground";
+    // `w-full`: the button is a flex ITEM inside the row wrapper, so without
+    // it the button shrink-wraps its content and every row ends at a
+    // different x — which is what used to leave the licence tags ragged.
+    let base = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-1 tw:text-xs tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground";
     if disabled {
         format!("{base} tw:cursor-default tw:opacity-55 tw:hover:bg-transparent")
     } else {
         base.to_string()
     }
+}
+
+/// The author as a row's second line spells it: the name before any
+/// parenthetical. Upstream credits run long ("FastLED (Daniel Garcia, Mark
+/// Kriegsman et al.)") and the row has one line to give; the tooltip and
+/// `COPYING.md` carry the full text.
+fn credit_author(author: &str) -> &str {
+    author
+        .split_once(" (")
+        .map_or(author, |(lead, _)| lead)
+        .trim()
 }
 
 /// One button of a segmented row (the fade presets, and the editor's space
@@ -885,6 +925,17 @@ mod tests {
 
         // An out-of-range index (a stale click) changes nothing.
         assert_eq!(with_member_removed(&three, 9), three);
+    }
+
+    #[test]
+    fn a_row_credits_the_author_without_the_parenthetical() {
+        assert_eq!(
+            credit_author("FastLED (Daniel Garcia, Mark Kriegsman et al.)"),
+            "FastLED",
+            "the row has one line to give; the full credit is in the tooltip"
+        );
+        assert_eq!(credit_author("Blackheartedwolf"), "Blackheartedwolf");
+        assert_eq!(credit_author(""), "");
     }
 
     #[test]

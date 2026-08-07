@@ -115,6 +115,14 @@ pub fn PopoverButton(
     /// and welding only one edge leaves a shelf on the other.
     #[props(default = false)]
     match_anchor_width: bool,
+    /// Floor for the width lock, in CSS px: the panel welds to the anchor as
+    /// usual but never renders narrower than this. For anchored controls
+    /// whose CONTENT needs more room than the control itself has — a palette
+    /// swatch is ~190px on a module panel, and its chooser has tabs, a search
+    /// box, a two-line catalog and an editor to fit. Ignored unless
+    /// `match_anchor_width` is set, and always clamped to the viewport.
+    #[props(default = None)]
+    min_panel_width_px: Option<f64>,
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
@@ -173,7 +181,19 @@ pub fn PopoverButton(
     // centered alignment lands on exactly the anchor's footprint.
     let panel_width_style = if match_anchor_width {
         trigger_rect()
-            .map(|rect| format!("width: {:.1}px;", rect.width + 2.0 * TRIGGER_INFLATE_PX))
+            .map(|rect| {
+                let welded = rect.width + 2.0 * TRIGGER_INFLATE_PX;
+                // A FLOOR, never a ceiling: the lock exists so the panel is
+                // not NARROWER than its anchor (a few px short reads as a
+                // mistake, and welding one edge leaves a shelf on the other).
+                // Growing past the anchor breaks neither rule — the merged
+                // outline unions the two rects — so a control whose content
+                // needs more room than the control has may ask for it.
+                let width = welded.max(min_panel_width_px.unwrap_or(0.0));
+                // Never past the viewport: the same budget the popover cards
+                // assume in their own `w-[min(…, calc(100vw-24px))]`.
+                format!("width: min({width:.1}px, calc(100vw - 24px));")
+            })
             .unwrap_or_default()
     } else {
         String::new()
