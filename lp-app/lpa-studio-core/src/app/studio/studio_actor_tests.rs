@@ -73,6 +73,15 @@ struct ScriptedClientIo {
     /// progress, so the pull loops and re-checks its cancel signal at every
     /// frame boundary — the realistic shape a preempting command cancels.
     endless_frames: Rc<RefCell<bool>>,
+    /// When non-zero, a read streams this many non-final frames (each yielding
+    /// once, so the actor's preempt watcher interleaves) before the final
+    /// `End` frame — the shape of a real multi-frame project read, which takes
+    /// long enough that a command arriving mid-pull can cancel it.
+    frames_before_end: Rc<RefCell<u32>>,
+    /// Final (`End`) frames handed out: one per read that actually COMPLETED.
+    /// A cancelled pull sends its request and never gets here, so this — not
+    /// `read_count` — is the count of pulls whose data reached the app.
+    completed_reads: Rc<RefCell<usize>>,
     next_seq: Rc<RefCell<u32>>,
 }
 
@@ -85,6 +94,8 @@ impl ScriptedClientIo {
             stall_reads: Rc::new(RefCell::new(false)),
             fail_reads: Rc::new(RefCell::new(false)),
             endless_frames: Rc::new(RefCell::new(false)),
+            frames_before_end: Rc::new(RefCell::new(0)),
+            completed_reads: Rc::new(RefCell::new(0)),
             next_seq: Rc::new(RefCell::new(0)),
         }
     }
@@ -95,6 +106,8 @@ impl ScriptedClientIo {
             revision: Rc::clone(&self.revision),
             fail_reads: Rc::clone(&self.fail_reads),
             endless_frames: Rc::clone(&self.endless_frames),
+            frames_before_end: Rc::clone(&self.frames_before_end),
+            completed_reads: Rc::clone(&self.completed_reads),
         }
     }
 }
@@ -105,6 +118,8 @@ struct ScriptedHandle {
     revision: Rc<RefCell<i64>>,
     fail_reads: Rc<RefCell<bool>>,
     endless_frames: Rc<RefCell<bool>>,
+    frames_before_end: Rc<RefCell<u32>>,
+    completed_reads: Rc<RefCell<usize>>,
 }
 
 impl ScriptedHandle {
@@ -126,6 +141,17 @@ impl ScriptedHandle {
 
     fn set_endless_frames(&self, value: bool) {
         *self.endless_frames.borrow_mut() = value;
+    }
+
+    /// Make each read take `frames` non-final frames before it completes.
+    fn set_frames_before_end(&self, frames: u32) {
+        *self.frames_before_end.borrow_mut() = frames;
+    }
+
+    /// Reads whose final frame was delivered — i.e. pulls that completed
+    /// rather than being cancelled.
+    fn completed_read_count(&self) -> usize {
+        *self.completed_reads.borrow()
     }
 }
 
@@ -179,9 +205,34 @@ impl ClientIo for ScriptedClientIo {
                 WireServerMsgBody::ProjectRead { events },
             ))));
         }
+        let frames_before_end = *self.frames_before_end.borrow();
+        if frames_before_end > 0 {
+            // A multi-frame read: `frames_before_end` non-final frames (Begin
+            // at seq 0, then empty continuations), then the final End frame.
+            // Each yields once so the pull returns control between frames —
+            // the window in which a preempting command can cancel it.
+            let mut seq = self.next_seq.borrow_mut();
+            let this_seq = *seq;
+            *seq += 1;
+            let (events, fin) = match this_seq {
+                0 => (vec![ProjectReadEvent::Begin { revision }], false),
+                seq if seq < frames_before_end => (Vec::new(), false),
+                _ => {
+                    *self.completed_reads.borrow_mut() += 1;
+                    (vec![ProjectReadEvent::End { revision }], true)
+                }
+            };
+            return Box::pin(YieldOnce::new(Ok(WireServerMessage::stream_frame(
+                id,
+                this_seq,
+                fin,
+                WireServerMsgBody::ProjectRead { events },
+            ))));
+        }
         if *self.stall_reads.borrow() {
             return Box::pin(core::future::pending());
         }
+        *self.completed_reads.borrow_mut() += 1;
         Box::pin(async move {
             Ok(WireServerMessage::new(
                 id,
@@ -488,6 +539,83 @@ fn action_preempts_in_flight_passive_refresh() {
     assert!(
         final_view.home.is_some() && final_view.panes.is_empty(),
         "RefreshConnections reset the project, landing back on home"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Live-control drag: a CONTINUOUS stream of foreground actions — the shape of
+// dragging a fader, knob, or clock tape — must not starve the passive pull.
+// Every panel write is Foreground, so every one of them preempts an in-flight
+// pull; with no floor on that, the pull is cancelled at its first frame
+// boundary for as long as the drag lasts and the preview never refreshes.
+// ---------------------------------------------------------------------------
+#[test]
+fn a_drag_of_foreground_actions_does_not_starve_the_passive_pull() {
+    let (controller, handle) = connected_controller();
+    // A realistic multi-frame read: it spans several polls, so a write landing
+    // mid-pull has a window in which to cancel it.
+    handle.set_frames_before_end(4);
+    let (mut actor, studio_handle) = StudioActor::new(controller, never_timer());
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
+
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut cx = StdContext::from_waker(&waker);
+    let target = ProjectEditorTarget::node_tree();
+
+    // 40 rounds, 50 ms apart: a two-second drag at the knob's 20 writes/s
+    // throttle — the exact rate that measured zero preview paints.
+    for _ in 0..40 {
+        tx.send(StudioCommand::RefreshTick);
+        {
+            let mut batch = Box::pin(actor.run_one_batch_for_test());
+            // Let the batch get its pull in flight...
+            for _ in 0..4 {
+                let _ = batch.as_mut().poll(&mut cx);
+            }
+            // ...then the drag's next write arrives mid-pull.
+            tx.send(StudioCommand::Action(UiAction::from_op(
+                target.node_id(),
+                ProjectEditorOp::Focus,
+            )));
+            for _ in 0..500 {
+                if batch.as_mut().poll(&mut cx).is_ready() {
+                    break;
+                }
+            }
+        }
+        actor.controller.advance_clock_for_test(0.05);
+    }
+
+    assert!(
+        handle.completed_read_count() > 0,
+        "a sustained drag starved the passive pull: {} reads sent, {} completed \
+         — every pull is cancelled by the next write, so the preview freezes \
+         for the whole drag",
+        handle.read_count(),
+        handle.completed_read_count(),
+    );
+}
+
+/// Control for the drag test above: the same multi-frame reads at the same
+/// cadence, with NO writes arriving — every due tick completes its pull. If
+/// this ever fails, the drag test's zero is a harness artefact, not starvation.
+#[test]
+fn at_rest_every_due_tick_completes_its_pull() {
+    let (controller, handle) = connected_controller();
+    handle.set_frames_before_end(4);
+    let (mut actor, studio_handle) = StudioActor::new(controller, never_timer());
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
+
+    for _ in 0..40 {
+        tx.send(StudioCommand::RefreshTick);
+        drive(actor.run_one_batch_for_test());
+        actor.controller.advance_clock_for_test(0.05);
+    }
+
+    assert_eq!(
+        handle.completed_read_count(),
+        40,
+        "with no writes arriving, every tick's pull must complete"
     );
 }
 
