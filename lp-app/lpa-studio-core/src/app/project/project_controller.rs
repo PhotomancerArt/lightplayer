@@ -936,10 +936,17 @@ impl ProjectController {
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
                 && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
-                && let Some(live) =
-                    self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
             {
-                endpoint = endpoint.with_live_value(live);
+                if let Some(live) =
+                    self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
+                {
+                    endpoint = endpoint.with_live_value(live);
+                }
+                // The structured half, for the controls a summary cannot
+                // serve — see `UiBindingEndpoint::live_gradient`.
+                if let Some(config) = self.live_channel_gradient(graph, scope.as_ref(), channel) {
+                    endpoint = endpoint.with_live_gradient(config);
+                }
             }
             // A consumed bus channel is a panel-write target (panel.md P1):
             // the control built over this wiring dispatches PanelWrite at
@@ -1744,7 +1751,14 @@ impl ProjectController {
         let Some(graph) = self.binding_graph() else {
             return;
         };
-        let mut updates: Vec<(NodeId, String, String)> = Vec::new();
+        // The display string and the structured config ride together so the
+        // two readings can never disagree about which write they describe.
+        let mut updates: Vec<(
+            NodeId,
+            String,
+            Option<String>,
+            Option<lpc_model::GradientConfig>,
+        )> = Vec::new();
         for binding in &graph.bindings {
             if binding.direction != lpc_wire::WireBindingDirection::Consumes {
                 continue;
@@ -1758,20 +1772,25 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) =
-                self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
-            else {
+            let live = self.live_channel_display(graph, scope.as_ref(), channel, binding.kind);
+            let gradient = self.live_channel_gradient(graph, scope.as_ref(), channel);
+            // Either reading is reason enough to decorate the endpoint. A
+            // gradient channel used to fall out here: it has no scalar
+            // display, so the string was `None` and the whole row was
+            // skipped — which is why a palette never carried a live reading
+            // of any kind.
+            if live.is_none() && gradient.is_none() {
                 continue;
-            };
-            updates.push((binding.node, name.as_str().to_string(), live));
+            }
+            updates.push((binding.node, name.as_str().to_string(), live, gradient));
         }
-        for (node_id, slot, live) in updates {
+        for (node_id, slot, live, gradient) in updates {
             if let Some(node) = self
                 .root_nodes
                 .iter_mut()
                 .find_map(|node| node.node_by_runtime_id_mut(node_id))
             {
-                node.apply_bound_live_value(&slot, &live);
+                node.apply_bound_live_value(&slot, live.as_deref(), gradient.as_ref());
             }
         }
     }
@@ -1858,6 +1877,9 @@ impl ProjectController {
                     self.live_channel_display(graph, Some(scope), channel, binding.kind)
                 {
                     endpoint = endpoint.with_live_value(live);
+                }
+                if let Some(config) = self.live_channel_gradient(graph, Some(scope), channel) {
+                    endpoint = endpoint.with_live_gradient(config);
                 }
             }
             if binding.panel_show {
@@ -4051,6 +4073,26 @@ impl ProjectController {
         }
     }
 
+    /// The channel's live reading as a gradient config, echo first on the same
+    /// rule as [`Self::live_channel_display`] — so a palette pick reads back on
+    /// the gesture rather than a probe cadence later.
+    ///
+    /// `None` for every channel that is not carrying a gradient, which is what
+    /// leaves the scalar path untouched: no other control gains a field, and no
+    /// per-tick value is carried structurally.
+    fn live_channel_gradient(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: Option<&lpc_wire::WireScopeRef>,
+        channel: &str,
+    ) -> Option<lpc_model::GradientConfig> {
+        let value = match self.pending_panel_write(scope, channel) {
+            Some(value) => value,
+            None => graph_channel_value(graph, scope, channel)?,
+        };
+        crate::app::project::gradient_config_value(value)
+    }
+
     /// Whether a panel writer holds `(scope, channel)` — an echoed write
     /// counts, so the control reads Engaged (and offers its reset) on the
     /// gesture rather than a round trip later.
@@ -6141,6 +6183,35 @@ fn borrowed_tracking(
 /// regardless of kind, exactly as `visual.out` does, and the DTO gate stays
 /// quiet. What remains excluded is the case the gate was written for: an
 /// Instant channel whose value is a live-advancing NUMBER.
+/// The raw reading on a channel's CONSUMING endpoint row.
+///
+/// Channels are keyed `(scope, name)` since wire 6, and a playlist entry's
+/// sink row (wire 8) must never be confused with an enclosing scope's
+/// same-named channel. A scope-less endpoint (pre-scope test fakes) falls back
+/// to the first name match.
+fn graph_channel<'a>(
+    graph: &'a lpc_wire::WireBindingGraph,
+    scope: Option<&lpc_wire::WireScopeRef>,
+    channel_name: &str,
+) -> Option<&'a lpc_wire::WireBusChannel> {
+    graph.channels.iter().find(|channel| {
+        channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
+    })
+}
+
+/// That channel's current value, when it has one.
+fn graph_channel_value<'a>(
+    graph: &'a lpc_wire::WireBindingGraph,
+    scope: Option<&lpc_wire::WireScopeRef>,
+    channel_name: &str,
+) -> Option<&'a lpc_model::LpValue> {
+    graph_channel(graph, scope, channel_name)?
+        .value
+        .as_ref()?
+        .value
+        .as_ref()
+}
+
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
     scope: Option<&lpc_wire::WireScopeRef>,
@@ -6152,9 +6223,7 @@ fn live_channel_value(
     // must never be confused with an enclosing scope's same-named channel.
     // A scope-less endpoint (pre-scope test fakes) falls back to the first
     // name match.
-    let channel = graph.channels.iter().find(|channel| {
-        channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
-    })?;
+    let channel = graph_channel(graph, scope, channel_name)?;
     let value = channel.value.as_ref()?.value.as_ref()?;
     // A product handle first, before any kind test: the chip is revision-
     // stable, so no exclusion applies to it.
@@ -6171,6 +6240,14 @@ fn live_channel_value(
     // knob riding the channel needs the reading to track its own writes.
     if let Some(period) = crate::app::project::phasor_config_period(value) {
         return crate::app::project::format_live_scalar(&lpc_model::LpValue::F32(period));
+    }
+    // A GradientConfig reads back as its summary, on the same reasoning: it
+    // moves only when someone writes it. Without this branch a palette
+    // channel had no display reading at all — `format_live_scalar` returns
+    // `None` for every struct — so the swatch's readout could only ever
+    // report the authored value.
+    if let Some(config) = crate::app::project::gradient_config_value(value) {
+        return Some(crate::app::project::format_gradient_summary(&config));
     }
     let instant =
         binding_kind == lpc_model::Kind::Instant || channel.kind == Some(lpc_model::Kind::Instant);

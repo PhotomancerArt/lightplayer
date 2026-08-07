@@ -549,6 +549,8 @@ fn phasor_period_control(
             phase_offset: struct_f32(config, "phase_offset").unwrap_or(0.0),
         },
         live_value: None,
+        // A phasor is not a palette; nothing to carry structurally.
+        live_gradient: None,
         panel_target: None,
         unit: None,
         state: config_row.state.clone(),
@@ -638,6 +640,7 @@ fn palette_swatch_control(
         value: config_value,
         emit: crate::UiPanelEmit::Gradient,
         live_value: None,
+        live_gradient: None,
         panel_target: None,
         // A palette carries its own vocabulary in the readout (`5 stops`,
         // `↻ 4 · 3/min`); a unit suffix has nothing to add.
@@ -652,10 +655,14 @@ fn palette_swatch_control(
     }
     let top_row = top_rows.iter().find(|row| row.key == name);
     control.panel_target = top_row.and_then(|row| public_panel_target(row));
-    // A driven palette reads back as the channel's config summary (the
-    // `format_live_panel_value` gradient branch) — text, not a config the
-    // swatch could sample, so the strips keep showing the authored one.
+    // A driven palette reads back BOTH ways: the config summary for the
+    // readout's text surfaces (the `format_live_panel_value` gradient branch),
+    // and the config itself for the strips — so the swatch shows the palette
+    // that is playing, including one this panel just wrote. The summary alone
+    // could not do that: a `GradientConfig` does not survive the round trip
+    // through display text.
     control.live_value = top_row.and_then(|row| bound_live_value(row));
+    control.live_gradient = top_row.and_then(|row| bound_live_gradient(row));
     Some(control)
 }
 
@@ -786,6 +793,16 @@ fn snap_control_display(control: &mut UiPanelControl, min: f32, step: f32) {
 fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
     match &slot.source {
         UiSlotSourceState::Bound(endpoint) => endpoint.live_value.clone(),
+        _ => None,
+    }
+}
+
+/// The same row's live reading as a gradient config — present only when the
+/// channel carries one, which is what keeps every other control's payload
+/// exactly as it was.
+fn bound_live_gradient(slot: &UiConfigSlot) -> Option<lpc_model::GradientConfig> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) => endpoint.live_gradient.clone(),
         _ => None,
     }
 }
@@ -1198,6 +1215,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         value: value.clone(),
         emit: crate::UiPanelEmit::Value,
         live_value: bound_live_value(slot),
+        live_gradient: bound_live_gradient(slot),
         panel_target: public_panel_target(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),

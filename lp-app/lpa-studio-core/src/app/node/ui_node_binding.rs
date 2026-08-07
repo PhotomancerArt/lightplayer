@@ -3,7 +3,11 @@
 use crate::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
 /// A human-readable binding endpoint shown in node binding popovers.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// `PartialEq` but not `Eq`: the live gradient carries `f32` coordinates, the
+/// same reason [`crate::UiConfigSlot`] and [`crate::UiPanelControl`] have
+/// always been comparison-only.
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiBindingEndpoint {
     /// Compact label for the endpoint, such as `bus:time`.
     pub label: String,
@@ -18,6 +22,16 @@ pub struct UiBindingEndpoint {
     /// enters the DTO and absent for monotonic/time-kind channels, so the
     /// whole-DTO change gate does not fire per engine tick (P6 item 1).
     pub live_value: Option<String>,
+    /// The same reading as a CONFIG, when the channel carries a gradient.
+    ///
+    /// [`Self::live_value`] is display text, and a scalar survives that round
+    /// trip — `live_numeric()` just re-parses it. A [`lpc_model::GradientConfig`]
+    /// cannot, so a palette control fed only the string could never show what
+    /// it had just written. Carried NARROWLY (gradient-shaped, not a general
+    /// `LpValue`) so the quantize-before-the-DTO rule above keeps holding for
+    /// every scalar channel: a config only moves when someone writes it, so it
+    /// costs no per-tick churn.
+    pub live_gradient: Option<lpc_model::GradientConfig>,
     /// The consumed bus channel's `(scope, channel)` panel-write target
     /// (panel.md P1), present on Consumes-direction bus endpoints so the
     /// panel control built over this wiring can dispatch panel commands.
@@ -36,6 +50,7 @@ impl UiBindingEndpoint {
             detail: None,
             default_origin: false,
             live_value: None,
+            live_gradient: None,
             panel_target: None,
             panel_hint: false,
         }
@@ -59,6 +74,13 @@ impl UiBindingEndpoint {
         self
     }
 
+    /// Attach the channel's live reading as a gradient config, for the
+    /// palette controls that need the structure rather than the summary.
+    pub fn with_live_gradient(mut self, config: lpc_model::GradientConfig) -> Self {
+        self.live_gradient = Some(config);
+        self
+    }
+
     /// Attach the consumed channel's panel-write target.
     pub fn with_panel_target(mut self, panel_target: crate::UiPanelTarget) -> Self {
         self.panel_target = Some(panel_target);
@@ -73,7 +95,7 @@ impl UiBindingEndpoint {
 }
 
 /// Binding state for a produced product or value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedBindings {
     /// Optional bus target published by this output.
     pub bus_target: Option<UiBindingEndpoint>,
@@ -106,7 +128,7 @@ impl Default for UiProducedBindings {
 }
 
 /// How a produced item participates in the graph.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedBinding {
     /// Binding state associated with the produced item.
     pub bindings: UiProducedBindings,

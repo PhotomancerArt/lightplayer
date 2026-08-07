@@ -5708,6 +5708,8 @@ dependencies = [
  "lp-gfx",
  "lp-gfx-lpvm",
  "lp-shader",
+ "lpc-engine",
+ "lpc-model",
  "lpir",
  "lps-builtins",
  "lps-filetests",

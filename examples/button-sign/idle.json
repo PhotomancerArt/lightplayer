@@ -3,6 +3,11 @@
   "source": "idle.glsl",
   "render_order": 0,
   "float_mode": "fixed",
+  "bindings": {
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
   "consumed": {
     "wavePhase": {
       "kind": "phasor",
@@ -25,8 +30,26 @@
         "phase_offset": 0.0
       },
       "default": 0,
+      "label": "Palette scroll",
+      "description": "Scroll offset into the palette strip (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
       "label": "Palette",
-      "description": "Palette cycle position (0-1)"
+      "description": "The ramp the wave field reads its colors from",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.8203,0.0283,0.0629) (0.7295,0.0489,0.0495) (0.6284,0.0656,0.0037) (0.5533,0.0506,-0.0655) (0.5562,-0.0116,-0.1083) (0.6348,-0.0534,-0.1057) (0.7362,-0.0597,-0.0809) (0.8257,-0.052,-0.0498) (0.8893,-0.0394,-0.0181) (0.9216,-0.0245,0.0115) (0.9205,-0.0082,0.037) (0.886,0.0093,0.0557) (0.8203,0.0283,0.0629)"
+          }
+        ]
+      }
     },
     "time": {
       "kind": "seconds",

@@ -118,7 +118,7 @@ fn modes() -> Element {
 }
 
 #[story(
-    description = "State treatments, no new color family: a BOUND swatch wears the violet frame and its readout leads in violet, because a config channel is driving the slot — what comes back from that channel is a summary in WORDS (on the readout's tooltip and in the label popup), so the strips keep showing the authored palette. Under it, an unsaved edit's warning label."
+    description = "State treatments, no new color family: a BOUND swatch wears the violet frame and its readout leads in violet, because a config channel is driving the slot. The strips show the palette that channel is PLAYING — a driven palette reads back as a config, not only as the summary the readout's tooltip and the label popup carry, which is what lets a pick show up on the control that made it. Under it, an unsaved edit's warning label."
 )]
 fn states() -> Element {
     let mut bound = palette_swatch_control(

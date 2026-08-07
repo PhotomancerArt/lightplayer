@@ -2625,6 +2625,16 @@ mod tests {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic"))
     }
 
+    fn examples_plasma_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma"))
+    }
+
+    fn examples_plasma_duo_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma-duo"),
+        )
+    }
+
     /// The published output-channel bytes for the output node behind `path` —
     /// the core-path end product the M4 differential tests compare.
     fn output_buffer_bytes(rt: &Engine, path: &str) -> alloc::vec::Vec<u8> {
@@ -4363,6 +4373,83 @@ mod tests {
         ))));
 
         rt.tick(16).expect("tick fyeah-sign without radio cycle");
+    }
+
+    /// The palette examples (M5) compile and render.
+    ///
+    /// The `ticks_without_radio_trigger_cycle` tests above prove they LOAD,
+    /// which is deliberately not enough here: a shader whose compile fails
+    /// still ticks, it just renders the black fallback
+    /// (`docs/defects/2026-07-…events render flake` class). These examples
+    /// took an authored `sampler2D palette` slot in place of hand-rolled
+    /// cosine palettes, so "the frame after the compile window carries
+    /// color" is what pins the whole chain end to end: the authored
+    /// `GradientConfig` parses, the strip bakes, the sampler binds, and the
+    /// body samples it.
+    #[test]
+    fn palette_examples_render_after_the_compile_window() {
+        // `plasma-duo` names two outputs deliberately: one palette channel
+        // feeding two fixtures is the thing it proves that `plasma` cannot.
+        for (label, fs, outputs) in [
+            (
+                "fyeah-sign",
+                examples_fyeah_sign_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "fyeah-button",
+                examples_fyeah_button_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "button-sign",
+                examples_button_sign_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "button-playlist",
+                examples_button_playlist_fs(),
+                &["/output.json"][..],
+            ),
+            ("plasma", examples_plasma_fs(), &["/output.json"][..]),
+            (
+                "plasma-duo",
+                examples_plasma_duo_fs(),
+                &["/disc_out.json", "/grid_out.json"][..],
+            ),
+        ] {
+            let fs: &dyn LpFs = &fs;
+            let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+            let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
+            let button_service: Rc<dyn ButtonService> = hardware.clone();
+            let radio_service: Rc<dyn RadioService> = hardware.clone();
+            let mut services = EngineServices::new(TreePath::parse("/palette.show").expect("path"));
+            services.set_button_service(Some(button_service));
+            services.set_radio_service(Some(radio_service));
+
+            let mut rt = ProjectLoader::load_from_root(fs, services)
+                .unwrap_or_else(|e| panic!("load {label}: {e:?}"));
+            rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+                lp_shader::ShaderFrontend::LpsGlsl,
+            ))));
+
+            // Frame 1 defers the shader compile and requests a window;
+            // frame 2 opens it, compiles, and renders for real.
+            rt.tick(40)
+                .unwrap_or_else(|e| panic!("{label} tick 1: {e:?}"));
+            rt.tick(40)
+                .unwrap_or_else(|e| panic!("{label} tick 2: {e:?}"));
+
+            for output in outputs {
+                assert!(
+                    output_buffer_bytes(&rt, output)
+                        .iter()
+                        .any(|byte| *byte != 0),
+                    "{label} rendered black at {output} — its palette shader did \
+                     not compile or the strip did not reach the sampler"
+                );
+            }
+        }
     }
 
     #[test]

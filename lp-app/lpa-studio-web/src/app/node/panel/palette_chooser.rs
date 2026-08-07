@@ -83,8 +83,9 @@ impl PaletteChooserTab {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PaletteChooser(
-    /// The config the control currently holds — every gesture is expressed
-    /// as a whole replacement of this.
+    /// The EFFECTIVE config the control is showing — every gesture is
+    /// expressed as a whole replacement of this, so a set built here grows
+    /// from what is playing rather than from the authored default.
     config: GradientConfig,
     /// Backing slot for the slot-local write path.
     #[props(default = None)]
@@ -402,8 +403,18 @@ fn CycleTabBody(
     }
 }
 
-/// One catalog row: mini strip, name, and — for a third-party palette — its
-/// license tag, with author and source in the row's tooltip.
+/// One catalog row: mini strip, name, and — for a third-party palette — the
+/// credit on a second line beneath it, with the full attribution in the row's
+/// tooltip.
+///
+/// The licence used to be a tag pinned to the row's right edge. It moved
+/// under the name at the M4 follow-up gate: a licence is not something the
+/// person choosing a palette is deciding on, and it took the width a name
+/// needs. Nothing legal rides on this row — attribution is pinned to
+/// `assets/palettes/third-party/COPYING.md` by ADR
+/// `2026-08-04-palette-catalog-licensing-and-isolation` and enforced by
+/// `tests/license_manifest.rs` — so the second line is a deliberate credit,
+/// not a compliance sticker.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PaletteRow(
@@ -419,7 +430,13 @@ fn PaletteRow(
     on_press: EventHandler<()>,
     on_edit: EventHandler<()>,
 ) -> Element {
-    let spdx = choice.license.as_ref().map(|license| license.spdx.clone());
+    // Credit, when there is anyone to credit: author and licence on their own
+    // dim line under the name. A LightPlayer original or a project palette
+    // has nobody to attribute and must not grow a blank second line.
+    let credit = choice
+        .license
+        .as_ref()
+        .map(|license| format!("{} · {}", credit_author(&license.author), license.spdx));
     let name = choice.name.clone();
     rsx! {
         // A row with a ✎ is two gestures, so the affordance is a sibling of
@@ -437,17 +454,30 @@ fn PaletteRow(
                         on_press.call(());
                     }
                 },
-                span { class: "tw:w-14 tw:flex-none",
+                // The gradient is the thing being CHOSEN, so it gets real
+                // width rather than a token chip. 56px of a ~280px row put
+                // 20% on the palette and 70% on its label, which is backwards
+                // for a list you scan by eye — the search box is how you find
+                // one by name. A fuller rethink (full-width strip, text
+                // beneath) is banked: `docs/debt/palette-row-favours-the-name.md`.
+                span { class: "tw:w-24 tw:flex-none",
                     GradientStripCanvas { gradient: choice.gradient.clone() }
                 }
-                span { class: "tw:min-w-0 tw:truncate tw:text-left", "{choice.name}" }
-                if let Some(spdx) = spdx {
-                    span { class: "tw:ml-auto tw:flex-none tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                        "{spdx}"
+                // The text column is the grower, so every row's strip, name
+                // and credit share one left edge and the add affordance sits
+                // flush right — the button itself is `w-full` for the same
+                // reason, or it would shrink-wrap and take the right edge
+                // with it.
+                span { class: "tw:grid tw:min-w-0 tw:grow tw:text-left",
+                    span { class: "tw:min-w-0 tw:truncate", "{choice.name}" }
+                    if let Some(credit) = credit {
+                        span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
+                            "{credit}"
+                        }
                     }
                 }
                 if adding {
-                    span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
+                    span { class: "tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground", aria_hidden: "true",
                         StudioIcon { name: StudioIconName::Add, size: 12 }
                     }
                 }
@@ -526,8 +556,11 @@ fn CycleMemberChip(
 
 /// Scroll containment: the list is the only thing in the popover that grows
 /// with the catalog, so the cap lives here rather than on the panel.
+/// Taller than the 210px it was: catalog rows carry a credit line now, so the
+/// same cap showed barely half as many palettes. The list still has to leave
+/// the popover shorter than a phone viewport.
 const PALETTE_LIST_CLASS: &str =
-    "tw:grid tw:max-h-[210px] tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto tw:px-2 tw:py-1";
+    "tw:grid tw:max-h-[264px] tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto tw:px-2 tw:py-1";
 
 const GROUP_HEADING_CLASS: &str = "tw:m-0 tw:px-1 tw:pt-1 tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
 
@@ -545,12 +578,26 @@ fn tab_class(active: bool) -> String {
 }
 
 fn palette_row_class(disabled: bool) -> String {
-    let base = "tw:flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-1 tw:text-xs tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground";
+    // `w-full`: the button is a flex ITEM inside the row wrapper, so without
+    // it the button shrink-wraps its content and every row ends at a
+    // different x — which is what used to leave the licence tags ragged.
+    let base = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-1 tw:text-xs tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground";
     if disabled {
         format!("{base} tw:cursor-default tw:opacity-55 tw:hover:bg-transparent")
     } else {
         base.to_string()
     }
+}
+
+/// The author as a row's second line spells it: the name before any
+/// parenthetical. Upstream credits run long ("FastLED (Daniel Garcia, Mark
+/// Kriegsman et al.)") and the row has one line to give; the tooltip and
+/// `COPYING.md` carry the full text.
+fn credit_author(author: &str) -> &str {
+    author
+        .split_once(" (")
+        .map_or(author, |(lead, _)| lead)
+        .trim()
 }
 
 /// One button of a segmented row (the fade presets, and the editor's space
@@ -741,15 +788,23 @@ pub fn with_palette_edited(
 /// heard of — an edited ramp, an import — is already this project's.
 #[must_use]
 pub fn palette_identity(gradient: &Gradient, choices: &[PaletteChoice]) -> (String, PaletteOrigin) {
-    let matched = choices.iter().find(|choice| &choice.gradient == gradient);
-    match matched {
-        Some(choice) if choice.group == PaletteGroup::ThisProject => {
-            (choice.name.clone(), PaletteOrigin::ProjectCustom)
-        }
-        Some(choice) => (
+    // The CATALOG is asked first, even though project rows sort first: if
+    // these stops are a built-in's stops, then editing them forks a built-in,
+    // whatever else the project happens to call the same ramp. Asking the
+    // project first would report "project custom" for every held catalog
+    // palette — which is what used to make the `copy of built-in` line
+    // unreachable in practice.
+    let builtin = choices
+        .iter()
+        .find(|choice| choice.group != PaletteGroup::ThisProject && &choice.gradient == gradient);
+    if let Some(choice) = builtin {
+        return (
             choice.name.clone(),
             PaletteOrigin::BuiltinCopy(choice.name.clone()),
-        ),
+        );
+    }
+    match choices.iter().find(|choice| &choice.gradient == gradient) {
+        Some(choice) => (choice.name.clone(), PaletteOrigin::ProjectCustom),
         None => ("Custom palette".to_string(), PaletteOrigin::ProjectCustom),
     }
 }
@@ -884,6 +939,56 @@ mod tests {
 
         // An out-of-range index (a stale click) changes nothing.
         assert_eq!(with_member_removed(&three, 9), three);
+    }
+
+    #[test]
+    fn a_held_builtin_edits_as_a_copy_of_that_builtin() {
+        // The `copy of built-in "..."` line was unreachable in practice: the
+        // only ✎ that fires lands on a project row, project rows sort first,
+        // and the lookup took the first match — so a held catalog palette
+        // always reported "project custom". The catalog is asked first now.
+        let lava = ramp(0.5);
+        let choices = vec![
+            PaletteChoice {
+                id: "project".into(),
+                name: "Palette".into(),
+                group: PaletteGroup::ThisProject,
+                license: None,
+                gradient: lava.clone(),
+            },
+            PaletteChoice {
+                id: "fastled_lava".into(),
+                name: "Lava".into(),
+                group: PaletteGroup::FastledStock,
+                license: None,
+                gradient: lava.clone(),
+            },
+        ];
+        assert_eq!(
+            palette_identity(&lava, &choices),
+            (
+                "Lava".to_string(),
+                PaletteOrigin::BuiltinCopy("Lava".to_string())
+            ),
+            "these are a built-in's stops, so editing them forks the built-in"
+        );
+
+        // A ramp only this project has is still its own.
+        let mine = ramp(0.25);
+        let (name, origin) = palette_identity(&mine, &choices);
+        assert_eq!(origin, PaletteOrigin::ProjectCustom);
+        assert_eq!(name, "Custom palette");
+    }
+
+    #[test]
+    fn a_row_credits_the_author_without_the_parenthetical() {
+        assert_eq!(
+            credit_author("FastLED (Daniel Garcia, Mark Kriegsman et al.)"),
+            "FastLED",
+            "the row has one line to give; the full credit is in the tooltip"
+        );
+        assert_eq!(credit_author("Blackheartedwolf"), "Blackheartedwolf");
+        assert_eq!(credit_author(""), "");
     }
 
     #[test]

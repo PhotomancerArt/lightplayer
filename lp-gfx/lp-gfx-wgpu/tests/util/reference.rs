@@ -11,6 +11,7 @@ use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use super::corpus::CorpusShader;
+use super::palette;
 
 /// Renders corpus shaders through the Q32 wasm path.
 pub struct ReferenceRenderer {
@@ -45,14 +46,16 @@ impl ReferenceRenderer {
         let (hoisted, remainder) = hoist_declarations(shader.source);
         let source = format!("{hoisted}{}{remainder}", authored_prototypes(shader.source));
         let start = Instant::now();
+        let mut desc = CompilePxDesc::new(
+            &source,
+            TextureStorageFormat::Rgba16Unorm,
+            lpir::CompilerConfig::default(),
+            ShaderFrontend::Naga,
+        );
+        desc.textures = palette::texture_specs(shader);
         let compiled = self
             .engine
-            .compile_px_desc(CompilePxDesc::new(
-                &source,
-                TextureStorageFormat::Rgba16Unorm,
-                lpir::CompilerConfig::default(),
-                ShaderFrontend::Naga,
-            ))
+            .compile_px_desc(desc)
             .map_err(|e| format!("{}: reference compile: {e:?}", shader.name))?;
         Ok(ReferenceShader {
             shader: compiled,
@@ -74,13 +77,21 @@ impl ReferenceRenderer {
             .engine
             .alloc_texture(width, height, TextureStorageFormat::Rgba16Unorm)
             .map_err(|e| format!("alloc_texture: {e:?}"))?;
+        let (palette_fields, palette_buffers) = palette::bind_on_engine(&self.engine, shader)?;
 
-        compiled
+        let result = compiled
             .shader
-            .render_frame(&corpus_uniforms(shader, width, height, time), &mut tex)
-            .map_err(|e| format!("{}: render_frame: {e:?}", shader.name))?;
+            .render_frame(
+                &with_fields(corpus_uniforms(shader, width, height, time), palette_fields),
+                &mut tex,
+            )
+            .map_err(|e| format!("{}: render_frame: {e:?}", shader.name));
 
-        let data = tex.data();
+        let data = tex.data().to_vec();
+        for buffer in palette_buffers {
+            self.engine.free_texture(buffer);
+        }
+        result?;
         Ok(data
             .chunks_exact(2)
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
@@ -113,4 +124,13 @@ pub fn corpus_uniforms(shader: &CorpusShader, width: u32, height: u32, time: f32
     // extra fields are ignored, and the bodies that no longer declare it are
     // exactly the ones that went fully phasor.
     LpsValueF32::Struct { name: None, fields }
+}
+
+/// Append texture (or any other) uniform fields to a corpus uniform tree.
+pub fn with_fields(uniforms: LpsValueF32, extra: Vec<(String, LpsValueF32)>) -> LpsValueF32 {
+    let LpsValueF32::Struct { name, mut fields } = uniforms else {
+        panic!("corpus uniforms are a struct");
+    };
+    fields.extend(extra);
+    LpsValueF32::Struct { name, fields }
 }

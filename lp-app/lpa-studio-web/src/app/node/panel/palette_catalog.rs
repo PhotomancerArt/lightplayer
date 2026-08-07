@@ -18,6 +18,7 @@ use lpa_palettes::{PaletteCategory, PaletteLicense};
 use lpa_studio_core::app::project::gradient_config_value;
 use lpa_studio_core::{
     UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeSection, UiNodeTabBody, UiNodeView,
+    UiSlotSourceState,
 };
 use lpc_model::{Gradient, GradientConfig};
 
@@ -179,13 +180,20 @@ pub fn group_choices(choices: &[PaletteChoice]) -> Vec<(PaletteGroup, Vec<Palett
         .collect()
 }
 
-/// The distinct palettes authored anywhere in `nodes`.
+/// The distinct palettes this project has in hand — authored anywhere in
+/// `nodes`, or HELD on a channel driving one of their slots.
 ///
 /// Walks the same UI-side data the cards render — config/debug/asset slot
 /// sections, records, and nested children — so nothing is read that the user
 /// cannot already see. Deduplicated by GRADIENT (the same ramp authored on
 /// three nodes is one row) and capped, because this is a convenience section
 /// and not an inventory.
+///
+/// Held palettes count because a fresh project authors none: every palette
+/// arrives by picking one, which writes the panel channel and leaves the
+/// authored slot alone. Without them the section is permanently empty, and
+/// since the ✎ renders only on project rows, the gradient editor would have
+/// no way in at all.
 #[must_use]
 pub fn project_palette_choices(nodes: &[UiNodeView]) -> Vec<PaletteChoice> {
     /// Beyond this the section stops being a shortcut and starts being a
@@ -239,6 +247,16 @@ fn collect_sections(sections: &[UiNodeSection], found: &mut Vec<PaletteChoice>) 
 }
 
 fn collect_slot(slot: &UiConfigSlot, found: &mut Vec<PaletteChoice>) {
+    // A palette a channel is DRIVING belongs to the project every bit as much
+    // as an authored one — more, since it is the one currently playing. It is
+    // also the only way a built-in reaches the editor: the ✎ renders on
+    // project rows, and a catalog list stays a catalog. Collected first so
+    // the held ramp wins the dedupe against an authored twin.
+    if let UiSlotSourceState::Bound(endpoint) = &slot.source
+        && let Some(config) = endpoint.live_gradient.as_ref()
+    {
+        push_config(&slot.label, config, found);
+    }
     match &slot.body {
         UiConfigSlotBody::Value(value) => {
             let Some(config) = gradient_config_value(&value.kind.to_lp_value()) else {
@@ -392,6 +410,30 @@ mod tests {
             .map(|choice| choice.name)
             .collect();
         assert_eq!(names, vec!["Palette", "Cycle 1", "Cycle 2"]);
+    }
+
+    #[test]
+    fn a_held_palette_belongs_to_the_project() {
+        // A fresh project authors no palette: picking one writes the panel
+        // channel and leaves the authored slot alone. If the section only
+        // read authored values it would stay empty forever, and the ✎ —
+        // which renders on project rows only — would have no way in.
+        let mut slot = gradient_slot("Palette", &GradientConfig::Static(ramp(0.9)));
+        slot.source = UiSlotSourceState::Bound(
+            lpa_studio_core::UiBindingEndpoint::new("bus:palette")
+                .with_live_gradient(GradientConfig::Static(ramp(0.3))),
+        );
+        let rows = project_palette_choices(&nodes_with_slots(vec![slot]));
+
+        assert_eq!(
+            rows.iter().map(|row| &row.gradient).collect::<Vec<_>>(),
+            vec![&ramp(0.3), &ramp(0.9)],
+            "the HELD ramp leads; the authored one it is covering still lists"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.group == PaletteGroup::ThisProject)
+        );
     }
 
     #[test]
