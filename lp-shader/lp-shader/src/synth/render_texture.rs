@@ -1,4 +1,19 @@
 //! Synthesise `__render_texture_<format>`: nested y/x loops, incremental offsets (Shape B), F32 → unorm16.
+//!
+//! # Declared space
+//!
+//! The loop nest follows the shader's declared space
+//! ([`ShaderEntrySpace`](crate::ShaderEntrySpace)):
+//!
+//! - **2D** (`render_2d(vec2)`) — the historical nested `y`/`x` walk over a
+//!   `width × height` target, one call per pixel with both Q16.16 pixel-centre
+//!   coordinates.
+//! - **1D** (`render_1d(float)`) — a single `x` loop over `width`, one call per
+//!   pixel with the single Q16.16 pixel-centre coordinate. The `__height`
+//!   parameter is *unused* by the emitted loop: a 1D target is `(N, 1)` and
+//!   [`crate::LpsPxShader::render_frame`] refuses a taller one before the guest
+//!   ever runs, so the wrapper does not pay a per-frame check for a shape the
+//!   host already guarantees.
 
 use alloc::string::String;
 use alloc::vec;
@@ -12,6 +27,8 @@ use lps_shared::{
     FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
 };
 use lpvm::{DEFAULT_INVOCATION_FUEL, VMCTX_OFFSET_FUEL};
+
+use crate::entry_space::ShaderEntrySpace;
 
 /// `render_fn_index` was out of bounds for [`LpsModuleSig::functions`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,12 +114,17 @@ impl Q16CoordDecoder {
 }
 
 /// Append `__render_texture_<format>` to `module` and `meta` in lockstep; returns the function name.
+///
+/// `space` is the shader's declared space and decides the loop nest (see the
+/// module docs): 2D walks `height × width` and passes two coordinates, 1D
+/// walks `width` and passes one.
 pub fn synthesise_render_texture(
     module: &mut LpirModule,
     meta: &mut LpsModuleSig,
     render_fn_index: usize,
     format: TextureStorageFormat,
     float_mode: FloatMode,
+    space: ShaderEntrySpace,
 ) -> Result<String, SynthError> {
     let render_sig = meta
         .functions
@@ -132,20 +154,30 @@ pub fn synthesise_render_texture(
     let mut fb = FunctionBuilder::new(name.as_str(), &[]);
     let tex_ptr = fb.add_param(IrType::Pointer);
     let width = fb.add_param(IrType::I32);
+    // 1D targets are `(N, 1)` (enforced host-side), so the emitted 1D loop
+    // never reads `__height` — the parameter stays for one ABI shape.
     let height = fb.add_param(IrType::I32);
 
-    let pos_y = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IconstI32 {
-        dst: pos_y,
-        value: Q_HALF,
+    // The vertical walk exists only in 2D; a 1D shader takes one coordinate
+    // and its target is a single row.
+    let row = (space == ShaderEntrySpace::TwoD).then(|| {
+        let pos_y = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: pos_y,
+            value: Q_HALF,
+        });
+        pos_y
     });
     let px_off = fb.alloc_vreg(IrType::I32);
     fb.push(LpirOp::IconstI32 {
         dst: px_off,
         value: 0,
     });
-    let y = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IconstI32 { dst: y, value: 0 });
+    let y = row.map(|_| {
+        let y = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: y, value: 0 });
+        y
+    });
     // Per-invocation fuel metering (lpvm-native): linear pixel counter and
     // the constant tank size stored into the vmctx header per pixel.
     let inv_idx = fb.alloc_vreg(IrType::I32);
@@ -165,8 +197,9 @@ pub fn synthesise_render_texture(
     let pos_x = fb.alloc_vreg(IrType::I32);
     let x = fb.alloc_vreg(IrType::I32);
 
-    fb.push_loop();
-    {
+    // 2D opens the row loop; 1D renders the single row directly.
+    if let (Some(y), Some(_)) = (y, row) {
+        fb.push_loop();
         let cmp_y = fb.alloc_vreg(IrType::I32);
         fb.push(LpirOp::IgeS {
             dst: cmp_y,
@@ -176,7 +209,8 @@ pub fn synthesise_render_texture(
         fb.push_if(cmp_y);
         fb.push(LpirOp::Break);
         fb.end_if();
-
+    }
+    {
         fb.push(LpirOp::IconstI32 {
             dst: pos_x,
             value: Q_HALF,
@@ -220,14 +254,13 @@ pub fn synthesise_render_texture(
             }
 
             let pos_x_f = coords.decode(&mut fb, pos_x);
-            let pos_y_f = coords.decode(&mut fb, pos_y);
+            let mut call_args = alloc::vec![VMCTX_VREG, pos_x_f];
+            if let Some(pos_y) = row {
+                call_args.push(coords.decode(&mut fb, pos_y));
+            }
 
             let color: Vec<_> = (0..channels).map(|_| fb.alloc_vreg(IrType::F32)).collect();
-            fb.push_call(
-                render_callee,
-                &[VMCTX_VREG, pos_x_f, pos_y_f],
-                color.as_slice(),
-            );
+            fb.push_call(render_callee, call_args.as_slice(), color.as_slice());
 
             let base = fb.alloc_vreg(IrType::I32);
             fb.push(LpirOp::Iadd {
@@ -271,7 +304,8 @@ pub fn synthesise_render_texture(
             });
         }
         fb.end_loop();
-
+    }
+    if let (Some(y), Some(pos_y)) = (y, row) {
         fb.push(LpirOp::IaddImm {
             dst: pos_y,
             src: pos_y,
@@ -282,8 +316,8 @@ pub fn synthesise_render_texture(
             src: y,
             imm: 1,
         });
+        fb.end_loop();
     }
-    fb.end_loop();
     fb.push_return(&[]);
 
     let ir_fn = fb.finish();
@@ -367,6 +401,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         assert_eq!(name, "__render_texture_rgba16");
@@ -386,6 +421,7 @@ mod tests {
             0,
             TextureStorageFormat::R16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         assert_eq!(name, "__render_texture_r16");
@@ -407,6 +443,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let synth_ir = ir
@@ -428,6 +465,7 @@ mod tests {
             0,
             TextureStorageFormat::R16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let synth_fn = ir
@@ -466,6 +504,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let synth_fn = ir
@@ -476,9 +515,9 @@ mod tests {
         let render_callee_id = ir
             .functions
             .iter()
-            .find(|(_, f)| f.name == "render")
+            .find(|(_, f)| f.name == "render_2d")
             .map(|(id, _)| *id)
-            .expect("render id");
+            .expect("render_2d id");
         let calls_to_render = synth_fn.body.iter().filter(|op| {
             matches!(op, LpirOp::Call { callee: CalleeRef::Local(id), .. } if *id == render_callee_id)
         }).count();
@@ -500,6 +539,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let synth_fn = ir
@@ -560,10 +600,20 @@ mod tests {
     }
 
     fn make_stub_render_module(return_ty: LpsType) -> (LpirModule, LpsModuleSig) {
+        make_stub_entry_module(return_ty, ShaderEntrySpace::TwoD)
+    }
+
+    /// Stub module whose entry matches `space`: `render_2d(float, float)` or
+    /// `render_1d(float)`.
+    fn make_stub_entry_module(
+        return_ty: LpsType,
+        space: ShaderEntrySpace,
+    ) -> (LpirModule, LpsModuleSig) {
         let return_ir = return_ir_types(&return_ty);
-        let mut fb = FunctionBuilder::new("render", return_ir.as_slice());
-        let _p0 = fb.add_param(IrType::F32);
-        let _p1 = fb.add_param(IrType::F32);
+        let mut fb = FunctionBuilder::new(space.entry_name(), return_ir.as_slice());
+        for _ in 0..space.coord_lanes() {
+            let _p = fb.add_param(IrType::F32);
+        }
         let q_one_bits = fb.alloc_vreg(IrType::I32);
         fb.push(LpirOp::IconstI32 {
             dst: q_one_bits,
@@ -587,11 +637,14 @@ mod tests {
 
         let meta = LpsModuleSig {
             functions: alloc::vec![LpsFnSig {
-                name: String::from("render"),
+                name: String::from(space.entry_name()),
                 return_type: return_ty,
                 parameters: alloc::vec![FnParam {
                     name: String::from("pos"),
-                    ty: LpsType::Vec2,
+                    ty: match space {
+                        ShaderEntrySpace::TwoD => LpsType::Vec2,
+                        ShaderEntrySpace::OneD => LpsType::Float,
+                    },
                     qualifier: ParamQualifier::In,
                 }],
                 kind: LpsFnKind::UserDefined,
@@ -599,6 +652,78 @@ mod tests {
             ..Default::default()
         };
         (module, meta)
+    }
+
+    /// A 1D shader's wrapper is a **single** loop: one bounds check against
+    /// `__width`, no row walk, and the entry is called with one coordinate.
+    #[test]
+    fn synth_one_d_emits_a_single_x_loop_with_one_coordinate() {
+        let (mut ir, mut meta) = make_stub_entry_module(LpsType::Vec4, ShaderEntrySpace::OneD);
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+            ShaderEntrySpace::OneD,
+        )
+        .expect("synth");
+        let synth_fn = ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .expect("synth fn");
+        let body: Vec<&LpirOp> = synth_fn.body.iter().collect();
+
+        assert_eq!(
+            body.iter().filter(|op| matches!(op, LpirOp::Break)).count(),
+            1,
+            "one bounds-check Break: the row loop does not exist in 1D"
+        );
+        let args = body
+            .iter()
+            .find_map(|op| match op {
+                LpirOp::Call { args, .. } => Some(*args),
+                _ => None,
+            })
+            .expect("call to the entry");
+        assert_eq!(
+            args.count, 2,
+            "vmctx plus exactly one coordinate reaches render_1d"
+        );
+    }
+
+    /// The 2D wrapper still walks rows: two Breaks, two coordinates.
+    #[test]
+    fn synth_two_d_keeps_the_nested_walk() {
+        let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("synth");
+        let synth_fn = ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .expect("synth fn");
+        let body: Vec<&LpirOp> = synth_fn.body.iter().collect();
+        assert_eq!(
+            body.iter().filter(|op| matches!(op, LpirOp::Break)).count(),
+            2
+        );
+        let args = body
+            .iter()
+            .find_map(|op| match op {
+                LpirOp::Call { args, .. } => Some(*args),
+                _ => None,
+            })
+            .expect("call to the entry");
+        assert_eq!(args.count, 3, "vmctx plus both coordinates");
     }
 
     fn return_ir_types(ret: &LpsType) -> Vec<IrType> {

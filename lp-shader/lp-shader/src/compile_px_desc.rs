@@ -6,6 +6,8 @@ use lp_collection::VecMap;
 use lpir::{CompilerConfig, FloatMode};
 use lps_shared::{TextureBindingSpec, TextureStorageFormat};
 
+use crate::entry_space::ShaderEntrySpace;
+
 pub type TextureBindingSpecs = VecMap<String, TextureBindingSpec>;
 
 /// Frontend used for GLSL source before LPIR lowering.
@@ -64,12 +66,22 @@ pub struct CompilePxDesc<'a> {
     /// via [`lpvm::LpvmEngine::supports_float_mode`] and the caller errors.
     /// See `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`.
     pub float_mode: FloatMode,
+    /// Space this shader declares it renders in, which *is* the entry
+    /// contract: `TwoD` requires `vec4 render_2d(vec2 pos)`, `OneD`
+    /// requires `vec4 render_1d(float pos)`.
+    ///
+    /// Carried per compile for the same reason as [`Self::float_mode`]:
+    /// it is an authored slot on the shader node (`ShaderDef::space`), and
+    /// the compiler never infers it from the source. Defaults to
+    /// [`ShaderEntrySpace::TwoD`].
+    pub space: ShaderEntrySpace,
 }
 
 impl<'a> CompilePxDesc<'a> {
     /// Build a descriptor with no texture binding specs, in the shipped
-    /// numeric mode ([`FloatMode::Q32`]). Set [`Self::float_mode`] after
-    /// construction to compile Float.
+    /// numeric mode ([`FloatMode::Q32`]) and the default declared space
+    /// ([`ShaderEntrySpace::TwoD`]). Set [`Self::float_mode`] /
+    /// [`Self::space`] after construction to compile Float or a 1D shader.
     #[must_use]
     pub fn new(
         glsl: &'a str,
@@ -84,6 +96,7 @@ impl<'a> CompilePxDesc<'a> {
             textures: TextureBindingSpecs::new(),
             frontend,
             float_mode: FloatMode::Q32,
+            space: ShaderEntrySpace::TwoD,
         }
     }
 
@@ -91,6 +104,13 @@ impl<'a> CompilePxDesc<'a> {
     #[must_use]
     pub fn with_float_mode(mut self, float_mode: FloatMode) -> Self {
         self.float_mode = float_mode;
+        self
+    }
+
+    /// Same descriptor, compiled for a shader declaring `space`.
+    #[must_use]
+    pub fn with_space(mut self, space: ShaderEntrySpace) -> Self {
+        self.space = space;
         self
     }
 

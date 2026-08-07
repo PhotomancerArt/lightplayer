@@ -174,7 +174,7 @@ impl Project {
 
 const PALETTE_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
      layout(binding = 1) uniform sampler2D palette;\n\
-     vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
+     vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
 
 fn write(fs: &LpFsMemory, path: &str, body: &str) {
     let path = String::from(path);
