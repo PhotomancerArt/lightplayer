@@ -6,11 +6,12 @@ This crate is the entire request/response/error vocabulary a client and the
 cloud sync service exchange, as pure Rust types: `CloudRequest`,
 `CloudResponse`, `CloudError`, the `CloudCall`/`CloudReply` envelope, and the
 supporting building blocks (`Visibility`, `Actor`, `ProjectMeta`,
-`HeadInfo`/`PushOutcome`, `SidecarMeta`). It carries no transport, no IO, and
-no logic beyond the version-refusal helper in `version.rs`. The blob
-*transfer* encoding is out of scope entirely — blobs move over a separate
-plain-HTTP plane — this crate only carries the hashes (`HaveBlobs`,
-`MissingBlobs`) that plane is keyed by.
+`HeadInfo`/`PushOutcome`, `SidecarMeta`, `MeInfo`, `SessionInfo`/`SessionList`,
+`Ack`, `LoginOptionsInfo`/`OidcOption`/`DevPickerOptions`/`DevChoice`). It
+carries no transport, no IO, and no logic beyond the version-refusal helper
+in `version.rs`. The blob *transfer* encoding is out of scope entirely —
+blobs move over a separate plain-HTTP plane — this crate only carries the
+hashes (`HaveBlobs`, `MissingBlobs`) that plane is keyed by.
 
 `no_std` + `alloc`. Depends on `lpc-history` for `PrefixedUid` (uids and the
 `Actor::User` identity) and `ContentHash` (blob/tree hashes), and for
@@ -18,18 +19,21 @@ plain-HTTP plane — this crate only carries the hashes (`HaveBlobs`,
 
 ## Every message is a struct; the pairing is a compile-time fact
 
-Each of the eleven requests is a struct in `request.rs` (`GetProject { uid }`,
-`PushCommit { .. }`, and the two payload-free `WhoAmI` / `ListMyProjects`);
-each response is a struct in `response.rs` (`ProjectInfo`, `Heads`,
-`MissingBlobs`, …). `CloudRequest` and `CloudResponse` are the closed sets of
-them — a unit variant where the message carries nothing, a newtype variant
-wrapping the struct otherwise. The per-message structs stay behind
-`request::` / `response::` rather than being re-exported at the crate root:
-`Events` and `Heads` only read unambiguously with their module in front.
+Each of the sixteen requests is a struct in `request.rs` (`GetProject { uid }`,
+`PushCommit { .. }`, and the payload-free `WhoAmI` / `ListMyProjects` /
+`GetMe` / `ListSessions` / `LoginOptions`); each response is a struct — most
+directly in `response.rs` (`ProjectInfo`, `Heads`, `MissingBlobs`, …), a few
+(`MeInfo`, `SessionInfo`/`SessionList`, `Ack`, `LoginOptionsInfo`) in their
+own concept file for the same reason `ProjectMeta`/`HeadInfo`/`SidecarMeta`
+are. `CloudRequest` and `CloudResponse` are the closed sets of them — a unit
+variant where the message carries nothing, a newtype variant wrapping the
+struct otherwise. The per-message structs stay behind their own module
+rather than being re-exported at the crate root: `Events` and `Heads` only
+read unambiguously with their module in front.
 
 `CloudCallSpec` (in `call_spec.rs`) is the pairing table — one hand-written
-impl per request naming its `Response` and how to `extract` it. Eleven impls
-in one greppable file, deliberately not a macro. It is what lets a client
+impl per request naming its `Response` and how to `extract` it. Sixteen
+impls in one greppable file, deliberately not a macro. It is what lets a client
 write `call(port, GetProject { uid })` and get a `ProjectInfo` back, and what
 lets the service's handlers return the concrete response type; the "what if
 the answer is the wrong variant" branch then exists once per request instead
@@ -65,3 +69,7 @@ both sides can detect and report, never a silent decode failure, a field
 alias, or a best-effort partial-compat decode. `version::check_version` is
 the one place that decision is made; both client and server call it before
 trusting a call or reply body.
+
+`CLOUD_API_VERSION` is `2` as of 2026-08-07: v2 added the account/session/
+login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
+`LoginOptions`).

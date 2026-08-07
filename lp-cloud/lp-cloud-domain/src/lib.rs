@@ -42,9 +42,11 @@ pub mod ports;
 pub mod push_validation;
 
 pub use cloud_service::CloudService;
+pub use model::caller::Caller;
 pub use model::cloud_project::CloudProject;
 pub use model::cloud_user::CloudUser;
 pub use model::head_ref::HeadRef;
+pub use model::login_providers::{DevPickerConnection, LoginProviders, OidcConnection};
 pub use model::member_record::MemberRecord;
 pub use model::member_role::MemberRole;
 pub use model::project_refs::ProjectRefs;
