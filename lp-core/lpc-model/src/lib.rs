@@ -149,10 +149,11 @@ pub use project::overlay_mutation::{
     StoredSlotEdit,
 };
 pub use project::{
-    ChangeSummary, CommitResult, LocationSeg, ManifestParseError, MutationBatchResults,
-    MutationResult, NodeAttachSite, NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary,
-    ProjectConfig, ProjectInventory, ProjectKind, ProjectManifest, ProjectNode, ProjectNodeOrigin,
-    ProjectNodePlacement, ProjectTree, Revision,
+    ChangeSummary, CommitResult, ExportFileSet, ExportFinding, ExportLintReport, ExportSeverity,
+    LocationSeg, ManifestParseError, MutationBatchResults, MutationResult, NodeAttachSite,
+    NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary, ProjectConfig, ProjectInventory,
+    ProjectKind, ProjectManifest, ProjectNode, ProjectNodeOrigin, ProjectNodePlacement,
+    ProjectTree, Revision, check_export, check_exports,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
