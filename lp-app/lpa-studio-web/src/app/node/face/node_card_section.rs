@@ -59,10 +59,17 @@ pub fn NodeCardSection(
     /// (spike gate 2; ADR 2026-08-04-wiring-flow-and-panel-settings).
     #[props(default = false)]
     panel_tint: bool,
+    /// The root card's EXPORTS rail (module authoring unit, P3): the sage
+    /// export wash plus a sage rail, marking the section that describes
+    /// what this project hands out. Mutually exclusive with `panel_tint` in
+    /// practice — no section is both the performable surface and the
+    /// manifest's face.
+    #[props(default = false)]
+    export_tint: bool,
     /// Full-bleed section content — padding is the content's own business.
     children: Element,
 ) -> Element {
-    let container = section_container_class(first, panel_tint);
+    let container = section_container_class(first, panel_tint, export_tint);
     let toggleable = open.is_some() && on_toggle.is_some();
     let expanded = open.unwrap_or(true);
 
@@ -77,7 +84,7 @@ pub fn NodeCardSection(
     rsx! {
         section { class: container,
             div { class: "tw:grid tw:min-w-0 tw:grid-cols-[20px_minmax(0,1fr)]",
-                SectionRail { label, icon, toggleable, on_toggle }
+                SectionRail { label, icon, toggleable, on_toggle, export_tint }
                 div { class: "tw:grid tw:min-w-0 tw:content-start",
                     if let Some(subline) = subline {
                         p { class: "tw:m-0 tw:px-4 tw:pt-2 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
@@ -94,7 +101,12 @@ pub fn NodeCardSection(
 /// Divider logic: every section but the first carries the 1px top hairline
 /// (`border-strong` — `border-muted` was invisible against the card in the
 /// wired app).
-fn section_container_class(first: bool, panel_tint: bool) -> String {
+///
+/// Two opt-in washes, each marking one kind of section: the module PANEL's
+/// teaching treatment, and the root card's EXPORTS rail (P3). Both are
+/// left-to-right fades in the same idiom, so the grammar reads as one
+/// family in two colors.
+fn section_container_class(first: bool, panel_tint: bool, export_tint: bool) -> String {
     let mut class = String::from(if first {
         "tw:grid tw:min-w-0"
     } else {
@@ -103,6 +115,10 @@ fn section_container_class(first: bool, panel_tint: bool) -> String {
     if panel_tint {
         class.push_str(
             " tw:bg-[linear-gradient(90deg,rgba(24,32,29,0.85),rgba(24,32,29,0.25)_60%,transparent)]",
+        );
+    } else if export_tint {
+        class.push_str(
+            " tw:bg-[linear-gradient(90deg,var(--studio-status-export-bg)_0%,transparent_72%)]",
         );
     }
     class
@@ -120,6 +136,10 @@ fn SectionRail(
     #[props(default = None)] icon: Option<StudioIconName>,
     #[props(default = false)] toggleable: bool,
     #[props(default = None)] on_toggle: Option<EventHandler<()>>,
+    /// Sage rail text for the exports section — "color on the label", the
+    /// same convention `DetailSection` uses for a tinted title.
+    #[props(default = false)]
+    export_tint: bool,
 ) -> Element {
     let text = rsx! {
         if let Some(icon) = icon {
@@ -157,9 +177,7 @@ fn SectionRail(
         }
     } else {
         rsx! {
-            div { class: "tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-1.5 tw:py-2 tw:text-dim-foreground",
-                {text}
-            }
+            div { class: rail_label_class(export_tint), {text} }
         }
     }
 }
@@ -206,15 +224,26 @@ fn CollapsedSectionRow(
     }
 }
 
+/// The non-toggleable rail's own class: a pure label, dim by default and
+/// sage on the exports section.
+fn rail_label_class(export_tint: bool) -> &'static str {
+    if export_tint {
+        "tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-1.5 tw:py-2 tw:text-status-export-foreground"
+    } else {
+        "tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-1.5 tw:py-2 tw:text-dim-foreground"
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SECTION_LABEL_TEXT_CLASS, section_container_class};
+    use super::{SECTION_LABEL_TEXT_CLASS, rail_label_class, section_container_class};
 
     #[test]
     fn only_non_first_sections_carry_the_divider() {
-        assert!(!section_container_class(true, false).contains("border-t"));
+        assert!(!section_container_class(true, false, false).contains("border-t"));
         assert!(
-            section_container_class(false, false).contains("tw:border-t tw:border-border-strong")
+            section_container_class(false, false, false)
+                .contains("tw:border-t tw:border-border-strong")
         );
     }
 
@@ -222,8 +251,27 @@ mod tests {
     fn the_panel_tint_is_opt_in() {
         // The module PANEL's teaching wash (spike gate 2) must never leak
         // onto ordinary sections.
-        assert!(section_container_class(false, true).contains("linear-gradient"));
-        assert!(!section_container_class(false, false).contains("linear-gradient"));
+        assert!(section_container_class(false, true, false).contains("linear-gradient"));
+        assert!(!section_container_class(false, false, false).contains("linear-gradient"));
+    }
+
+    /// The exports wash (P3) is its own opt-in in its own color, and the
+    /// panel's teaching treatment still wins if a caller ever asks for
+    /// both — one section can only mean one thing.
+    #[test]
+    fn the_export_tint_is_its_own_opt_in() {
+        let exports = section_container_class(false, false, true);
+        assert!(exports.contains("--studio-status-export-bg"));
+        assert!(
+            !section_container_class(false, false, false).contains("--studio-status-export-bg"),
+            "an ordinary section is never sage"
+        );
+        assert!(
+            !section_container_class(false, true, true).contains("--studio-status-export-bg"),
+            "the panel wash wins over a doubly-tinted section"
+        );
+        assert!(rail_label_class(true).contains("text-status-export-foreground"));
+        assert!(rail_label_class(false).contains("text-dim-foreground"));
     }
 
     #[test]

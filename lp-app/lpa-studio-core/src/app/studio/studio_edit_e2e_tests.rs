@@ -2593,7 +2593,7 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 /// Connect-time pulls discover the device's LOADED project, so device
 /// tests must not run the edit-e2e project — an idle device falls back to
 /// the default storage slot, an empty one classifies Empty.
-fn device_e2e_server() -> LpServer {
+pub(crate) fn device_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));

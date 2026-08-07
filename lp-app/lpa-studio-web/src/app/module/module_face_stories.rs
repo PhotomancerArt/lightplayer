@@ -15,8 +15,10 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, control_root_face, held_root_face, held_root_view,
-    module_node_view, plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
+    EXPORT_PROJECT, HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, clean_exports, control_root_face,
+    error_exports, exporting_root_face, fire_export, held_root_face, held_root_view,
+    module_card_with_export, module_node_view, plasma_children, plasma_face, plasma_one_panel,
+    root_module_node_view, warning_exports,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -147,6 +149,83 @@ fn workspace_no_bus_pane() -> Element {
     rsx! {
         div { class: "tw:grid tw:w-full tw:max-w-[860px] tw:gap-3.5 tw:bg-page tw:p-3",
             NodePane { view, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The root card of a PATTERN project: the exports section (module authoring unit, P3) sits between the wiring drawer and the provenance footer, wearing the sage export wash and a sage rail. Three folders, every one clean — sage dots, no lint lines. Sage is the whole family's hue: it reads as a structural property of the project ('this ships from here'), not as a status you would clear. A project that exports nothing has no section at all, which is what keeps a plain project plain (spike 2·ii)."
+)]
+fn root_card_exports_clean() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view(
+                    EXPORT_PROJECT,
+                    ROOT_SCOPE,
+                    "5 nodes · 3 exports",
+                    exporting_root_face(clean_exports()),
+                ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The same section with one export carrying a WARNING: fire reads a channel only scaffolding writes, so an imported copy runs on the authored default. The row's dot takes the warning tone while the section keeps its sage identity — the family colour says what kind of thing this is, the dot says how it is doing. The aggregate line under the rows is the same sentence the module's own popup shows."
+)]
+fn root_card_exports_warning() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view(
+                    EXPORT_PROJECT,
+                    ROOT_SCOPE,
+                    "5 nodes · 2 exports",
+                    exporting_root_face(warning_exports()),
+                ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Both severities at once: a warning and a hard ERROR (a file inside the export folder points outside it, so the vendored copy would not load). The error dot must not be swallowed by the warning above it, and the two lint lines rank worst-last in report order — this is the story that says whether the section can carry bad news without the sage wash softening it."
+)]
+fn root_card_exports_error() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view(
+                    EXPORT_PROJECT,
+                    ROOT_SCOPE,
+                    "5 nodes · 3 exports",
+                    exporting_root_face(error_exports()),
+                ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A designated child module card: the header wears the display-only `export` chip (D12 — the chip never toggles anything; the gesture lives in the popup behind the ⓘ). Beside it, the same card undesignated, so the two read against each other — the chip is the only difference, and it has to be findable without being loud."
+)]
+fn child_card_export_chip() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            div { class: "tw:grid tw:gap-3",
+                NodePane {
+                    view: module_card_with_export("fire", fire_export(true)),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export("common", fire_export(false)),
+                    on_action: move |_| {},
+                }
+            }
         }
     }
 }
