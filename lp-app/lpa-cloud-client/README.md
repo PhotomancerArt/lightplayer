@@ -18,6 +18,20 @@ The engine is written over the **library primitives**, not over
 history root. The studio wires this up in a later round; nothing in this crate
 knows what a studio is, and nothing in it draws anything.
 
+## Features
+
+| Feature | Default | What it adds |
+|---|---|---|
+| `in-process` | yes | `InProcessCloud` / `InProcessServer`, and with them the `lp-cloud-domain` + `lp-cloud-store-mem` dependencies |
+
+The port and the sync engine do not depend on `in-process`. The Studio web
+edge takes this crate with `default-features = false` and supplies its own
+HTTP `CloudPort` (`lpa-studio-web`'s `cloud::FetchCloudPort`) — otherwise the
+whole server domain would ride into the browser bundle for nothing. That
+combination is not covered by `just check` (which never compiles wasm32);
+`just check-wasm-cloud` is the cheap gate for it, `just studio-web-build` the
+full one.
+
 ## The caller contract
 
 This crate has no retry loop, no scheduler, and no policy. Read this section
@@ -103,7 +117,7 @@ If the copy's owner wants their own line instead, that is a fork
 | Concept | File |
 |---|---|
 | Transport trait, `TransportError`, the `call`/`request` helpers | `cloud_port.rs` |
-| The in-process service + client + offline switch | `in_process_cloud.rs` |
+| The in-process service + client + offline switch (`in-process`) | `in_process_cloud.rs` |
 | Per-project binding record (D23: per project, not per folder) | `cloud_binding.rs` |
 | A local project: package fs + history root + the composed moves | `local_project.rs` |
 | Share address parsing/rendering | `project_link.rs` |

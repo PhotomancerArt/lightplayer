@@ -40,6 +40,56 @@ never assume one (AGENTS.md, "Dev server ports").
 Configuration is all environment, parsed in one place: see the table at the
 top of `src/config.rs`.
 
+## Auth: providers, LoginOptions, and sessions
+
+Auth is **provider-based**, not Google-shaped
+(`docs/adr/2026-08-07-provider-based-auth.md`). `AppState` carries a
+`LoginProviders` (`lp-cloud-domain`) built once from config
+(`Config::login_providers`, `src/config.rs`) with two connection kinds:
+
+- **`oidc: Vec<OidcConnection>`** — external providers. Today: one row,
+  `{ id: "google", label: "Google", start_path: "/auth/google" }`. A
+  second OIDC provider is a second row plus a second OAuth handler that
+  also ends by calling `CloudService::open_session` — no vocabulary
+  change.
+- **`dev_picker: Option<DevPickerConnection>`** — present only when
+  `dev_auth` is on (`LP_CLOUD_DEV_AUTH=1` **and** the base URL is
+  localhost; see [`dev_auth_allowed`](src/config.rs), the same
+  triple-gate `/auth/dev` itself enforces). This is a *method of the
+  local connection*, not a third provider — the eventual self-host
+  password login is the local connection's other method, sibling to this
+  one, not a client-visible fork.
+
+`CloudRequest::LoginOptions` (anonymous-callable) is how a signed-out
+client discovers what "Sign in" should even render:
+`CloudService::login_options` maps `LoginProviders.oidc` straight into
+`LoginOptionsInfo.oidc`, and — when the dev picker is configured — reads
+its `choices` **live** from `MetaStore::users` (today's seeded accounts,
+capped at `DEV_PICKER_CHOICE_LIMIT`) rather than from static config, so
+the picker always lists who has actually signed in, not a fixed roster.
+A single `oidc` entry with no dev picker means the Studio client links
+straight to `start_path`; more than one option, or a present dev picker,
+means it opens a chooser — that branch lives entirely client-side, driven
+by this answer.
+
+**Sessions never record which door a login came through.** `dev_auth`
+and `google_auth` both end by calling the same
+`CloudService::open_session`, and the session row/cookie carries no
+provider field — `GetMe`'s `provider_label` derives itself from
+`google_sub` presence at read time rather than reading anything the
+session stored. This is what makes account switching a plain re-auth:
+the new session simply replaces the old one, and neither side needs to
+track which connection issued it.
+
+**Every session captures a best-effort user agent at mint time**
+(`captured_user_agent`, `src/auth/session_cookie.rs`): the `User-Agent`
+request header, trimmed, truncated to a fixed length, `None` if absent or
+blank. It is stored alongside `created_at` (migration `0002`) purely for
+`ListSessions`' display ("Chrome on macOS, signed in 3 days ago" — actual
+label formatting is the client's job); nothing here parses it into a
+device/browser struct, and a malformed or missing header degrades to
+`None` rather than failing the login.
+
 ## Google OAuth setup
 
 Real sign-in is the authorization-code flow, hand-rolled in
