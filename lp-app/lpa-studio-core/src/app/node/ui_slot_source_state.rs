@@ -3,7 +3,7 @@
 use crate::UiBindingEndpoint;
 
 /// Where a config slot currently receives its value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiSlotSourceState {
     /// The value is authored directly on this slot.
     Direct,
