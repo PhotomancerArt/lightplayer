@@ -24,7 +24,7 @@ use lps_frontend::std_math_handler::StdMathHandler;
 use lps_shared::LpsValueF32;
 use util::corpus::{CORPUS, CorpusShader};
 use util::diff::diff_frames;
-use util::reference::corpus_uniforms;
+use util::reference::{corpus_uniforms, with_fields};
 
 /// Fractional sample grid density per axis (16 × 16 points per shader).
 const GRID: u32 = 16;
@@ -94,13 +94,9 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
     };
     let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga);
 
-    let gpu_options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
     // The authoritative CPU tier, compiled the way the device compiles:
     // naga frontend at default Q32 config; prototypes spliced for the same
     // declaration-order reason as the GPU path (see `util::reference`).
-    let cpu_options =
-        ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
 
     println!("| shader | t (s) | mean |D| (8-bit) | max |D| (8-bit) | bound (mean) |");
     println!("|---|---|---|---|---|");
@@ -109,23 +105,42 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         let (width, height) = frame_size(shader);
         let points = grid_points_q16(width, height);
 
+        let mut shader_gpu_options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        shader_gpu_options.textures = util::palette::texture_specs(shader);
         let mut gpu_shader = gpu
-            .compile_shader(shader.source, &gpu_options)
+            .compile_shader(shader.source, &shader_gpu_options)
             .unwrap_or_else(|e| panic!("{}: gpu compile: {e}", shader.name));
         let cpu_source = format!(
             "{}{}",
             lp_gfx_wgpu::assembly::authored_prototypes(shader.source),
             shader.source
         );
+        // The authoritative CPU tier, compiled the way the device compiles:
+        // naga frontend at default Q32 config; prototypes spliced for the same
+        // declaration-order reason as the GPU path (see `util::reference`).
+        let mut shader_cpu_options =
+            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
+        shader_cpu_options.textures = util::palette::texture_specs(shader);
         let mut cpu_shader = cpu
-            .compile_shader(&cpu_source, &cpu_options)
+            .compile_shader(&cpu_source, &shader_cpu_options)
             .unwrap_or_else(|e| panic!("{}: cpu compile: {e}", shader.name));
+
+        // Each tier binds the same baked strip through its own texture
+        // handles; the texels are byte-identical, so any divergence is the
+        // sampler, not the palette.
+        let (gpu_palette, _gpu_palette_textures) = util::palette::bind_on_graphics(&gpu, shader)
+            .unwrap_or_else(|e| panic!("{}: gpu {e}", shader.name));
+        let (cpu_palette, _cpu_palette_textures) = util::palette::bind_on_graphics(&cpu, shader)
+            .unwrap_or_else(|e| panic!("{}: cpu {e}", shader.name));
 
         let bound = mean_8bit_bound(shader.name);
         for &t in TIMESTAMPS {
-            let uniforms = corpus_uniforms(shader, width, height, t);
-            let gpu_samples = sample_on(&gpu, gpu_shader.as_mut(), &points, &uniforms);
-            let cpu_samples = sample_on(&cpu, cpu_shader.as_mut(), &points, &uniforms);
+            let base = corpus_uniforms(shader, width, height, t);
+            let gpu_uniforms = with_fields(base.clone(), gpu_palette.clone());
+            let cpu_uniforms = with_fields(base, cpu_palette.clone());
+            let gpu_samples = sample_on(&gpu, gpu_shader.as_mut(), &points, &gpu_uniforms);
+            let cpu_samples = sample_on(&cpu, cpu_shader.as_mut(), &points, &cpu_uniforms);
             let stats = diff_frames(&cpu_samples, &gpu_samples);
             println!(
                 "| {} ({} pts) | {t:.1} | {:.3} | {:.1} | <= {bound} |",

@@ -7,6 +7,7 @@
 
 pub mod corpus;
 pub mod diff;
+pub mod palette;
 pub mod reference;
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
