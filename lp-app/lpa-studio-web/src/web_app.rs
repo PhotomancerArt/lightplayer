@@ -24,7 +24,7 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+    CloudAccountControl, PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
@@ -112,6 +112,10 @@ pub fn App() -> Element {
         allow(unused_variables, reason = "only the wasm exchange task writes it")
     )]
     let openrouter_error = use_context_provider(|| Signal::new(None::<String>));
+    // Who the cloud service says we are: one `whoami` per page load, in
+    // context as a `Signal<CloudSession>` alongside a refresh handle. Nothing
+    // renders it yet (P5/P6 do); an unreachable service leaves it quiet.
+    crate::cloud::use_cloud_session_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
@@ -497,6 +501,7 @@ pub fn App() -> Element {
                 StudioRoute::SharedProject { .. } => {}
                 StudioRoute::Home
                 | StudioRoute::Explore
+                | StudioRoute::Account
                 | StudioRoute::Boards { .. }
                 | StudioRoute::Docs { .. } => {
                     // In-app sections: setting the route signal above already
@@ -580,6 +585,7 @@ pub fn App() -> Element {
                 | StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Explore
+                | StudioRoute::Account
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
@@ -686,6 +692,9 @@ pub fn App() -> Element {
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
+        // Like Session: no tab lights. The avatar in the right cluster is
+        // the account page's current-place marker.
+        StudioRoute::Account => SiteSection::Account,
         // Lens routes light NO tab — the active session chip is the
         // current-place marker (D15). The other catch-all routes
         // (stories, the standalone editors) never render this chrome.
@@ -709,11 +718,22 @@ pub fn App() -> Element {
                 }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
+                // Last of the chrome's children, so the account slot sits
+                // exactly where the spike puts it: after the settings
+                // trigger, before SiteChrome's own ⋯ button. Inert until
+                // the cloud session context says otherwise. On /account
+                // the slot wears the you're-here underline — no nav tab
+                // lights there, so the slot is the section's marker
+                // (G1 ruling 2026-08-07).
+                CloudAccountControl { on_account: section == SiteSection::Account }
             }
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {
                 StudioRoute::Home => rsx! {
                     crate::app::HomePage { on_action }
+                },
+                StudioRoute::Account => rsx! {
+                    crate::app::AccountPage {}
                 },
                 StudioRoute::Explore => rsx! {
                     crate::app::ExplorePage {

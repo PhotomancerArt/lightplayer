@@ -13,6 +13,28 @@ use lp_cloud_domain::SESSION_TOKEN_LEN;
 /// The cookie name. One name, one meaning, on one origin (D26).
 pub const SESSION_COOKIE: &str = "lp_session";
 
+/// Longest `User-Agent` a session row keeps (P3). Long enough for any real
+/// browser string; short enough that a session capture cannot become a place
+/// to stash an arbitrary payload.
+const MAX_USER_AGENT_LEN: usize = 256;
+
+/// Capture a request's `User-Agent` for the session `open_session` mints, if
+/// it minted one — truncated to [`MAX_USER_AGENT_LEN`] characters.
+///
+/// Both auth edges (`google_auth`, `dev_auth`) call this at the same point
+/// they call `open_session`, so the two logins record it identically. `None`
+/// for no header, an unreadable one, or one that is empty after trimming —
+/// all three are an honest "nothing sent", not an empty string sitting in
+/// the sessions list.
+pub fn captured_user_agent(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(axum::http::header::USER_AGENT)?.to_str().ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(MAX_USER_AGENT_LEN).collect())
+}
+
 /// Read the session token out of a request's `Cookie` header.
 ///
 /// Returns `None` for no cookie, a cookie that is not ours, and a value that
@@ -117,5 +139,36 @@ mod tests {
         assert!(!set_session_cookie(&token, false, 60.0).contains("Secure"));
         assert!(set_session_cookie(&token, true, 60.0).ends_with("; Secure"));
         assert!(clear_session_cookie(true).contains("Max-Age=0"));
+    }
+
+    #[test]
+    fn the_header_is_captured_verbatim_when_short() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::USER_AGENT,
+            "Mozilla/5.0".parse().unwrap(),
+        );
+        assert_eq!(
+            captured_user_agent(&headers).as_deref(),
+            Some("Mozilla/5.0")
+        );
+    }
+
+    #[test]
+    fn no_header_and_a_blank_header_are_both_none() {
+        assert_eq!(captured_user_agent(&HeaderMap::new()), None);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::USER_AGENT, "   ".parse().unwrap());
+        assert_eq!(captured_user_agent(&headers), None);
+    }
+
+    #[test]
+    fn a_long_header_is_truncated_to_the_cap() {
+        let mut headers = HeaderMap::new();
+        let long = "x".repeat(1000);
+        headers.insert(axum::http::header::USER_AGENT, long.parse().unwrap());
+        let captured = captured_user_agent(&headers).expect("a header was sent");
+        assert_eq!(captured.chars().count(), MAX_USER_AGENT_LEN);
     }
 }

@@ -28,10 +28,16 @@ use rusqlite::Connection;
 
 /// Every migration, in order. The index in this slice (1-based) is the
 /// `user_version` a database has once that migration has been applied.
-const MIGRATIONS: &[Migration] = &[Migration {
-    name: "0001_initial",
-    sql: include_str!("../migrations/0001_initial.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        name: "0001_initial",
+        sql: include_str!("../migrations/0001_initial.sql"),
+    },
+    Migration {
+        name: "0002_profile_and_sessions",
+        sql: include_str!("../migrations/0002_profile_and_sessions.sql"),
+    },
+];
 
 /// Bring a database up to the current schema and report the version it
 /// ended at.
@@ -143,6 +149,51 @@ mod tests {
         ] {
             assert!(table_exists(&conn, table), "missing table {table}");
         }
+    }
+
+    /// The upgrade path 0002 exists for: a database stopped at 0001 (rows
+    /// shaped by the old schema and all) picks up the new columns with
+    /// sane defaults, and the rows it already had survive untouched.
+    #[test]
+    fn migrating_from_0001_to_0002_fills_defaults_and_keeps_existing_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        assert_eq!(apply(&mut conn, &MIGRATIONS[..1]).unwrap(), 1);
+        conn.execute(
+            "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
+             VALUES ('usr_x', 'g-1', 'x@example.com', 'X', 1.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_uid, expires_at)\n\
+             VALUES ('deadbeef', 'usr_x', 100.0)",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(run_migrations(&mut conn).unwrap(), latest_version());
+        assert_eq!(schema_version(&conn).unwrap(), 2);
+
+        let (email, given_name, provider): (String, Option<String>, String) = conn
+            .query_row(
+                "SELECT email, given_name, provider FROM users WHERE uid = 'usr_x'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(email, "x@example.com", "the pre-existing row survived");
+        assert_eq!(given_name, None);
+        assert_eq!(provider, "google", "the migration's default");
+
+        let (created_at, user_agent): (f64, Option<String>) = conn
+            .query_row(
+                "SELECT created_at, user_agent FROM sessions WHERE token_hash = 'deadbeef'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(created_at, 0.0, "the migration's default");
+        assert_eq!(user_agent, None);
     }
 
     #[test]
