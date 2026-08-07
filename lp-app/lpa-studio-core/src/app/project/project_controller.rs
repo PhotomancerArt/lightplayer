@@ -180,6 +180,43 @@ pub struct ProjectController {
     /// collected yet — today, "Upgraded project from format 4 to 5". Drained
     /// by [`Self::take_open_notices`].
     open_notices: Vec<UiNotice>,
+    /// Memoized export-lint verdict for the active library project (P2 of
+    /// the module authoring unit), read through
+    /// [`Self::export_lint_report`].
+    ///
+    /// Interior-mutable so the read path can stay `&self` for view builders
+    /// while the two halves still recompute only when their own inputs
+    /// move: the STATIC half ([`lpc_model::check_exports`]) on the saved
+    /// package bytes, the GRAPH half
+    /// ([`crate::app::project::check_export_graph`]) on the binding-graph
+    /// revision. The static half reads files; the graph half does not, so
+    /// the common case (a new probe snapshot every refresh) never touches
+    /// the filesystem.
+    export_lint: std::cell::RefCell<Option<ExportLintCache>>,
+    /// Forces the STATIC half to re-run when the package bytes changed
+    /// without `last_synced` moving — a manifest patch
+    /// (`package_manifest::set_kind_and_exports`) is exactly that case, so
+    /// P3's designation editor bumps this via
+    /// [`Self::invalidate_export_lint`].
+    export_lint_epoch: std::cell::Cell<u64>,
+}
+
+/// Memoized export-lint state (see [`ProjectController::export_lint`]).
+struct ExportLintCache {
+    /// Static-half inputs: project uid, the runtime fs version the library
+    /// copy is synced to, and the manual epoch.
+    static_key: (String, lpc_model::FsVersion, u64),
+    /// Export folder names the static half read out of `project.json`.
+    /// Empty for a non-library project, which short-circuits both halves.
+    exports: Vec<String>,
+    /// Findings the static half produced for `static_key`.
+    static_findings: Vec<lpc_model::ExportFinding>,
+    /// Binding-graph revision the assembled `report` was built at; `None`
+    /// when no graph snapshot had arrived yet.
+    graph_revision: Option<lpc_model::Revision>,
+    /// Both halves joined. `Rc` so the read path hands out a cheap clone
+    /// rather than copying the findings per view build.
+    report: Rc<lpc_model::ExportLintReport>,
 }
 
 /// One staged node removal (see `ProjectController::staged_removals`).
@@ -256,6 +293,8 @@ impl ProjectController {
             library: None,
             classified_open_issue: None,
             open_notices: Vec::new(),
+            export_lint: std::cell::RefCell::new(None),
+            export_lint_epoch: std::cell::Cell::new(0),
         }
     }
 
@@ -642,6 +681,118 @@ impl ProjectController {
             walk(root, &mut stack, target, &mut out);
         }
         out
+    }
+
+    /// The active project's export-lint verdict (module authoring unit, P2):
+    /// both halves of the check, joined, cached per input.
+    ///
+    /// Empty — and free — for anything that is not a library project with a
+    /// non-empty `exports` list: no active library project, a `General` or
+    /// `Show` kind, or a `Pattern`/`Rig` that exports nothing yet. Only when
+    /// there is something to check does this read package bytes, and then
+    /// only when those bytes could have moved (see [`Self::export_lint`]).
+    ///
+    /// P3 renders this; nothing here decides presentation.
+    pub fn export_lint_report(&self) -> Rc<lpc_model::ExportLintReport> {
+        let Some(active) = self
+            .library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+        else {
+            return Rc::new(lpc_model::ExportLintReport::default());
+        };
+        let static_key = (
+            active.handle.uid.to_string(),
+            active.last_synced,
+            self.export_lint_epoch.get(),
+        );
+        let graph_revision = self.binding_graph().map(|graph| graph.revision);
+
+        let mut cache = self.export_lint.borrow_mut();
+        let static_stale = cache
+            .as_ref()
+            .is_none_or(|entry| entry.static_key != static_key);
+        if static_stale {
+            let (exports, static_findings) = static_export_findings(&active.handle);
+            *cache = Some(ExportLintCache {
+                static_key,
+                exports,
+                static_findings,
+                graph_revision: None,
+                report: Rc::new(lpc_model::ExportLintReport::default()),
+            });
+        }
+        let entry = cache.as_mut().expect("filled above");
+        if static_stale || entry.graph_revision != graph_revision {
+            let mut findings = entry.static_findings.clone();
+            if !entry.exports.is_empty()
+                && let Some(graph) = self.binding_graph()
+            {
+                findings.extend(super::export_lint::check_export_graph(
+                    graph,
+                    &entry.exports,
+                    &self.export_graph_context(),
+                ));
+            }
+            entry.graph_revision = graph_revision;
+            entry.report = Rc::new(lpc_model::ExportLintReport::new(findings));
+        }
+        Rc::clone(&entry.report)
+    }
+
+    /// Force the export lint's STATIC half to re-run on the next read.
+    ///
+    /// Needed only for package writes that do not advance the library's
+    /// synced fs version — today just a `project.json` patch (the kind /
+    /// exports designation, P3). Ordinary saves already move
+    /// `last_synced` and invalidate on their own.
+    pub fn invalidate_export_lint(&self) {
+        self.export_lint_epoch
+            .set(self.export_lint_epoch.get().wrapping_add(1));
+    }
+
+    /// Node identity and placement for the export lint's graph half, from
+    /// the synced controller tree plus the connect-time def-artifact map.
+    ///
+    /// `enclosing_scopes` is the chain of MODULE nodes above each node,
+    /// outermost first — the outward walk R5 resolution follows. Playlists
+    /// are not in it: an entry's sink scope is named by the playlist node
+    /// itself, and the graph half hops from that sink straight to the
+    /// playlist's own enclosing modules.
+    fn export_graph_context(&self) -> super::export_lint::ExportGraphContext {
+        fn walk(
+            node: &NodeController,
+            stack: &mut Vec<NodeId>,
+            def_artifacts: &BTreeMap<NodeId, ArtifactLocation>,
+            out: &mut Vec<super::export_lint::ExportGraphNode>,
+        ) {
+            let id = node.target().node_id;
+            out.push(super::export_lint::ExportGraphNode {
+                id,
+                label: node.label().to_string(),
+                def_path: def_artifacts
+                    .get(&id)
+                    .map(|artifact| artifact.file_path().as_str().to_string()),
+                enclosing_scopes: stack.clone(),
+            });
+            let is_module = node.kind() == MODULE_KIND_LABEL;
+            if is_module {
+                stack.push(id);
+            }
+            for child in node.children() {
+                walk(child, stack, def_artifacts, out);
+            }
+            if is_module {
+                stack.pop();
+            }
+        }
+
+        let mut nodes = Vec::new();
+        let mut stack = Vec::new();
+        for root in &self.root_nodes {
+            walk(root, &mut stack, &self.def_artifacts, &mut nodes);
+        }
+        super::export_lint::ExportGraphContext::new(nodes)
     }
 
     /// The project's **primary visual product**: the resolved value of
@@ -6910,12 +7061,178 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Run the export lint's STATIC half against a library package's **saved**
+/// bytes, returning the manifest's export list beside the findings.
+///
+/// The library snapshot is what is on disk (`package_export.rs` says the
+/// same about export): unsaved overlay edits are not in it, so the static
+/// half describes the project as it would actually be vendored — which is
+/// the question the lint asks. A non-library project (`exports` empty)
+/// short-circuits before any file walk.
+///
+/// Read failures degrade to "nothing to say" rather than a finding: a
+/// manifest that will not parse is already surfaced loudly by the open
+/// path's `PackageHealth`, and inventing a second, vaguer complaint here
+/// would only bury it.
+fn static_export_findings(
+    handle: &crate::app::library::PackageHandle,
+) -> (Vec<String>, Vec<lpc_model::ExportFinding>) {
+    let exports = {
+        let fs = handle.package_fs.borrow();
+        match crate::app::library::package_manifest::read_manifest(&*fs) {
+            Ok(fields) => fields.exports,
+            Err(error) => {
+                log::debug!("export lint: cannot read project.json: {error}");
+                return (Vec::new(), Vec::new());
+            }
+        }
+    };
+    if exports.is_empty() {
+        return (exports, Vec::new());
+    }
+    let files = match handle.read_all_files() {
+        Ok(files) => files,
+        Err(error) => {
+            log::debug!("export lint: cannot read package files: {error}");
+            return (exports, Vec::new());
+        }
+    };
+    let set: lpc_model::ExportFileSet<'_> = files
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
+    let findings = lpc_model::check_exports(&exports, &set).findings;
+    (exports, findings)
+}
+
 fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
     UiError::MissingSession(format!("library: {e}"))
 }
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+/// The controller's half of the export lint (P2): reaching a library
+/// package's SAVED bytes and feeding them to the static half. The two pure
+/// halves have their own unit tests (`lpc_model::project::export_check`,
+/// `crate::app::project::export_lint`); what these pin is the seam — path
+/// shapes, the non-library short circuit, and the empty verdict when no
+/// library is attached at all.
+#[cfg(test)]
+mod export_lint_derivation_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use lpfs::{LpFs, LpFsMemory};
+
+    use super::{ProjectController, static_export_findings};
+    use crate::app::library::{LibraryStore, PackageHandle, PackageProvenance};
+
+    const MODULE: &str = r#"{
+  "kind": "Module",
+  "nodes": { "shader": { "ref": "./shader.json" } },
+  "provenance": { "author": "Yona", "license": "CC0-1.0" }
+}"#;
+
+    fn handle_for(files: &[(&str, &str)]) -> PackageHandle {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = LibraryStore::new(
+            fs,
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| String::from("2026-08-07-1017")),
+        );
+        let files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(path, text)| ((*path).to_string(), text.as_bytes().to_vec()))
+            .collect();
+        let summary = store
+            .install_package("pack", &files, PackageProvenance::Created, 1.0)
+            .expect("install");
+        store.open(summary.uid).expect("open")
+    }
+
+    /// The seam works end to end: a `pattern` manifest's `exports` list
+    /// reaches the static half, and the escaping ref inside the export
+    /// folder comes back as an error naming the file.
+    #[test]
+    fn export_lint_static_half_reads_a_library_package() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "../common/simplex.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].severity, lpc_model::ExportSeverity::Error);
+        assert_eq!(findings[0].path.as_deref(), Some("/chase/shader.json"));
+    }
+
+    /// `read_all_files` yields slash-less relative paths; the file set must
+    /// still line up with the `/chase/...` refs resolve to (a clean folder
+    /// reads clean, not "everything escapes").
+    #[test]
+    fn export_lint_static_half_agrees_with_read_all_files_path_shape() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"rig\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+            ("chase/shader.glsl", "void main() {}"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    /// A general project exports nothing, so the lint never walks a file.
+    #[test]
+    fn export_lint_short_circuits_a_non_library_project() {
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\"\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert!(exports.is_empty());
+        assert!(findings.is_empty());
+    }
+
+    /// No library attached (host tests, the demo project) is a clean, empty
+    /// verdict — never a complaint about a project the controller cannot
+    /// see the bytes of.
+    #[test]
+    fn export_lint_report_is_empty_without_a_library() {
+        let controller = ProjectController::new();
+        let report = controller.export_lint_report();
+        assert!(report.is_empty());
+        assert_eq!(report.worst(), None);
+        // idempotent, and invalidation on an empty controller is harmless
+        controller.invalidate_export_lint();
+        assert!(controller.export_lint_report().is_empty());
+    }
 }
 
 #[cfg(test)]
