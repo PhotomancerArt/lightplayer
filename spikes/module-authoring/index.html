@@ -2,7 +2,7 @@
 <html lang="en" data-hue="sage">
 <head>
 <meta charset="utf-8">
-<title>Module authoring — exports designation, workbench reading, import/fork — design spike</title>
+<title>Module authoring — patterns, exports, and project kinds — design spike</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via top-bar spike) --- */
@@ -307,7 +307,7 @@
 </head>
 <body class="lint-warn tint">
 
-<h1>Module authoring — the <span class="t" data-t="noun_pl">exports</span> of a workbench project</h1>
+<h1>Module authoring — patterns, <span class="t" data-t="noun_pl">exports</span>, and project kinds</h1>
 <p class="hint">
   Spike for T1 (<b>2026-08-07-1017-module-authoring-unit</b>), round 3. Gate-2 rulings:
   <b>export</b> ratified (fix Share's "Export zip" → "Download"); <b>sage</b> hue; §2
@@ -470,24 +470,38 @@
 </div>
 <div class="duo" style="margin-top:18px">
   <div>
-    <div class="cap">design language (draft — container term still open)</div>
-    <div class="why">Layer names so the surfaces can talk about them consistently.
-      <b>Gate 2: "workbench project" rejected</b> — workbench sounds like something else;
-      "module project" is a candidate; not settled.</div>
+    <div class="cap">design language — SETTLED: ProjectKind enum (kind on the project, never the module)</div>
+    <div class="why">project.json carries <b>kind = role</b>, product-facing only — <b>the engine
+      resolves modules; the product reads project kinds</b>. Modules stay untyped containers
+      (rig-ness/show-ness = categories, the modules.md §1 treatment).
+      <span class="t" data-t="noun_pl">Exports</span> live in the library variants and are typed
+      transitively by their project's kind. "Pattern" won the word (prior art: authored+shared
+      units — Pixelblaze patterns, Shadertoy shaders — vs "effect" = built-in lists); "effect"
+      stays free for a future modifier-of-patterns.</div>
     <div class="lang">
-      <div class="lrow"><span class="term">project<span class="d">standalone</span></span>
-        <span class="def">an authoring container. No
-        <span class="t" data-t="noun_pl">exports</span> — nothing to import; you can still open
-        or fork it. Today's five examples are this.</span></div>
-      <div class="lrow"><span class="term">module project?<span class="d">naming OPEN —
-        not "workbench"</span></span>
-        <span class="def">a project whose manifest designates ≥1 module folder as importable —
-        the unit T1 ships. Candidates: <i>module project</i>, <i>project with
-        <span class="t" data-t="noun_pl">exports</span></i>, …</span></div>
+      <div class="lrow"><span class="term">project<span class="d">General — the unmarked
+        default</span></span>
+        <span class="def">sandbox; owes nobody a taxonomy. First
+        <span class="t" data-t="noun">export</span> offers the upgrade to pattern project.</span></div>
+      <div class="lrow"><span class="term">pattern project<span class="d">Pattern
+        { <span class="t" data-t="noun_pl">exports</span> } — T1's unit</span></span>
+        <span class="def">authors one visual (or a family); rig scaffolding stays home; the
+        designated folders are what importers vendor. Day-one build.</span></div>
+      <div class="lrow"><span class="term">show project<span class="d">Show — T4
+        dresses it</span></span>
+        <span class="def">the composition you flash: imports patterns, owns its rig, arranges
+        them (playlist now, timeline later). Idiom: <b>rig + show sub-modules — you play the
+        show on the rig</b> (pure bus semantics; two rigs = same show on both). "Scene" parked
+        = one stored state within a show.</span></div>
+      <div class="lrow"><span class="term">rig project<span class="d">Rig
+        { <span class="t" data-t="noun_pl">exports</span> } — reserved</span></span>
+        <span class="def">shares hardware descriptions (board, outputs, fixtures, mapping —
+        all node-level data). Its scaffolding would be test patterns — the same machinery,
+        mirrored. Future hardware-sharing plan.</span></div>
       <div class="lrow"><span class="term">modpack<span class="d">T3's object</span></span>
-        <span class="def">a curated, licensed <i>collection</i> of such projects + browse
-        metadata (spaces, authors, licenses). Explore browses packs; packs reference projects;
-        projects <span class="t" data-t="verb_lc">export</span> modules.</span></div>
+        <span class="def">a curated, licensed <i>collection</i> of pattern/rig projects +
+        browse metadata. Explore browses packs; packs reference projects; projects
+        <span class="t" data-t="verb_lc">export</span> modules.</span></div>
     </div>
   </div>
 </div>
