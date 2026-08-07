@@ -591,11 +591,19 @@ fn a_drag_of_foreground_actions_does_not_starve_the_passive_pull() {
     // getting through is the preview staying as live during a drag as it is
     // at rest — before the floor this was zero.
     let completed = handle.completed_read_count();
+    let sent = handle.read_count();
     assert!(
         completed >= 15,
-        "a sustained drag starved the passive pull: {} reads sent, {completed} \
-         completed — the preview freezes for the whole drag",
-        handle.read_count(),
+        "a sustained drag starved the passive pull: {sent} reads sent, \
+         {completed} completed — the preview freezes for the whole drag",
+    );
+    // The floor must not become "passive pulls are uncancellable": the tally
+    // resets on every run that gets through, so the writes still preempt in
+    // between and a gesture keeps its latency guarantee.
+    assert!(
+        completed < sent,
+        "promotion never released: {completed} of {sent} pulls completed, so \
+         writes stopped preempting altogether",
     );
 }
 
