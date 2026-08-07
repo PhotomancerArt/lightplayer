@@ -1,0 +1,134 @@
+// Bench workload shader — a FROZEN copy of `examples/basic/shader.glsl` as of
+// 2026-08-02, embedded by `workload.rs` via include_str!.
+//
+// This file is part of the `leds.max-safe@1` metric definition: it is what the
+// measured boards were running. It is deliberately a copy rather than a
+// reference to examples/ — an unrelated edit to the example must not silently
+// change what a checked-in measurement means. Editing this shader changes the
+// workload, which means bumping `MEASUREMENT_METRIC_VERSION` in
+// `lpc_model::measurement` and re-benching every pair.
+
+// 0=heatmap, 1=rainbow, 2=fire, 3=cool, 4=warm (5s per palette, 1s lerp transition)
+
+const bool CYCLE_PALETTE = true;
+
+// Lygia heatmap: blue -> cyan -> green -> yellow -> red
+vec3 paletteHeatmap(float t) {
+    vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
+    return clamp(1.0 - r * r, 0.0, 1.0);
+}
+
+// Lygia physical hue (neon rainbow)
+vec3 paletteRainbow(float t) {
+    float r = 0.33333;
+    vec3 v = abs(mod(fract(1.0 - t) + vec3(0.0, 1.0, 2.0) * r, 1.0) * 2.0 - 1.0);
+    return v * v * (3.0 - 2.0 * v);
+}
+
+// Lygia fire: black -> red -> orange -> yellow -> white
+vec3 paletteFire(float t) {
+    return clamp(vec3(1.0, 0.25, 0.0625) * exp(4.0 * t - 1.0), 0.0, 1.0);
+}
+
+// Iñigo Quílez parametric palette: cool blues/cyans
+vec3 paletteCool(float t) {
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.25, 0.25, 0.25);
+    return clamp(a + b * cos(6.28318530718 * (c * t + d)), 0.0, 1.0);
+}
+
+// Iñigo Quílez parametric palette: warm oranges/reds
+vec3 paletteWarm(float t) {
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.0, 0.1, 0.2);
+    return clamp(a + b * cos(6.28318530718 * (c * t + d)), 0.0, 1.0);
+}
+
+vec3 applyPalette(float t, float palette) {
+    // Add small epsilon to avoid Q32 rounding errors at boundaries (e.g. 3.99999 -> 3)
+    float p = floor(palette + 0.001);
+    if (p < 0.5) return paletteHeatmap(t);
+    if (p < 1.5) return paletteRainbow(t);
+    if (p < 2.5) return paletteFire(t);
+    if (p < 3.5) return paletteCool(t);
+    return paletteWarm(t);
+}
+
+// Naga GLSL-in resolves calls in source order; define helpers before render().
+vec2 worley_demo(vec2 scaledCoord, float time) {
+    float noiseValue = lpfn_worley(scaledCoord * 2, 0u) / 2 + 0.5;
+    float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
+    return vec2(t, 1.0);
+}
+
+vec2 fbm_demo(vec2 scaledCoord, float time) {
+    float noiseValue = lpfn_fbm(scaledCoord, 3, 0u);
+    float t = mod(time * 0.1 + (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5 / 3.0, 1.0);
+    return vec2(t, 1.0);
+}
+
+vec2 prsd_demo(vec2 scaledCoord, float time) {
+    vec2 gradient;
+    float noiseValue = lpfn_psrdnoise(
+        scaledCoord,
+        vec2(0.0),
+        time,
+        gradient,
+        0u
+    );
+
+    float hue = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
+    float gradientAngle = atan(gradient.y, gradient.x) / (2.0 * 3.14159) + 0.5;
+    float t = mod(time * 0.1 + hue / 3.0, 1.0);
+    float v = mix(0.5, 1.0, gradientAngle);
+    return vec2(t, v);
+}
+
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
+    // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
+    const vec2 REF_SIZE = vec2(32.0, 32.0);
+    vec2 virtCoord = pos * REF_SIZE / outputSize;
+
+    // Palette cycle: 5s per palette, 1s smooth transition to next.
+    // Keep palette index and blend phase derived from one timer so fixed-point
+    // boundary rounding cannot make them disagree at 25s loop points.
+    float palettePhase = mod(time, 25.0) * 0.2;
+    float palette = min(floor(palettePhase), 4.0);
+    float cyclePhase = palettePhase - palette;
+    float nextPalette = palette + 1.0;
+    if (nextPalette > 4.5) {
+        nextPalette = 0.0;
+    }
+    float blend = smoothstep(0.8, 1.0, cyclePhase);
+
+    float panSpeed = .3;
+    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
+
+    float scaleSpeed = .7;
+    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
+
+    vec2 center = REF_SIZE * 0.5;
+    vec2 dir = virtCoord - center;
+    vec2 scaledCoord = center + dir * scale;
+
+    vec2 tv = prsd_demo(scaledCoord, time);
+    //vec2 tv = fbm_demo(scaledCoord, time);
+    //vec2 tv = worley_demo(scaledCoord, time);
+
+    if (CYCLE_PALETTE) {
+        return vec4(mix(
+            applyPalette(tv.x, palette),
+            applyPalette(tv.x, nextPalette),
+            blend
+        ) * tv.y, 1.0);
+    } else {
+        return vec4(applyPalette(tv.x, 0) * tv.y, 1.0);
+    }
+}

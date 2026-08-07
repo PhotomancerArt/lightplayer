@@ -1,4 +1,5 @@
 pub mod args;
+pub mod bench;
 pub mod calibrate;
 pub mod handler;
 pub mod list;
