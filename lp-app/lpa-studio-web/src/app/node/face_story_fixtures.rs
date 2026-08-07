@@ -576,6 +576,19 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
     }
 }
 
+/// A fixture whose control output is published to a bus channel — the
+/// ordinary wiring an output node's wire reads (`output_face_decoration`
+/// discovers its sources exactly this way). Gives the output header's
+/// publish chip and the detail popover's Output aspect something to say.
+pub(crate) fn fixture_face_bound_output() -> UiFixtureFace {
+    let mut face = fixture_face();
+    face.preview.binding.revision = Some("rev 104".to_string());
+    face.preview.binding.bindings.bus_target = Some(UiBindingEndpoint::new("bus:halo.out"));
+    face.preview.binding.bindings.consumers =
+        vec![UiBindingEndpoint::new("output:dig-quad").with_detail("channel 1")];
+    face
+}
+
 /// A fixture inside its declared budget: the readout is a setup number.
 pub(crate) fn fixture_face_within_budget() -> UiFixtureFace {
     UiFixtureFace {

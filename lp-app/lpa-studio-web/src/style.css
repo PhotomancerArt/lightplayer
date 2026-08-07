@@ -2160,9 +2160,12 @@ label:has(> input:not(:disabled)) {
     inset: 5.5%;
 }
 
-/* Pinned above the lamp display inside the output section (not floating). */
+/* Pinned above the lamp display inside the output section (not floating).
+   Also the produced product's header — name and publish chip lead it — so
+   it centres its items rather than stretching them. */
 .ux-map-toggle-bar {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 2px;
     padding: 3px 8px;
