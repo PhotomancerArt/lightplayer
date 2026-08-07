@@ -24,7 +24,7 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+    CloudAccountControl, PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
@@ -713,6 +713,11 @@ pub fn App() -> Element {
                 }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
+                // Last of the chrome's children, so the account slot sits
+                // exactly where the spike puts it: after the settings
+                // trigger, before SiteChrome's own ⋯ button. Inert until
+                // the cloud session context says otherwise.
+                CloudAccountControl {}
             }
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {
