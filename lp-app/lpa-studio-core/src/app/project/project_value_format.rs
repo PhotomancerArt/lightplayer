@@ -179,9 +179,13 @@ pub fn phasor_config_period(value: &LpValue) -> Option<f32> {
 /// A palette reading is the dense [`format_gradient_summary`] line rather
 /// than the compact chip: this string is what the popup and the readout's
 /// tooltip carry, and a channel-driven palette is exactly the case where
-/// "which palette is this" needs to be answerable in words. The strip
-/// itself still shows the AUTHORED config — a live reading arrives as text,
-/// not as a config the swatch could sample.
+/// "which palette is this" needs to be answerable in words.
+///
+/// This is the TEXT half only. The strip shows the driven config itself,
+/// which reaches the control structurally beside this string
+/// ([`crate::UiPanelControl::live_gradient`]) — a `GradientConfig` cannot be
+/// recovered from a summary, so a swatch fed only this could never draw the
+/// palette it had just written.
 pub fn format_live_panel_value(value: &LpValue) -> Option<String> {
     if let Some(config) = gradient_config_value(value) {
         return Some(format_gradient_summary(&config));

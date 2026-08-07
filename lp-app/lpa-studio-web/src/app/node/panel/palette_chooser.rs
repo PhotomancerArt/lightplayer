@@ -454,7 +454,13 @@ fn PaletteRow(
                         on_press.call(());
                     }
                 },
-                span { class: "tw:w-14 tw:flex-none",
+                // The gradient is the thing being CHOSEN, so it gets real
+                // width rather than a token chip. 56px of a ~280px row put
+                // 20% on the palette and 70% on its label, which is backwards
+                // for a list you scan by eye — the search box is how you find
+                // one by name. A fuller rethink (full-width strip, text
+                // beneath) is banked: `docs/debt/palette-row-favours-the-name.md`.
+                span { class: "tw:w-24 tw:flex-none",
                     GradientStripCanvas { gradient: choice.gradient.clone() }
                 }
                 // The text column is the grower, so every row's strip, name
