@@ -50,14 +50,21 @@
                     "meta": {},
                     "fields": [
                       {
-                        "name": "running",
+                        "name": "play_state",
                         "shape": {
                           "value": {
                             "shape": {
-                              "id": 1196386242,
-                              "ty": "bool",
+                              "id": 256914120,
+                              "ty": "string",
                               "meta": {},
-                              "editor": "plain"
+                              "editor": {
+                                "dropdown": {
+                                  "options": [
+                                    { "value": "playing", "label": "Playing" },
+                                    { "value": "paused", "label": "Paused" }
+                                  ]
+                                }
+                              }
                             }
                           }
                         },

@@ -17,26 +17,48 @@
       },
       {
         "name": "transport",
+        "panel": "show",
         "shape": {
           "record": {
             "fields": [
               {
-                "name": "running",
+                "default_bind": "bus:clock.play_state",
+                "name": "play_state",
                 "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
                 "shape": {
                   "value": {
                     "shape": {
-                      "editor": "plain",
-                      "id": 1196386242,
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "label": "Playing",
+                              "value": "playing"
+                            },
+                            {
+                              "label": "Paused",
+                              "value": "paused"
+                            }
+                          ]
+                        }
+                      },
+                      "id": 256914120,
                       "meta": {},
-                      "ty": "bool"
+                      "ty": "string"
                     }
                   }
                 }
               },
               {
+                "default_bind": "bus:clock.rate",
                 "name": "rate",
                 "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
                 "shape": {
                   "value": {
                     "shape": {
@@ -54,8 +76,12 @@
                 }
               },
               {
+                "default_bind": "bus:clock.scrub",
                 "name": "scrub_offset_seconds",
                 "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
                 "shape": {
                   "value": {
                     "shape": {

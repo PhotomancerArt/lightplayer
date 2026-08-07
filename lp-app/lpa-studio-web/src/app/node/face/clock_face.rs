@@ -90,7 +90,7 @@ pub fn ClockFace(
                     // detail popup" — G1 feedback, 2026-08-05).
                     {
                         let override_targets: Vec<_> = [
-                            transport.running_override.clone(),
+                            transport.play_state_override.clone(),
                             transport.rate_override.clone(),
                             transport.scrub_override.clone(),
                         ]

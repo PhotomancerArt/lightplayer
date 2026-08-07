@@ -16,7 +16,8 @@ related:
 (`lp-core/lpc-model/src/nodes/clock/clock_transport.rs`, named
 `ClockControls` at `controls` until plan
 `2026-08-04-2355-clock-tape-hero` P1) exposes
-`running`, `rate`, and `scrub_offset_seconds` as Debug-role slots, and
+`running`, `rate`, and `scrub_offset_seconds` as Debug-role slots (P6 of
+the same plan retyped `running` to `play_state: PlayState`), and
 the engine consumes all three every frame. The UI for them is the
 generic slot renderer: a toggle, a number, and — for the scrub offset —
 a plain slider whose unit is "seconds added to the clock". There is no
