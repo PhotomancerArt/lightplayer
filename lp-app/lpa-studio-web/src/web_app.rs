@@ -112,6 +112,10 @@ pub fn App() -> Element {
         allow(unused_variables, reason = "only the wasm exchange task writes it")
     )]
     let openrouter_error = use_context_provider(|| Signal::new(None::<String>));
+    // Who the cloud service says we are: one `whoami` per page load, in
+    // context as a `Signal<CloudSession>` alongside a refresh handle. Nothing
+    // renders it yet (P5/P6 do); an unreachable service leaves it quiet.
+    crate::cloud::use_cloud_session_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
