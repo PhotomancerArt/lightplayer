@@ -501,6 +501,7 @@ pub fn App() -> Element {
                 StudioRoute::SharedProject { .. } => {}
                 StudioRoute::Home
                 | StudioRoute::Explore
+                | StudioRoute::Account
                 | StudioRoute::Boards { .. }
                 | StudioRoute::Docs { .. } => {
                     // In-app sections: setting the route signal above already
@@ -584,6 +585,7 @@ pub fn App() -> Element {
                 | StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Explore
+                | StudioRoute::Account
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
@@ -690,6 +692,9 @@ pub fn App() -> Element {
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
+        // Like Session: no tab lights. The avatar in the right cluster is
+        // the account page's current-place marker.
+        StudioRoute::Account => SiteSection::Account,
         // Lens routes light NO tab — the active session chip is the
         // current-place marker (D15). The other catch-all routes
         // (stories, the standalone editors) never render this chrome.
@@ -723,6 +728,9 @@ pub fn App() -> Element {
             match current_route {
                 StudioRoute::Home => rsx! {
                     crate::app::HomePage { on_action }
+                },
+                StudioRoute::Account => rsx! {
+                    crate::app::AccountPage {}
                 },
                 StudioRoute::Explore => rsx! {
                     crate::app::ExplorePage {
