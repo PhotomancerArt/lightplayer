@@ -1,6 +1,7 @@
 # ADR: Client Pull Loop and Actor-Owned Controller
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-08-06 — D3's preemption rule gained a
+  starvation floor; see the note under D3)
 - **Date:** 2026-07-04
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -98,6 +99,25 @@ loops become queue semantics:
   next frame boundary, the preempting action runs, and refresh resumes on the
   next tick. `BackoffPolicy` is applied on `Failed`/`TimedOut` outcomes of
   passive pulls; a clean cancel is not a failure.
+
+  > **Amended 2026-08-06: "refresh resumes on the next tick" only held for a
+  > SINGLE preempting action.** A live control — a brightness fader, a knob, a
+  > clock tape — is a continuous stream of foreground panel writes, and each
+  > one cancelled the next pull at its first frame boundary. The pull therefore
+  > never completed, never stamped the completion-paced gate
+  > (`2026-07-27-completion-based-refresh-pacing`), and the rendered preview
+  > froze for the whole drag: measured as zero canvas paints in the browser and
+  > 40 project reads sent / 0 completed at the actor. Preemption is priority,
+  > not starvation, so the rule now has a floor: after
+  > `PASSIVE_PREEMPTIONS_BEFORE_PROMOTION` consecutive cancels the next passive
+  > run is **promoted to a foreground action's standing** (`PassiveStanding`),
+  > and only recovery work — which owns the connection — still preempts it.
+  > This adds no new preemption axis; it moves a starved run between the two
+  > standings the class model already defines. Both passive lanes (the lens
+  > project pull and the device cards' ▶ frame feeds) run at one standing per
+  > tick. A drag now refreshes on every other tick — the rate the preview
+  > already achieves at rest — and a gesture arriving during a promoted run
+  > waits for that one pull, no more.
 - **Spawn.** The run loop is a plain `async fn` (`StudioActor::run`) with no
   runtime dependency, so wasm drives it under `wasm_bindgen_futures::spawn_local`
   and tests drive it with a bare waker. (A native/tokio spawn helper is a
