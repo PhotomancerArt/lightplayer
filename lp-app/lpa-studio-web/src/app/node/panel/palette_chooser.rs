@@ -782,15 +782,23 @@ pub fn with_palette_edited(
 /// heard of — an edited ramp, an import — is already this project's.
 #[must_use]
 pub fn palette_identity(gradient: &Gradient, choices: &[PaletteChoice]) -> (String, PaletteOrigin) {
-    let matched = choices.iter().find(|choice| &choice.gradient == gradient);
-    match matched {
-        Some(choice) if choice.group == PaletteGroup::ThisProject => {
-            (choice.name.clone(), PaletteOrigin::ProjectCustom)
-        }
-        Some(choice) => (
+    // The CATALOG is asked first, even though project rows sort first: if
+    // these stops are a built-in's stops, then editing them forks a built-in,
+    // whatever else the project happens to call the same ramp. Asking the
+    // project first would report "project custom" for every held catalog
+    // palette — which is what used to make the `copy of built-in` line
+    // unreachable in practice.
+    let builtin = choices
+        .iter()
+        .find(|choice| choice.group != PaletteGroup::ThisProject && &choice.gradient == gradient);
+    if let Some(choice) = builtin {
+        return (
             choice.name.clone(),
             PaletteOrigin::BuiltinCopy(choice.name.clone()),
-        ),
+        );
+    }
+    match choices.iter().find(|choice| &choice.gradient == gradient) {
+        Some(choice) => (choice.name.clone(), PaletteOrigin::ProjectCustom),
         None => ("Custom palette".to_string(), PaletteOrigin::ProjectCustom),
     }
 }
@@ -925,6 +933,45 @@ mod tests {
 
         // An out-of-range index (a stale click) changes nothing.
         assert_eq!(with_member_removed(&three, 9), three);
+    }
+
+    #[test]
+    fn a_held_builtin_edits_as_a_copy_of_that_builtin() {
+        // The `copy of built-in "..."` line was unreachable in practice: the
+        // only ✎ that fires lands on a project row, project rows sort first,
+        // and the lookup took the first match — so a held catalog palette
+        // always reported "project custom". The catalog is asked first now.
+        let lava = ramp(0.5);
+        let choices = vec![
+            PaletteChoice {
+                id: "project".into(),
+                name: "Palette".into(),
+                group: PaletteGroup::ThisProject,
+                license: None,
+                gradient: lava.clone(),
+            },
+            PaletteChoice {
+                id: "fastled_lava".into(),
+                name: "Lava".into(),
+                group: PaletteGroup::FastledStock,
+                license: None,
+                gradient: lava.clone(),
+            },
+        ];
+        assert_eq!(
+            palette_identity(&lava, &choices),
+            (
+                "Lava".to_string(),
+                PaletteOrigin::BuiltinCopy("Lava".to_string())
+            ),
+            "these are a built-in's stops, so editing them forks the built-in"
+        );
+
+        // A ramp only this project has is still its own.
+        let mine = ramp(0.25);
+        let (name, origin) = palette_identity(&mine, &choices);
+        assert_eq!(origin, PaletteOrigin::ProjectCustom);
+        assert_eq!(name, "Custom palette");
     }
 
     #[test]
