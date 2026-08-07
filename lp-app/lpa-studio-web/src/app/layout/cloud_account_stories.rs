@@ -15,8 +15,8 @@ use lpc_cloud_api::{DevChoice, DevPickerOptions, LoginOptionsInfo, MeInfo, OidcO
 use lpc_history::{PrefixedUid, UidPrefix};
 
 use crate::app::layout::cloud_account::{
-    AccountAvatar, AccountMenu, AvatarFace, PendingPill, SignInLink, SignInMenu, SignInPanel,
-    ACCOUNT_HERE_WRAP,
+    ACCOUNT_HERE_WRAP, AccountAvatar, AccountMenu, AvatarFace, PendingPill, SignInLink, SignInMenu,
+    SignInPanel,
 };
 use crate::cloud::account_memory::RememberedAccount;
 
