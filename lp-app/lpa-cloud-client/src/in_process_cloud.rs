@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
 use lp_cloud_domain::{
-    BlobStore as _, Caller, Clock as _, CloudService, MetaStore as _, SESSION_TOKEN_LEN,
-    session_token_hash,
+    BlobStore as _, Caller, Clock as _, CloudService, DevPickerConnection, LoginProviders,
+    MetaStore as _, SESSION_TOKEN_LEN, session_token_hash,
 };
 use lp_cloud_store_mem::{MemBlobStore, MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::{Actor, CLOUD_API_VERSION, CloudCall, CloudReply, check_version};
@@ -41,13 +41,26 @@ pub struct InProcessServer {
 
 impl InProcessServer {
     /// A service whose clock starts at `start_time` (f64 epoch seconds).
+    ///
+    /// The dev picker is on unconditionally: this transport stands in for a
+    /// local dev server (never production, which speaks over `FetchCloudPort`
+    /// instead), so a client test exercising `LoginOptions`'s dev-picker
+    /// branch should not have to opt in separately.
     pub fn new(start_time: f64) -> Rc<Self> {
         Rc::new(Self {
-            service: RefCell::new(CloudService::new(
-                MemMetaStore::new(),
-                MemClock::new(start_time),
-                MemIdMint::new(),
-            )),
+            service: RefCell::new(
+                CloudService::new(
+                    MemMetaStore::new(),
+                    MemClock::new(start_time),
+                    MemIdMint::new(),
+                )
+                .with_login_providers(LoginProviders {
+                    oidc: Vec::new(),
+                    dev_picker: Some(DevPickerConnection {
+                        start_path: "/auth/dev".to_string(),
+                    }),
+                }),
+            ),
             blobs: RefCell::new(MemBlobStore::new()),
             trees: RefCell::new(BTreeMap::new()),
         })
@@ -61,7 +74,7 @@ impl InProcessServer {
     /// above), never the dev picker.
     pub fn sign_in(&self, google_sub: &str, email: &str, display_name: &str) -> SignedIn {
         let mut service = self.service.borrow_mut();
-        let user = service.upsert_user(google_sub, email, display_name, "google");
+        let user = service.upsert_user(google_sub, email, display_name, "google", None, None, None);
         let token = service.open_session(user.uid, SESSION_TTL_SECONDS, None);
         SignedIn {
             user: user.uid,

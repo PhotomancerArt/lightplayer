@@ -418,7 +418,15 @@ fn republishing_restates_slug_and_visibility() {
 #[test]
 fn publish_validates_uid_prefix_and_slug() {
     let mut svc = service();
-    let owner = svc.upsert_user("g-owner", "owner@example.com", "Owner", "google");
+    let owner = svc.upsert_user(
+        "g-owner",
+        "owner@example.com",
+        "Owner",
+        "google",
+        None,
+        None,
+        None,
+    );
     let actor = Actor::User(owner.uid);
 
     let wrong_prefix = svc.handle(
@@ -481,7 +489,15 @@ fn membership_invited_by_email_resolves_at_first_login() {
         Err(CloudError::NotFound)
     );
 
-    let later = svc.upsert_user("g-later", "later@example.com", "Later", "google");
+    let later = svc.upsert_user(
+        "g-later",
+        "later@example.com",
+        "Later",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert!(
         svc.handle(Actor::User(later.uid), get_project(world.project))
             .is_ok(),
@@ -547,7 +563,15 @@ fn who_am_i_reports_the_caller_without_failing() {
             actor: Actor::Anonymous
         }))
     );
-    let user = svc.upsert_user("g-user", "user@example.com", "User", "google");
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(
         svc.handle(Actor::User(user.uid), CloudRequest::WhoAmI),
         Ok(CloudResponse::UserInfo(UserInfo {
@@ -559,10 +583,26 @@ fn who_am_i_reports_the_caller_without_failing() {
 #[test]
 fn minted_user_uids_are_usr_prefixed() {
     let mut svc = service();
-    let user = svc.upsert_user("g-user", "user@example.com", "User", "google");
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(user.uid.prefix(), UidPrefix::User);
     // Same Google subject, second login: same account.
-    let again = svc.upsert_user("g-user", "user@example.com", "User", "google");
+    let again = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(again.uid, user.uid);
 }
 
@@ -619,7 +659,15 @@ fn have_blobs_reports_only_what_is_missing() {
 #[test]
 fn sessions_resolve_until_they_expire() {
     let mut svc = service();
-    let user = svc.upsert_user("g-user", "user@example.com", "User", "google");
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     let token = svc.open_session(user.uid, 60.0, None);
     assert_eq!(svc.resolve_session(&token), Actor::User(user.uid));
 
@@ -656,8 +704,16 @@ fn get_me_refuses_an_anonymous_caller() {
 #[test]
 fn get_me_reports_the_providers_label() {
     let mut svc = service();
-    let google_user = svc.upsert_user("g-1", "one@example.com", "One", "google");
-    let dev_user = svc.upsert_user("dev-auth:two@example.com", "two@example.com", "Two", "dev");
+    let google_user = svc.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
+    let dev_user = svc.upsert_user(
+        "dev-auth:two@example.com",
+        "two@example.com",
+        "Two",
+        "dev",
+        None,
+        None,
+        None,
+    );
 
     let CloudResponse::MeInfo(info) = svc
         .handle(Actor::User(google_user.uid), CloudRequest::GetMe)
@@ -680,7 +736,15 @@ fn get_me_reports_the_providers_label() {
 #[test]
 fn update_me_trims_and_recomputes_display_name() {
     let mut svc = service();
-    let user = svc.upsert_user("g-1", "one@example.com", "Provider Name", "google");
+    let user = svc.upsert_user(
+        "g-1",
+        "one@example.com",
+        "Provider Name",
+        "google",
+        None,
+        None,
+        None,
+    );
     let actor = Actor::User(user.uid);
 
     let CloudResponse::MeInfo(info) = svc
@@ -720,7 +784,7 @@ fn update_me_trims_and_recomputes_display_name() {
 #[test]
 fn update_me_refuses_a_name_over_the_length_cap() {
     let mut svc = service();
-    let user = svc.upsert_user("g-1", "one@example.com", "One", "google");
+    let user = svc.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
     let too_long = "x".repeat(201);
     let answer = svc.handle(
         Actor::User(user.uid),
@@ -738,8 +802,24 @@ fn update_me_refuses_a_name_over_the_length_cap() {
 #[test]
 fn list_sessions_marks_the_caller_and_isolates_by_account() {
     let mut svc = service();
-    let alice = svc.upsert_user("g-alice", "alice@example.com", "Alice", "google");
-    let bob = svc.upsert_user("g-bob", "bob@example.com", "Bob", "google");
+    let alice = svc.upsert_user(
+        "g-alice",
+        "alice@example.com",
+        "Alice",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let bob = svc.upsert_user(
+        "g-bob",
+        "bob@example.com",
+        "Bob",
+        "google",
+        None,
+        None,
+        None,
+    );
     let alice_token = svc.open_session(alice.uid, 60.0, Some("Mozilla/5.0".to_string()));
     let _second_alice_token = svc.open_session(alice.uid, 60.0, None);
     let _bob_token = svc.open_session(bob.uid, 60.0, None);
@@ -761,8 +841,24 @@ fn list_sessions_marks_the_caller_and_isolates_by_account() {
 #[test]
 fn revoke_session_refuses_bad_hex_and_someone_elses_session() {
     let mut svc = service();
-    let alice = svc.upsert_user("g-alice", "alice@example.com", "Alice", "google");
-    let bob = svc.upsert_user("g-bob", "bob@example.com", "Bob", "google");
+    let alice = svc.upsert_user(
+        "g-alice",
+        "alice@example.com",
+        "Alice",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let bob = svc.upsert_user(
+        "g-bob",
+        "bob@example.com",
+        "Bob",
+        "google",
+        None,
+        None,
+        None,
+    );
     let bob_token = svc.open_session(bob.uid, 60.0, None);
 
     let bad_hex = svc.handle(
@@ -819,8 +915,16 @@ fn login_options_reports_the_dev_picker_only_when_enabled() {
             start_path: "/auth/dev".to_string(),
         }),
     });
-    with_picker.upsert_user("g-1", "one@example.com", "One", "google");
-    with_picker.upsert_user("dev-auth:two@example.com", "two@example.com", "Two", "dev");
+    with_picker.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
+    with_picker.upsert_user(
+        "dev-auth:two@example.com",
+        "two@example.com",
+        "Two",
+        "dev",
+        None,
+        None,
+        None,
+    );
 
     let CloudResponse::LoginOptionsInfo(info) = with_picker
         .handle(Actor::Anonymous, CloudRequest::LoginOptions)
@@ -853,9 +957,33 @@ struct World {
 
 impl World {
     fn publish(svc: &mut Service, visibility: Visibility) -> Self {
-        let owner = svc.upsert_user("g-owner", "owner@example.com", "Owner", "google");
-        let member = svc.upsert_user("g-member", "member@example.com", "Member", "google");
-        let stranger = svc.upsert_user("g-stranger", "stranger@example.com", "Stranger", "google");
+        let owner = svc.upsert_user(
+            "g-owner",
+            "owner@example.com",
+            "Owner",
+            "google",
+            None,
+            None,
+            None,
+        );
+        let member = svc.upsert_user(
+            "g-member",
+            "member@example.com",
+            "Member",
+            "google",
+            None,
+            None,
+            None,
+        );
+        let stranger = svc.upsert_user(
+            "g-stranger",
+            "stranger@example.com",
+            "Stranger",
+            "google",
+            None,
+            None,
+            None,
+        );
         let project = project_uid();
 
         svc.handle(

@@ -152,37 +152,52 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     /// `provider` (`"google"` | `"dev"` today) is only ever set on the
     /// *creation* branch below — an account's sign-in method is fixed at
     /// birth, and a returning login must not silently reassign it via
-    /// `..existing`. `given_name`/`family_name`/`picture_url` are left
-    /// exactly as they were on a returning login too (the struct-level
-    /// seeding rules on [`CloudUser`]); capturing real values for them from
-    /// the provider profile at creation is P3's job — this method seeds
-    /// `None` until then, which is a legitimate "the provider told us
-    /// nothing yet", not a lie.
+    /// `..existing`.
+    ///
+    /// `given_name`/`family_name`/`picture_url` are whatever the edge
+    /// captured from the provider's profile this login (`None` is an honest
+    /// "the provider told us nothing"). What happens with them is the
+    /// Q4/Q5 ruling, straight from [`CloudUser`]'s struct-level seeding
+    /// rules: on **creation** they are seeded verbatim and `display_name` is
+    /// recomputed from them through the one shared derivation
+    /// ([`CloudUser::recompute_display_name`]); on a **returning** login only
+    /// `picture_url` is refreshed — `given_name`/`family_name`/
+    /// `display_name` are left exactly as they were, because a provider
+    /// re-reporting its own idea of a name must not clobber an edit the
+    /// account holder made via `UpdateMe`. Edits to this rule stay on
+    /// LightPlayer; a fork changing it should say so.
     pub fn upsert_user(
         &mut self,
         google_sub: &str,
         email: &str,
         display_name: &str,
         provider: &str,
+        given_name: Option<&str>,
+        family_name: Option<&str>,
+        picture_url: Option<&str>,
     ) -> CloudUser {
         let email = normalize_email(email);
         let user = match self.store.user_by_google_sub(google_sub) {
             Some(existing) => CloudUser {
                 email: email.clone(),
-                display_name: display_name.into(),
+                picture_url: picture_url.map(ToString::to_string),
                 ..existing
             },
-            None => CloudUser {
-                uid: PrefixedUid::mint(UidPrefix::User, &self.mint.uid_bytes()),
-                google_sub: google_sub.into(),
-                email: email.clone(),
-                display_name: display_name.into(),
-                given_name: None,
-                family_name: None,
-                picture_url: None,
-                provider: provider.into(),
-                created_at: self.clock.now(),
-            },
+            None => {
+                let mut user = CloudUser {
+                    uid: PrefixedUid::mint(UidPrefix::User, &self.mint.uid_bytes()),
+                    google_sub: google_sub.into(),
+                    email: email.clone(),
+                    display_name: display_name.into(),
+                    given_name: given_name.map(ToString::to_string),
+                    family_name: family_name.map(ToString::to_string),
+                    picture_url: picture_url.map(ToString::to_string),
+                    provider: provider.into(),
+                    created_at: self.clock.now(),
+                };
+                user.recompute_display_name();
+                user
+            }
         };
         self.store.put_user(user.clone());
         self.store.resolve_pending_members(&email, user.uid);
