@@ -10,17 +10,27 @@
 //!
 //! # Lifetimes, and why they differ
 //!
+//! - the **provider is NOT remounted per article.** Under path routing an
+//!   article switch re-renders [`DocsSimProvider`] in place with a new
+//!   `sims` slice (a `key` on the component does not force a remount —
+//!   that assumption shipped the "names sim `main`, which this page does
+//!   not declare" defect: the registry kept the previous article's sims).
+//!   The provider therefore detects the spec-slice change itself, retires
+//!   the old page's hosts, and boots the new page's into a signal-backed
+//!   registry every embed re-reads reactively.
 //! - the **actor** is spawned with `wasm_bindgen_futures::spawn_local`, so
-//!   it survives this component's unmount. That is deliberate and load
+//!   it survives retirement and unmount alike. That is deliberate and load
 //!   bearing: [`DocsSimHost::shutdown`] only *enqueues* the teardown
 //!   (StopSimulator → Shutdown), and a dropped-but-unpolled actor future
-//!   can never process that queue. A scope-tied `spawn` here would leak
-//!   the Worker on every navigation away from the article.
-//! - the **view and tick loops** are scope-tied (`spawn` inside
-//!   `use_hook`), so they die with the page. They must: they write into
-//!   this scope's signals.
-//! - [`use_drop`] calls `shutdown()` on every host. `DocsSimHost` also
-//!   shuts down on `Drop` as a backstop, but the explicit call is the
+//!   can never process that queue.
+//! - the **view loop** is scope-tied (`spawn`) and additionally ends on
+//!   its own when a retired host's actor closes the view channel. The
+//!   **tick loop** holds only a [`std::rc::Weak`] to its host: retiring a
+//!   sim drops the registry's `Rc`, the next upgrade fails, and the loop
+//!   exits — otherwise every article switch would leave another immortal
+//!   ticker running in the provider's scope.
+//! - [`use_drop`] calls `shutdown()` on every *current* host. `DocsSimHost`
+//!   also shuts down on `Drop` as a backstop, but the explicit call is the
 //!   contract — see the type's docs in `lpa-studio-core`.
 //!
 //! Verified in a browser by patching `Worker.prototype.terminate`:
@@ -95,15 +105,19 @@ impl DocsSim {
 }
 
 /// The page-local registry embeds resolve `sim=` against.
-#[derive(Clone)]
+///
+/// Signal-backed on purpose: the provider swaps the whole sim list in place
+/// on an article switch (no remount — see the module docs), and reading
+/// through the signal is what re-points every embed at the new page's sims.
+#[derive(Clone, Copy)]
 pub(crate) struct DocsSimRegistry {
-    sims: Rc<Vec<DocsSim>>,
+    sims: Signal<Rc<Vec<DocsSim>>>,
 }
 
 impl DocsSimRegistry {
     /// One sim by article handle.
-    pub(crate) fn get(&self, name: &str) -> Option<&DocsSim> {
-        self.sims.iter().find(|sim| sim.name == name)
+    pub(crate) fn get(&self, name: &str) -> Option<DocsSim> {
+        self.sims.read().iter().find(|sim| sim.name == name).cloned()
     }
 
     /// Resolve a `sim=` argument, which may name several sims
@@ -115,7 +129,7 @@ impl DocsSimRegistry {
         let mut missing = Vec::new();
         for name in argument.split(',').map(str::trim).filter(|n| !n.is_empty()) {
             match self.get(name) {
-                Some(sim) => found.push(sim.clone()),
+                Some(sim) => found.push(sim),
                 None => missing.push(name.to_string()),
             }
         }
@@ -158,30 +172,56 @@ impl DocsStudioActions {
 /// Boot this page's sims, drive them, and provide the registry to the
 /// article below.
 ///
-/// Mount this **keyed by article slug** so switching articles remounts it:
-/// the hosts belong to the page that declared them, and a re-key is what
-/// runs the teardown.
+/// An article switch does NOT remount this component — the router swaps
+/// the `sims` slice and the markdown underneath it in one re-render (a
+/// `key` on the component does not force a remount). So the switch is
+/// handled here: when the spec slice changes, the previous page's hosts
+/// are shut down and the new page's boot into the registry signal, before
+/// the children (the article's embeds) render against it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DocsSimProvider(sims: &'static [DocsSimSpec], children: Element) -> Element {
-    let booted = use_hook(move || boot_sims(sims));
+    let mut booted = use_signal(|| Rc::new(Vec::<DocsSim>::new()));
+    // Which spec slice `booted` currently serves. `PAGES` entries are
+    // statics, so slice identity (pointer + length) is page identity.
+    // Two pages declaring CONTENT-identical slices may or may not get
+    // deduplicated into one static by the compiler; both outcomes are
+    // correct here — shared identity keeps the warm sim across the
+    // switch, distinct identity retires and re-boots the same spec.
+    let active = use_hook(|| Rc::new(std::cell::Cell::new(None::<&'static [DocsSimSpec]>)));
 
-    let drop_sims = booted.clone();
+    let switched = !matches!(active.get(), Some(current) if core::ptr::eq(current, sims));
+    if switched {
+        // LEAK-CRITICAL, part 1: retire the previous article's hosts. Only
+        // this enqueued StopSimulator reaches `worker.terminate()`; the
+        // retired tick loops exit on their next failed Weak upgrade once
+        // the registry's Rc goes.
+        for sim in booted.peek().iter() {
+            if let Some(host) = &sim.host {
+                host.shutdown();
+            }
+        }
+        // Written during render, deliberately: this component never reads
+        // `booted` reactively (peek only), and the swap must land before
+        // the children render so an embed never resolves against the
+        // previous article's registry.
+        booted.set(Rc::new(boot_sims(sims)));
+        active.set(Some(sims));
+    }
+
     use_drop(move || {
-        // LEAK-CRITICAL. Nothing in the actor/controller/pool/session chain
-        // terminates the browser Worker on drop; only this enqueued
-        // StopSimulator reaches `worker.terminate()`. See the lifecycle
+        // LEAK-CRITICAL, part 2: the same retirement for leaving the docs
+        // section entirely. Nothing in the actor/controller/pool/session
+        // chain terminates the browser Worker on drop; see the lifecycle
         // contract on `lpa_studio_core::DocsSimHost`.
-        for sim in drop_sims.iter() {
+        for sim in booted.peek().iter() {
             if let Some(host) = &sim.host {
                 host.shutdown();
             }
         }
     });
 
-    use_context_provider(|| DocsSimRegistry {
-        sims: Rc::new(booted),
-    });
+    use_context_provider(|| DocsSimRegistry { sims: booted });
 
     rsx! {
         {children}
@@ -248,15 +288,26 @@ fn boot_sim(spec: &'static DocsSimSpec) -> DocsSim {
     }
 
     let host = Rc::new(host);
-    let tick_host = Rc::clone(&host);
+    // Weak on purpose: the registry's Rc is this host's lifeline. When the
+    // article switches (or the page unmounts) the registry drops it, the
+    // upgrade fails, and this loop exits — a strong Rc here would keep a
+    // retired host's ticker alive for as long as the docs section lives.
+    let tick_host = Rc::downgrade(&host);
     spawn(async move {
         loop {
-            let delay = tick_host.next_refresh_delay();
+            let Some(live) = tick_host.upgrade() else {
+                break;
+            };
+            let delay = live.next_refresh_delay();
+            drop(live);
             TimeoutFuture::new(delay.as_millis() as u32).await;
+            let Some(live) = tick_host.upgrade() else {
+                break;
+            };
             // Hidden tab: skip the pull. The sim keeps self-ticking; only
             // the view (and the rebuild behind it) freezes.
             if !document_hidden() {
-                tick_host.send_refresh_tick();
+                live.send_refresh_tick();
             }
         }
     });

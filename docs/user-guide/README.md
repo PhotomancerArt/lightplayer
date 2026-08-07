@@ -1,4 +1,23 @@
-# What is LightPlayer?
+# Welcome to LightPlayer!
+
+```embed sim-canvas sim=main view=product
+```
+
+```embed panel sim=main mode=interactive
+```
+
+LightPlayer is a work-in-progress app that helps you build light art at any scale,
+from glowing scarves to art cars.
+
+It works by running small graphics programs called [shaders] for each lamp in your
+art, allowing for dynamic patterns driven by the environment, or pre-programmed
+playlists.
+
+LightPlayer runs today on ESP32-based controllers and boards including the [QuinLED] boards
+and others.
+
+Our goal is to create a user friendly envion
+
 
 You have LEDs and a controller. Plug it into your phone or your
 computer, and in a minute or two you have glowing light — a library of
