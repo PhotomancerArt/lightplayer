@@ -117,7 +117,11 @@ pub(crate) struct DocsSimRegistry {
 impl DocsSimRegistry {
     /// One sim by article handle.
     pub(crate) fn get(&self, name: &str) -> Option<DocsSim> {
-        self.sims.read().iter().find(|sim| sim.name == name).cloned()
+        self.sims
+            .read()
+            .iter()
+            .find(|sim| sim.name == name)
+            .cloned()
     }
 
     /// Resolve a `sim=` argument, which may name several sims
