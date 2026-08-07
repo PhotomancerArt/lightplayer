@@ -16,6 +16,7 @@ use lpc_history::{PrefixedUid, UidPrefix};
 
 use crate::app::layout::cloud_account::{
     AccountAvatar, AccountMenu, AvatarFace, PendingPill, SignInLink, SignInMenu, SignInPanel,
+    ACCOUNT_HERE_WRAP,
 };
 use crate::cloud::account_memory::RememberedAccount;
 
@@ -27,6 +28,26 @@ pub(crate) fn slot_signed_out_and_pending() -> Element {
         div { class: SLOT_ROW,
             SignInLink { href: "/auth/google?next=%2Fprojects".to_string() }
             PendingPill {}
+        }
+    }
+}
+
+#[story(
+    description = "On /account the slot wears the tabs' you're-here underline (G1 ruling 2026-08-07): no nav tab lights there, so the slot that opens the page marks the place, the way the logo is Home's tab. Left: on /account. Right: the same slot anywhere else. Both against the header's border line the bar must land on."
+)]
+pub(crate) fn slot_on_account_underline() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-[46px] tw:items-center tw:justify-end tw:gap-2 tw:border-b tw:border-border-subtle tw:px-4 tw:pb-2.5",
+            span { class: ACCOUNT_HERE_WRAP,
+                span { class: AVATAR_TRIGGER,
+                    AccountAvatar { face: AvatarFace::of_me(&yona()), size: 26 }
+                }
+            }
+            span { class: "tw:flex tw:flex-none",
+                span { class: AVATAR_TRIGGER,
+                    AccountAvatar { face: AvatarFace::of_me(&crew()), size: 26 }
+                }
+            }
         }
     }
 }
