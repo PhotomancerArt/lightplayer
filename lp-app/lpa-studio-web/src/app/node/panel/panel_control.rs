@@ -439,6 +439,7 @@ mod tests {
             },
             value,
             live_value: None,
+            live_gradient: None,
             panel_target: None,
             unit: None,
             state,
