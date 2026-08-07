@@ -43,7 +43,14 @@ use crate::cloud::{CloudSession, CloudSessionRefresh};
 /// [`CloudSession`] context — the house rule stories rely on.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn CloudAccountControl() -> Element {
+pub fn CloudAccountControl(
+    /// True on the /account page: the slot wears the tabs' you're-here
+    /// underline. /account has no nav tab, so the slot that opens it
+    /// marks the place, the way the logo does at Home (G1 ruling
+    /// 2026-08-07).
+    #[props(default = false)]
+    on_account: bool,
+) -> Element {
     let Some(session) = try_consume_context::<Signal<CloudSession>>() else {
         return rsx! {};
     };
@@ -59,40 +66,57 @@ pub fn CloudAccountControl() -> Element {
     // Recomputed per render: the chrome re-renders on every route change,
     // so `next` always names the page the user is looking at.
     let next = current_path();
-    match session() {
-        CloudSession::Pending => rsx! {
+    let inner = match session() {
+        CloudSession::Pending => Some(rsx! {
             PendingPill {}
-        },
+        }),
         CloudSession::Anonymous { options } => {
-            let Some(options) = options else {
-                // Options that never landed: an affordance pointing nowhere
-                // is worse than none (P4's `Anonymous { options: None }`).
-                return rsx! {};
-            };
-            match sign_in_affordance(&options, &next) {
-                SignInAffordance::Direct(href) => rsx! {
+            // Options that never landed: an affordance pointing nowhere
+            // is worse than none (P4's `Anonymous { options: None }`).
+            options.and_then(|options| match sign_in_affordance(&options, &next) {
+                SignInAffordance::Direct(href) => Some(rsx! {
                     SignInLink { href }
-                },
-                SignInAffordance::Chooser => rsx! {
+                }),
+                SignInAffordance::Chooser => Some(rsx! {
                     SignInMenu { options, next }
-                },
-                SignInAffordance::Nothing => rsx! {},
-            }
+                }),
+                SignInAffordance::Nothing => None,
+            })
         }
-        CloudSession::SignedIn { me, options } => {
+        CloudSession::SignedIn { me, options } => Some(rsx! {
+            AccountDropdown {
+                me,
+                accounts: remembered(),
+                options,
+                next,
+                on_sign_out: refresh.map(|refresh| EventHandler::new(move |()| sign_out(refresh))),
+            }
+        }),
+        CloudSession::Unreachable => None,
+    };
+    // No wrapper when the slot renders nothing: an empty span would still
+    // claim a gap in the chrome's flex row.
+    match inner {
+        None => rsx! {},
+        Some(inner) => {
+            let class = if on_account {
+                ACCOUNT_HERE_WRAP
+            } else {
+                "tw:flex tw:flex-none"
+            };
             rsx! {
-                AccountDropdown {
-                    me,
-                    accounts: remembered(),
-                    options,
-                    next,
-                    on_sign_out: refresh.map(|refresh| EventHandler::new(move |()| sign_out(refresh))),
-                }
+                span { class: "{class}", {inner} }
             }
         }
-        CloudSession::Unreachable => rsx! {},
     }
 }
+
+/// The account slot's you're-here underline on /account: the tabs'
+/// accent bar under whatever the slot renders, landing on the header's
+/// border line like `LOGO_HOME_ACTIVE_WRAP` does for the logo at Home.
+/// The offset suits the slot's 28px controls. `pub(crate)` for the
+/// story that shows it against the header border.
+pub(crate) const ACCOUNT_HERE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[12px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 
 /// The boot shimmer: the slot at its signed-out size, holding its shape
 /// while `whoami` is in flight.

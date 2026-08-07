@@ -130,6 +130,37 @@ async fn given_and_family_query_params_seed_a_new_account() {
     assert_eq!(info.display_name, "Yona Appletree");
 }
 
+/// `?next=` lands the login where the client asked — the same contract
+/// (and the same guard) as the Google flow, so the sign-in and
+/// switch-account links return the user to the page they were on.
+#[tokio::test]
+async fn next_lands_the_login_on_the_requested_page() {
+    let server = TestServer::new();
+    let response = server
+        .get("/auth/dev?email=yona@example.com&next=%2Faccount")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&response, header::LOCATION).as_deref(),
+        Some("/account")
+    );
+}
+
+/// An absolute or protocol-relative `next` is an open-redirect attempt;
+/// the guard folds it to `/`, exactly as the Google callback would.
+#[tokio::test]
+async fn a_foreign_next_falls_back_to_the_root() {
+    let server = TestServer::new();
+    let response = server
+        .get("/auth/dev?email=yona@example.com&next=https%3A%2F%2Fevil.example")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&response, header::LOCATION).as_deref(),
+        Some("/")
+    );
+}
+
 /// The edge captures the request's `User-Agent`, same as the Google callback
 /// does — this is the dev login's half of that.
 #[tokio::test]

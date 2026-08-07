@@ -721,8 +721,11 @@ pub fn App() -> Element {
                 // Last of the chrome's children, so the account slot sits
                 // exactly where the spike puts it: after the settings
                 // trigger, before SiteChrome's own ⋯ button. Inert until
-                // the cloud session context says otherwise.
-                CloudAccountControl {}
+                // the cloud session context says otherwise. On /account
+                // the slot wears the you're-here underline — no nav tab
+                // lights there, so the slot is the section's marker
+                // (G1 ruling 2026-08-07).
+                CloudAccountControl { on_account: section == SiteSection::Account }
             }
             LocalStoreBanner { status: store_status.read().clone() }
             match current_route {

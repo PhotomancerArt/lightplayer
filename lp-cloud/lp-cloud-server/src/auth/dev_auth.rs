@@ -33,6 +33,13 @@ pub struct DevAuthQuery {
     pub given: Option<String>,
     /// Family name to seed a *new* account with. See [`given`](Self::given).
     pub family: Option<String>,
+    /// Where to land after the session is minted — the same contract as
+    /// the Google flow's `next`, guarded by the same
+    /// [`safe_next_path`](crate::auth::google_auth::safe_next_path)
+    /// (relative same-origin paths only; anything else lands on `/`).
+    /// The client's sign-in and switch-account links pass the page the
+    /// user was on.
+    pub next: Option<String>,
 }
 
 /// Sign in as `email` and land on the app.
@@ -99,7 +106,12 @@ pub async fn get_dev_auth(
         .await;
 
     let cookie = set_session_cookie(&token, state.config().cookies_are_secure(), ttl);
-    let mut response = Redirect::to("/").into_response();
+    let landing = query
+        .next
+        .as_deref()
+        .and_then(crate::auth::google_auth::safe_next_path)
+        .unwrap_or_else(|| "/".to_string());
+    let mut response = Redirect::to(&landing).into_response();
     match HeaderValue::from_str(&cookie) {
         Ok(value) => {
             response.headers_mut().insert(header::SET_COOKIE, value);
