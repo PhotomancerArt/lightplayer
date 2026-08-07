@@ -104,6 +104,104 @@
             }
           }
         }
+      },
+      {
+        "name": "space",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "TwoD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_1d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Default",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "OneD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_2d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Default",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Extrude",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Radial",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Angular",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Mirror",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
       }
     ],
     "meta": {}

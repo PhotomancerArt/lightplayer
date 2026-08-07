@@ -245,6 +245,102 @@
         }
       },
       {
+        "name": "strip_order_meaningful",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "consume",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "Auto",
+                "shape": {
+                  "unit": {
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "Policy",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "from_1d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Extrude",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Radial",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Angular",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Mirror",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "name": "force",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "editor": "plain",
+                              "id": 1196386242,
+                              "meta": {},
+                              "ty": "bool"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
         "name": "color_order",
         "shape": {
           "value": {
