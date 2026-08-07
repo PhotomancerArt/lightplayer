@@ -154,11 +154,26 @@ impl TapeTransportDriver {
     /// unchanged block keeps its extrapolation anchor; a changed one
     /// re-anchors at now and repaints immediately (elapsed exactly zero —
     /// the deterministic first frame).
+    ///
+    /// **A live drag holds its anchor.** The scrub write stream is
+    /// throttled, so mid-drag every echo arrives carrying a position the
+    /// finger has already left. Re-anchoring on it did two things at once:
+    /// it reset `anchored_at_ms`, dropping the running time accumulated
+    /// since the drag began, and it moved `scrub_offset_seconds` out from
+    /// under `preview_delta` — so the strip snapped backwards once per
+    /// dispatch interval and then caught up on the next pointer move. While
+    /// the finger is down the preview IS the value (`paint` adds the
+    /// pointer's delta against this anchor), and the echo has nothing to
+    /// contribute; the anchor re-settles on the first sync after release.
     pub(crate) fn sync(&self, transport: &UiClockTransport) {
         let Some(inner) = &self.inner else {
             return;
         };
         let now = inner.performance.now();
+        if inner.dragging.get() {
+            inner.schedule();
+            return;
+        }
         let changed = {
             let mut anchor = inner.anchor.borrow_mut();
             match anchor.as_ref() {
@@ -193,11 +208,28 @@ impl TapeTransportDriver {
     /// stream's echo. Repaints immediately so the strip is under the
     /// finger this frame, not the next one.
     pub(crate) fn set_scrub_drag(&self, preview: Option<f32>) {
-        if let Some(inner) = &self.inner {
-            inner.dragging.set(preview.is_some());
-            inner.scrub_preview.set(preview);
-            inner.paint(inner.performance.now());
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        // Releasing: fold the finger's last position INTO the held anchor
+        // before dropping the preview. The anchor still describes where the
+        // drag started, so clearing the preview alone would paint one frame
+        // back at the pre-drag position and then jump forward when the DTO
+        // lands — the release-end twin of the jank this anchor-hold fixes.
+        // `seconds` tracks `scrub_offset_seconds` one-for-one (that is what
+        // makes `preview_delta` a pure correction), so moving both by the
+        // same delta leaves `t` continuous across the hand-off.
+        if preview.is_none()
+            && let Some(settled) = inner.scrub_preview.get()
+            && let Some(anchor) = inner.anchor.borrow_mut().as_mut()
+        {
+            let delta = settled - anchor.transport.scrub_offset_seconds;
+            anchor.transport.scrub_offset_seconds = settled;
+            anchor.transport.seconds += delta;
         }
+        inner.dragging.set(preview.is_some());
+        inner.scrub_preview.set(preview);
+        inner.paint(inner.performance.now());
     }
 
     /// The scrub value under the finger, when a drag is live.
