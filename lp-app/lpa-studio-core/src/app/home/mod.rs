@@ -28,7 +28,7 @@ pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidenc
 pub use setup_wizard::{
     SetupSession, UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, setup_rail,
 };
-pub use ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
+pub use ui_device_card::{SIM_CARD_KEY, UiDeviceCard, UiDeviceProjectChip};
 pub use ui_example_card::UiExampleCard;
 pub use ui_home_view::UiHomeView;
 pub use ui_package_card::{UiCardConnection, UiPackageCard};

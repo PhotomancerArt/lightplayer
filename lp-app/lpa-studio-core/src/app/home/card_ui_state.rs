@@ -20,7 +20,8 @@
 use crate::app::device::BootloaderEntryFlow;
 use crate::app::roster::DeviceCardTab;
 
-/// One card's UI view-state. `Default` is a fresh card: the Status tab,
+/// One card's UI view-state. `Default` is a fresh card: the Settings
+/// front door,
 /// nothing open, no op in flight.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CardUiState {

@@ -2152,7 +2152,11 @@ fn card_tab_and_sheet_drive_through_core_ops() {
             .iter()
             .find(|card| !card.sim)
             .expect("the connected device card");
-        assert_eq!(card.ui.tab, DeviceCardTab::Status, "fresh card = Status");
+        assert_eq!(
+            card.ui.tab,
+            DeviceCardTab::Details,
+            "fresh card = Settings front door"
+        );
         card.identity_key().to_string()
     };
 
@@ -3247,6 +3251,26 @@ fn coexisting_sim_and_device_running() -> (StudioController, FakeEsp32Device, cr
 fn coexisting_fixture(
     device_project_loaded: bool,
 ) -> (StudioController, FakeEsp32Device, crate::RuntimeId) {
+    let (studio, device, sim_id, _server, _lamps) =
+        coexisting_fixture_with_sim_server(device_project_loaded);
+    (studio, device, sim_id)
+}
+
+/// [`coexisting_fixture`], also handing back the in-process sim SERVER
+/// (so a test can drive its render frames — the sim feed needs the engine
+/// to actually publish) and the uid of an installed "Lamps" package whose
+/// demand chain reaches an Output node with real mapped lamps (the
+/// embedded Plasma example; Sign stops at the fixture, so its engine
+/// never publishes a non-empty frame).
+fn coexisting_fixture_with_sim_server(
+    device_project_loaded: bool,
+) -> (
+    StudioController,
+    FakeEsp32Device,
+    crate::RuntimeId,
+    Rc<RefCell<lpa_server::LpServer>>,
+    String,
+) {
     use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, StudioServerClient};
@@ -3273,6 +3297,11 @@ fn coexisting_fixture(
             1.0,
         )
         .unwrap();
+    let plasma = crate::app::home::embedded_example("examples/plasma")
+        .expect("the plasma example is embedded");
+    let lamps = store
+        .install_package("Lamps", &plasma.files(), PackageProvenance::Created, 1.0)
+        .unwrap();
 
     let mut device_state = FakeLightPlayerState::new()
         .with_project_files(porch_files)
@@ -3288,8 +3317,9 @@ fn coexisting_fixture(
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
 
+    let sim_server = Rc::new(RefCell::new(edit_e2e_server()));
     let sim_io = InProcessServerIo {
-        server: Rc::new(RefCell::new(edit_e2e_server())),
+        server: Rc::clone(&sim_server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
         sent: Rc::new(RefCell::new(Vec::new())),
     };
@@ -3303,7 +3333,7 @@ fn coexisting_fixture(
         },
     )))
     .expect("open on the sim succeeds");
-    (studio, device, sim_id)
+    (studio, device, sim_id, sim_server, lamps.uid.to_string())
 }
 
 /// A studio whose link registry holds one fake provider with one scripted
@@ -4227,6 +4257,390 @@ fn device_card_key(studio: &StudioController) -> String {
         .expect("the board's card")
         .identity_key()
         .to_string()
+}
+
+// ---------------------------------------------------------------------
+// The device card's live frame feed (honest-device preview P2): the ▶ tab
+// pulls the frames a board ALREADY published, on a session the editor lens
+// is not on, and only while that tab is up.
+// ---------------------------------------------------------------------
+
+/// The feed, end to end through the real link: selecting ▶ on a connected
+/// board's card starts published-frame reads, and what lands on the card is
+/// the DEVICE's own output buffer plus the geometry to draw it with.
+///
+/// The geometry `Rc` is the second half of the promise: a steady feed ships
+/// the layout once and samples thereafter (`IfChanged`), and the renderer
+/// repaints on `Rc` POINTER identity — so a second pull that says
+/// "unchanged" must hand back the SAME `Rc`, not an equal one.
+#[test]
+fn the_play_tab_feeds_the_card_frames_the_device_published() {
+    let (mut studio, card_key, _device) = studio_feeding_a_loaded_device();
+
+    run_card_feeds(&mut studio);
+
+    let card = device_card(&studio, &card_key);
+    let frame = card.frame_preview.as_ref().expect("a published frame");
+    assert!(!frame.bytes.is_empty(), "the published buffer arrived");
+    assert!(frame.revision > 0, "the device stamped a publish revision");
+    assert!(
+        !frame.sample_layout.spans.is_empty(),
+        "the sample layout says how to read the buffer"
+    );
+    let geometry = frame
+        .display_layout
+        .as_ref()
+        .expect("this fixture's layout fits the wire budget");
+    assert_eq!(
+        card.frame_age_secs,
+        Some(0.0),
+        "a frame that just landed is not stale"
+    );
+
+    // Second pull: the layout is asked for `IfChanged` and comes back
+    // unchanged, so the SAME Rc rides the new frame.
+    let first = std::rc::Rc::clone(geometry);
+    run_card_feeds(&mut studio);
+    let card = device_card(&studio, &card_key);
+    let frame = card.frame_preview.as_ref().expect("a second frame");
+    assert!(
+        std::rc::Rc::ptr_eq(
+            &first,
+            frame.display_layout.as_ref().expect("geometry still there")
+        ),
+        "unchanged geometry keeps its Rc — a new one repaints the whole field"
+    );
+}
+
+/// P3's default rule, end to end: a connected board running a project opens
+/// its card on ▶ with NO tab selection anywhere — and because the tab and
+/// the feed's gate are the same answer (`effective_card_tab`), the feed is
+/// already running when the card is first drawn.
+///
+/// This is the whole "▶ is the default" promise: not a renderer preference,
+/// but a card that is already showing frames the first time you look at it.
+#[test]
+fn a_fresh_connected_card_opens_on_play_and_is_already_feeding() {
+    let (store, host) = library();
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Play,
+        "a Ready board running a project opens on its picture"
+    );
+
+    run_card_feeds(&mut studio);
+    assert!(
+        device_card(&studio, &card_key).frame_preview.is_some(),
+        "the default tab feeds itself — no gesture required"
+    );
+
+    // And an explicit choice outranks the default, permanently: moving to
+    // Settings must not snap back to ▶ on the next view build.
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
+    assert_eq!(
+        device_card(&studio, &card_key).ui.tab,
+        crate::DeviceCardTab::Details,
+        "the user's tab choice is sticky"
+    );
+}
+
+/// The gate, negative half: a card on any other tab issues NO frame read.
+/// The feed is the only wire traffic a non-lens device session generates
+/// between heartbeats, so a card nobody is watching must generate none.
+///
+/// The tab is selected EXPLICITLY here: a fresh card on a loaded, answering
+/// board now opens on ▶ (P3's default rule), so "no selection" is no longer
+/// a way to express "watching something else".
+#[test]
+fn a_card_on_another_tab_never_pulls_frames() {
+    let (store, host) = library();
+    let (mut studio, card_key, _device) = studio_with_loaded_device(&store, host);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Details);
+
+    run_card_feeds(&mut studio);
+
+    let feed = studio.card_feed_for_test().expect("the device session");
+    assert_eq!(
+        feed.pull_completed_at(),
+        None,
+        "no pull ran for a card whose ▶ tab is not up"
+    );
+    assert!(feed.frame().is_none());
+}
+
+/// The gate's other half plus Q4: a board that stops answering stops being
+/// read — and its card KEEPS the last frame it published, which is exactly
+/// what the offline treatment shows ("last frame · N s ago"), dimmed.
+#[test]
+fn an_unplugged_board_stops_feeding_and_keeps_its_last_frame() {
+    let (mut studio, card_key, device) = studio_feeding_a_loaded_device();
+    run_card_feeds(&mut studio);
+    let published = device_card(&studio, &card_key)
+        .frame_preview
+        .clone()
+        .expect("a frame while connected");
+    let fed_at = studio
+        .card_feed_for_test()
+        .and_then(crate::CardFeedState::pull_completed_at)
+        .expect("the feed ran");
+
+    // Unplug: the stream reports EOF on the next pull and the session
+    // goes Gone.
+    device.set_failure_plan(
+        FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes()),
+    );
+    drive(studio.refresh_device_sync_for_test());
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Gone)
+    ));
+
+    run_card_feeds(&mut studio);
+
+    assert_eq!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at),
+        Some(fed_at),
+        "a board that is not Ready is not read"
+    );
+    let card = device_card(&studio, &card_key);
+    assert_eq!(
+        card.frame_preview.as_ref().map(|frame| frame.revision),
+        Some(published.revision),
+        "the last in-session frame survives the unplug (Q4)"
+    );
+    assert_eq!(
+        card.frame_fps, None,
+        "a dead link reports no engine rate, however recently it did"
+    );
+}
+
+/// Completion-gap pacing: a feed pull that just finished is not due again
+/// until a full gap of IDLE time has passed, counted from the completion —
+/// so a slow dome frame spaces itself out instead of running back-to-back,
+/// and the UI timer is told about the shorter gap while a card feeds.
+#[test]
+fn the_feed_paces_itself_from_each_pulls_completion() {
+    let clock = Rc::new(std::cell::Cell::new(1.0_f64));
+    let (mut studio, _card_key, _device) = studio_feeding_a_loaded_device_at(Rc::clone(&clock));
+
+    run_card_feeds(&mut studio);
+    let first = studio
+        .card_feed_for_test()
+        .and_then(crate::CardFeedState::pull_completed_at)
+        .expect("the first pull ran");
+
+    // Same instant: not due, nothing touches the wire.
+    run_card_feeds(&mut studio);
+    assert_eq!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at),
+        Some(first),
+        "an early tick bounces off the gap without a wire op"
+    );
+    assert!(
+        studio.next_refresh_interval() <= crate::DEVICE_CARD_FEED_INTERVAL,
+        "a feeding card pulls the UI timer down to its own cadence"
+    );
+
+    clock.set(clock.get() + crate::DEVICE_CARD_FEED_INTERVAL.as_secs_f64());
+    run_card_feeds(&mut studio);
+    assert!(
+        studio
+            .card_feed_for_test()
+            .and_then(crate::CardFeedState::pull_completed_at)
+            > Some(first),
+        "once the gap elapsed the next frame is pulled"
+    );
+}
+
+/// G1 ruling 3 (Q5 overturned), end to end: the SIM session rides the same
+/// published-frame feed a device does. Its card defaults to ▶, the feed
+/// pulls the sim engine's OWN published frame over the in-proc wire, and
+/// the home view's sim card carries it — no browser re-simulation anywhere.
+#[test]
+fn the_sim_card_feeds_real_frames_like_a_device() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp};
+
+    let (mut studio, _device, _sim_id, sim_server, lamps_uid) =
+        coexisting_fixture_with_sim_server(false);
+
+    // Swap the sim onto the project whose chain reaches an Output node —
+    // only a publishing engine has a frame for the feed to read.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage { key: lamps_uid },
+    )))
+    .expect("open the output-chain project on the sim");
+
+    // The engine publishes on render ticks; give it a few so the chain
+    // settles — compile, render, publish (the wasm sim's rAF loop does
+    // this continuously).
+    for _ in 0..5 {
+        sim_server.borrow_mut().advance_frame(16).expect("tick");
+    }
+
+    run_card_feeds(&mut studio);
+    let frame_revision = {
+        let pool = studio.runtime_pool_for_test();
+        let session = pool.sim_session().expect("the sim session");
+        assert!(
+            session.sim_loaded_project().is_some(),
+            "the sim knows its loaded project"
+        );
+        let feed = session.card_feed();
+        assert!(feed.pull_completed_at().is_some(), "the feed pull ran");
+        assert!(feed.handle_id().is_some(), "the feed acquired a handle");
+        let frame = feed.frame().expect("the sim engine's published frame");
+        assert!(!frame.bytes.is_empty(), "the published buffer arrived");
+        frame.revision
+    };
+
+    // The gallery's sim card carries the frame the feed banked — the same
+    // view wiring a device card uses, through HomeSimEvidence.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+    let view = studio.view();
+    let home = view.home.as_ref().expect("detached editor = gallery");
+    let sim_card = home.devices.iter().find(|card| card.sim).expect("sim card");
+    assert_eq!(
+        sim_card.ui.tab,
+        crate::DeviceCardTab::Play,
+        "a loaded sim opens on its picture, same default rule as hardware"
+    );
+    let frame = sim_card
+        .frame_preview
+        .as_ref()
+        .expect("the sim card wears the fed frame");
+    assert_eq!(frame.revision, frame_revision, "the same frame, not a copy");
+}
+
+/// A connected board running the demo project, with its card's ▶ tab
+/// selected — the fixture every feed row starts from.
+fn studio_feeding_a_loaded_device() -> (StudioController, String, FakeEsp32Device) {
+    studio_feeding_a_loaded_device_at(Rc::new(std::cell::Cell::new(1.0)))
+}
+
+fn studio_feeding_a_loaded_device_at(
+    clock: Rc<std::cell::Cell<f64>>,
+) -> (StudioController, String, FakeEsp32Device) {
+    let (store, host) = library();
+    let (mut studio, card_key, device) = studio_with_loaded_device_at(&store, host, clock);
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
+    (studio, card_key, device)
+}
+
+fn studio_with_loaded_device(
+    store: &LibraryStore,
+    host: Rc<MemoryLibraryHost>,
+) -> (StudioController, String, FakeEsp32Device) {
+    studio_with_loaded_device_at(store, host, Rc::new(std::cell::Cell::new(1.0)))
+}
+
+/// A fake board booted with the demo project LOADED and running (the real
+/// hardware shape), connected through the real link. The same package is
+/// installed in the library, so the board classifies as Known — the state
+/// the client-side layout fallback reads its files from.
+fn studio_with_loaded_device_at(
+    store: &LibraryStore,
+    host: Rc<MemoryLibraryHost>,
+    clock: Rc<std::cell::Cell<f64>>,
+) -> (StudioController, String, FakeEsp32Device) {
+    let files: Vec<(String, Vec<u8>)> = crate::app::project::demo_project::demo_project_files()
+        .iter()
+        .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
+        .collect();
+    let summary = store
+        .install_package("Sign", &files, PackageProvenance::Created, 1.0)
+        .expect("the demo project installs");
+    let library_files = store
+        .open(summary.uid)
+        .expect("the installed package opens")
+        .read_all_files()
+        .expect("its files read back");
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let endpoint_id = LinkEndpointId::new("fake-device-0");
+    let provider =
+        FakeProvider::new().with_device_endpoint(endpoint_id.clone(), "Fake ESP32", script);
+    let device = provider.device(&endpoint_id).expect("device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let mut studio = StudioController::with_link_registry_for_test(
+        {
+            let clock = Rc::clone(&clock);
+            move || clock.get()
+        },
+        registry,
+    );
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        view.home
+            .as_ref()
+            .expect("gallery showing")
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card")
+            .identity_key()
+            .to_string()
+    };
+    (studio, card_key, device)
+}
+
+/// Run every due card feed to completion, the way the actor's tick does.
+fn run_card_feeds(studio: &mut StudioController) {
+    drive(studio.run_due_card_feeds(
+        |_budget: Duration| core::future::pending::<()>(),
+        &lpa_client::NeverCancel,
+    ));
+}
+
+fn select_card_tab(studio: &mut StudioController, card_key: &str, tab: crate::DeviceCardTab) {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{CardUiOp, HomeOp};
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CardUi(CardUiOp::SelectTab {
+            card: card_key.to_string(),
+            tab,
+        }),
+    )))
+    .expect("tab select dispatches");
+}
+
+/// The card wearing `card_key`, off a freshly built view.
+fn device_card(studio: &StudioController, card_key: &str) -> crate::UiDeviceCard {
+    studio
+        .view()
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the card by identity")
+        .clone()
 }
 
 fn studio_with_two_fake_devices(

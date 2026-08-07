@@ -22,6 +22,7 @@
 //! what this session is pretending to be rather than anything measured.
 
 use crate::app::rich_object::{RichLine, RichObjectView, RichSection, RichWeight};
+use crate::app::roster::board_display_name;
 use crate::core::status::UiStatusKind;
 
 use super::roster_card_state::RosterCardState;
@@ -86,12 +87,9 @@ fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> 
         tone: input.state.spec().tone,
         lines,
         chip: None,
-        affordances: input
-            .project_name
-            .is_some()
-            .then_some(SimDetailAffordance::OpenEditor)
-            .into_iter()
-            .collect(),
+        // No editor CTA (G1b ruling 5): the ▶ tab's Editor button and the
+        // title-bar ⤢ carry the entry.
+        affordances: Vec::new(),
         weight: RichWeight::Actionable,
     }
 }
@@ -108,17 +106,6 @@ fn project_section(input: &SimRichInput<'_>) -> Option<RichSection<SimDetailAffo
         affordances: Vec::new(),
         weight: RichWeight::Actionable,
     })
-}
-
-/// A board id's human name for the card line: the catalog's `display_name`
-/// when the id is a known board, else the raw id verbatim — advisory
-/// metadata may name a board this build's catalog doesn't carry (a future
-/// board, a typo'd id), and the line should still say something rather
-/// than disappear. Same rule as the project card's "for \<board\>" badge.
-fn board_display_name(board_id: &str) -> String {
-    lpa_boards::board_by_id(board_id)
-        .map(|board| board.display_name.clone())
-        .unwrap_or_else(|| board_id.to_string())
 }
 
 /// Danger zone, pinned last: Stop simulator (runtime-pool P3's explicit
@@ -155,9 +142,9 @@ mod tests {
         let rollup = view.rollup();
         assert_eq!(rollup.tone, UiStatusKind::Good);
         assert_eq!(
-            rollup.affordance,
-            Some(&SimDetailAffordance::OpenEditor),
-            "the loaded sim's face carries the visible editor CTA"
+            rollup.affordance, None,
+            "no front-door editor CTA (G1b ruling 5) — the ▶ tab's Editor \
+             button and the title-bar ⤢ carry the entry"
         );
 
         let danger = view.sections.last().unwrap();

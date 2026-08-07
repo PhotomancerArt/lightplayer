@@ -45,7 +45,7 @@ pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, SetupSession, UiCardConnection, UiDeviceCard,
+    HomePoolEvidence, HomeSimEvidence, SIM_CARD_KEY, SetupSession, UiCardConnection, UiDeviceCard,
     UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
     UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
 };
@@ -90,6 +90,7 @@ pub use app::project::{
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
+pub use app::roster::board_display_name;
 pub use app::roster::{
     BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
     DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
@@ -98,8 +99,9 @@ pub use app::roster::{
     firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
-    DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
-    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLoadedProject,
+    CardFeedApply, CardFeedState, DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId,
+    RuntimeKind, RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment,
+    SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
@@ -125,24 +127,24 @@ pub use app::share::{
     ShareFile, ShareHeader, peek_header,
 };
 pub use app::studio::{
-    ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
-    LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
-    StudioActor, StudioActorOptions, StudioCommand, StudioController, StudioHandle, StudioLogSink,
-    StudioSnapshot, StudioViewReceiver, StudioViewSender, UiChromeSession, UiChromeSessionStatus,
-    UiChromeSessionTarget, UiConsoleView, UiError, UiLensRuntime, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget,
-    UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher,
-    has_unsaved_work, studio_view_channel,
+    ConsoleCommand, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL,
+    FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand,
+    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
+    StudioViewSender, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiConsoleView,
+    UiError, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
+    UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
     ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
-    PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
-    UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus,
-    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
+    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
+    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
+    UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
