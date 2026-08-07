@@ -11,6 +11,14 @@ pub struct UiPackageCard {
     pub uid: String,
     /// Manifest kind (`"Module"`; pre-rename packages said `"Project"`).
     pub kind: String,
+    /// Display label for the project's authored kind (`"General"` |
+    /// `"Pattern"` | `"Show"` | `"Rig"`), from `ProjectManifest.kind`/
+    /// `exports` via `ProjectManifest::project_kind` (module authoring
+    /// unit, P1). Distinct from [`Self::kind`] above (the pre-mitosis
+    /// root-artifact kind tag, always `"Module"` today) — this is the
+    /// project's own authored designation, feeding the P4/P5 gallery UI.
+    /// `"General"` for a degraded card whose manifest could not be read.
+    pub project_kind: String,
     /// THE user-facing identifier (dated: `2026-07-09-1421-basic`): card
     /// title, URL, export name. Rename edits it.
     pub slug: String,

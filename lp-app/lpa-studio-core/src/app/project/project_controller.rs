@@ -3613,10 +3613,12 @@ impl ProjectController {
         let active = self.library.as_ref()?.active.as_ref()?;
         let view = active.handle.package_fs.borrow();
         let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        let kind = crate::app::library::package_manifest::kind_label(&fields.kind).to_string();
         Some(crate::UiProjectManifest {
             format: fields.format,
             uid: fields.uid,
             name: fields.name,
+            kind,
         })
     }
 
