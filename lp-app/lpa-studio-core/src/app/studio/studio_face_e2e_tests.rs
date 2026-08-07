@@ -1768,6 +1768,173 @@ fn a_default_bound_palette_with_panel_show_is_a_panel_write_target() {
     );
 }
 
+#[test]
+fn a_palette_panel_write_reads_back_on_the_swatch_that_wrote_it() {
+    // The M4 defect: the swatch rendered the AUTHORED config, so a pick
+    // changed the light and left the control showing the old ramp. The
+    // summary string could not carry the fix — a GradientConfig does not
+    // survive the round trip through display text — so the control carries
+    // the config structurally alongside it.
+    let server = Rc::new(RefCell::new(palette_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let swatch = shader_control(&snapshot, "Palette");
+    let authored = swatch
+        .shown_palette()
+        .expect("a palette control shows a palette");
+    assert_eq!(
+        authored.gradients()[0].stops.len(),
+        2,
+        "the unwritten control shows its authored default"
+    );
+    let target = swatch.panel_target.clone().expect("D5 promotes the slot");
+
+    // Write a four-stop ramp down the panel channel, exactly as a pick does.
+    let picked = lpc_model::GradientConfig::Static(lpc_model::Gradient {
+        space: lpc_model::Colorspace::Srgb,
+        method: lpc_model::InterpMethod::Linear,
+        stops: lpc_model::parse_stops("#000 #f80 #0af #fff").expect("a four-stop ramp parses"),
+    });
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: lpc_model::ToLpValue::to_lp_value(&picked),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let swatch = shader_control(&snapshot, "Palette");
+    assert_eq!(
+        swatch.shown_palette(),
+        Some(picked),
+        "the swatch shows the palette it just wrote, not the authored default"
+    );
+    // The readout's text surface tracks the same write.
+    let summary = crate::app::project::format_gradient_summary(
+        &swatch.shown_palette().expect("still a palette"),
+    );
+    assert_eq!(
+        swatch.live_value.as_deref(),
+        Some(summary.as_str()),
+        "the summary and the config describe the same write"
+    );
+    // The authored value is not lost — it still backs the detail popover.
+    assert_eq!(
+        swatch
+            .gradient_config()
+            .expect("authored config survives")
+            .gradients()[0]
+            .stops
+            .len(),
+        2,
+    );
+}
+
+#[test]
+fn successive_palette_writes_compose_instead_of_clobbering() {
+    // The user-visible face of the same defect: the chooser derives each new
+    // config from the one the control is SHOWING, so while that was the stale
+    // authored value, adding a second palette to a cycle threw the first one
+    // away. This walks the loop the UI walks — read the shown config, build
+    // the next one from it, write — twice.
+    let server = Rc::new(RefCell::new(palette_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let mut snapshot = view.try_recv().expect("connect emits a snapshot");
+    let target = shader_control(&snapshot, "Palette")
+        .panel_target
+        .clone()
+        .expect("D5 promotes the slot");
+
+    let ramp = |stops: &str| lpc_model::Gradient {
+        space: lpc_model::Colorspace::Srgb,
+        method: lpc_model::InterpMethod::Linear,
+        stops: lpc_model::parse_stops(stops).expect("stops parse"),
+    };
+
+    // Two adds, each built from whatever the control is showing at the time —
+    // exactly `with_member_added(shown, picked)` in the Cycle tab.
+    for added in [ramp("#f00 #ff0"), ramp("#00f #0ff")] {
+        let shown = shader_control(&snapshot, "Palette")
+            .shown_palette()
+            .expect("a palette control shows a palette");
+        let next = match shown {
+            lpc_model::GradientConfig::Static(current) => lpc_model::GradientConfig::Cycle {
+                set: vec![current, added],
+                step_seconds: 20.0,
+                fade_seconds: 0.5,
+            },
+            lpc_model::GradientConfig::Cycle {
+                mut set,
+                step_seconds,
+                fade_seconds,
+            } => {
+                set.push(added);
+                lpc_model::GradientConfig::Cycle {
+                    set,
+                    step_seconds,
+                    fade_seconds,
+                }
+            }
+        };
+        handle.tx.send(StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            crate::PanelWriteOp {
+                scope: target.scope,
+                channel: target.channel.clone(),
+                value: lpc_model::ToLpValue::to_lp_value(&next),
+                ttl_ms: None,
+            },
+        )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        snapshot = view.try_recv().expect("panel write emits a snapshot");
+    }
+
+    let shown = shader_control(&snapshot, "Palette")
+        .shown_palette()
+        .expect("still a palette");
+    assert_eq!(
+        shown.gradients().len(),
+        3,
+        "the incumbent plus BOTH adds — the second add used to discard the \
+         first, because it rebuilt from the stale authored config: {shown:?}"
+    );
+}
+
 const PLAYLIST_BOUND_GLOW_DIR: &str = "/projects/playlist-bound-glow-e2e";
 
 /// fyeah-sign's nesting: the bound-glow shader is playlist entry 1's node.

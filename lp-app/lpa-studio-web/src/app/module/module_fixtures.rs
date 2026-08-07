@@ -106,6 +106,7 @@ fn knob(
             widget: UiPanelWidget::Knob { min, max, step },
             value: UiSlotValue::f32(value),
             live_value: None,
+            live_gradient: None,
             panel_target: Some(lpa_studio_core::UiPanelTarget {
                 scope: scope_target(scope),
                 channel: channel.to_string(),
@@ -133,6 +134,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
             },
             value: UiSlotValue::f32(value),
             live_value: None,
+            live_gradient: None,
             panel_target: Some(lpa_studio_core::UiPanelTarget {
                 scope: scope_target(scope),
                 channel: channel.to_string(),
@@ -156,6 +158,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             widget: UiPanelWidget::Toggle,
             value: UiSlotValue::bool(value),
             live_value: None,
+            live_gradient: None,
             panel_target: Some(lpa_studio_core::UiPanelTarget {
                 scope: scope_target(scope),
                 channel: channel.to_string(),
@@ -186,6 +189,7 @@ fn swatch(
             widget: UiPanelWidget::PaletteSwatch,
             value: crate::app::node::node_story_fixtures::gradient_slot_value(config),
             live_value: None,
+            live_gradient: None,
             panel_target: Some(lpa_studio_core::UiPanelTarget {
                 scope: scope_target(scope),
                 channel: channel.to_string(),

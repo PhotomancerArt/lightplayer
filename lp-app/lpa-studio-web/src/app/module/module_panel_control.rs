@@ -234,7 +234,7 @@ fn ModulePanelControlBody(
     // A palette reads as its compact chip (`5 stops`, `↻ 4 · 20 s`) — the
     // strips below say WHICH palette; the full summary stays on hover and
     // in the label's detail popup.
-    let palette = control.swatch_palette();
+    let palette = control.shown_palette();
     let shown_value = if phasor {
         format!("{} s", control.shown_display())
     } else if let Some(config) = &palette {
@@ -424,6 +424,7 @@ mod tests {
                 },
                 value: UiSlotValue::f32(0.5),
                 live_value: None,
+                live_gradient: None,
                 panel_target: None,
                 unit: None,
                 state: UiSlotFieldState::editable(),

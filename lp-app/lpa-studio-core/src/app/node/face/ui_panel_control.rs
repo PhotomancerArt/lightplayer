@@ -95,6 +95,13 @@ pub struct UiPanelControl {
     /// (≤2 decimals) and absent for monotonic/time-kind channels — see
     /// [`crate::UiBindingEndpoint::live_value`], the source it mirrors.
     pub live_value: Option<String>,
+    /// The live reading as a CONFIG, for a palette control — see
+    /// [`crate::UiBindingEndpoint::live_gradient`], the source it mirrors.
+    ///
+    /// A `GradientConfig` cannot be recovered from [`Self::live_value`]'s
+    /// summary text, so without this the swatch could not show the palette it
+    /// had itself just written down the panel channel.
+    pub live_gradient: Option<lpc_model::GradientConfig>,
     /// The `(scope, channel)` a gesture writes down the panel command
     /// channel, present when the backing slot consumes a bus channel.
     pub panel_target: Option<UiPanelTarget>,
@@ -178,6 +185,23 @@ impl UiPanelControl {
         self.gradient_config()
     }
 
+    /// The palette the control's FACE shows: the live reading when a channel
+    /// is driving the slot — including this panel holding it — else the
+    /// authored config. The palette counterpart of [`Self::shown_display`],
+    /// and for the same reason: a control that showed the authored value
+    /// while the show played something else was reporting on the wrong thing.
+    ///
+    /// The authored config keeps its home in the detail popover
+    /// ([`Self::detail_aspects`]), exactly as the authored scalar does.
+    pub fn shown_palette(&self) -> Option<lpc_model::GradientConfig> {
+        if !matches!(self.widget, crate::UiPanelWidget::PaletteSwatch) {
+            return None;
+        }
+        self.live_gradient
+            .clone()
+            .or_else(|| self.gradient_config())
+    }
+
     /// The control's popover sections: the backing slot row's aspects plus
     /// the AUTHORED value, which the face no longer shows whenever a live
     /// reading displaces it (GV fix 3). Without this row the authored
@@ -228,6 +252,7 @@ mod tests {
             value: UiSlotValue::f32(1.6),
             emit: crate::UiPanelEmit::Value,
             live_value: None,
+            live_gradient: None,
             panel_target: None,
             unit: None,
             state: UiSlotFieldState::editable(),

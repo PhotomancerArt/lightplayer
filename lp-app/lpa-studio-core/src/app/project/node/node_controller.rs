@@ -440,9 +440,14 @@ impl NodeController {
 
     /// Attach a consumed channel's live reading to the named root field's
     /// bound endpoint on every slot root (display-only; P6 item 1).
-    pub(in crate::app::project) fn apply_bound_live_value(&mut self, slot_name: &str, live: &str) {
+    pub(in crate::app::project) fn apply_bound_live_value(
+        &mut self,
+        slot_name: &str,
+        live: Option<&str>,
+        gradient: Option<&lpc_model::GradientConfig>,
+    ) {
         for slot in &mut self.slots {
-            slot.apply_bound_live_value(slot_name, live);
+            slot.apply_bound_live_value(slot_name, live, gradient);
         }
     }
 

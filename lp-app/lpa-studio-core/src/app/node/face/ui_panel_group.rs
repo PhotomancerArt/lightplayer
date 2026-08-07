@@ -153,6 +153,7 @@ mod tests {
                 value: UiSlotValue::f32(0.5),
                 emit: crate::UiPanelEmit::Value,
                 live_value: None,
+                live_gradient: None,
                 panel_target: None,
                 unit: None,
                 state: UiSlotFieldState::editable(),

@@ -31,6 +31,14 @@ pollster = "0.3"
 pollster = "0.3"
 png = "0.18"
 lp-gfx-lpvm = { path = "../lp-gfx-lpvm" }
+# The corpus carries authored palettes now (examples/fyeah-sign/idle.json), so
+# the harness bakes strips exactly the way the engine does rather than
+# reimplementing the color math. `no-default-features` keeps the node gates —
+# and everything they pull — out of this crate's test build.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
+  "std",
+] }
+lpc-model = { path = "../../lp-core/lpc-model" }
 lp-shader = { path = "../../lp-shader/lp-shader", features = ["naga"] }
 lpir = { path = "../../lp-shader/lpir" }
 lps-filetests = { path = "../../lp-shader/lps-filetests" }

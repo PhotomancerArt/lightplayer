@@ -48,8 +48,10 @@ Some things to try:
   the shader declared it, LightPlayer built the slider. (That's what
   violet means everywhere in Studio: *bound* — wired so something else
   can drive it.)
-- **Repaint it:** the `vec3(0.0, 0.33, 0.67)` near the end is the
-  palette's phase offsets. Nudge them.
+- **Repaint it:** pick a different palette from the panel above — the
+  colors are a *value* now, not code. Or squeeze more of the ramp into
+  the picture: change `vec2(hue, 0.0)` on the last line to
+  `vec2(hue * 2.0, 0.0)`.
 
 Breaking it is fine — a typo shows its error right in the editor, the
 LEDs keep their last good frame, and **Reset** puts everything back the

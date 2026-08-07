@@ -209,7 +209,7 @@ fn PanelControlBody(
     // A palette's readout is the compact chip (`5 stops`, `↻ 4 · 20 s`) —
     // the strips below say which palette, so the words only have to say
     // what KIND of palette it is and how fast it moves.
-    let palette = control.swatch_palette();
+    let palette = control.shown_palette();
     let shown_value = if phasor {
         format!("{} s", control.shown_display())
     } else if let Some(config) = &palette {
@@ -373,9 +373,9 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
         }
         UiPanelWidget::Toggle => bool_value(control).is_some(),
         // A swatch agrees with its value when that value READS as a
-        // palette (`UiPanelControl::swatch_palette`) — the same guard the
+        // palette (`UiPanelControl::shown_palette`) — the same guard the
         // render arm falls back on.
-        UiPanelWidget::PaletteSwatch => control.swatch_palette().is_some(),
+        UiPanelWidget::PaletteSwatch => control.shown_palette().is_some(),
     }
 }
 
@@ -439,6 +439,7 @@ mod tests {
             },
             value,
             live_value: None,
+            live_gradient: None,
             panel_target: None,
             unit: None,
             state,
