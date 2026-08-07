@@ -50,6 +50,9 @@ pub struct NodeCardUiState {
     /// Whether the shader face's agent section is collapsed to its
     /// summary row.
     pub agent_collapsed: bool,
+    /// Which product the module face's hero leads with, when the module's
+    /// scope resolves both. Default [`ModuleHeroProduct::Control`].
+    pub hero_product: ModuleHeroProduct,
     /// The composer draft as last mirrored by the web (write-on-collapse;
     /// see the module doc — this is the remount seed, not the live text).
     pub composer_draft: String,
@@ -72,8 +75,32 @@ impl NodeCardUiState {
             NodeUiOp::SetDraft { draft, .. } => {
                 self.composer_draft = draft.clone();
             }
+            NodeUiOp::SetHeroProduct { product, .. } => {
+                self.hero_product = *product;
+            }
         }
     }
+}
+
+/// Which of a module scope's two primary products its face's hero leads
+/// with.
+///
+/// **Default is `Control`** (Yona's ruling, 2026-08-07, reversing the
+/// visual-first reading of `docs/design/modules.md` R7): a fixture
+/// project's output IS the lamps, so leading with the raster the shader
+/// painted shows the intermediate instead of the thing the project drives.
+/// The visual stays one gesture away — the hero's upper-right toggle
+/// writes this per card.
+///
+/// Whichever kind this names but the scope does not resolve falls back to
+/// the other, so a single-product module renders the same either way.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ModuleHeroProduct {
+    /// The scope's `control.out` — the fixtures' lamps.
+    #[default]
+    Control,
+    /// The scope's `visual.out` — the R7 output mirror's raster.
+    Visual,
 }
 
 /// The expandable drawers under a node card's face.
@@ -108,6 +135,12 @@ pub enum NodeUiOp {
     /// Mirror the composer draft (write-on-collapse; the web seeds its
     /// view-local draft signal from this on mount).
     SetDraft { node: String, draft: String },
+    /// Point the module face's hero at one of its scope's two products
+    /// (the hero's upper-right toggle).
+    SetHeroProduct {
+        node: String,
+        product: ModuleHeroProduct,
+    },
 }
 
 impl NodeUiOp {
@@ -116,7 +149,8 @@ impl NodeUiOp {
         match self {
             Self::SetDrawer { node, .. }
             | Self::SetAgentCollapsed { node, .. }
-            | Self::SetDraft { node, .. } => node,
+            | Self::SetDraft { node, .. }
+            | Self::SetHeroProduct { node, .. } => node,
         }
     }
 
@@ -160,6 +194,11 @@ mod tests {
             !state.debug_open,
             "the Debug section defaults to collapsed (G1 feedback)"
         );
+        assert_eq!(
+            state.hero_product,
+            ModuleHeroProduct::Control,
+            "a module face leads with its lamps, not the raster behind them"
+        );
         assert!(state.composer_draft.is_empty());
 
         state.apply(&NodeUiOp::SetDrawer {
@@ -190,6 +229,10 @@ mod tests {
             node: node.clone(),
             collapsed: true,
         });
+        state.apply(&NodeUiOp::SetHeroProduct {
+            node: node.clone(),
+            product: ModuleHeroProduct::Visual,
+        });
         assert_eq!(
             state,
             NodeCardUiState {
@@ -198,6 +241,7 @@ mod tests {
                 wiring_open: true,
                 debug_open: true,
                 agent_collapsed: true,
+                hero_product: ModuleHeroProduct::Visual,
                 composer_draft: "make it pulse".to_string(),
             }
         );
@@ -233,6 +277,10 @@ mod tests {
             NodeUiOp::SetDraft {
                 node: "/a.module/b.shader".into(),
                 draft: String::new(),
+            },
+            NodeUiOp::SetHeroProduct {
+                node: "/a.module/b.shader".into(),
+                product: ModuleHeroProduct::Visual,
             },
         ];
         for op in &ops {
