@@ -348,6 +348,52 @@
   .archcard p.d { color: var(--dim); font-size: 11px; }
   .archcard code { font: 600 10.5px/1.4 var(--mono); color: var(--heading); }
 
+  /* ---- convergence: ruling tags + rejected strips ---- */
+  .ctag { display: inline-flex; font: 700 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border);
+    border-radius: 999px; padding: 3px 9px; align-self: center; }
+  .rej { max-width: 1400px; margin: -12px 0 26px; padding: 8px 12px;
+    border: 1px solid var(--border-muted); border-left: 3px solid var(--err-border);
+    border-radius: 7px; background: var(--surface-muted);
+    font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .rej b { color: var(--muted); }
+
+  /* ---- section 4 · provider-defined sign-in ---- */
+  .provgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 1400px; }
+  @media (max-width: 1080px) { .provgrid { grid-template-columns: 1fr; } }
+  .provcard { border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden;
+    background: var(--surface-subtle); box-shadow: 0 12px 30px rgba(0,0,0,.35);
+    display: flex; flex-direction: column; }
+  .provcard header { display: flex; align-items: center; gap: 9px; padding: 9px 13px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .provcard header .t { font: 600 11.5px/1 var(--mono); color: var(--strong); }
+  .provcard header .badge { margin-left: auto; }
+  .provcard .pdesc { padding: 8px 13px; font: 500 10px/1.5 var(--mono); color: var(--dim);
+    border-bottom: 1px dashed var(--border-muted); }
+  .provcard .pdesc b { color: var(--heading); font-weight: 650; }
+  .provcard .pbody { padding: 13px; display: grid; gap: 8px; align-content: start; flex: 1; }
+  .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    appearance: none; cursor: pointer; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 8px; padding: 7px 11px; min-width: 0; }
+  .pickrow:hover { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .pickrow .av { width: 28px; height: 28px; font-size: 10.5px; }
+  .pickrow .who { display: grid; min-width: 0; }
+  .pickrow .nm { font-size: 12px; font-weight: 700; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pickrow .em { font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pickrow.newp { border-style: dashed; color: var(--subtle); font: 600 11.5px/1 var(--sans);
+    justify-content: flex-start; gap: 8px; }
+  .pickrow.newp:hover { color: var(--text); }
+  .orline { display: flex; align-items: center; gap: 10px; color: var(--dim);
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+  .orline::before, .orline::after { content: ""; flex: 1; height: 1px; background: var(--border-muted); }
+
+  /* boot shimmer on the chosen text link */
+  .signin-link.booting { color: transparent !important; pointer-events: none; border-radius: 999px;
+    background: linear-gradient(100deg, var(--surface-subtle) 35%, var(--surface-raised) 50%, var(--surface-subtle) 65%);
+    background-size: 250% 100%; animation: shim 1.4s linear infinite; }
+
   /* toast */
   .toast {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px);
@@ -439,6 +485,12 @@
   vision (D20): <b>viewers never need an account</b> — a share link opens running with zero
   login, so the chrome must never nag the anonymous 95%. Avatars here are generated stand-ins;
   the real one is Google's profile photo (currently discarded at the OAuth callback).
+  <br><br>
+  <b>Converged 2026-08-07</b> — gate rulings: §1 <b>A</b> (quiet text link; C's inline ask
+  composes), §2 <b>A growing into C</b>, §3 <b>B structure with A's content</b>, §5 lean
+  switch model, bones only. New ruling folded in: <b>auth stays provider-based</b> — Google is
+  prod config, not the architecture; §4 shows the same "Sign in" on three deployments (shape
+  borrowed from skybridge's auth-connections model). Rejected concepts shrink to strips.
 </p>
 
 <div class="controls">
@@ -495,7 +547,7 @@
 </div>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Quiet text link</span>
+  <p class="cap"><span class="cname">A · Quiet text link</span><span class="ctag">chosen</span>
     <span class="cnote">“Sign in” rides the secondary family’s treatment, last before ⋯ — one word, zero chrome weight</span></p>
   <div class="appframe">
     <div class="bar">
@@ -521,44 +573,14 @@
   </div>
 </div>
 
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · Ghost avatar</span>
-    <span class="cnote">a dashed silhouette holds the exact slot the signed-in avatar will occupy; click → a small why-popover, then straight to Google</span></p>
-  <div class="appframe" style="min-height:210px">
-    <div class="bar">
-      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
-      <span class="rside">
-        <span class="navrow" style="margin-right:6px">
-          <button class="navlink secondary">Explore</button>
-          <button class="navlink secondary">Boards</button>
-          <button class="navlink secondary">Docs</button>
-        </span>
-        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
-        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
-        <button class="avbtn ghost" data-toggles="pop-1b" data-boot-slot title="Sign in">
-          <svg width="14" height="14"><use href="#i-person"/></svg>
-        </button>
-        <button class="iconbtn morebtn">⋯</button>
-      </span>
-    </div>
-    <div class="popmenu signinpop" id="pop-1b">
-      <p class="lead">Sign in to LightPlayer</p>
-      <p class="why">Publish projects to lightplayer.app and share them by URL. Everything else works without an account.</p>
-      <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Continue with Google</button>
-      <p class="fineprint"><b>Viewers of your links never need an account.</b> Signing in is only for publishing your own work.</p>
-    </div>
-    <div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div>
-  </div>
-</div>
+<p class="rej"><b>B · Ghost avatar — rejected:</b> a dashed silhouette reserving the avatar slot
+  draws more chrome attention than an unused feature deserves, and it needed its own why-popover
+  to explain itself. Its sign-in copy (“publish and share by URL; viewers never need an
+  account”) lives on in §4’s provider cards.</p>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">C · Nothing until it matters</span>
-    <span class="cnote">chrome stays exactly today’s; the ask appears inline at the point of need — here, the Share panel’s publish row</span></p>
+  <p class="cap"><span class="cname">C · Nothing until it matters</span><span class="ctag">composes with A</span>
+    <span class="cnote">chrome stays quiet; the ask appears inline at the point of need — here, the Share panel’s publish row. Ships regardless of A.</span></p>
   <div class="appframe">
     <div class="bar">
       <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
@@ -588,12 +610,10 @@
         </div>
       </div>
       <p class="sub" style="max-width:340px; padding-top:6px">
-        The clean-chrome argument: an anonymous share-link viewer sees zero account UI.
-        The cost: a returning user on a new browser has no obvious way back in —
-        “sign in” exists only where publishing starts.<br><br>
-        <b>These compose:</b> C’s inline ask is needed in the publish flow <i>regardless</i>
-        of what the chrome shows — the real question is whether the chrome also carries
-        A or B.
+        An anonymous share-link viewer sees zero account UI beyond A’s one quiet word.
+        <b>These compose (ruled):</b> C’s inline ask ships in the publish flow, and the
+        chrome carries A for the returning user on a new browser. What this button leads
+        to depends on the deployment’s providers — §4.
       </p>
     </div>
   </div>
@@ -601,8 +621,8 @@
 
 <p class="sub" style="margin-top:-8px">
   <b>Boot behavior</b> (flip the Boot chip above): while the app’s <code>whoami</code> is in
-  flight the account slot renders a shimmer placeholder in A/B — never a “Sign in” that pops
-  into an avatar a beat later. Concept C has nothing to placeholder, which is also an argument for it.
+  flight, A’s slot holds a shimmer pill — never a “Sign in” that pops into an avatar a
+  beat later.
 </p>
 
 <!-- ================================================================ -->
@@ -615,7 +635,7 @@
 </p>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Plain menu</span>
+  <p class="cap"><span class="cname">A · Plain menu</span><span class="ctag">chosen · ship first</span>
     <span class="cnote">identity header row + rows; same grammar as the shipped ⋯ menu — smallest possible thing</span></p>
   <div class="appframe" style="min-height:238px">
     <div class="bar">
@@ -650,45 +670,14 @@
   </div>
 </div>
 
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · Identity card</span>
-    <span class="cnote">the big-avatar centered card every Google property uses; warmer, but a second visual grammar the app doesn’t have anywhere else</span></p>
-  <div class="appframe" style="min-height:262px">
-    <div class="bar">
-      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
-      <span class="rside">
-        <span class="navrow" style="margin-right:6px">
-          <button class="navlink secondary">Explore</button>
-          <button class="navlink secondary">Boards</button>
-          <button class="navlink secondary">Docs</button>
-        </span>
-        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
-        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
-        <button class="avbtn" data-toggles="pop-2b" data-boot-slot><span data-av="active"></span></button>
-        <button class="iconbtn morebtn">⋯</button>
-      </span>
-    </div>
-    <div class="popmenu wide popcard" id="pop-2b">
-      <span data-av="active" data-av-size="56"></span>
-      <div class="nm" data-name="active"></div>
-      <div class="em" data-email="active"></div>
-      <div class="actions">
-        <button class="pillbtn">Manage profile</button>
-        <button class="pillbtn">Sign out</button>
-      </div>
-    </div>
-    <div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div>
-  </div>
-</div>
+<p class="rej"><b>B · Identity card — rejected:</b> the big-avatar centered card is a second
+  visual grammar the app has nowhere else, and it fails the growth test — a centered card has
+  no honest place for a switch-account list. A’s header row carries the same warmth at menu
+  scale.</p>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">C · A, grown multi-account</span>
-    <span class="cnote">the switch group slots between profile rows and sign-out; “add” re-runs Google’s picker (<code style="font-family:var(--mono)">prompt=select_account</code> is already always on)</span></p>
+  <p class="cap"><span class="cname">C · A, grown multi-account</span><span class="ctag">chosen · growth path</span>
+    <span class="cnote">the switch group slots between profile rows and sign-out; “add” re-runs the provider’s picker (Google already forces <code style="font-family:var(--mono)">prompt=select_account</code>; the dev picker just shows itself)</span></p>
   <div class="appframe" style="min-height:392px">
     <div class="bar">
       <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
@@ -729,112 +718,149 @@
 <!-- ================================================================ -->
 <h2><span class="n">3 ·</span> The profile page — <span style="text-transform:none">/account</span></h2>
 <p class="sub">
-  Minimal identity on purpose: avatar, given name, family name. Email is Google’s, read-only.
-  <b>A</b> is the smallest honest page. <b>B</b> is the settings-rows shape that has room for
-  what’s coming (sessions, and later the AI-token balance) — choosing B is choosing the
-  growth path now. Flip <b>Identity → awkward</b>: the CJK name is family-first, which is
-  the argument for two neutral boxes over a single “full name” field with assumptions.
+  Ruling: <b>B’s structure, A’s content</b> — settings rows holding only what exists (identity,
+  account, sessions); the AI-token balance gets a group later without a redesign. Minimal
+  identity on purpose: photo (Google’s, never stored), given + family name. Flip
+  <b>Identity → awkward</b>: the CJK name is family-first, which is the argument for two
+  neutral boxes over a single “full name” field with assumptions.
 </p>
 
-<div class="pagegrid">
-  <div>
-    <p class="cap"><span class="cname">A · Identity card page</span>
-      <span class="cnote">one narrow column; save appears when dirty; nothing else</span></p>
-    <div class="appframe">
-      <div class="bar">
-        <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-        <span class="navrow"><button class="navlink">Devices</button><button class="navlink">Projects</button></span>
-        <span class="rside">
-          <button class="avbtn" style="border-color:var(--accent-border)"><span data-av="active"></span></button>
-          <button class="iconbtn morebtn">⋯</button>
-        </span>
-      </div>
-      <div class="pagebody">
-        <div class="profnarrow">
-          <p class="ptitle">Your profile</p>
-          <p class="psub">How you appear on projects you publish.</p>
-          <div class="avblock">
-            <span data-av="active" data-av-size="64"></span>
-            <span class="note"><b>Photo from your Google account.</b> It updates when Google’s does; LightPlayer doesn’t store its own.</span>
-          </div>
-          <div class="fields">
-            <div class="field"><label>Given name</label><input data-given-input value=""></div>
-            <div class="field"><label>Family name</label><input data-family-input value=""></div>
-            <div class="field" style="grid-column: 1 / -1"><label>Email</label>
-              <span class="ro"><svg width="13" height="13"><use href="#i-google"/></svg><span class="v" data-email="active"></span></span>
-            </div>
-          </div>
-          <div class="savebar">
-            <button class="savebtn" disabled data-savebtn>Save</button>
-            <span class="savenote" data-savenote>Names start from Google; edits stay on LightPlayer.</span>
-          </div>
-          <div class="uidline"><span><b>account</b> usr_qY7LqRfrX26CGe8m</span><span><b>since</b> Aug 6, 2026</span></div>
-        </div>
-      </div>
+<div class="barwrap" style="max-width:860px">
+  <p class="cap"><span class="cname">Converged page</span><span class="ctag">B structure · A content</span>
+    <span class="cnote">save appears when dirty (A’s behavior); the sign-in row wears the provider badge, not a hardcoded Google</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink">Projects</button></span>
+      <span class="rside">
+        <button class="avbtn" style="border-color:var(--accent-border)"><span data-av="active"></span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
     </div>
-  </div>
-
-  <div>
-    <p class="cap"><span class="cname">B · Settings rows</span>
-      <span class="cnote">grouped rows with room to grow: sessions today, token balance later</span></p>
-    <div class="appframe">
-      <div class="bar">
-        <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-        <span class="navrow"><button class="navlink">Devices</button><button class="navlink">Projects</button></span>
-        <span class="rside">
-          <button class="avbtn" style="border-color:var(--accent-border)"><span data-av="active"></span></button>
-          <button class="iconbtn morebtn">⋯</button>
-        </span>
+    <div class="pagebody">
+      <div class="setgroup">
+        <p class="ptitle" style="margin-bottom:2px">Your profile</p>
+        <p class="psub">How you appear on projects you publish.</p>
       </div>
-      <div class="pagebody">
-        <div class="setgroup">
-          <p class="gt">Identity</p>
-          <div class="setrows">
-            <div class="setrow"><span class="k">Photo</span>
-              <span class="v" style="display:flex;align-items:center;gap:10px">
-                <span data-av="active" data-av-size="34"></span>
-                <span class="v dim" style="font-size:11px">from your Google account</span></span></div>
-            <div class="setrow"><span class="k">Given name</span><span class="v"><input data-given-input value=""></span></div>
-            <div class="setrow"><span class="k">Family name</span><span class="v"><input data-family-input value=""></span></div>
-          </div>
+      <div class="setgroup">
+        <p class="gt">Identity</p>
+        <div class="setrows">
+          <div class="setrow"><span class="k">Photo</span>
+            <span class="v" style="display:flex;align-items:center;gap:10px">
+              <span data-av="active" data-av-size="34"></span>
+              <span class="v dim" style="font-size:11px">from your sign-in provider — updates when it does; not stored here</span></span></div>
+          <div class="setrow"><span class="k">Given name</span><span class="v"><input data-given-input value=""></span></div>
+          <div class="setrow"><span class="k">Family name</span><span class="v"><input data-family-input value=""></span></div>
+          <div class="setrow"><span class="k">&nbsp;</span>
+            <span class="v"><span class="savebar" style="margin:0">
+              <button class="savebtn" disabled data-savebtn>Save</button>
+              <span class="savenote" data-savenote>Names start from your provider; edits stay on LightPlayer.</span>
+            </span></span></div>
         </div>
-        <div class="setgroup">
-          <p class="gt">Account</p>
-          <div class="setrows">
-            <div class="setrow"><span class="k">Email</span><span class="v dim" data-email="active"></span>
-              <span class="act badge">Google</span></div>
-            <div class="setrow"><span class="k">Account id</span>
-              <span class="v dim" style="font-family:var(--mono); font-size:11px">usr_qY7LqRfrX26CGe8m</span></div>
-          </div>
+      </div>
+      <div class="setgroup">
+        <p class="gt">Account</p>
+        <div class="setrows">
+          <div class="setrow"><span class="k">Email</span><span class="v dim" data-email="active"></span>
+            <span class="act badge">Google</span></div>
+          <div class="setrow"><span class="k">Account id</span>
+            <span class="v dim" style="font-family:var(--mono); font-size:11px">usr_qY7LqRfrX26CGe8m · since Aug 6, 2026</span></div>
         </div>
-        <div class="setgroup">
-          <p class="gt">Sessions</p>
-          <div class="setrows">
-            <div class="setrow sessrow"><span class="k">This browser</span>
-              <span class="v"><span class="devico"><svg width="14" height="14"><use href="#i-laptop"/></svg></span>
-                Safari · macOS · signed in Aug 6</span>
-              <span class="act badge good">current</span></div>
-            <div class="setrow sessrow"><span class="k">&nbsp;</span>
-              <span class="v dim"><span class="devico"><svg width="14" height="14"><use href="#i-phone"/></svg></span>
-                Chrome · Android · signed in Aug 2</span>
-              <span class="act"><button class="linkbtn">Sign out</button></span></div>
-            <div class="setrow"><span class="k">&nbsp;</span><span class="v dim">30-day sessions, renewed on use</span>
-              <span class="act"><button class="linkbtn danger">Sign out everywhere</button></span></div>
-          </div>
+      </div>
+      <div class="setgroup">
+        <p class="gt">Sessions</p>
+        <div class="setrows">
+          <div class="setrow sessrow"><span class="k">This browser</span>
+            <span class="v"><span class="devico"><svg width="14" height="14"><use href="#i-laptop"/></svg></span>
+              Safari · macOS · signed in Aug 6</span>
+            <span class="act badge good">current</span></div>
+          <div class="setrow sessrow"><span class="k">&nbsp;</span>
+            <span class="v dim"><span class="devico"><svg width="14" height="14"><use href="#i-phone"/></svg></span>
+              Chrome · Android · signed in Aug 2</span>
+            <span class="act"><button class="linkbtn">Sign out</button></span></div>
+          <div class="setrow"><span class="k">&nbsp;</span><span class="v dim">30-day sessions, renewed on use</span>
+            <span class="act"><button class="linkbtn danger">Sign out everywhere</button></span></div>
         </div>
       </div>
     </div>
   </div>
 </div>
 
+<p class="rej"><b>A · narrow identity-card page — rejected as a layout</b> (its content and
+  save-on-dirty behavior won): same fields, but no honest room for sessions or a token balance
+  without becoming this page anyway. The session list needs one new store method
+  (<code style="font-family:var(--mono)">sessions_for_user</code>) — bones worth building since
+  it is what makes “sign out everywhere” possible.</p>
+
 <!-- ================================================================ -->
-<h2><span class="n">4 ·</span> Multi-account — try it, and what it costs</h2>
+<h2><span class="n">4 ·</span> One “Sign in”, many providers — the surface is server-defined</h2>
+<p class="sub">
+  Ruling: <b>don’t lock into Google.</b> The shape (after skybridge’s auth-connections model):
+  the server exposes a public <b>login-options</b> call — which connections this deployment has
+  (<b>oidc</b> rows like Google, or a <b>local</b> connection whose <i>methods</i> are
+  pick-a-profile, password, …) — and the client renders sign-in from that answer. Google is a
+  config row, not a code path; password is a <i>method of local</i>, not a provider sibling.
+  Below: the same “Sign in” click on three deployments. The dev picker is LightPlayer’s
+  existing <b style="font-family:var(--mono)">/auth/dev</b> grown up — and it stays triple-gated
+  (build config + server config + route re-check), never compiled into prod.
+</p>
+
+<div class="provgrid" style="margin-bottom:26px">
+  <div class="provcard">
+    <header><span class="t">lightplayer.app</span><span class="badge live">prod</span></header>
+    <div class="pdesc">options: oidc <b>google</b> · local <b>off</b></div>
+    <div class="pbody">
+      <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Continue with Google</button>
+      <p class="fineprint"><b>One active provider → no chooser at all:</b> the chrome’s “Sign in”
+        links straight to <span style="font-family:var(--mono)">/auth/google?next=…</span>.
+        This card only exists once a second provider does.</p>
+      <p class="fineprint" style="margin-top:2px"><b>Viewers of your links never need an
+        account.</b> Signing in is only for publishing your own work.</p>
+    </div>
+  </div>
+  <div class="provcard">
+    <header><span class="t">localhost:8080</span><span class="badge good">local dev</span></header>
+    <div class="pdesc">options: local <b>pick-a-profile</b> (passwordless) · oidc <b>none</b></div>
+    <div class="pbody">
+      <div data-pick-list></div>
+      <p class="fineprint">Click a profile → instant session, no password. Rows are the
+        deployment’s existing users; testing a two-account sync flow is two clicks.</p>
+    </div>
+  </div>
+  <div class="provcard">
+    <header><span class="t">studio.my-camp.net</span><span class="badge">self-host</span></header>
+    <div class="pdesc">options: local <b>password</b> · oidc <b>optional</b></div>
+    <div class="pbody">
+      <div class="field"><label>Email</label><input value="crew@zookdome.org"></div>
+      <div class="field"><label>Password</label><input type="password" value="••••••••••"></div>
+      <button class="savebtn" style="justify-self:start">Sign in</button>
+      <div class="orline">or</div>
+      <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Continue with Google</button>
+      <p class="fineprint">Keeps data separate on a shared local server with zero Google
+        dependency; the oidc row appears only if the host configured one.</p>
+    </div>
+  </div>
+</div>
+
+<p class="sub">
+  <b>Bones underneath</b> (plan inputs, not UI): connection kinds <b>local | oidc</b>; a
+  provider-agnostic session mint — every door converges on the same
+  <b style="font-family:var(--mono)">open_session</b>, and the cookie never knows which door
+  you came through (already true of <b style="font-family:var(--mono)">dev_auth</b> vs
+  <b style="font-family:var(--mono)">google_auth</b> today); and room for an identities link
+  table (<b style="font-family:var(--mono)">connection, subject → user</b>) so one account can
+  later be reachable through several providers without a rebuild.
+</p>
+
+<!-- ================================================================ -->
+<h2><span class="n">5 ·</span> Multi-account — try it, and what it costs</h2>
 <p class="sub">
   Live demo: click the avatar, switch accounts, watch the chrome follow. Below it, the three
   ways to build switching — the spike’s architectural point is that the <b>cheap one is
-  genuinely good</b>, because Google’s account picker (already forced on every sign-in via
-  <b style="font-family:var(--mono)">prompt=select_account</b>) does the heavy lifting, and
-  the dropdown’s account list is just <i>local memory of past sign-ins</i>, not server state.
+  genuinely good</b>, because the provider’s own picker (Google already forces
+  <b style="font-family:var(--mono)">prompt=select_account</b>; the dev picker <i>is</i> one)
+  does the heavy lifting, and the dropdown’s account list is just <i>local memory of past
+  sign-ins</i>, not server state. Ruling: bones only — ship the shape, don’t smooth the edges.
 </p>
 
 <div class="barwrap">
@@ -878,12 +904,12 @@
 
 <div class="archgrid">
   <div class="archcard lean">
-    <span class="at">Switch = re-auth through Google <span class="tag">lean · ship this</span></span>
-    <p>One active session, exactly today’s server. “Switch” and “Add account” both link to
-      <code>/auth/google?next=…</code>; Google’s picker (no password re-entry) comes back and the
-      new session <i>replaces</i> the cookie. The dropdown’s account rows are a
-      <b>client-side memory of past sign-ins</b> (name, email, avatar in localStorage) — sugar,
-      not server state.</p>
+    <span class="at">Switch = re-auth through the provider <span class="tag">lean · ship this</span></span>
+    <p>One active session, exactly today’s server. “Switch” and “Add account” re-enter the
+      sign-in flow (<code>/auth/google?next=…</code> in prod — Google’s picker, no password
+      re-entry; the profile picker in dev) and the new session <i>replaces</i> the cookie. The
+      dropdown’s account rows are a <b>client-side memory of past sign-ins</b> (name, email,
+      avatar, provider in localStorage) — sugar, not server state.</p>
     <p class="d">Cost: a page round-trip per switch (~1–2 s). Zero new server surface, zero new
       security model. Multi-account UX exists from day one; the architecture stays one-cookie simple.</p>
   </div>
@@ -983,6 +1009,16 @@
       el.textContent = others.length ? `Sign out of ${p.email.split("@")[0]}@…` : "Sign out";
     });
 
+    // §4 dev picker: every profile on this deployment, current first
+    document.querySelectorAll("[data-pick-list]").forEach(list => {
+      list.innerHTML = people().map((q, i) => `
+        <button class="pickrow" data-pick-to="${i}" style="margin-bottom:8px">
+          ${avatarHTML(q, 28)}
+          <span class="who"><span class="nm">${fullName(q)}</span><span class="em">${q.email}</span></span>
+        </button>`).join("")
+        + `<button class="pickrow newp"><svg width="13" height="13"><use href="#i-plus"/></svg> New profile…</button>`;
+    });
+
     // boot state: account slots shimmer, text link hides
     document.querySelectorAll("[data-boot-slot]").forEach(btn => {
       if (state.boot === "pending") {
@@ -994,7 +1030,6 @@
         btn.innerHTML = btn.dataset.savedHtml;
         delete btn.dataset.savedHtml;
         btn.classList.remove("pending");
-        if (btn.getAttribute("data-toggles") === "pop-1b") btn.classList.add("ghost");
         // re-render avatars inside restored nodes
         btn.querySelectorAll("[data-av-holder]").forEach(el => {
           el.innerHTML = avatarHTML(p, null); el.style.display = "contents";
@@ -1002,7 +1037,7 @@
       }
     });
     document.querySelectorAll("[data-boot-hide]").forEach(el => {
-      el.style.visibility = state.boot === "pending" ? "hidden" : "visible";
+      el.classList.toggle("booting", state.boot === "pending");
     });
   }
 
@@ -1033,20 +1068,30 @@
     if (demo && !e.target.closest("[data-toggles=pop-demo]")) demo.hidden = true;
   });
 
-  // account switching (delegated: lists re-render)
-  document.addEventListener("click", e => {
-    const row = e.target.closest("[data-switch-to]");
-    if (!row) return;
-    state.active = +row.getAttribute("data-switch-to");
-    renderAll();
+  // account switching + dev picker (delegated: lists re-render)
+  function showToast(msg) {
     const p = activeP();
     const toast = document.getElementById("toast");
     document.querySelector("[data-toast-av]").innerHTML = avatarHTML(p, 20);
-    document.getElementById("toast-msg").textContent =
-      `Signed in as ${p.email} — via Google's account picker, ~1s round-trip in the lean model`;
+    document.getElementById("toast-msg").textContent = msg;
     toast.classList.add("show");
     clearTimeout(toast._t);
     toast._t = setTimeout(() => toast.classList.remove("show"), 3200);
+  }
+  document.addEventListener("click", e => {
+    const sw = e.target.closest("[data-switch-to]");
+    if (sw) {
+      state.active = +sw.getAttribute("data-switch-to");
+      renderAll();
+      showToast(`Signed in as ${activeP().email} — via the provider's picker, ~1s round-trip in the lean model`);
+      return;
+    }
+    const pick = e.target.closest("[data-pick-to]");
+    if (pick) {
+      state.active = +pick.getAttribute("data-pick-to");
+      renderAll();
+      showToast(`Dev session as ${activeP().email} — self-asserted, passwordless, never compiled into prod`);
+    }
   });
 
   // dirty-save demo on profile pages
