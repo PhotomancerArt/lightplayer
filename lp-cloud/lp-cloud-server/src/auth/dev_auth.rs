@@ -61,8 +61,17 @@ pub async fn get_dev_auth(
 
     let token = state
         .with_service(move |core| {
-            let user = core.service.upsert_user(&google_sub, &email, &display_name);
-            core.service.open_session(user.uid, ttl)
+            // "dev" (P2's provider column) — `google_sub`'s own `dev-auth:`
+            // namespace already keeps this from ever colliding with a real
+            // Google subject, but `provider` is what `get_me` actually reads
+            // for the wire's `providerLabel`, so it is set explicitly rather
+            // than inferred from the sub text.
+            let user = core
+                .service
+                .upsert_user(&google_sub, &email, &display_name, "dev");
+            // User-agent capture is P3's job (auth-edge work); `None` here
+            // is an honest "not wired up yet", not a placeholder value.
+            core.service.open_session(user.uid, ttl, None)
         })
         .await;
 

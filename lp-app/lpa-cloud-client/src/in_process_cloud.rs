@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
 use lp_cloud_domain::{
-    BlobStore as _, Clock as _, CloudService, MetaStore as _, SESSION_TOKEN_LEN,
+    BlobStore as _, Caller, Clock as _, CloudService, MetaStore as _, SESSION_TOKEN_LEN,
+    session_token_hash,
 };
 use lp_cloud_store_mem::{MemBlobStore, MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::{Actor, CLOUD_API_VERSION, CloudCall, CloudReply, check_version};
@@ -55,11 +56,13 @@ impl InProcessServer {
     /// Log somebody in, minting the account on first sight.
     ///
     /// The edge's job, not the domain's: everything an OAuth callback does
-    /// after the provider hands back an identity.
+    /// after the provider hands back an identity. Always `"google"` —
+    /// this stands in for the Google callback specifically (see the doc
+    /// above), never the dev picker.
     pub fn sign_in(&self, google_sub: &str, email: &str, display_name: &str) -> SignedIn {
         let mut service = self.service.borrow_mut();
-        let user = service.upsert_user(google_sub, email, display_name);
-        let token = service.open_session(user.uid, SESSION_TTL_SECONDS);
+        let user = service.upsert_user(google_sub, email, display_name, "google");
+        let token = service.open_session(user.uid, SESSION_TTL_SECONDS, None);
         SignedIn {
             user: user.uid,
             token,
@@ -221,7 +224,14 @@ impl CloudPort for InProcessCloud {
         let result = match check_version(call.version) {
             Ok(()) => {
                 let actor = self.actor();
-                self.server.service.borrow_mut().handle(actor, call.request)
+                // This client knows its own raw token, unlike a browser's
+                // HttpOnly cookie — hashing it here is exactly what the HTTP
+                // edge does from the cookie header (`api_route.rs`).
+                let session = self.session.as_ref().map(|token| session_token_hash(token));
+                self.server
+                    .service
+                    .borrow_mut()
+                    .handle(Caller { actor, session }, call.request)
             }
             Err(mismatch) => Err(mismatch),
         };

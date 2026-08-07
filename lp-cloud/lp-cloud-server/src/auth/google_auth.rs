@@ -242,9 +242,15 @@ pub async fn get_google_callback(
     let token = state
         .with_service(move |core| {
             // This one call mints-or-finds the account *and* resolves every
-            // pending membership for the address (Q4).
-            let user = core.service.upsert_user(&google_sub, &email, &display_name);
-            core.service.open_session(user.uid, ttl)
+            // pending membership for the address (Q4). "google" (P2's
+            // provider column) — the only connection this handler ever
+            // authenticates through.
+            let user = core
+                .service
+                .upsert_user(&google_sub, &email, &display_name, "google");
+            // User-agent capture is P3's job (auth-edge work); `None` here
+            // is an honest "not wired up yet", not a placeholder value.
+            core.service.open_session(user.uid, ttl, None)
         })
         .await;
 
