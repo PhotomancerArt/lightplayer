@@ -30,9 +30,14 @@
 //! (512 words) against the S3's eight 48-word ones, and a smaller register
 //! file in front of them. The C6's `+0x400` remains the odd one out. The
 //! experiment firmware proved the constant on silicon with a FIFO-port probe
-//! at every demo boot; that probe is not carried over here because this crate
-//! has no harness entrypoint to run it from, and the app path proves the
-//! offset end to end anyway (a wrong offset cannot transmit a single frame).
+//! at every demo boot; that probe is not carried over here because the app path
+//! proves the offset end to end anyway (a wrong offset cannot transmit a single
+//! frame).
+//!
+//! ⚠️ The original reason given here was that this crate had no harness
+//! entrypoint to run a probe from. That expired on 2026-08-06 when
+//! `test_xt_fp_conformance` brought `fw_harness` to this crate — the probe is
+//! still not carried over, but now that is a choice rather than a constraint.
 //!
 //! # Structural differences from the S3 backend (each verified in the sources
 //! above, none recalled from memory)

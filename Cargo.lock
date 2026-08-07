@@ -4063,7 +4063,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
- "lp-xt-fp-vectors",
+ "lp-xt-fp-harness",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -4102,6 +4102,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-xt-fp-harness",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -5835,6 +5836,14 @@ dependencies = [
  "lp-emu-core",
  "lp-xt-fp-vectors",
  "lp-xt-inst",
+]
+
+[[package]]
+name = "lp-xt-fp-harness"
+version = "40.0.0"
+dependencies = [
+ "esp-println",
+ "lp-xt-fp-vectors",
 ]
 
 [[package]]
