@@ -1,14 +1,20 @@
-//! Prefixed base-62 identifier, e.g. `prj_h7Kq9xY2mQ4tB8Wz`.
+//! Prefixed base-32 identifier, e.g. `prjhk7q9xy2mq4tb8wz`.
 //!
-//! The canonical text form is `<prefix>_<body>` where `<prefix>` is a
-//! [`UidPrefix`] and `<body>` is exactly [`UID_BODY_LEN`] characters from
-//! the base-62 alphabet `0-9A-Za-z`.
+//! The canonical text form is `<prefix><body>` — one token, no separator —
+//! where `<prefix>` is a [`UidPrefix`] and `<body>` is exactly
+//! [`UID_BODY_LEN`] characters of lowercase Crockford base-32 (`0-9a-z`
+//! minus the confusables `i l o u`). The body is lowercase-only so a uid
+//! survives case-folding contexts (URLs, case-insensitive filesystems,
+//! being read aloud), and `_` stays out of the uid entirely so it remains
+//! free as a delimiter in composite keys that EMBED a uid. No separator is
+//! needed for exact parsing: prefixes are a closed set and the body length
+//! is fixed, so the split point is always known.
 //!
-//! Minting takes 128 caller-supplied random bits and keeps the 16
-//! least-significant base-62 digits — i.e. the value modulo 62^16
-//! (~95 bits of keyspace). The slight non-uniformity from the modulo is
-//! irrelevant at this keyspace and is accepted by design; no rng dependency
-//! exists in this crate.
+//! Minting takes 128 caller-supplied random bits and keeps the low
+//! 16 × 5 = 80 bits — exactly uniform, since the keyspace is a power of
+//! two. Values below 2^80 survive the reduction untouched, which the
+//! deterministic efuse-MAC embed (`HardwareId::device_uid`) relies on. No
+//! rng dependency exists in this crate.
 
 use core::fmt;
 use core::str::FromStr;
@@ -19,12 +25,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::uid_prefix::UidPrefix;
 
-/// Length of the base-62 body of a [`PrefixedUid`].
+/// Length of the base-32 body of a [`PrefixedUid`].
 pub const UID_BODY_LEN: usize = 16;
 
-const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/// Lowercase Crockford base-32: `0-9` then `a-z` without `i l o u`.
+const ALPHABET: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
-/// A prefixed base-62 identifier (`prj_…`, `mod_…`, `dev_…`).
+/// A prefixed base-32 identifier (`prj…`, `mod…`, `dev…`).
 ///
 /// Compact (no heap per uid), ordered by prefix then body bytes.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,8 +48,8 @@ impl PrefixedUid {
         let mut value = u128::from_be_bytes(*random);
         let mut body = [0u8; UID_BODY_LEN];
         for slot in body.iter_mut().rev() {
-            *slot = ALPHABET[(value % 62) as usize];
-            value /= 62;
+            *slot = ALPHABET[(value & 31) as usize];
+            value >>= 5;
         }
         Self { prefix, body }
     }
@@ -51,7 +58,7 @@ impl PrefixedUid {
         self.prefix
     }
 
-    /// The 16-character base-62 body (always ASCII).
+    /// The 16-character base-32 body (always ASCII).
     pub fn body_str(&self) -> &str {
         core::str::from_utf8(&self.body).expect("uid body is always ASCII")
     }
@@ -59,7 +66,7 @@ impl PrefixedUid {
 
 impl fmt::Display for PrefixedUid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}_{}", self.prefix, self.body_str())
+        write!(f, "{}{}", self.prefix, self.body_str())
     }
 }
 
@@ -72,13 +79,11 @@ impl fmt::Debug for PrefixedUid {
 /// Why a uid string failed to parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UidParseError {
-    /// The prefix is not one of the known [`UidPrefix`] values.
+    /// The string does not start with a known [`UidPrefix`].
     UnknownPrefix,
-    /// No `_` separator between prefix and body.
-    MissingSeparator,
-    /// The body is not exactly [`UID_BODY_LEN`] characters.
+    /// The body after the prefix is not exactly [`UID_BODY_LEN`] characters.
     BadLength,
-    /// The body contains a character outside `0-9A-Za-z`.
+    /// The body contains a character outside lowercase Crockford base-32.
     BadChar,
 }
 
@@ -86,26 +91,34 @@ impl fmt::Display for UidParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
             UidParseError::UnknownPrefix => "unknown uid prefix",
-            UidParseError::MissingSeparator => "missing `_` separator",
             UidParseError::BadLength => "uid body must be exactly 16 characters",
-            UidParseError::BadChar => "uid body must be base-62 (0-9A-Za-z)",
+            UidParseError::BadChar => {
+                "uid body must be lowercase Crockford base-32 (0-9a-z minus ilou)"
+            }
         };
         f.write_str(msg)
     }
+}
+
+fn is_body_char(byte: u8) -> bool {
+    ALPHABET.contains(&byte)
 }
 
 impl FromStr for PrefixedUid {
     type Err = UidParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (prefix, body) = s.split_once('_').ok_or(UidParseError::MissingSeparator)?;
-        let prefix: UidPrefix = prefix.parse()?;
+        let prefix = UidPrefix::ALL
+            .into_iter()
+            .find(|p| s.starts_with(p.as_str()))
+            .ok_or(UidParseError::UnknownPrefix)?;
+        let body = &s[prefix.as_str().len()..];
         if body.len() != UID_BODY_LEN {
             return Err(UidParseError::BadLength);
         }
         let mut bytes = [0u8; UID_BODY_LEN];
         for (slot, ch) in bytes.iter_mut().zip(body.bytes()) {
-            if !ch.is_ascii_alphanumeric() {
+            if !is_body_char(ch) {
                 return Err(UidParseError::BadChar);
             }
             *slot = ch;
@@ -138,26 +151,43 @@ mod tests {
     #[test]
     fn encodes_all_zero_bytes_as_zero_body() {
         let uid = PrefixedUid::mint(UidPrefix::Project, &[0u8; 16]);
-        assert_eq!(uid.to_string(), "prj_0000000000000000");
+        assert_eq!(uid.to_string(), "prj0000000000000000");
     }
 
     #[test]
     fn encodes_known_values() {
-        // value 61 -> last digit 'z'
+        // value 31 -> last digit 'z'
         let mut bytes = [0u8; 16];
-        bytes[15] = 61;
+        bytes[15] = 31;
         let uid = PrefixedUid::mint(UidPrefix::Device, &bytes);
-        assert_eq!(uid.to_string(), "dev_000000000000000z");
+        assert_eq!(uid.to_string(), "dev000000000000000z");
 
-        // value 62 -> "10"
-        bytes[15] = 62;
+        // value 32 -> "10"
+        bytes[15] = 32;
         let uid = PrefixedUid::mint(UidPrefix::Module, &bytes);
-        assert_eq!(uid.to_string(), "mod_0000000000000010");
+        assert_eq!(uid.to_string(), "mod0000000000000010");
 
         // max value: encoding must stay in-alphabet and length 16
         let uid = PrefixedUid::mint(UidPrefix::Project, &[0xFF; 16]);
         assert_eq!(uid.body_str().len(), UID_BODY_LEN);
-        assert!(uid.body_str().bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert!(uid.body_str().bytes().all(is_body_char));
+    }
+
+    #[test]
+    fn values_below_keyspace_survive_untouched() {
+        // The efuse-MAC embed (HardwareId::device_uid) packs a value
+        // < 2^56 and relies on mint being the identity below 2^80.
+        let mut bytes = [0u8; 16];
+        bytes[9] = 0x01;
+        bytes[10..16].copy_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+        let uid = PrefixedUid::mint(UidPrefix::Device, &bytes);
+        // Round-tripping the body back through the alphabet recovers the value.
+        let mut value: u128 = 0;
+        for ch in uid.body_str().bytes() {
+            let digit = ALPHABET.iter().position(|c| *c == ch).unwrap() as u128;
+            value = (value << 5) | digit;
+        }
+        assert_eq!(value, u128::from_be_bytes(bytes));
     }
 
     #[test]
@@ -171,30 +201,34 @@ mod tests {
 
     #[test]
     fn rejects_malformed_input() {
+        // the retired underscore form: separator makes the body 17 chars
         assert_eq!(
-            "prj0000000000000000".parse::<PrefixedUid>(),
-            Err(UidParseError::MissingSeparator)
+            "prj_0000000000000000".parse::<PrefixedUid>(),
+            Err(UidParseError::BadLength)
         );
         assert_eq!(
-            "xxx_0000000000000000".parse::<PrefixedUid>(),
+            "xxx0000000000000000".parse::<PrefixedUid>(),
             Err(UidParseError::UnknownPrefix)
         );
         assert_eq!(
-            "prj_000000000000000".parse::<PrefixedUid>(),
+            "prj000000000000000".parse::<PrefixedUid>(),
             Err(UidParseError::BadLength)
         );
         assert_eq!(
-            "prj_00000000000000000".parse::<PrefixedUid>(),
+            "prj00000000000000000".parse::<PrefixedUid>(),
             Err(UidParseError::BadLength)
         );
+        // 'i' is a confusable excluded from the alphabet
         assert_eq!(
-            "prj_00000000000000!0".parse::<PrefixedUid>(),
+            "prj000000000000000i".parse::<PrefixedUid>(),
             Err(UidParseError::BadChar)
         );
+        // uppercase is out: the body is lowercase-only
         assert_eq!(
-            "".parse::<PrefixedUid>(),
-            Err(UidParseError::MissingSeparator)
+            "prj000000000000000Z".parse::<PrefixedUid>(),
+            Err(UidParseError::BadChar)
         );
+        assert_eq!("".parse::<PrefixedUid>(), Err(UidParseError::UnknownPrefix));
     }
 
     #[test]
@@ -205,7 +239,7 @@ mod tests {
         let back: PrefixedUid = serde_json::from_str(&json).unwrap();
         assert_eq!(back, uid);
 
-        let bad: Result<PrefixedUid, _> = serde_json::from_str("\"prj_short\"");
+        let bad: Result<PrefixedUid, _> = serde_json::from_str("\"prjshort\"");
         assert!(bad.is_err());
     }
 }
