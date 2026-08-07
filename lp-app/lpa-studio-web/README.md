@@ -101,6 +101,37 @@ merge/provenance logic and the per-provider onboarding copy live in
 `lpa-studio-core/src/app/settings/`; the browser IO edges live in
 `src/settings_io.rs`.
 
+### Cloud service (account surface) — same-origin, in dev too
+
+`src/cloud/` is the whole edge onto the cloud service: `FetchCloudPort` (an
+HTTP `CloudPort` over the deployed `POST /api` + `/b/`, `/t/` planes),
+`CloudSession` (one `Signal<CloudSession>` in context, fed by one `whoami`
+per page load, plus a `CloudSessionRefresh` handle), and `account_memory`
+(the `lp_accounts` localStorage list the switch-account rows come from —
+names and photo URLs only, never a token).
+
+Every request uses a **relative** URL, so the session cookie rides along with
+no token in JS and no CORS posture the deployed site does not have. In
+production the service serves the app and they are one origin. In dev they
+are two ports, so `Dioxus.toml` carries `[[web.proxy]]` entries forwarding
+`/api`, `/auth`, `/b` and `/t` to a locally running `lp-cloud` on **2812**:
+
+```bash
+LP_CLOUD_PORT=2812 just cloud-serve   # dev auth on (LP_CLOUD_DEV_AUTH=1)
+just studio-dev                       # in another shell
+```
+
+That port is pinned in `Dioxus.toml` — a proxy target cannot be discovered at
+request time, so it is the one dev port in the repo that is not
+`scripts/dev-port.sh`'s to pick. Change one and change the other. Without a
+local service running, the proxied calls simply fail and the session reads
+`Unreachable`, which renders nothing account-shaped.
+
+Nothing in `just check` compiles wasm32, and this crate takes
+`lpa-cloud-client` with `default-features = false` (no in-process transport
+in the browser bundle): `just check-wasm-cloud` is the cheap gate for that
+combination, `just studio-web-build` the full one.
+
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. `dx build` writes Studio app assets under
 `target/dx/lpa-studio-web/{debug,release}/web/public/`, while `public/`

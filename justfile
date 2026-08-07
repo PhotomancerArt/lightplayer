@@ -516,6 +516,14 @@ studio-firmware-package-served:
         esac
     done < <(just studio-served-builds)
 
+# Cheap wasm-compile gate for the cloud client path (full gate: studio-web-build).
+#
+# Nothing in `just check` compiles wasm32, and the browser edge builds
+# `lpa-cloud-client` WITHOUT its default `in-process` feature — a combination
+# no other recipe exercises. Seconds, not the minutes a dx build costs.
+check-wasm-cloud: install-wasm32-target
+    cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
+
 studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
