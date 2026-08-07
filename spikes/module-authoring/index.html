@@ -278,17 +278,42 @@
   .tree .c { color: var(--dim); }
 
   .duo { display: flex; gap: 26px; align-items: flex-start; flex-wrap: wrap; }
+
+  /* ---- stateful card flows -------------------------------------------------- */
+  .flow { border-top: 1px solid var(--border); }
+  .flowhead { display: flex; align-items: center; gap: 8px; padding: 8px 11px 4px;
+              font-size: 10px; color: var(--dim); text-transform: uppercase;
+              letter-spacing: .1em; }
+  .flowhead .fx { margin-left: auto; cursor: pointer; color: var(--dim);
+                  font-size: 12px; line-height: 1; }
+  .flowhead .fx:hover { color: var(--strong); }
+  .frow { display: flex; gap: 8px; padding: 6px 11px; font-size: 12px;
+          color: var(--muted); cursor: pointer; align-items: center; }
+  .frow:hover { background: var(--bg-wash); color: var(--strong); }
+  .frow .d { margin-left: auto; font-size: 10.5px; color: var(--dim); }
+  .frow.good { color: var(--good-text); cursor: default; }
+  .frow.good:hover { background: none; }
+  .finput { margin: 4px 11px 2px; display: block; width: calc(100% - 22px);
+            background: var(--terminal); border: 1px solid var(--border-strong);
+            border-radius: 6px; color: var(--text); font: 12px var(--mono);
+            padding: 6px 8px; }
+  .finput:focus { outline: none; border-color: var(--accent-border); }
+  .ffoot { display: flex; gap: 8px; padding: 8px 11px 10px; justify-content: flex-end; }
+  .ffoot .btn { font-size: 11.5px; padding: 4px 12px; }
+  .fhint { font-size: 10.5px; color: var(--dim); padding: 2px 11px 6px; }
+  .statecap { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+              color: var(--dim); margin: 0 0 6px; }
 </style>
 </head>
 <body class="lint-warn tint">
 
 <h1>Module authoring — the <span class="t" data-t="noun_pl">exports</span> of a workbench project</h1>
 <p class="hint">
-  Spike for T1 (<b>2026-08-07-1017-module-authoring-unit</b>), round 2. Converged per gate 1:
-  §1 = root-card section (1B) + optional child tint; §2 rebuilt on Yona's instinct — designation
-  lives in the <b>module's own detail popup</b>, the root section <b>appears reactively</b>;
-  §3 = three verbs (add / new-from / fork) + design language for project-vs-pack; §4 = visual
-  template cards. <b>Terminology workshop</b>: the strip swaps
+  Spike for T1 (<b>2026-08-07-1017-module-authoring-unit</b>), round 3. Gate-2 rulings:
+  <b>export</b> ratified (fix Share's "Export zip" → "Download"); <b>sage</b> hue; §2
+  popup-designation confirmed (detail popup owed a facelift anyway); container term OPEN
+  ("workbench" rejected, "module project" candidate). §3 rebuilt: <b>cards as stateful little
+  windows</b> — every verb becomes an inline flow in the card. <b>Terminology workshop</b>: the strip swaps
   <b>export ⇄ publish</b> live. For "export": R7 may <i>unify</i>, not collide — a module exports
   channels, a project exports modules (same idea: a container's curated outward interface); the
   real collision is Share's "Export zip" (→ "Download zip"). For "publish": reads as a state, and
@@ -422,68 +447,47 @@
 
 <!-- ============================================================ section 3 -->
 <section data-sec="3">
-<h2><span class="n">3</span> Consuming a module — three verbs, one menu</h2>
+<h2><span class="n">3</span> Consuming a module — the card is a little stateful window</h2>
 <p class="sub">
-  Converged from gate 1 (3A) + Yona's verb list. Card click = <b>Add to project</b> when one is
-  open; the menu carries the full set: per-<span class="t" data-t="noun">export</span>
-  <b>Add</b> rows (families), <b>New project from this</b> (the OpenExample seed semantics,
-  generalized), <b>Open workbench</b> (fork — the whole project, rig included). Same verb set
-  everywhere it appears: Explore, the setup wizard, the add-node picker, and later the
-  playlist-adjust panel control (Sean side quest) — T4 owns each surface's chrome.
+  Gate-2 ruling: verbs don't navigate away — <b>the card itself becomes the flow</b>.
+  Pick an <span class="t" data-t="noun">export</span> → a project selector <i>in the card</i>;
+  <b>New project from this</b> → a mini wizard <i>in the card</i>; <b>Open workbench</b> (fork)
+  → a name prompt <i>in the card</i>. Same verb set on every surface (Explore, setup wizard,
+  add-node picker, later the playlist-adjust panel control — Sean side quest); T4 owns each
+  surface's chrome. The first card is <b>live</b> — click through a whole flow.
 </p>
 <div class="duo">
   <div>
-    <div class="cap">family card, menu open</div>
-    <div class="shelf" style="width:440px">
-      <div class="gcard open" data-menucard>
-        <div class="thumb"><canvas data-fx="fire"></canvas></div>
-        <div class="kebab">⋯</div>
-        <div class="gmenu">
-          <div class="mtitle">add to sunroom-strip</div>
-          <div class="mi">fire <span class="d">1D</span></div>
-          <div class="mi">noise_party <span class="d">1D+2D</span></div>
-          <div class="mi">ripple_interference_cascade <span class="d">2D</span></div>
-          <div class="msep"></div>
-          <div class="mi">New project from this…</div>
-          <div class="mi">Open workbench <span class="d">— fork yona-noise</span></div>
-        </div>
-        <div class="gbody">
-          <div class="gname">yona-noise</div>
-          <div class="gmeta"><span class="chip pub"><span class="t" data-t="count3">3
-            exports</span></span><span class="chip mono">1D+2D</span>
-            <span>Yona · EUPL-1.2</span></div>
-        </div>
-      </div>
-      <div class="gcard">
-        <div class="thumb"><canvas data-fx="meteor"></canvas></div>
-        <div class="kebab">⋯</div>
-        <div class="gbody">
-          <div class="gname">meteor_shower</div>
-          <div class="gmeta"><span class="chip mono">1D</span><span>Yona · EUPL-1.2</span></div>
-        </div>
-      </div>
+    <div class="cap">live — click the ⋯ and walk a flow</div>
+    <div class="shelf" style="width:230px">
+      <div class="gcard" id="livecard"></div>
     </div>
-    <p class="why" style="margin-top:8px">single-<span class="t" data-t="noun">export</span>
-      card: click adds it directly; its menu skips the chooser rows.</p>
   </div>
-
   <div>
-    <div class="cap">design language (draft — workshop)</div>
-    <div class="why">Naming the layers so the surfaces can talk about them consistently.</div>
+    <div class="cap">the three flows, frozen</div>
+    <div class="shelf" style="width:940px" id="frozen"></div>
+  </div>
+</div>
+<div class="duo" style="margin-top:18px">
+  <div>
+    <div class="cap">design language (draft — container term still open)</div>
+    <div class="why">Layer names so the surfaces can talk about them consistently.
+      <b>Gate 2: "workbench project" rejected</b> — workbench sounds like something else;
+      "module project" is a candidate; not settled.</div>
     <div class="lang">
       <div class="lrow"><span class="term">project<span class="d">standalone</span></span>
         <span class="def">an authoring container. No
         <span class="t" data-t="noun_pl">exports</span> — nothing to import; you can still open
         or fork it. Today's five examples are this.</span></div>
-      <div class="lrow"><span class="term">workbench project<span class="d">has
-        <span class="t" data-t="noun_pl">exports</span></span></span>
-        <span class="def">a project whose manifest designates ≥1 module folder as importable.
-        The unit T1 ships. "Workbench" is the <i>role</i> of everything outside the
-        <span class="t" data-t="state">exported</span> folders.</span></div>
+      <div class="lrow"><span class="term">module project?<span class="d">naming OPEN —
+        not "workbench"</span></span>
+        <span class="def">a project whose manifest designates ≥1 module folder as importable —
+        the unit T1 ships. Candidates: <i>module project</i>, <i>project with
+        <span class="t" data-t="noun_pl">exports</span></i>, …</span></div>
       <div class="lrow"><span class="term">modpack<span class="d">T3's object</span></span>
-        <span class="def">a curated, licensed <i>collection</i> of workbench projects +
-        browse metadata (spaces, authors, licenses). Explore browses packs; packs reference
-        projects; projects <span class="t" data-t="verb_lc">export</span> modules.</span></div>
+        <span class="def">a curated, licensed <i>collection</i> of such projects + browse
+        metadata (spaces, authors, licenses). Explore browses packs; packs reference projects;
+        projects <span class="t" data-t="verb_lc">export</span> modules.</span></div>
     </div>
   </div>
 </div>
@@ -682,13 +686,84 @@ function applyLint() {
 }
 linttgl.addEventListener('click', () => { lintIx = (lintIx + 1) % 3; applyLint(); });
 
-/* ---------- 3A overflow menu ----------------------------------------------- */
-document.querySelectorAll('[data-menucard] .kebab').forEach(k => {
-  k.addEventListener('click', ev => {
-    ev.stopPropagation();
-    k.closest('.gcard').classList.toggle('open');
-  });
+/* ---------- section 3: stateful card flows ---------------------------------- */
+const EXPORTS3 = [
+  { n:'fire', sp:'1D' }, { n:'noise_party', sp:'1D+2D' },
+  { n:'ripple_interference_cascade', sp:'2D' },
+];
+function cardShell(inner, open) {
+  return `<div class="thumb"><canvas data-fx="fire"></canvas></div>
+    <div class="kebab">⋯</div>
+    ${open ? `<div class="gmenu" style="display:block">
+      <div class="mtitle">add an <span class="t" data-t="noun_lc">export</span></div>
+      ${EXPORTS3.map(e => `<div class="mi" data-act="add" data-exp="${e.n}">${e.n}
+        <span class="d">${e.sp}</span></div>`).join('')}
+      <div class="msep"></div>
+      <div class="mi" data-act="new">New project from this…</div>
+      <div class="mi" data-act="fork">Open workbench <span class="d">— fork</span></div>
+    </div>` : ''}
+    <div class="gbody">
+      <div class="gname">yona-noise</div>
+      <div class="gmeta"><span class="chip pub"><span class="t" data-t="count3">3
+        exports</span></span><span class="chip mono">1D+2D</span>
+        <span>Yona · EUPL-1.2</span></div>
+    </div>${inner || ''}`;
+}
+const FLOWS = {
+  add: exp => `<div class="flow">
+    <div class="flowhead">add “${exp}” to <span class="fx" data-act="rest">✕</span></div>
+    <div class="frow" data-act="done" data-exp="${exp}">sunroom-strip
+      <span class="d">open now</span></div>
+    <div class="frow" data-act="done" data-exp="${exp}">hat-brim</div>
+    <div class="frow" data-act="done" data-exp="${exp}">sim session
+      <span class="d">unsaved</span></div>
+    <div class="fhint">vendors ${exp}/ into the project — yours to edit</div></div>`,
+  done: exp => `<div class="flow">
+    <div class="frow good">✓ added ${exp} to sunroom-strip</div>
+    <div class="fhint">modules/${exp}/ · provenance kept · <span style="cursor:pointer;
+      text-decoration:underline" data-act="rest">back</span></div></div>`,
+  new: () => `<div class="flow">
+    <div class="flowhead">new project from yona-noise <span class="fx" data-act="rest">✕</span></div>
+    <div class="frow" style="cursor:default">seed with
+      <span class="d">fire · 1D</span></div>
+    <input class="finput" value="fire-project" spellcheck="false">
+    <div class="fhint">vendors fire/ + a fresh rig — the OpenExample gesture, generalized</div>
+    <div class="ffoot"><button class="btn" data-act="rest">Cancel</button>
+      <button class="btn primary" data-act="rest">Create &amp; open</button></div></div>`,
+  fork: () => `<div class="flow">
+    <div class="flowhead">fork yona-noise <span class="fx" data-act="rest">✕</span></div>
+    <input class="finput" value="yona-noise-2" spellcheck="false">
+    <div class="fhint">the whole project — rig, helpers, and
+      <span class="t" data-t="noun_pl">exports</span></div>
+    <div class="ffoot"><button class="btn" data-act="rest">Cancel</button>
+      <button class="btn primary" data-act="rest">Fork &amp; open</button></div></div>`,
+};
+const livecard = document.getElementById('livecard');
+function setState(state, exp) {
+  if (state === 'rest') livecard.innerHTML = cardShell('', false);
+  else if (state === 'menu') livecard.innerHTML = cardShell('', true);
+  else livecard.innerHTML = cardShell(FLOWS[state](exp), false);
+  livecard.querySelector('canvas') && paint(livecard.querySelector('canvas'));
+  applyTerm();
+}
+livecard.addEventListener('click', ev => {
+  const act = ev.target.closest('[data-act]');
+  if (act) { setState(act.dataset.act === 'add' ? 'add'
+      : act.dataset.act === 'done' ? 'done' : act.dataset.act,
+      act.dataset.exp); ev.stopPropagation(); return; }
+  if (ev.target.closest('.kebab')) { setState('menu'); ev.stopPropagation(); }
 });
+setState('rest');
+
+const frozen = document.getElementById('frozen');
+frozen.innerHTML = [
+  [cardShell('', true), 'menu — pick an <span class="t" data-t="noun_lc">export</span> or a verb'],
+  [cardShell(FLOWS.add('fire'), false), 'project selector, in the card'],
+  [cardShell(FLOWS.new(), false), 'mini wizard, in the card'],
+  [cardShell(FLOWS.fork(), false), 'name prompt, in the card'],
+].map(([html, cap]) =>
+  `<div><div class="statecap">${cap}</div><div class="gcard">${html}</div></div>`
+).join('');
 
 /* ---------- thumbnail canvases ---------------------------------------------- */
 function paint(cv) {
