@@ -31,7 +31,7 @@ impl UiBindingAuthoringDirection {
 }
 
 /// Authoring surface for one bindable slot row.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiBindingAuthoring {
     /// Local slot name keying the node's `bindings` map (bindings live at
     /// node-def roots since M0).
