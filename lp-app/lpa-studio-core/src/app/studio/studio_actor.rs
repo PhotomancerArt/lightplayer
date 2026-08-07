@@ -139,6 +139,52 @@ pub struct StudioActor<MakeTimer> {
     /// refreshed each batch.
     delay: Rc<Cell<Duration>>,
     options: StudioActorOptions,
+    /// Consecutive passive runs (project pull + card feeds) that ended in
+    /// preemption. At [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`] the next run is
+    /// promoted to foreground standing so a continuous gesture stream — a
+    /// live-control drag — cannot starve it. Reset by any run that got through.
+    ///
+    /// [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`]: crate::PASSIVE_PREEMPTIONS_BEFORE_PROMOTION
+    preempted_passive_runs: u8,
+}
+
+/// The standing an in-flight passive run holds against the command queue.
+///
+/// Both variants are the *existing* class semantics, just applied at
+/// different priorities — there is no new preemption axis, only a promotion
+/// between the two the class model already defines.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PassiveStanding {
+    /// Normal standing: anything that preempts a passive refresh — every
+    /// foreground action, every recovery action — cancels the run.
+    Passive,
+    /// Promoted after [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`] consecutive
+    /// preemptions: the run now has a foreground action's standing, so only
+    /// what preempts a foreground action (recovery work, which owns the
+    /// connection) cancels it. This is the starvation floor.
+    ///
+    /// [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`]: crate::PASSIVE_PREEMPTIONS_BEFORE_PROMOTION
+    Foreground,
+}
+
+impl PassiveStanding {
+    /// Whether a queued command cancels a passive run holding this standing.
+    fn preempted_by(self, command: &StudioCommand) -> bool {
+        // A queued console command, tick, or shutdown does not preempt an
+        // in-flight pull: console mutations are display-side and can wait for
+        // the batch after the pull completes.
+        // An attachment is synchronous installation work, same as console;
+        // a cross-tab library ping is background gallery staleness;
+        // settings are synchronous store mutations, same as console;
+        // agent feedback is a synchronous mirror mutation, same as console.
+        let StudioCommand::Action(action) = command else {
+            return false;
+        };
+        match self {
+            PassiveStanding::Passive => action.class().preempts_passive_refresh(),
+            PassiveStanding::Foreground => action.class().preempts_foreground_action(),
+        }
+    }
 }
 
 impl<MakeTimer, Timer> StudioActor<MakeTimer>
@@ -184,6 +230,7 @@ where
             make_timer,
             delay: Rc::clone(&delay),
             options,
+            preempted_passive_runs: 0,
         };
         (actor, StudioHandle { tx, view, delay })
     }
@@ -239,7 +286,14 @@ where
             // wire operation (they drain session-buffered logs and surface
             // state changes), so each session still sees at most one wire
             // op per batch.
-            self.run_refresh_tick().await;
+            //
+            // Both passive lanes (project pull, card feeds) run at ONE
+            // standing, decided before the tick: either both are ordinary
+            // passive work, or — after a starving run of preemptions — both
+            // are promoted for this tick, so a drag cannot freeze the
+            // project preview and the device cards' ▶ feeds independently.
+            let standing = self.passive_standing();
+            let refresh_preempted = self.run_refresh_tick(standing).await;
             self.controller.run_due_heartbeats();
             // D32 (M6): the quiet PortHeld retry rides the same cadence —
             // a no-op unless a held port's retry interval elapsed.
@@ -250,7 +304,8 @@ where
             // LAST in the tick: the device-card frame feed is a picture,
             // and nothing structural should wait behind one. A no-op
             // unless some card is showing its ▶ tab on a Ready device.
-            self.run_card_feed_tick().await;
+            let feed_preempted = self.run_card_feed_tick(standing).await;
+            self.note_passive_run_end(refresh_preempted || feed_preempted);
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
@@ -341,9 +396,34 @@ where
         }
     }
 
+    /// The standing this tick's passive work holds: promoted once a gesture
+    /// stream has cancelled [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`] runs in a
+    /// row, so preemption stays a priority rule and never becomes starvation.
+    ///
+    /// [`PASSIVE_PREEMPTIONS_BEFORE_PROMOTION`]: crate::PASSIVE_PREEMPTIONS_BEFORE_PROMOTION
+    fn passive_standing(&self) -> PassiveStanding {
+        if self.preempted_passive_runs >= crate::PASSIVE_PREEMPTIONS_BEFORE_PROMOTION {
+            PassiveStanding::Foreground
+        } else {
+            PassiveStanding::Passive
+        }
+    }
+
+    /// Fold this tick's outcome into the promotion tally: a preempted run
+    /// counts toward the floor, and any run that got through resets it.
+    fn note_passive_run_end(&mut self, preempted: bool) {
+        self.preempted_passive_runs = if preempted {
+            self.preempted_passive_runs.saturating_add(1)
+        } else {
+            0
+        };
+    }
+
     /// Run one passive refresh tick as a cancellable, deadline-bounded pull,
     /// concurrently watching the queue so a preempting command cancels it.
-    async fn run_refresh_tick(&mut self) {
+    ///
+    /// Returns whether the pull was cut short by a preempting command.
+    async fn run_refresh_tick(&mut self, standing: PassiveStanding) -> bool {
         let cancel = SharedCancel::new();
         cancel.reset();
         let deadline =
@@ -355,9 +435,10 @@ where
             let pull = self
                 .controller
                 .refresh_loaded_project_tick_gated(deadline, &cancel);
-            let watch = watch_for_preempt(&self.commands, &cancel);
+            let watch = watch_for_preempt(&self.commands, &cancel, standing);
             pull_while_watching(pull, watch).await
         };
+        let preempted = matches!(outcome, Ok(Some(ProjectRefreshOutcome::Cancelled)));
 
         // Completion-based pacing: any attempt that RAN (synced, failed,
         // timed out, or found nothing to refresh) stamps its completion so
@@ -401,6 +482,7 @@ where
         if completed {
             self.controller.note_passive_refresh_completed();
         }
+        preempted
     }
 
     /// Run the due device-card frame feeds under the same preempt watch
@@ -409,15 +491,17 @@ where
     /// ends at its next frame boundary rather than making the gesture wait
     /// for a dome frame.
     ///
+    /// Returns whether a feed read was cut short by a preempting command.
+    ///
     /// [`ActionClass::Passive`]: crate::ActionClass::Passive
-    async fn run_card_feed_tick(&mut self) {
+    async fn run_card_feed_tick(&mut self, standing: PassiveStanding) -> bool {
         let cancel = SharedCancel::new();
         cancel.reset();
         let feeds = self
             .controller
             .run_due_card_feeds(self.make_timer.clone(), &cancel);
-        let watch = watch_for_preempt(&self.commands, &cancel);
-        pull_while_watching(feeds, watch).await;
+        let watch = watch_for_preempt(&self.commands, &cancel, standing);
+        pull_while_watching(feeds, watch).await
     }
 
     /// The lens session's passive-refresh backoff delay (zero while
@@ -616,13 +700,17 @@ fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
     actions.push(action);
 }
 
-/// Peek the command queue (without consuming) for a command whose class
-/// preempts a passive refresh, and flip `cancel` when one appears. Resolves once
-/// it has requested cancellation, or stays pending while no preempting command
-/// is queued.
-async fn watch_for_preempt(commands: &CommandReceiver, cancel: &SharedCancel) {
+/// Peek the command queue (without consuming) for a command that preempts a
+/// passive run holding `standing`, and flip `cancel` when one appears. Resolves
+/// once it has requested cancellation, or stays pending while no preempting
+/// command is queued.
+async fn watch_for_preempt(
+    commands: &CommandReceiver,
+    cancel: &SharedCancel,
+    standing: PassiveStanding,
+) {
     core::future::poll_fn(|cx: &mut Context<'_>| {
-        if commands.peek_any(|command| command_preempts_passive(command)) {
+        if commands.peek_any(|command| standing.preempted_by(command)) {
             cancel.set();
             return Poll::Ready(());
         }
@@ -654,26 +742,6 @@ where
         pull.as_mut().poll(cx)
     })
     .await
-}
-
-fn command_preempts_passive(command: &StudioCommand) -> bool {
-    match command {
-        StudioCommand::Action(action) => action.class().preempts_passive_refresh(),
-        // A queued console command, tick, or shutdown does not preempt an
-        // in-flight pull: console mutations are display-side and can wait for
-        // the batch after the pull completes.
-        // An attachment is synchronous installation work, same as console;
-        // a cross-tab library ping is background gallery staleness;
-        // settings are synchronous store mutations, same as console;
-        // agent feedback is a synchronous mirror mutation, same as console.
-        StudioCommand::AttachLibrary(_)
-        | StudioCommand::LibraryChanged
-        | StudioCommand::Console(_)
-        | StudioCommand::Settings(_)
-        | StudioCommand::Agent(_)
-        | StudioCommand::RefreshTick
-        | StudioCommand::Shutdown => false,
-    }
 }
 
 /// Poll a future once with a no-op waker and return its output if ready.

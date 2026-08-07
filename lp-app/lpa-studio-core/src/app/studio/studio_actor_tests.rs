@@ -586,13 +586,16 @@ fn a_drag_of_foreground_actions_does_not_starve_the_passive_pull() {
         actor.controller.advance_clock_for_test(0.05);
     }
 
+    // With the starvation floor the drag settles into alternation: a write
+    // cancels one pull, the next is promoted and completes. Half the ticks
+    // getting through is the preview staying as live during a drag as it is
+    // at rest — before the floor this was zero.
+    let completed = handle.completed_read_count();
     assert!(
-        handle.completed_read_count() > 0,
-        "a sustained drag starved the passive pull: {} reads sent, {} completed \
-         — every pull is cancelled by the next write, so the preview freezes \
-         for the whole drag",
+        completed >= 15,
+        "a sustained drag starved the passive pull: {} reads sent, {completed} \
+         completed — the preview freezes for the whole drag",
         handle.read_count(),
-        handle.completed_read_count(),
     );
 }
 
@@ -630,10 +633,19 @@ fn recovery_class_preempts_foreground_and_passive() {
     assert!(recovery_action().class().preempts_passive_refresh());
     assert!(!refresh_action().class().preempts_foreground_action());
     assert!(refresh_action().class().preempts_passive_refresh());
-    // The actor's queue classifier agrees.
-    assert!(command_preempts_passive(&StudioCommand::Action(recovery_action())));
-    assert!(command_preempts_passive(&StudioCommand::Action(refresh_action())));
-    assert!(!command_preempts_passive(&StudioCommand::RefreshTick));
+    // The actor's queue classifier agrees, at ordinary passive standing.
+    let passive = PassiveStanding::Passive;
+    assert!(passive.preempted_by(&StudioCommand::Action(recovery_action())));
+    assert!(passive.preempted_by(&StudioCommand::Action(refresh_action())));
+    assert!(!passive.preempted_by(&StudioCommand::RefreshTick));
+
+    // Promoted to foreground standing (the starvation floor), an ordinary
+    // foreground action no longer cancels the run — but recovery still does,
+    // because it owns the connection.
+    let promoted = PassiveStanding::Foreground;
+    assert!(promoted.preempted_by(&StudioCommand::Action(recovery_action())));
+    assert!(!promoted.preempted_by(&StudioCommand::Action(refresh_action())));
+    assert!(!promoted.preempted_by(&StudioCommand::RefreshTick));
 }
 
 // ---------------------------------------------------------------------------
