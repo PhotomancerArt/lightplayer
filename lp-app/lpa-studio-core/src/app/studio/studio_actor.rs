@@ -247,6 +247,10 @@ where
             // Sim crash detection + guarded auto-reboot rides the same
             // cadence too — a no-op while the sim worker is healthy.
             self.controller.run_due_sim_crash_recovery().await;
+            // LAST in the tick: the device-card frame feed is a picture,
+            // and nothing structural should wait behind one. A no-op
+            // unless some card is showing its ▶ tab on a Ready device.
+            self.run_card_feed_tick().await;
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
@@ -397,6 +401,23 @@ where
         if completed {
             self.controller.note_passive_refresh_completed();
         }
+    }
+
+    /// Run the due device-card frame feeds under the same preempt watch
+    /// the lens pull uses: a feed is [`ActionClass::Passive`], so an
+    /// arriving user gesture flips the cancel flag and the in-flight read
+    /// ends at its next frame boundary rather than making the gesture wait
+    /// for a dome frame.
+    ///
+    /// [`ActionClass::Passive`]: crate::ActionClass::Passive
+    async fn run_card_feed_tick(&mut self) {
+        let cancel = SharedCancel::new();
+        cancel.reset();
+        let feeds = self
+            .controller
+            .run_due_card_feeds(self.make_timer.clone(), &cancel);
+        let watch = watch_for_preempt(&self.commands, &cancel);
+        pull_while_watching(feeds, watch).await;
     }
 
     /// The lens session's passive-refresh backoff delay (zero while

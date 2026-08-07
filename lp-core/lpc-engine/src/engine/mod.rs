@@ -12,6 +12,11 @@ pub mod memory_pressure;
 // node's output slot, so the module needs both node kinds.
 #[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 mod output_flush_tests;
+// The published-frame read proves itself on a real shader → fixture → output
+// chain: the fixture is what owns the display layout, the shader is what a
+// re-render would have pulled.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+mod output_frame_probe_tests;
 mod project_apply;
 mod project_loader;
 mod project_read_nodes;

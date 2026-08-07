@@ -795,6 +795,10 @@ fn product_preview_from_probe(
             ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
+        // Published output frames are the device card's play-tab feed, not a
+        // lens product preview: they key on an output NODE, not a
+        // `UiProductRef`, and are consumed by their own path.
+        ProjectProbeResult::OutputFrame(_) => None,
         ProjectProbeResult::BindingGraph(_) | ProjectProbeResult::Timebase(_) => None,
     }
 }

@@ -4,6 +4,7 @@ use lpc_wire::{BuildFacts, HardwareFacts};
 
 use crate::UiLogEntry;
 use crate::app::home::card_ui_state::CardUiState;
+use crate::app::node::UiControlProductPreview;
 use crate::app::roster::RosterCardState;
 
 /// A device card. Visually distinct from package cards by contract: the
@@ -29,9 +30,10 @@ pub struct UiDeviceCard {
     /// Where the card stands in the honest roster vocabulary.
     pub state: RosterCardState,
     /// The project the device holds (live cards) or last ran (offline
-    /// cards) — identity for the card's hero strip (gallery-rework P05,
-    /// vision D12: a thumbnail strip under the title bar with the project's
-    /// name overlaid), never health. `None` renders no strip.
+    /// cards) — identity for the card's ▶ tab (honest-device preview P3:
+    /// the project chip on the play tab's meta row, under the picture the
+    /// board itself published), never health. `None` means no ▶ tab at all:
+    /// nothing to draw.
     pub project: Option<UiDeviceProjectChip>,
     /// Running-firmware build facts from the live link's hello (provenance
     /// + the feature set compiled into the image) — Technical evidence for
@@ -51,10 +53,13 @@ pub struct UiDeviceCard {
     /// (gallery-rework vision D4 — inherited from the project it runs, and
     /// rendered as the card's "as \<board\>" line).
     ///
-    /// Device cards leave this `None` on purpose: a device's board is a
-    /// registry fact (`RegisteredDevice.board_id`) read straight from
-    /// `HomeInputs.registered`, and duplicating it onto the presentation
-    /// would give the two surfaces a way to disagree.
+    /// LIVE device cards leave this `None` on purpose: a live board's
+    /// identity claim is `hardware.board_id` from its own hello, and
+    /// duplicating the registry fact beside it would give two surfaces a
+    /// way to disagree. REMEMBERED (registry) cards DO carry the
+    /// registry's `board_id` here (G1b rulings 9/10) — offline there is
+    /// no hello, and the Details tab + the gone device's ▶ box both name
+    /// the board from it.
     pub board_id: Option<String>,
     /// The port as the app can name it (endpoint label + grant short id,
     /// e.g. "ESP32 Serial (0x303a:0x1001) · port-2") — the Technical tab's
@@ -75,12 +80,48 @@ pub struct UiDeviceCard {
     /// card's console strip and Console tab render this. Always empty on
     /// remembered (offline) cards: no session, no console.
     pub console_tail: Vec<UiLogEntry>,
+    /// The newest frame this device PUBLISHED, as the ▶ Play tab draws it
+    /// (honest-device preview): the running control product read off the
+    /// board, never re-simulated in the browser.
+    ///
+    /// Fed by the session's [`CardFeedState`](crate::CardFeedState) while
+    /// the ▶ tab is selected on a Ready device. It deliberately OUTLIVES the
+    /// link: an offline card keeps the last in-session frame (dimmed, "last
+    /// frame") rather than blanking, so unplugging a board does not erase
+    /// what it was doing. `None` on sim cards (their ▶ tab hosts the
+    /// re-simulated preview lease), on registry-derived cards, and on any
+    /// device that has not published a frame this session.
+    pub frame_preview: Option<UiControlProductPreview>,
+    /// How many seconds old [`Self::frame_preview`] is, stamped at view
+    /// build against the studio clock. The stale treatment engages past
+    /// [`FRAME_STALE_AFTER_SECS`](crate::FRAME_STALE_AFTER_SECS); `None`
+    /// exactly when there is no frame.
+    ///
+    /// Ages on the device's PUBLISH revision, not on read arrivals — a
+    /// board that stopped rendering ages honestly while its card keeps
+    /// answering reads.
+    pub frame_age_secs: Option<f64>,
+    /// The live link's engine fps, as the device's own heartbeat reports it.
+    /// This is the BOARD's render rate — a different fact from how often
+    /// frames reach the card, which is what the age says.
+    ///
+    /// Only real firmware heartbeats (every 5 s, `fw-esp32-common`'s server
+    /// loop); the host/browser runtimes send none, so a sim never has one
+    /// and a freshly connected board has none for up to five seconds.
+    /// `None` also once the link is gone — a remembered rate is not a rate.
+    pub frame_fps: Option<f32>,
     /// The card's UI view-state (selected tab, open sheet, in-place op).
     /// Core-owned + keyed by [`Self::identity_key`], so it survives the
     /// card ⇄ pane growth and session replaces. The gallery/lens builder
     /// leaves this default; the controller overlays the persisted state.
     pub ui: CardUiState,
 }
+
+/// The (≤1) sim card's reserved identity key — the sim has no uid and no
+/// registry entry, so its `CardUiState` and view-transition name key by
+/// this token instead. Named because the controller's default-tab rule has
+/// to recognize the sim card by key alone.
+pub const SIM_CARD_KEY: &str = "runtime-sim";
 
 impl UiDeviceCard {
     /// The card's CANONICAL identity — the ONE key both the UI-state map
@@ -109,7 +150,7 @@ impl UiDeviceCard {
     /// keeps every rung.
     pub fn identity_key(&self) -> &str {
         if self.sim {
-            return "runtime-sim";
+            return SIM_CARD_KEY;
         }
         self.uid
             .as_deref()
@@ -151,11 +192,10 @@ impl UiDeviceCard {
     }
 }
 
-/// The device's project, as the card's hero strip names it: thumbnail seed
-/// + display name (gallery-rework P05 — the strip replaced this as the
-/// small in-body chip). Identity only — the status line and edge tint
-/// carry health. On offline/not-responding cards the renderer dims the
-/// strip (last-known, not current).
+/// The device's project, as the card's ▶ tab names it: thumbnail seed +
+/// display name. Identity only — the status line and edge tint carry
+/// health. On offline/not-responding cards the renderer dims the PICTURE
+/// (last-known, not current); the chip itself stays legible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceProjectChip {
     /// `prj_…` uid — thumbnail seed and the push/review target key.

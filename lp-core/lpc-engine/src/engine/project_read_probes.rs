@@ -1,17 +1,19 @@
 //! Project probe helpers.
 
 use alloc::format;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, Kind};
+use lpc_model::{ChannelName, Kind, NodeId};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
-    ControlProductProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
-    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
-    WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
+    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
+    OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
+    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
+    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
     WireChannelSampleFormat, WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow,
 };
 use lps_shared::TextureStorageFormat;
@@ -19,10 +21,23 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
-use crate::products::control::{ControlRenderRequest, ControlRenderTarget};
+use crate::node::NodeEntryState;
+use crate::products::control::{
+    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
+};
 use crate::products::visual::RenderTextureRequest;
+use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
+
+/// One output node found by the published-frame tree walk, snapshotted so the
+/// layout pass can take `&mut Engine` without holding a tree borrow.
+struct PublishedOutputCandidate {
+    node: NodeId,
+    buffer_id: RuntimeBufferId,
+    sample_layout: Option<ControlLayout>,
+    source_product: Option<ControlProduct>,
+}
 
 impl Engine {
     pub(super) fn read_project_render_product_probe(
@@ -348,6 +363,95 @@ impl Engine {
                 message: format!("{error}"),
             },
         }
+    }
+
+    /// Read the frames every output node has ALREADY published.
+    ///
+    /// The cheap counterpart of
+    /// [`read_project_control_product_probe`](Self::read_project_control_product_probe):
+    /// that one re-renders the product inside the request path, which is
+    /// exactly what a live card feed must not do. This walks the tree for
+    /// nodes owning a sink buffer, clones each buffer's published bytes, and
+    /// pairs them with the sample layout the publishing tick latched. The
+    /// only non-trivial work is the optional display layout, which producers
+    /// answer from cached mapping state (no resolve, no render).
+    ///
+    /// Cost is O(published bytes) plus O(lamps) per requested layout. The
+    /// bytes clone is deliberate and accepted — it is one more copy of a
+    /// buffer that already exists, where a render call would be a whole
+    /// frame's work.
+    pub fn read_project_output_frame_probe(
+        &mut self,
+        registry: &ProjectRegistry,
+        request: OutputFrameProbeRequest,
+    ) -> OutputFrameProbeResult {
+        // Snapshot the candidates first: the display-layout pass below needs
+        // `&mut self`, and the tree walk borrows it immutably.
+        let candidates: Vec<PublishedOutputCandidate> = self
+            .tree()
+            .entries()
+            .filter_map(|entry| {
+                let NodeEntryState::Alive(node) = entry.state.value() else {
+                    return None;
+                };
+                let buffer_id = node.runtime_output_sink_buffer_id()?;
+                Some(PublishedOutputCandidate {
+                    node: entry.id,
+                    buffer_id,
+                    sample_layout: node.runtime_output_sample_layout().cloned(),
+                    source_product: node.runtime_output_source_product(),
+                })
+            })
+            .collect();
+
+        let mut outputs = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            let Some(buffer) = self.runtime_buffers().get(candidate.buffer_id) else {
+                continue;
+            };
+            let RuntimeBufferMetadata::OutputChannels {
+                channels,
+                sample_format,
+            } = buffer.value().metadata
+            else {
+                // A sink buffer that is not carrying output channels has not
+                // published a frame yet (or is not one): skip it rather than
+                // invent a shape for it.
+                continue;
+            };
+            let revision = buffer.changed_at();
+            let bytes = buffer.value().bytes.clone();
+
+            let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
+                ControlDisplayLayoutProbeResult::Omitted
+            } else if let Some(product) = candidate.source_product {
+                self.control_display_layout_probe(registry, product, request.display_layout)
+                    .unwrap_or_else(|error| ControlDisplayLayoutProbeResult::Unsupported {
+                        reason: format!("{error}"),
+                    })
+            } else {
+                ControlDisplayLayoutProbeResult::Unsupported {
+                    reason: String::from(
+                        "output has not published a frame yet, so its source product is unknown",
+                    ),
+                }
+            };
+
+            outputs.push(OutputFrameEntry {
+                node: candidate.node,
+                revision,
+                channels,
+                sample_format: match sample_format {
+                    RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
+                    RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
+                },
+                sample_layout: candidate.sample_layout.unwrap_or_default(),
+                display_layout,
+                bytes,
+            });
+        }
+
+        OutputFrameProbeResult::Frame { outputs }
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).

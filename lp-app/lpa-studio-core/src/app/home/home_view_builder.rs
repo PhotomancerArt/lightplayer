@@ -76,6 +76,15 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The ▶ tab's live frame — the SIM ENGINE'S published output, read
+    /// through the same feed as a device's (G1 ruling 3: the sim card
+    /// never re-simulates; it shows what the simulated board actually
+    /// output).
+    pub frame: Option<crate::UiControlProductPreview>,
+    /// Seconds since [`Self::frame`] arrived, stamped at build time.
+    pub frame_age_secs: Option<f64>,
+    /// The sim engine's reported fps, when known.
+    pub fps: Option<f32>,
     /// The board the sim claims to be (vision D4), inherited from the
     /// project it runs — `vendor/product`, the registry's vocabulary.
     /// `None` = no board known, the ordinary default.
@@ -141,6 +150,18 @@ pub struct HomeDeviceEvidence {
     /// reaches the page. Rendered on the card's Technical tab (gate-1
     /// sitting, 2026-08-03: an unflashed card identified nothing).
     pub port_label: Option<String>,
+    /// The newest frame this session's card feed pulled off the board
+    /// (honest-device preview P2) — the ▶ tab's picture. Present only while
+    /// the session object holds one; it survives the link going `Gone`.
+    pub frame: Option<crate::UiControlProductPreview>,
+    /// How old [`Self::frame`] is, measured at view build.
+    pub frame_age_secs: Option<f64>,
+    /// The card identity the feed was feeding — how the last frame finds
+    /// its card once the live row yields to the remembered one.
+    pub frame_card_key: Option<String>,
+    /// The engine fps this session's latest heartbeat reported. `None`
+    /// once the link is gone — a remembered rate is not a rate.
+    pub fps: Option<f32>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -352,6 +373,21 @@ fn assemble_roster(
         })
         .cloned()
         .collect();
+    // Q4: an unplugged board's card keeps the last frame it published this
+    // session. The live row yielded to the better-informed registry card
+    // just above, so the frame has to cross over with it — otherwise the ▶
+    // tab blanks at exactly the moment "what was it doing?" matters. Only
+    // registry cards are in `devices` at this point, so nothing live is
+    // overwritten.
+    for live in &pool.devices {
+        let (Some(frame), Some(key)) = (live.frame.as_ref(), live.frame_card_key.as_deref()) else {
+            continue;
+        };
+        if let Some(card) = devices.iter_mut().find(|card| card.identity_key() == key) {
+            card.frame_preview = Some(frame.clone());
+            card.frame_age_secs = live.frame_age_secs;
+        }
+    }
     // last-seen sort (stable: hydration order breaks ties); live leads
     devices.sort_by(|a, b| {
         last_seen_sort_key(b)
@@ -485,6 +521,9 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         RosterCardState::ConnectedEmpty
     };
     UiDeviceCard {
+        frame_preview: sim.frame.clone(),
+        frame_age_secs: sim.frame_age_secs,
+        frame_fps: sim.fps,
         port_label: None,
         session_key: None,
         uid: None,
@@ -581,6 +620,15 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         _ => (None, None),
     };
     UiDeviceCard {
+        // The ▶ tab's picture: what the BOARD published, kept across an
+        // unplug so an offline card shows its last frame (Q4).
+        frame_preview: live.frame.clone(),
+        frame_age_secs: live.frame_age_secs,
+        // A dead link reports no rate; the age still ticks.
+        frame_fps: match &live.link {
+            Some(DeviceState::Ready { .. }) => live.fps,
+            _ => None,
+        },
         session_key: live.session_key.clone(),
         uid: identity.map(|identity| identity.uid.clone()),
         // Pre-provision title: the detected chip is the one honest,
@@ -770,6 +818,9 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         connect: ConnectEvidence::Idle,
     });
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: Some(device.uid.clone()),
@@ -783,7 +834,9 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         fw: None,
         hardware: None,
         detected_chip: None,
-        board_id: None,
+        // the registry's board fact rides the remembered card (G1b ruling
+        // 9/10: Details names it; the gone device's ▶ box shows it)
+        board_id: device.board_id.clone(),
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -1082,6 +1135,9 @@ mod tests {
             devices: Vec::new(),
             sim: Some(HomeSimEvidence {
                 project,
+                frame: None,
+                frame_age_secs: None,
+                fps: None,
                 board_id: None,
                 console_tail: Vec::new(),
             }),
@@ -1253,6 +1309,9 @@ mod tests {
         };
         let cards = vec![
             UiDeviceCard {
+                frame_preview: None,
+                frame_age_secs: None,
+                frame_fps: None,
                 port_label: None,
                 session_key: None,
                 uid: Some("dev_a".to_string()),
@@ -1270,6 +1329,9 @@ mod tests {
                 board_id: None,
             },
             UiDeviceCard {
+                frame_preview: None,
+                frame_age_secs: None,
+                frame_fps: None,
                 port_label: None,
                 session_key: None,
                 uid: Some("dev_a".to_string()),
@@ -1689,6 +1751,9 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                frame: None,
+                frame_age_secs: None,
+                fps: None,
                 board_id: None,
                 console_tail: Vec::new(),
             }),

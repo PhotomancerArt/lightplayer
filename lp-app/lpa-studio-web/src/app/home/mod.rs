@@ -6,6 +6,7 @@
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;
+pub(crate) mod device_play_tab;
 pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;

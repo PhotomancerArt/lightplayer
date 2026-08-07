@@ -58,6 +58,35 @@ pub const REFRESH_DUE_SLACK: Duration = Duration::from_millis(2);
 /// fills the buffers in the background.
 pub const DEVICE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Completion-gap for the device card's live frame feed (honest-device
+/// preview): the minimum idle time between one published-frame read
+/// COMPLETING and the next one starting, while a card's ▶ Play tab is
+/// selected on a Ready device.
+///
+/// Same figure as [`DEVICE_REFRESH_INTERVAL`], and for the same reason —
+/// under completion-based pacing the number is idle time, not a period, so
+/// the frame size sets the real rate. One frame is `lamps × 3 × 2` bytes
+/// before base64 (×4/3 after) on a link that carries every other protocol
+/// message too: at the ~90 KB/s a USB-serial device sustains, a 1500-lamp
+/// dome frame (~9 KB raw, ~12 KB encoded) takes ~130 ms to arrive and
+/// settles at ~4–5 fps; a 300-lamp strip (~1.8 KB) lands in ~25 ms and hits
+/// the 150 ms gap's ~5–7 fps ceiling. Big frames therefore self-throttle by
+/// taking longer to complete, and shrinking this constant would not make
+/// them faster — it would only remove the device's breathing room between
+/// reads. Tune at the hardware feel-walk (G1), not here.
+pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
+
+/// How old the newest device frame may get before the card's ▶ tab calls
+/// it stale (amber "last frame · N s ago" instead of calm green).
+///
+/// Ratified at the UX spike gate (2026-08-05): five seconds is long enough
+/// that a slow dome frame, a busy device, or a preempted feed pull never
+/// flickers the treatment, and short enough that a board which actually
+/// stopped publishing says so before anyone trusts a frozen picture.
+/// Consumed by the ▶ tab renderer (P3) against
+/// [`UiDeviceCard::frame_age_secs`](crate::UiDeviceCard::frame_age_secs).
+pub const FRAME_STALE_AFTER_SECS: f64 = 5.0;
+
 /// The default passive-refresh backoff base: start at 3 s (the retired flat
 /// `PASSIVE_REFRESH_FAILURE_BACKOFF_MS`), double on consecutive failures, cap
 /// at [`PASSIVE_REFRESH_BACKOFF_MAX`]. Each session carries its own

@@ -5,8 +5,8 @@ pub mod operation;
 
 pub use crate::core::action::action::UiAction;
 pub use crate::core::action::action_class::{
-    ActionClass, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE,
+    ActionClass, DEVICE_CARD_FEED_CLASS, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 pub use crate::core::action::action_confirmation::ActionConfirmation;
 pub use crate::core::action::action_enablement::ActionEnablement;

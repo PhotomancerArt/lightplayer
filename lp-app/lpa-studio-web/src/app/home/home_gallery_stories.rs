@@ -78,6 +78,9 @@ fn devices() -> Vec<UiDeviceCard> {
     // the D27 roster: live first (naturally), then last-seen order
     vec![
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
@@ -98,6 +101,9 @@ fn devices() -> Vec<UiDeviceCard> {
             board_id: None,
         },
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
@@ -282,6 +288,9 @@ fn connected_device_and_project_chip() -> Element {
         head_version: Some(5),
     };
     devices.push(UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
@@ -425,6 +434,9 @@ fn thumb_state_caption_class() -> &'static str {
 /// the loaded project's chip, or "nothing loaded".
 fn sim_device_card(with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         port_label: None,
         session_key: None,
         uid: None,

@@ -145,6 +145,9 @@ mod tests {
 
     fn failed_card() -> (UiDeviceCard, CardOp) {
         let card = UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: None,

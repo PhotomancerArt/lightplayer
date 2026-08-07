@@ -10,7 +10,9 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
     TickContext, err_ctx,
 };
-use crate::products::control::{ControlRenderRequest, ControlRenderTarget, ControlSampleFormat};
+use crate::products::control::{
+    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
+};
 use crate::resource::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
     RuntimeChannelSampleFormat,
@@ -30,6 +32,16 @@ pub struct OutputNode {
     channel_buffer_id: Option<RuntimeBufferId>,
     control_samples: Vec<u16>,
     def_view: Option<OutputDefView>,
+    /// Interpretation metadata for the frame currently in the buffer,
+    /// latched by the render that produced it.
+    ///
+    /// The published-frame read hands a client the buffer's bytes verbatim;
+    /// these two fields are what make those bytes mean something without a
+    /// second render. Both survive the test-pattern bypass on purpose — the
+    /// pattern repaints an extent the graph already established, so the
+    /// layout and the source product are still the frame's truth.
+    published_sample_layout: Option<ControlLayout>,
+    published_source_product: Option<ControlProduct>,
 }
 
 impl OutputNode {
@@ -39,6 +51,8 @@ impl OutputNode {
             channel_buffer_id: None,
             control_samples: Vec::new(),
             def_view: None,
+            published_sample_layout: None,
+            published_source_product: None,
         }
     }
 
@@ -141,6 +155,14 @@ impl NodeRuntime for OutputNode {
         self.channel_buffer_id
     }
 
+    fn runtime_output_sample_layout(&self) -> Option<&ControlLayout> {
+        self.published_sample_layout.as_ref()
+    }
+
+    fn runtime_output_source_product(&self) -> Option<ControlProduct> {
+        self.published_source_product
+    }
+
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         // Bypass, not overwrite: while the Debug slot is on, the graph resolve
         // is skipped entirely, so upstream demand from this root stops. Other
@@ -182,7 +204,9 @@ impl NodeRuntime for OutputNode {
             ControlSampleFormat::Unorm16,
             &mut self.control_samples,
         );
-        let _layout = ctx.render_control(control, &request, target)?;
+        let layout = ctx.render_control(control, &request, target)?;
+        self.published_sample_layout = Some(layout);
+        self.published_source_product = Some(control);
 
         self.publish_channel_buffer(ctx)
     }

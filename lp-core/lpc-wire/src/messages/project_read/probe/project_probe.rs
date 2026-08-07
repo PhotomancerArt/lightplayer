@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 
 use super::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
-    ControlProductProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
-    TimebaseProbeRequest, TimebaseProbeResult,
+    ControlProductProbeResult, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RenderProductProbeRequest, RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult,
 };
 
 /// Request-scoped diagnostic work attached to a project read.
@@ -15,6 +15,9 @@ use super::{
 pub enum ProjectProbeRequest {
     RenderProduct(RenderProductProbeRequest),
     ControlProduct(ControlProductProbeRequest),
+    /// The frames the outputs have ALREADY published — no render, unlike
+    /// [`Self::ControlProduct`]. See [`OutputFrameProbeRequest`].
+    OutputFrame(OutputFrameProbeRequest),
     BindingGraph(BindingGraphProbeRequest),
     Timebase(TimebaseProbeRequest),
     // Future: ShaderPixel(ShaderPixelProbeRequest),
@@ -31,6 +34,7 @@ pub enum ProjectProbeRequest {
 pub enum ProjectProbeResult {
     RenderProduct(RenderProductProbeResult),
     ControlProduct(ControlProductProbeResult),
+    OutputFrame(OutputFrameProbeResult),
     BindingGraph(BindingGraphProbeResult),
     Timebase(TimebaseProbeResult),
     // Future: ShaderPixel(ShaderPixelProbeResult),
@@ -49,16 +53,18 @@ pub enum ProjectProbeResult {
 /// result except the bulk bytes; [`ProjectProbeResultHeader::into_result`]
 /// reattaches the reassembled bytes to recover the full [`ProjectProbeResult`].
 ///
-/// Only the two bulk-bearing variants are representable here
-/// ([`RenderProductProbeResult::Texture`] and
-/// [`ControlProductProbeResult::Preview`]); every other probe result is small
-/// and always travels whole in `ProjectReadProbeEvent::Result`.
+/// Only the bulk-bearing variants are representable here
+/// ([`RenderProductProbeResult::Texture`],
+/// [`ControlProductProbeResult::Preview`], and every
+/// [`OutputFrameProbeResult`]); the remaining probe results are small and
+/// always travel whole in `ProjectReadProbeEvent::Result`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectProbeResultHeader {
     RenderProduct(super::RenderProductProbeResultHeader),
     ControlProduct(super::ControlProductProbeResultHeader),
+    OutputFrame(super::OutputFrameProbeResultHeader),
 }
 
 impl ProjectProbeResult {
@@ -82,6 +88,12 @@ impl ProjectProbeResult {
                 }
                 Err(result) => Err(Self::ControlProduct(result)),
             },
+            // Always splittable: an output frame is nothing but bulk samples
+            // plus its interpretation metadata.
+            Self::OutputFrame(result) => {
+                let (header, bytes) = result.into_chunked_parts();
+                Ok((ProjectProbeResultHeader::OutputFrame(header), bytes))
+            }
             Self::BindingGraph(_) | Self::Timebase(_) => Err(self),
         }
     }
@@ -98,6 +110,7 @@ impl ProjectProbeResultHeader {
             Self::ControlProduct(header) => {
                 ProjectProbeResult::ControlProduct(header.into_result(bytes))
             }
+            Self::OutputFrame(header) => ProjectProbeResult::OutputFrame(header.into_result(bytes)),
         }
     }
 }

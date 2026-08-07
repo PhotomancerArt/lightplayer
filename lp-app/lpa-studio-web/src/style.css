@@ -361,37 +361,9 @@ label:has(> input:not(:disabled)) {
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
 }
 
-/* Per-device console (D42), card mode: the ambient one-line strip at the
-   card's bottom edge (clicking jumps to the Console tab; the strip hides
-   while that tab is active) and the tab's read-only line list. */
-
-.ux-console-strip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 26px;
-    padding: 5px 10px;
-    border: 0;
-    border-top: 1px solid var(--studio-color-border);
-    background: var(--studio-color-terminal);
-    cursor: pointer;
-}
-
-.ux-console-strip-line {
-    flex: 1;
-    overflow: hidden;
-    font-family: var(--studio-font-mono);
-    font-size: 10.5px;
-    color: var(--studio-color-text-dim);
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.ux-console-strip:hover .ux-console-strip-line {
-    color: var(--studio-color-text);
-}
+/* Per-device console (D42), the Console tab's read-only line list —
+   the ambient strip and the pane's permanent region retired at G1b
+   (ruling 7): the console is the tab, in both modes. */
 
 .ux-console-lines {
     display: grid;
@@ -418,40 +390,6 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-console-lines > .ux-console-line-error {
-    color: var(--studio-status-error-text);
-}
-
-/* Pane mode (D43, round 3.5): the console is a permanent expanded
-   bottom region — a normal console; the tab and strip are gone. */
-
-.ux-console-region {
-    flex: none;
-    height: 200px;
-    padding: 8px 12px;
-    overflow-y: auto;
-    font-family: var(--studio-font-mono);
-    font-size: 11px;
-    background: var(--studio-color-terminal);
-    border-top: 1px solid var(--studio-color-border);
-}
-
-.ux-console-region > div {
-    overflow: hidden;
-    padding: 1.5px 0;
-    color: var(--studio-color-text-muted);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.ux-console-region > .ux-console-line-dim {
-    color: var(--studio-color-text-dim);
-}
-
-.ux-console-region > .ux-console-line-warn {
-    color: var(--studio-status-warning-text);
-}
-
-.ux-console-region > .ux-console-line-error {
     color: var(--studio-status-error-text);
 }
 
@@ -524,6 +462,204 @@ label:has(> input:not(:disabled)) {
 @keyframes ux-card-op-sweep {
     0% { left: -35%; }
     100% { left: 100%; }
+}
+
+/* ---- the device card's ▶ play tab (honest-device preview P3) ----------
+   The converged spike (`spikes/device-card-live-fixture/`, section 1): a
+   contained fixture view — NEVER letterboxed or cropped, which is what the
+   retired hero strip did — with a liveness pill inside it and a meta row
+   beneath. The G2 ruling that killed the strip was about honesty, so every
+   treatment here says where the picture came from and how old it is. */
+.ux-play-frame {
+    position: relative;
+    width: 100%;
+    height: 150px;
+    overflow: hidden;
+    border-radius: 7px;
+    /* Near-black, deliberately DARKER than the card: lamps are emissive,
+       and the field they sit in reads as "off" only against black. */
+    background: #07080a;
+    border: 1px solid var(--studio-color-border);
+}
+
+/* A frame with a display layout wears the LAYOUT's aspect ratio
+   (`--play-aspect`, clamped core-side) and the card grows to fit — the
+   picture is never squished into a fixed box (G1b, 2026-08-05). The
+   absolute size is capped by a MATCHED height/width pair (both derived
+   from the same 280px budget and the same ratio), so the cap letterboxes
+   by centering instead of re-squishing — an uncapped 100%-width frame
+   hit viewport scale in wide containers. */
+.ux-play-frame-fit {
+    height: auto;
+    aspect-ratio: var(--play-aspect, 1.5);
+    max-height: 280px;
+    max-width: calc(280px * var(--play-aspect, 1.5));
+    margin-inline: auto;
+}
+
+/* Offline / not-responding: the last frame is still the truth about what
+   the board was doing, so it stays — desaturated and dimmed, the card
+   grammar's "last known, not current". */
+.ux-play-frame-dim {
+    filter: saturate(0.45) brightness(0.55);
+}
+
+/* The lamp field is inset so an edge lamp is not clipped by the frame. */
+.ux-play-lamps {
+    position: absolute;
+    inset: 5%;
+}
+
+/* Liveness pill, top-right INSIDE the view: it belongs to the picture, not
+   to the card, because what it qualifies is the picture's age. */
+.ux-play-pill {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 6px;
+    border: 1px solid var(--studio-color-border);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--studio-color-terminal) 78%, transparent);
+    font-family: var(--studio-font-mono);
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.ux-play-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentcolor;
+    flex: none;
+}
+
+/* Calm green while frames keep arriving — the dot's slow blink is the only
+   motion, and it is what tells a still pattern apart from a frozen one. */
+.ux-play-pill-live {
+    color: var(--studio-status-good-text);
+}
+
+.ux-play-pill-live .ux-play-dot {
+    animation: ux-play-blink 2s ease-in-out infinite;
+}
+
+/* Amber only after the stale threshold (5 s): a device hiccup is not news. */
+.ux-play-pill-stale {
+    color: var(--studio-status-attention-text);
+}
+
+.ux-play-pill-offline {
+    color: var(--studio-status-neutral-text);
+}
+
+/* Violet = the sim's own family: a re-simulated picture must never wear the
+   green a device's frames earn. */
+.ux-play-pill-sim {
+    color: var(--studio-status-bound-text);
+}
+
+@keyframes ux-play-blink {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-play-pill-live .ux-play-dot {
+        animation: none;
+    }
+}
+
+/* The offline veil: says outright that this is not now. */
+.ux-play-veil {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    align-content: end;
+    justify-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    background: rgba(7, 8, 10, 0.25);
+    color: var(--studio-color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+/* The remembered board's name in the gone device's empty box (G1b
+   ruling 10): identity, said quietly — the Reconnect button under it is
+   the emphasis. */
+.ux-play-board {
+    margin: 0;
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+}
+
+/* No frame yet: an empty frame with a sentence, never a fake picture. */
+.ux-play-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    color: var(--studio-color-text-dim);
+    font-size: 11.5px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.ux-play-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--studio-color-text-dim);
+}
+
+.ux-play-spring {
+    flex: 1;
+}
+
+.ux-play-swatch {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    flex: none;
+}
+
+.ux-play-project {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.ux-play-project-name {
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ux-play-fps {
+    flex: none;
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+}
+
+.ux-play-fps-stale {
+    color: var(--studio-status-attention-text);
 }
 
 /* Safe-mode callout: the device booted with the recovery output clamp.

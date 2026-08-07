@@ -130,6 +130,9 @@ fn bound_card() -> UiDeviceCard {
         safe_clamp: None,
         sim: false,
         console_tail: Vec::new(),
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         ui: Default::default(),
     }
 }

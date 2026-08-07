@@ -329,6 +329,9 @@ mod tests {
 
     fn live_card(session_key: &str, uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
         UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: Some(session_key.to_string()),
             uid: uid.map(str::to_string),
