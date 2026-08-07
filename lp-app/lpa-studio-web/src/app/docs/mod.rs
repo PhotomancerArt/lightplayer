@@ -57,9 +57,12 @@ pub struct DocPage {
 pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "guide",
-        title: "What is LightPlayer?",
+        title: "Welcome",
         markdown: include_str!("../../../../../docs/user-guide/README.md"),
-        sims: &[],
+        sims: &[DocsSimSpec {
+            name: "main",
+            example_id: "examples/plasma-duo",
+        }],
     },
     DocPage {
         slug: "what-is-a-shader",
