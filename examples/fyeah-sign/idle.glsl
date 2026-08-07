@@ -5,39 +5,14 @@ layout(binding = 2) uniform float zoomPhase;
 layout(binding = 3) uniform float driftPhase;
 layout(binding = 4) uniform float bandPhase;
 layout(binding = 5) uniform float breathPhase;
-layout(binding = 6) uniform float paletteCycle;
+// The three moods are authored palettes now (idle.json's `palette` slot
+// cycles them), so the strip below replaces the cosine trio, the bare-float
+// switcher, and the hand-rolled crossfade this shader used to carry. `u`
+// may run past [0,1) — the strip samples wrap=repeat.
+layout(binding = 6) uniform sampler2D palette;
 layout(binding = 7) uniform float glow;
 
 const float TAU = 6.2831853;
-
-vec3 paletteRainbow(float t) {
-    float r = 0.33333;
-    vec3 v = abs(mod(fract(1.0 - t) + vec3(0.0, 1.0, 2.0) * r, 1.0) * 2.0 - 1.0);
-    return v * v * (3.0 - 2.0 * v);
-}
-
-vec3 paletteCool(float t) {
-    vec3 a = vec3(0.46, 0.50, 0.58);
-    vec3 b = vec3(0.38, 0.36, 0.32);
-    vec3 c = vec3(1.0, 1.0, 1.0);
-    vec3 d = vec3(0.18, 0.30, 0.44);
-    return clamp(a + b * cos(6.2831853 * (c * t + d)), 0.0, 1.0);
-}
-
-vec3 paletteWarm(float t) {
-    vec3 a = vec3(0.50, 0.42, 0.34);
-    vec3 b = vec3(0.42, 0.30, 0.24);
-    vec3 c = vec3(1.0, 1.0, 1.0);
-    vec3 d = vec3(0.00, 0.10, 0.24);
-    return clamp(a + b * cos(6.2831853 * (c * t + d)), 0.0, 1.0);
-}
-
-vec3 applyPalette(float t, float palette) {
-    float p = floor(palette + 0.001);
-    if (p < 0.5) return paletteCool(t);
-    if (p < 1.5) return paletteRainbow(t);
-    return paletteWarm(t);
-}
 
 vec2 movingNoise(vec2 coord, float t) {
     vec2 gradient;
@@ -56,10 +31,9 @@ vec2 movingNoise(vec2 coord, float t) {
 
 vec4 render(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
-    // Front-panel knob: `glow` scales the rainbow highlight (default 0.5
-    // reproduces the original). The old `speed` multiplier is gone — the
-    // wrapped terms carry their own periods now, and the scrolled noise
-    // rides `time`.
+    // Front-panel knob: `glow` scales the highlight (default 0.5 reproduces
+    // the original). The old `speed` multiplier is gone — the wrapped terms
+    // carry their own periods now, and the scrolled noise rides `time`.
     vec2 uv = pos / outputSize;
     vec2 virtCoord = pos * REF_SIZE / outputSize;
     vec2 center = REF_SIZE * 0.5;
@@ -73,16 +47,9 @@ vec4 render(vec2 pos) {
     float bands = 0.5 + 0.5 * sin((uv.x + uv.y) * 7.0 + TAU * bandPhase + tv.x * 6.2831853);
     float breath = 0.72 + 0.18 * sin(TAU * breathPhase);
 
-    float palettePhase = paletteCycle * 3.0;
-    float palette = min(floor(palettePhase), 2.0);
-    float nextPalette = palette + 1.0;
-    if (nextPalette > 2.5) {
-        nextPalette = 0.0;
-    }
-    float blend = smoothstep(0.78, 1.0, palettePhase - palette);
-
-    vec3 color = mix(applyPalette(tv.x, palette), applyPalette(tv.x, nextPalette), blend);
+    vec3 color = texture(palette, vec2(tv.x, 0.0)).rgb;
     color *= mix(0.48, 1.0, bands) * tv.y * breath;
-    color += paletteRainbow(fract(tv.x + 0.20)) * smoothstep(0.88, 1.0, bands) * (0.32 * glow);
+    color += texture(palette, vec2(tv.x + 0.20, 0.0)).rgb
+        * smoothstep(0.88, 1.0, bands) * (0.32 * glow);
     return vec4(clamp(color, 0.0, 1.0), 1.0);
 }

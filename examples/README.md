@@ -14,8 +14,9 @@ survive a load → write round trip byte-for-byte
 
 ## In the Studio gallery
 
-Three are compiled into the app and listed in the gallery's *Examples*
-section — `fyeah-sign`, `plasma`, `meteor`. Their file lists live in
+Five are compiled into the app and listed in the gallery's *Examples*
+section — `fyeah-sign`, `plasma`, `meteor`, `plasma-duo`, `zook-dome`.
+Their file lists live in
 `lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
 (`include_bytes!` against this directory), so a change here reaches
 Studio only after a rebuild, and an already-seeded library keeps the copy
@@ -29,11 +30,14 @@ authored binding to a bus channel
 
 | Example | Publishes | Shows off |
 |---|---|---|
-| `fyeah-sign` | `glow`, `speed` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast. The Studio demo project. |
-| `plasma` | `speed`, `scale` | the smallest non-empty panel: one shader, two bound uniforms |
+| `fyeah-sign` | `glow`, `palette` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast, and an authored palette cycling three moods. The Studio demo project. |
+| `plasma` | `speed`, `scale`, `palette` | the smallest non-empty panel: one shader, three bound uniforms. Also the `what-is-a-shader` article's live figure. |
+| `plasma-duo` | `speed`, `scale`, `palette` | one shader and one palette channel feeding two fixtures (disc + grid) with separate outputs |
+| `zook-dome` | `speed` | a real 1500-LED dome across five output channels |
 | `meteor` | `decay` | a compute/render pair — `sim` integrates meteor heads into a persistent map, `render` draws their tails over a `node:` binding |
 | `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
-| `button`, `button-playlist`, `button-sign`, `fyeah-button` | — | input nodes and playlist triggering |
+| `button` | — | input nodes and playlist triggering |
+| `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |
 | `events` | — | compute shaders publishing control messages |
 | `fluid` | — | the fluid solver driven by compute-shader emitters |
 | `fiber-headband`, `rocaille` | — | real fixtures with real 2D mappings |
