@@ -2,8 +2,9 @@
 
 mod edge_harness;
 
-use axum::http::{StatusCode, header};
-use edge_harness::{TestServer, header_value};
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use edge_harness::{Session, TestServer, header_value};
 use lpc_cloud_api::response::UserInfo;
 use lpc_cloud_api::{Actor, CloudRequest, CloudResponse};
 
@@ -91,10 +92,122 @@ async fn signing_in_twice_is_one_account() {
     assert_eq!(actor(&server, &first).await, actor(&server, &second).await);
 }
 
+/// No provider profile exists behind the dev login, so it falls back to the
+/// same thing the real login falls back to when Google reports no name — the
+/// email local-part — written through the shared derivation
+/// (`CloudUser::recompute_display_name`) rather than set directly.
+#[tokio::test]
+async fn a_first_login_seeds_the_given_name_from_the_email_local_part() {
+    let server = TestServer::new();
+    let session = server.sign_in("yona@example.com").await;
+
+    let reply = server.call(CloudRequest::GetMe, Some(&session)).await;
+    let Ok(CloudResponse::MeInfo(info)) = reply.result else {
+        panic!("expected MeInfo, got {:?}", reply.result);
+    };
+    assert_eq!(info.given_name.as_deref(), Some("yona"));
+    assert_eq!(info.family_name, None);
+    assert_eq!(info.display_name, "yona");
+}
+
+/// `?given=`/`?family=` exist only so a test can exercise the capture path
+/// without a stub Google — a real login never carries them.
+#[tokio::test]
+async fn given_and_family_query_params_seed_a_new_account() {
+    let server = TestServer::new();
+    let response = server
+        .get("/auth/dev?email=yona@example.com&given=Yona&family=Appletree")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let session = session_from(&response);
+
+    let reply = server.call(CloudRequest::GetMe, Some(&session)).await;
+    let Ok(CloudResponse::MeInfo(info)) = reply.result else {
+        panic!("expected MeInfo, got {:?}", reply.result);
+    };
+    assert_eq!(info.given_name.as_deref(), Some("Yona"));
+    assert_eq!(info.family_name.as_deref(), Some("Appletree"));
+    assert_eq!(info.display_name, "Yona Appletree");
+}
+
+/// `?next=` lands the login where the client asked — the same contract
+/// (and the same guard) as the Google flow, so the sign-in and
+/// switch-account links return the user to the page they were on.
+#[tokio::test]
+async fn next_lands_the_login_on_the_requested_page() {
+    let server = TestServer::new();
+    let response = server
+        .get("/auth/dev?email=yona@example.com&next=%2Faccount")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&response, header::LOCATION).as_deref(),
+        Some("/account")
+    );
+}
+
+/// An absolute or protocol-relative `next` is an open-redirect attempt;
+/// the guard folds it to `/`, exactly as the Google callback would.
+#[tokio::test]
+async fn a_foreign_next_falls_back_to_the_root() {
+    let server = TestServer::new();
+    let response = server
+        .get("/auth/dev?email=yona@example.com&next=https%3A%2F%2Fevil.example")
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_value(&response, header::LOCATION).as_deref(),
+        Some("/")
+    );
+}
+
+/// The edge captures the request's `User-Agent`, same as the Google callback
+/// does — this is the dev login's half of that.
+#[tokio::test]
+async fn the_user_agent_lands_on_the_session_row() {
+    let server = TestServer::new();
+    let response = server
+        .request(
+            Request::builder()
+                .uri("/auth/dev?email=yona@example.com")
+                .header(header::USER_AGENT, "DevBrowser/9.0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let session = session_from(&response);
+
+    let reply = server
+        .call(CloudRequest::ListSessions, Some(&session))
+        .await;
+    let Ok(CloudResponse::SessionList(list)) = reply.result else {
+        panic!("expected SessionList, got {:?}", reply.result);
+    };
+    assert_eq!(list.sessions.len(), 1);
+    assert_eq!(
+        list.sessions[0].user_agent.as_deref(),
+        Some("DevBrowser/9.0")
+    );
+}
+
 async fn actor(server: &TestServer, session: &edge_harness::Session) -> Actor {
     let reply = server.call(CloudRequest::WhoAmI, Some(session)).await;
     match reply.result {
         Ok(CloudResponse::UserInfo(UserInfo { actor })) => actor,
         other => panic!("expected UserInfo, got {other:?}"),
+    }
+}
+
+/// Pull a `Session` out of a redirect's `Set-Cookie`, for the tests above
+/// that drive `/auth/dev` with a hand-built request rather than
+/// `TestServer::sign_in`.
+fn session_from(response: &axum::http::Response<Body>) -> Session {
+    let set_cookie = header_value(response, header::SET_COOKIE)
+        .expect("a session cookie")
+        .to_string();
+    Session {
+        cookie: set_cookie.split(';').next().unwrap().to_string(),
+        set_cookie,
     }
 }

@@ -100,9 +100,11 @@ impl AppState {
         blobs: AnyBlobStore,
         site: StaticSite,
     ) -> Self {
+        let login_providers = config.login_providers();
         Self {
             core: Arc::new(Mutex::new(ServiceCore {
-                service: CloudService::new(meta, SystemClock, SecureMint),
+                service: CloudService::new(meta, SystemClock, SecureMint)
+                    .with_login_providers(login_providers),
                 blobs,
             })),
             site: Arc::new(site),
