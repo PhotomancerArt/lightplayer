@@ -29,11 +29,12 @@ authored binding to a bus channel
 
 | Example | Publishes | Shows off |
 |---|---|---|
-| `fyeah-sign` | `glow`, `speed` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast. The Studio demo project. |
+| `fyeah-sign` | `glow`, `palette` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast, and an authored palette cycling three moods. The Studio demo project. |
 | `plasma` | `speed`, `scale` | the smallest non-empty panel: one shader, two bound uniforms |
 | `meteor` | `decay` | a compute/render pair — `sim` integrates meteor heads into a persistent map, `render` draws their tails over a `node:` binding |
 | `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
-| `button`, `button-playlist`, `button-sign`, `fyeah-button` | — | input nodes and playlist triggering |
+| `button` | — | input nodes and playlist triggering |
+| `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |
 | `events` | — | compute shaders publishing control messages |
 | `fluid` | — | the fluid solver driven by compute-shader emitters |
 | `fiber-headband`, `rocaille` | — | real fixtures with real 2D mappings |
