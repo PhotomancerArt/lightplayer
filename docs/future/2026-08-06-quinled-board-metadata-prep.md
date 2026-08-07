@@ -273,18 +273,66 @@ entity in the project model:
   transmit; deassert only after the debounce with no wire transmission in
   flight — which matters here because the pusher runs on core 1 and can have a
   wave queued.
-- **Trigger**: global brightness (`f32 0–1`, post-gamma, since #317), not an
-  all-black pixel scan. All-black is a legitimate render state — a shader
-  fading to black would otherwise chatter the rail mid-animation, and a scan is
-  O(total LEDs) per frame on a chip where we count microseconds. **Open
-  question**: whether the output provider can currently see effective
-  brightness, or whether a small `is_off` flag needs plumbing down.
+- **Trigger — open question now resolved: use the all-black scan.**
+  `Esp32OutputProvider::write()` takes `data: &[u16]` that is already
+  post-gamma, post-brightness, post-power-limit (`shader sample → gamma →
+  brightness → power limit → DisplayPipeline`). **The provider cannot see
+  brightness at all**; an `is_off` flag would have to be plumbed down. It does
+  not need to be, for two reasons:
+  - Brightness is applied *upstream*, so **brightness 0 ⇒ all-black data**.
+    All-black is a strict superset of intent-off, and the trailing debounce is
+    what separates them: a shader's transient black never survives a
+    multi-second timer, and a genuine off always does.
+  - The cost objection does not hold with an **early exit**. A scan that stops
+    at the first non-zero byte is ~free on the common (lit) frame; only fully
+    black frames pay the full ~4.5 KB walk at dome scale, and those are exactly
+    the frames we are throttling anyway.
+
+  The residual failure mode is not incorrectness but *feel*: content that is
+  legitimately black for longer than the debounce cuts the rail, so coming back
+  costs `settle_ms` and, on a mechanical relay, an audible click. On the
+  dig2go's solid-state gate that is invisible. On a Dig-Quad Q1R driving a
+  user-supplied mechanical relay it argues for a longer debounce or an opt-out.
 - **Boot**: rail off at boot. On the dig2go this is also the strap-safe state
   (GPIO12 = MTDI must be low at boot or VDD_SDIO selects 1.8 V and the board
   will not boot), so the two requirements happen to agree — but pin-mux
   defaults must never idle it high.
 - **Polarity is metadata, not an assumption**: the Dig-Quad's Q1R triggers a
   user-supplied external relay board, so active level will vary by install.
+
+### Prior art — MIT-era WLED, for calibration
+
+> WLED — MIT License, Copyright (c) 2016 Christian Schwinne
+> Read at the pinned MIT commit `44e28f96`; behaviour described, not ported.
+
+Its `handleIO()` is the whole mechanism, and it independently lands on the same
+shape:
+
+| concern | what it does |
+|---|---|
+| trigger | the strip's **brightness**, not a pixel scan (it has the value to hand; we do not) |
+| turn-on | **immediate** on the off→on edge — energise, then paint |
+| settle | **none explicit** — it relies on call ordering, `handleIO()` running before the painting pass in the same loop |
+| turn-off | **600 ms trailing debounce**, refreshed while lit |
+| in-flight guard | also requires the strip no longer needs an update before cutting |
+| polarity | reversible, plus an **open-drain** option — both config, not code |
+| boot | starts in off-mode unless configured to turn on at boot |
+
+Two places we should deliberately differ. Their implicit settle is a
+single-threaded-loop artifact: **our pusher runs on core 1 and can have a wave
+queued**, so ordering alone guarantees nothing and we need an explicit
+`settle_ms` gate plus a drain check before deassert. And 600 ms is tuned for a
+responsive UI toggle; ours is a power-saving heuristic driven by *content*, so
+it wants seconds, not milliseconds.
+
+### The hazard neither sketch names: park the data line
+
+On deassert, drive the data pin **low** before the rail drops, and hold it low
+through the settle window on the way back up. A data line left high into an
+unpowered WS281x phantom-powers the first controller through its input
+protection diode — the failure is garbage output at best and a latched-up
+pixel at worst. This is the one part of the sequence that is a hardware-safety
+requirement rather than a polish item.
 
 ## Reading WLED safely
 
