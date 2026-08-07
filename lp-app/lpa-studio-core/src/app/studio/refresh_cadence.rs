@@ -45,6 +45,32 @@ pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 /// `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
 pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
 
+/// How many passive runs in a row an arriving-command stream may cancel
+/// before the next one is promoted to foreground standing and allowed to
+/// finish.
+///
+/// **Preemption is priority, not starvation.** The pull loop's cancel signal
+/// exists so a single user gesture never waits behind a background read —
+/// a latency guarantee for one action. A LIVE CONTROL is not one action: a
+/// fader/knob/tape drag is a continuous stream of foreground panel writes,
+/// and under the plain rule every one of them cancels the in-flight pull at
+/// its first frame boundary. The pull then never completes, never stamps
+/// the pacing gate, and the preview freezes for the whole drag — measured
+/// as zero canvas paints in the browser and 40 reads sent / 0 completed at
+/// the actor (`a_drag_of_foreground_actions_does_not_starve_the_passive_pull`).
+///
+/// One is the smallest value that bounds the starvation: a gesture stream
+/// cancels a pull, the next pull is protected and completes, so a drag
+/// refreshes the preview at half the tick rate instead of never — on the
+/// simulator that is ~15 pulls/s, which is the rate it already achieves at
+/// rest, so dragging no longer changes how live the preview looks. The cost
+/// is bounded and symmetric: a gesture arriving during a promoted run waits
+/// for that ONE pull to finish (~35 ms on the sim, one frame read on a
+/// device), and only every other run. Recovery-class work — device reset,
+/// disconnect — still preempts a promoted run, because it owns the
+/// connection.
+pub const PASSIVE_PREEMPTIONS_BEFORE_PROMOTION: u8 = 1;
+
 /// Slack applied when deciding whether a passive pull is due: the UI timer
 /// truncates the published delay to whole milliseconds, so a tick can fire
 /// a hair "early". Anything within this window counts as due instead of
