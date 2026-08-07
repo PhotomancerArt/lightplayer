@@ -47,7 +47,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 
 use crate::app_state::AppState;
-use crate::auth::session_cookie::{clear_session_cookie, session_token, set_session_cookie};
+use crate::auth::session_cookie::{
+    captured_user_agent, clear_session_cookie, session_token, set_session_cookie,
+};
 
 /// The cookie holding the `state` we expect back from Google.
 pub const OAUTH_STATE_COOKIE: &str = "lp_oauth_state";
@@ -235,16 +237,33 @@ pub async fn get_google_callback(
         .name
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| email.split('@').next().unwrap_or(email).to_string());
+    // Captured for `upsert_user` — what happens with them (seeded once at
+    // creation, never touched by a returning login) is that call's own
+    // Q4/Q5 ruling, not this edge's.
+    let given_name = profile.given_name.filter(|name| !name.trim().is_empty());
+    let family_name = profile.family_name.filter(|name| !name.trim().is_empty());
+    let picture = profile.picture.filter(|url| !url.trim().is_empty());
     let google_sub = profile.sub;
     let email = email.to_string();
     let ttl = config.session_ttl_seconds;
+    let user_agent = captured_user_agent(&headers);
 
     let token = state
         .with_service(move |core| {
             // This one call mints-or-finds the account *and* resolves every
-            // pending membership for the address (Q4).
-            let user = core.service.upsert_user(&google_sub, &email, &display_name);
-            core.service.open_session(user.uid, ttl)
+            // pending membership for the address (Q4). "google" (P2's
+            // provider column) — the only connection this handler ever
+            // authenticates through.
+            let user = core.service.upsert_user(
+                &google_sub,
+                &email,
+                &display_name,
+                "google",
+                given_name.as_deref(),
+                family_name.as_deref(),
+                picture.as_deref(),
+            );
+            core.service.open_session(user.uid, ttl, user_agent)
         })
         .await;
 
@@ -298,12 +317,20 @@ struct TokenResponse {
 }
 
 /// The subset of OIDC userinfo that identity is built from.
+///
+/// `given_name`/`family_name`/`picture` are Google's own field names for the
+/// `profile` scope (already requested, `:63`) — present whenever the account
+/// has them set, absent (never an error) otherwise, which `serde`'s default
+/// handling for `Option<T>` covers with no `#[serde(default)]` needed.
 #[derive(Debug, Deserialize)]
 struct ProfileResponse {
     sub: String,
     email: Option<String>,
     email_verified: Option<bool>,
     name: Option<String>,
+    given_name: Option<String>,
+    family_name: Option<String>,
+    picture: Option<String>,
 }
 
 async fn exchange_code(

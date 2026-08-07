@@ -1,6 +1,7 @@
 pub mod app;
 pub mod base;
 mod clipboard;
+pub mod cloud;
 pub mod core;
 mod device_events_io;
 pub mod exploration;
