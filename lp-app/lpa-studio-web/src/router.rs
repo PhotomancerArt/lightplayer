@@ -18,6 +18,8 @@
 //! /devices              the devices section
 //! /projects             the projects library section
 //! /explore              the explore section (placeholder until modpacks)
+//! /account              the signed-in account's profile page (identity,
+//!                       account, sessions); signed out it asks you in
 //! /sim/<project-key>    the editor as a lens on THE sim session running
 //!                       that project (slug — the user-facing identifier —
 //!                       or a `prj_…` uid as fallback). A sim runtime's
@@ -143,6 +145,11 @@ pub(crate) enum StudioRoute {
     /// The explore section (`/explore`) — community/example content.
     /// Placeholder until modpack scaffolding gives it real material.
     Explore,
+    /// The account's own profile page (`/account`): identity, account
+    /// facts, and the sessions open on it. Lights no nav tab — it is
+    /// reached from the identity dropdown, not the tab row — and renders
+    /// an invitation to sign in rather than a 404 when nobody is.
+    Account,
     /// The editor as a lens on THE sim session running this project. The
     /// key is the slug (preferred) or a `prj_…` uid (machine-stable
     /// fallback). Reload respawns the sim and loads the project.
@@ -247,6 +254,7 @@ impl StudioRoute {
             Some("devices") if segments.next().is_none() => StudioRoute::Devices,
             Some("projects") if segments.next().is_none() => StudioRoute::Projects,
             Some("explore") if segments.next().is_none() => StudioRoute::Explore,
+            Some("account") if segments.next().is_none() => StudioRoute::Account,
             Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
             Some("boards") => {
                 let rest: Vec<&str> = segments.collect();
@@ -311,6 +319,7 @@ impl StudioRoute {
             StudioRoute::Devices => "/devices".to_string(),
             StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
+            StudioRoute::Account => "/account".to_string(),
             StudioRoute::Sim { key, play: false } => format!("/sim/{key}"),
             StudioRoute::Sim { key, play: true } => format!("/sim/{key}/play"),
             StudioRoute::Device { uid, play: false } => format!("/device/{uid}"),
@@ -852,6 +861,7 @@ mod tests {
             StudioRoute::Devices,
             StudioRoute::Projects,
             StudioRoute::Explore,
+            StudioRoute::Account,
             StudioRoute::Sim {
                 key: "2026-07-09-1421-basic".to_string(),
                 play: false,
@@ -984,6 +994,7 @@ mod tests {
             "#/mapping/extra",
             "#/home/extra",
             "#/explore/extra",
+            "#/account/extra",
         ] {
             assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
