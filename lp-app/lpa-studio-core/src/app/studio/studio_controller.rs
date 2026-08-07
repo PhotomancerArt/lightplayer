@@ -991,11 +991,16 @@ impl StudioController {
     /// heartbeats, and it declares [`crate::DEVICE_CARD_FEED_CLASS`] — it
     /// preempts nothing and is cancelled at the next frame boundary when a
     /// user gesture arrives.
+    ///
+    /// Returns whether a due feed was skipped or cut short by cancellation,
+    /// so the actor can count this run toward its starvation floor (a live
+    /// control's write stream must not freeze a card's ▶ tab either).
     pub async fn run_due_card_feeds<MakeTimer, Timer, Cancel>(
         &mut self,
         make_timer: MakeTimer,
         cancel: &Cancel,
-    ) where
+    ) -> bool
+    where
         MakeTimer: FnMut(Duration) -> Timer + Clone,
         Timer: Future<Output = ()>,
         Cancel: CancelSignal + ?Sized,
@@ -1010,12 +1015,20 @@ impl StudioController {
             })
             .map(crate::RuntimeSession::id)
             .collect();
+        // Only a feed that was actually DUE can be starved: with no card
+        // feeding, a cancel flag flipped by the tick's watcher says nothing
+        // about this lane, and must not count toward the actor's floor.
+        let mut preempted = false;
         for id in due {
             if cancel.is_cancelled() {
-                return;
+                preempted = true;
+                break;
             }
             self.run_card_feed(id, make_timer.clone(), cancel).await;
+            // A read cut short mid-frame leaves the flag set.
+            preempted = cancel.is_cancelled();
         }
+        preempted
     }
 
     /// One session's feed pull: acquire the project handle, read the
