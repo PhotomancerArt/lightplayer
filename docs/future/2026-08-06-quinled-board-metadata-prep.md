@@ -155,6 +155,74 @@ a conservative floor or a modelling decision. Left alone pending that call.
   dig2go, Dig-Next-2, An-Penta-Plus/-Deca/-Mini. Same Web-Serial-from-the-browser
   shape as our provisioning flow.
 
+## dig2go — probed on the desk 2026-08-06
+
+First QuinLED board in hand. `hardware list --probe` and `espflash board-info`
+on `/dev/cu.wchusbserial110`:
+
+| fact | value |
+|---|---|
+| chip | **ESP32-D0WD-V3, revision v3.1** (esptool names the package — so it is a WROOM-class part, **not** a PICO) |
+| cores / clock | dual core + LP core, 240 MHz, 40 MHz crystal |
+| flash | **4 MB** |
+| MAC (efuse) | `d8:bc:38:e7:78:24` |
+| USB bridge | WCH CH34x, **`1a86:7523`** — enumerates fine on macOS (not the CH340K problem) |
+
+Notable: esptool resolving the exact package means **it will settle the
+Dig-Next-2 PICO-V3-02 inference outright** when that board arrives.
+
+Pins agree across the [pinout guide](https://quinled.info/quinled-dig2go-pinout-guide/)
+and `platformio_override.ini`: LED data **GPIO16**, touch button **GPIO0**,
+IR receiver **GPIO5**, ICS-43434 mic I²S **SD 19 / WS 4 / SCK 18**, free
+**GPIO21/22** (or I²C), **GPIO23**, **GPIO25** (ADC). UART0 is untouched — no
+collision. Headers expose "Switched 5v, 3v3, 2x GND".
+
+### ⚠️ GPIO12 is an LED power relay — and a flash-voltage strap
+
+The pinout calls GPIO12 the "LED Relay enable pin"; the spec page describes a
+"Custom 'relay' circuit which cuts off power to the LEDs completely when turned
+off in WLED". So **GPIO12 gates the LED supply**, and the headers' 5 V is
+"switched" by it too.
+
+Two consequences:
+
+1. **Firmware must assert GPIO12 after boot or the board is dark.** Not a dim
+   strip — no power at all. Without knowing this, a first bring-up reads as a
+   driver bug.
+2. **GPIO12 is MTDI**, the flash-voltage strap: it must be **low at boot**
+   (high selects 1.8 V VDD_SDIO and the board will not boot) and only driven
+   high afterwards. Pin-mux defaults must never idle it high. We already
+   reason about this strap — see the `default_esp32v3_manifest_offers_io13_spare_terminal`
+   comment in `default_manifests.rs`, which corrects an earlier entry that
+   confused IO13 with "IO12/relay".
+
+**We have no concept for this.** `HwCapability` is only `gpio-output`,
+`gpio-input`, `ws281x-output`, `rmt`, `radio` — nothing expresses "assert this
+pin to enable an output rail". This is the same shape as the Dig-Next-2's three
+software-switchable fused power outputs (GPIO20/21/22), so it is worth
+designing once as a general **switched output rail / power gate**, not as a
+dig2go special case. It is also a genuine product feature: cutting LED power
+when black is a real thing users want.
+
+### Support cost
+
+Free already: `HardwareTarget::Esp32` exists; the **`esp32v3-4mb` build def
+targets exactly this flash size** (factory 3 MB @ 0x10000 + lpfs 960 KB, "no
+slack"), so `flash_mb 4 >= flashSizeMb 4` — **no new firmware build needed**;
+one LED output makes the wire pool trivial; `usb_bridge` covers CH340
+(though `1a86:7523` is shared by CH340G and CH340C — read the silkscreen).
+
+To write: the two profile files plus catalog registration, and the power-gate
+mechanism above.
+
+Not present vs WLED: audio-reactive (the ICS-43434 mic) and IR remote. Worth
+being honest that the dig2go's whole pitch is a plug-and-play sound-reactive
+box, so a LightPlayer dig2go is a lesser product than a WLED dig2go until
+audio input exists.
+
+Reversible: `install.quinled.info` ships a dig2go image, so flashing ours over
+the factory WLED can be undone.
+
 ## Authoring readiness
 
 | board | can author now | blocked on |
