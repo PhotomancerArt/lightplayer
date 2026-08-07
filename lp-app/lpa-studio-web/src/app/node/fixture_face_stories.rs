@@ -8,8 +8,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_face_limiting, fixture_face_within_budget, fixture_node_view,
-    fixture_node_view_with_face, fyeah_presentable_doc, map2d_fixture_face,
+    fixture_face_bound_output, fixture_face_limiting, fixture_face_within_budget,
+    fixture_node_view, fixture_node_view_with_face, fyeah_presentable_doc, map2d_fixture_face,
     map2d_fixture_face_editing,
 };
 use crate::app::node::map_view::MapViewOptions;
@@ -73,6 +73,35 @@ fn power_limiting() -> Element {
         FixtureCardCanvas {
             NodePane {
                 view: fixture_node_view_with_face(fixture_face_limiting()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The output's own header: name, the violet publish chip when the control output is wired to a bus channel, and the 'i' detail affordance. The custom lamp hero replaced the boxed product pane, and this chrome came back with it — before, a fixture's output was the one produced product you could not inspect or see the link status of."
+)]
+fn output_header_bound() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            NodePane {
+                view: fixture_node_view_with_face(fixture_face_bound_output()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The output header's detail popover open: type info plus the Output aspect's routing rows (published channel, who reads it, revision) — the same popover every slot surface opens, reached from the hero's header."
+)]
+fn output_detail_open() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_bound_output(),
+                output_detail_initially_open: true,
                 on_action: move |_| {},
             }
         }
