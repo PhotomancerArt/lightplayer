@@ -223,6 +223,115 @@ audio input exists.
 Reversible: `install.quinled.info` ships a dig2go image, so flashing ours over
 the factory WLED can be undone.
 
+## Power rail control — design notes
+
+The dig2go's GPIO12 forces this question; the Dig-Next-2's three switched
+outputs and the Dig-Quad's Q1R relay trigger generalise it.
+
+**Hardware requirements**, all established from our own probing and the vendor
+pinouts (see the dig2go section above):
+
+- The gate pin must be **asserted for the outputs to work at all**. Un-asserted
+  reads as a dead board, not a dim one.
+- On the dig2go the gate is **GPIO12 = MTDI**, a flash-voltage strap: it must
+  be **low at boot** (high selects 1.8 V VDD_SDIO and the board will not boot).
+  Conveniently that is also the correct "rail off" state, but pin-mux defaults
+  must never idle it high.
+- **Polarity varies by install** — the Dig-Quad's Q1R drives a *user-supplied*
+  external relay board — so active level belongs in metadata, never in code.
+
+**Two electrical constraints** that any implementation has to respect,
+independent of how anyone else solved it:
+
+- **Energise, settle, then transmit.** Clocking WS281x data into an unpowered
+  strip phantom-powers the first controller through its data-pin protection
+  diode, producing garbage or a latch-up. The rail needs a settling period
+  before the first frame; pick a constant, measure it on the bench, and record
+  why.
+- **Never cut power with a frame in flight, and do not chatter.** Mechanical
+  relays have audible clicks and finite contact life, so the off transition
+  wants a debounce and a check that no wire transmission is outstanding — which
+  matters here because our pusher runs on core 1 and can have a wave queued.
+
+> Prior art exists in other firmware for this exact problem. If it is worth
+> consulting, use the pinned MIT-era checkout and the rules in
+> "Reading WLED safely" below — and prefer re-deriving to porting.
+
+### Proposed shape for us
+
+**Metadata plus driver, no model changes** — the power gate never becomes an
+entity in the project model:
+
+- **Manifest**: an optional board-level power-gate descriptor referencing a
+  `/gpio/N` address, with `active_level`, `open_drain`, `settle_ms`. Make it a
+  **list** even though only one entry is needed today — the Dig-Next-2 has
+  three independent switched rails, one per output channel, so each entry
+  should be able to name the channels it feeds. Reserve the GPIO so no driver
+  claims it as a wire. Not a new `HwCapability`: a capability says "this
+  resource can do X", this says "assert this or the outputs are dead."
+- **Driver**: the output provider owns the state machine — assert, settle,
+  transmit; deassert only after the debounce with no wire transmission in
+  flight — which matters here because the pusher runs on core 1 and can have a
+  wave queued.
+- **Trigger**: global brightness (`f32 0–1`, post-gamma, since #317), not an
+  all-black pixel scan. All-black is a legitimate render state — a shader
+  fading to black would otherwise chatter the rail mid-animation, and a scan is
+  O(total LEDs) per frame on a chip where we count microseconds. **Open
+  question**: whether the output provider can currently see effective
+  brightness, or whether a small `is_off` flag needs plumbing down.
+- **Boot**: rail off at boot. On the dig2go this is also the strap-safe state
+  (GPIO12 = MTDI must be low at boot or VDD_SDIO selects 1.8 V and the board
+  will not boot), so the two requirements happen to agree — but pin-mux
+  defaults must never idle it high.
+- **Polarity is metadata, not an assumption**: the Dig-Quad's Q1R triggers a
+  user-supplied external relay board, so active level will vary by install.
+
+## Reading WLED safely
+
+**WLED is EUPL-1.2-or-later, not MIT** — it relicensed. LightPlayer is
+`AGPL-3.0-or-later` (workspace `Cargo.toml`) plus a commercial licence.
+
+The compatibility picture:
+
+- EUPL-1.2 Article 5 (the compatibility clause) lets a derivative work built
+  from EUPL and another compatible-licensed work be distributed under that
+  compatible licence, and **AGPL v3 is on EUPL-1.2's Appendix list**. So on the
+  AGPL side alone, combining is permitted.
+- **The commercial half is where it breaks.** Dual licensing requires us to be
+  able to relicense the code we ship. EUPL is reciprocal and we do not hold the
+  copyright, so any WLED-derived material cannot go out under a proprietary
+  licence. Copyleft contaminates the commercial offering, not the AGPL one.
+
+This is exactly why the WLED-compat modpack was scoped EUPL-1.2 and kept
+separate — that decision is now load-bearing rather than tidy-minded.
+
+Working rule:
+
+- **Read the pinned MIT snapshot, not upstream `main`.**
+  `/Users/yona/dev/photomancer/oss/wled-mit`, detached at
+  `44e28f96e0af0c78cb1b902a45b6332dcacd10e0` (last commit before the relicence,
+  one past `v0.15.0-b6`). MIT permits use and quotation provided the copyright
+  notice travels with substantial portions — so **carry
+  "WLED — MIT License, Copyright (c) 2016 Christian Schwinne" wherever we quote
+  it.** Do not `git pull` that checkout forward; that would drag it into EUPL.
+- **Facts are fine regardless, and are not copyrightable**: GPIO numbers,
+  pinouts, wire and protocol formats, timing constants, observed behaviour,
+  config field semantics. Reading for interoperability is normal engineering.
+- **Never paste post-relicence (EUPL) WLED source into this tree** — not into
+  code, not into docs. Describe behaviour in our own words and cite the file.
+- ⚠️ **The MIT snapshot is two years behind.** Anything upstream fixed since
+  then is not in it. Do not go to current sources to fill the gap and port what
+  you find: note the *problem* it solves, then re-derive a solution as our own
+  engineering call with our own rationale.
+- **If we ever want post-relicence code**, it goes in the EUPL-1.2 modpack,
+  never in core.
+- Note the contrast: `intermittech/QuinLED-Firmware` (the source of the
+  `platformio_override.ini` pin tables) is **MIT**, and pin numbers are bare
+  facts regardless — no concern there.
+
+Not legal advice; if the commercial licence ever matters commercially, get a
+real opinion.
+
 ## Authoring readiness
 
 | board | can author now | blocked on |
