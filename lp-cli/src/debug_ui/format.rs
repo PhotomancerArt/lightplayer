@@ -81,6 +81,7 @@ pub(crate) fn format_value_editor_hint(editor: &ValueEditorHint) -> Option<Strin
         ValueEditorHint::Dimensions => Some(String::from("dimensions")),
         ValueEditorHint::Affine2d => Some(String::from("affine 2d")),
         ValueEditorHint::Power => Some(String::from("power")),
+        ValueEditorHint::Gradient => Some(String::from("gradient")),
         ValueEditorHint::Resource => Some(String::from("resource")),
         ValueEditorHint::RuntimeBufferResource => Some(String::from("runtime buffer")),
         ValueEditorHint::VisualProduct => Some(String::from("visual product")),

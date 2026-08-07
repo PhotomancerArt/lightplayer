@@ -1,9 +1,9 @@
-//! Stories for the standalone mapping editor (`#/mapping`,
+//! Stories for the standalone mapping editor (`/mapping`,
 //! `lpa-mapping-editor`). Mount states are pinned via the editor's
 //! deterministic story props — no animation, no measured viewport.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{EditorViewOptions, MapEditor};
+use lpa_mapping_editor::{EditorViewOptions, MapEditor, ReferenceImage};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::fyeah_presentable_doc;
@@ -89,7 +89,67 @@ pub(crate) fn editor_fit_preview() -> Element {
                     universes: false,
                     live: false,
                     fit_preview: true,
+                    reference: true,
                 }),
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A rotational repeat selected: one authored sector path with a gap, five ghosted instances, and the repeat popover (count, center, unwrap, expand)."
+)]
+pub(crate) fn editor_repeated_sector() -> Element {
+    rsx! {
+        EditorCanvasFrame {
+            MapEditor {
+                doc_epoch: 0,
+                doc: lpc_mapping::corpus::repeated_sector(),
+                initial_selection: vec![0],
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the popover breadcrumbs the scope."
+)]
+pub(crate) fn editor_repeat_scoped() -> Element {
+    rsx! {
+        EditorCanvasFrame {
+            MapEditor {
+                doc_epoch: 0,
+                doc: lpc_mapping::corpus::repeated_sector(),
+                initial_selection: vec![0],
+                initial_descend: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Reference image under the authored geometry: a traceable background at half opacity, dot grid visible through it — the sketch-to-mapping flow."
+)]
+pub(crate) fn editor_reference_trace() -> Element {
+    // Inline utf8 data URL: deterministic, no asset fetch, nothing the
+    // capture pipeline has to wait for. Single quotes and rgb() colors keep
+    // it URL-safe.
+    let reference = ReferenceImage {
+        data_url: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' \
+                   viewBox='0 0 400 400'><circle cx='200' cy='200' r='150' fill='none' \
+                   stroke='rgb(120,140,255)' stroke-width='6'/>\
+                   <path d='M200,200 L200,50 A150,150 0 0 1 342,153 z' \
+                   fill='rgb(80,90,140)'/></svg>"
+            .to_string(),
+        opacity: 0.5,
+        size: [400.0, 400.0],
+    };
+    rsx! {
+        EditorCanvasFrame {
+            MapEditor {
+                doc_epoch: 0,
+                doc: lpc_mapping::corpus::repeated_sector(),
+                reference: Some(reference),
             }
         }
     }
@@ -110,6 +170,7 @@ pub(crate) fn editor_universes() -> Element {
                     universes: true,
                     live: false,
                     fit_preview: false,
+                    reference: true,
                 }),
             }
         }

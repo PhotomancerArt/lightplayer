@@ -1,0 +1,22 @@
+[package]
+name = "lp-cloud-domain"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Cloud sync service domain logic: every CloudRequest answered behind injected ports, no IO"
+
+[dependencies]
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+lpc-history = { path = "../../lp-core/lpc-history" }
+
+# The in-memory adapters are this crate's test backend (D13). The resulting
+# dev-dependency cycle (store-mem -> domain -> [dev] store-mem) is supported by
+# cargo and is deliberate: the domain's unit tests exercise the same adapter
+# real callers use, rather than a second, subtly-different test double.
+[dev-dependencies]
+lp-cloud-store-mem = { path = "../lp-cloud-store-mem" }
+
+[lints]
+workspace = true

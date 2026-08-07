@@ -25,6 +25,7 @@ members = [
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-browser",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
@@ -46,6 +47,12 @@ members = [
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -127,6 +134,7 @@ default-members = [
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-upgrade",
+    "lp-app/lpa-cloud-client",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
@@ -138,6 +146,12 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    "lp-core/lpc-cloud-api",
+    # lp-cloud workspace members
+    "lp-cloud/lp-cloud-domain",
+    "lp-cloud/lp-cloud-store-mem",
+    "lp-cloud/lp-cloud-store-sqlite",
+    "lp-cloud/lp-cloud-server",
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
@@ -207,10 +221,10 @@ test-log = "0.2"
 env_logger = "0.11"
 
 # Cranelift crates - git main (TestCase fix); uncomment [patch] for local path
-cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
+cranelift-codegen = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
+cranelift-frontend = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
+cranelift-module = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
+cranelift-object = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0" }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
 
@@ -271,6 +285,24 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.lp-gfx-lpvm]
 opt-level = 3
+
+# The dev Studio's per-frame path runs through workspace crates the "*"
+# override above does not cover (it only reaches registry dependencies):
+# every server frame is serde-JSON-parsed by lpc-wire's generated visitors,
+# and dome-scale fixtures resolve 1500 lamps through lpc-mapping and shuttle
+# them through lpc-model layouts. At opt-level 0 that parse alone was 28% of
+# main-thread samples in a 2026-08-05 Chrome trace (12ms per message) and
+# made the mapping editor unusable at 1500 LEDs. These crates are schema/
+# engine surfaces that change rarely; the mapping editor is UI but small,
+# and its diff/format loop over 1500 SVG nodes runs per live-color frame.
+[profile.dev.package.lpc-wire]
+opt-level = 2
+[profile.dev.package.lpc-model]
+opt-level = 2
+[profile.dev.package.lpc-mapping]
+opt-level = 2
+[profile.dev.package.lpa-mapping-editor]
+opt-level = 2
 
 [profile.release]
 # Link-time optimization for all release builds - saves ~100-300 KB
@@ -370,22 +402,28 @@ esp-storage = { path = "third_party/esp-storage" }
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates
 # eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.
 naga = { path = "third_party/naga" }
-# no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
+# no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/PhotomancerArt/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
 # no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
 ser-write-json = { path = "third_party/ser-write-json" }
 
 #####################################
 # Local dev patches
+#
+# NOTE: a [patch."<url>"] key must match the source URL exactly as declared by
+# the manifest that pulls the crate in. lp-regalloc2 and lp-common are declared
+# by the upstream forks (lp-cranelift -> lp-regalloc2 -> lp-common), not here,
+# so their keys stay on the old `light-player` org until those forks are
+# updated. Rewriting them to `PhotomancerArt` silently patches nothing.
 
-# pp-rs local clone (sibling of lp2025): git clone https://github.com/light-player/pp-rs ../pp-rs
+# pp-rs local clone (sibling of lp2025): git clone https://github.com/PhotomancerArt/pp-rs ../pp-rs
 #[patch.crates-io]
 #pp-rs = { path = "../pp-rs" }
 
-#[patch."https://github.com/light-player/lp-regalloc2"]
+#[patch."https://github.com/PhotomancerArt/lp-regalloc2"]
 #regalloc2 = { path = "../lp-regalloc2" }
 #
-#[patch."https://github.com/light-player/lp-cranelift"]
+#[patch."https://github.com/PhotomancerArt/lp-cranelift"]
 #cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
 #cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
 #cranelift-module = { path = "../lp-cranelift/cranelift/module" }
@@ -394,6 +432,6 @@ ser-write-json = { path = "third_party/ser-write-json" }
 #cranelift-control = { path = "../lp-cranelift/cranelift/control" }
 #cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
 #
-#[patch."https://github.com/light-player/lp-common"]
+#[patch."https://github.com/PhotomancerArt/lp-common"]
 #lp-collection = { path = "../lp-common/lp-collection" }
 #

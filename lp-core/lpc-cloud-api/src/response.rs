@@ -1,0 +1,250 @@
+//! Typed answers to every [`crate::request::CloudRequest`].
+//!
+//! Responses mirror requests one-to-one where the request produces a
+//! distinct payload; a request whose only job is to mutate project state
+//! (`PublishProject`, `SetVisibility`, `AddMember`, `RemoveMember`) answers
+//! with the resulting [`ProjectInfo`] rather than a bare acknowledgement, so
+//! the caller never needs a follow-up `GetProject` to see what it just
+//! changed.
+//!
+//! Like the requests, each response is a **struct** and [`CloudResponse`] is
+//! the closed set of them as newtype variants. External tagging means the
+//! wire form is unchanged from the struct-variant spelling: `{"heads": <the
+//! inner struct>}`. The structs carry no `rename_all` — the enum's applies to
+//! variant names only, so `next_since` below is on the wire exactly as
+//! spelled.
+
+use alloc::vec::Vec;
+use lpc_history::{ContentHash, HistoryEvent};
+use serde::{Deserialize, Serialize};
+
+use crate::actor::Actor;
+use crate::head_info::{HeadInfo, PushOutcome};
+use crate::project_meta::ProjectMeta;
+use crate::sidecar_meta::SidecarMeta;
+
+/// A service→client response, carried inside a
+/// [`crate::envelope::CloudReply`]'s `Ok` side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CloudResponse {
+    /// See [`UserInfo`].
+    UserInfo(UserInfo),
+    /// See [`ProjectList`].
+    ProjectList(ProjectList),
+    /// See [`ProjectInfo`].
+    ProjectInfo(ProjectInfo),
+    /// See [`Heads`].
+    Heads(Heads),
+    /// See [`MissingBlobs`].
+    MissingBlobs(MissingBlobs),
+    /// See [`PushResult`].
+    PushResult(PushResult),
+    /// See [`Events`].
+    Events(Events),
+}
+
+/// Answers [`crate::request::WhoAmI`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserInfo {
+    /// The resolved caller identity.
+    pub actor: Actor,
+}
+
+/// Answers [`crate::request::ListMyProjects`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectList {
+    /// Every project the caller owns or is a member of.
+    pub projects: Vec<ProjectMeta>,
+}
+
+/// Answers [`crate::request::GetProject`] and the mutating project requests
+/// (`PublishProject`, `SetVisibility`, `AddMember`, `RemoveMember`) with the
+/// resulting state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectInfo {
+    /// Identity and access metadata.
+    pub meta: ProjectMeta,
+    /// Current head set (normally one entry — see [`PushOutcome::NewHead`]).
+    pub heads: Vec<HeadInfo>,
+    /// Client-computed display metadata from the most recent commit.
+    pub sidecar: SidecarMeta,
+}
+
+/// Answers [`crate::request::GetHeads`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Heads {
+    /// The project's current head set.
+    pub heads: Vec<HeadInfo>,
+}
+
+/// Answers [`crate::request::HaveBlobs`]: the subset of the queried hashes
+/// the server does not already have.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MissingBlobs {
+    /// Hashes the server is missing.
+    pub hashes: Vec<ContentHash>,
+}
+
+/// Answers [`crate::request::PushCommit`]: the accepted head state. Push is
+/// never blocked (D5) — the outcome only says whether the line advanced or
+/// gained a sibling head.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PushResult {
+    /// Whether the pushed commit advanced the line or created a new head
+    /// alongside an existing one.
+    pub outcome: PushOutcome,
+    /// The project's full head set after accepting the push.
+    pub heads: Vec<HeadInfo>,
+}
+
+/// Answers [`crate::request::GetEvents`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Events {
+    /// Events recorded after the requested `since` sequence number.
+    pub events: Vec<HistoryEvent>,
+    /// The server event sequence number to pass as `since` on the next call
+    /// to continue reading forward with no gap or overlap.
+    pub next_since: u64,
+}
+
+impl From<UserInfo> for CloudResponse {
+    fn from(response: UserInfo) -> Self {
+        CloudResponse::UserInfo(response)
+    }
+}
+
+impl From<ProjectList> for CloudResponse {
+    fn from(response: ProjectList) -> Self {
+        CloudResponse::ProjectList(response)
+    }
+}
+
+impl From<ProjectInfo> for CloudResponse {
+    fn from(response: ProjectInfo) -> Self {
+        CloudResponse::ProjectInfo(response)
+    }
+}
+
+impl From<Heads> for CloudResponse {
+    fn from(response: Heads) -> Self {
+        CloudResponse::Heads(response)
+    }
+}
+
+impl From<MissingBlobs> for CloudResponse {
+    fn from(response: MissingBlobs) -> Self {
+        CloudResponse::MissingBlobs(response)
+    }
+}
+
+impl From<PushResult> for CloudResponse {
+    fn from(response: PushResult) -> Self {
+        CloudResponse::PushResult(response)
+    }
+}
+
+impl From<Events> for CloudResponse {
+    fn from(response: Events) -> Self {
+        CloudResponse::Events(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::visibility::Visibility;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use lpc_history::{PrefixedUid, UidPrefix};
+
+    fn uid() -> PrefixedUid {
+        PrefixedUid::mint(UidPrefix::Project, &[2u8; 16])
+    }
+
+    #[test]
+    fn serde_round_trip_user_info() {
+        let resp = CloudResponse::UserInfo(UserInfo {
+            actor: Actor::Anonymous,
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    #[test]
+    fn serde_round_trip_project_info() {
+        let resp = CloudResponse::ProjectInfo(ProjectInfo {
+            meta: ProjectMeta {
+                uid: uid(),
+                slug: "zook-dome".to_string(),
+                visibility: Visibility::Link,
+                owner: Actor::Anonymous,
+            },
+            heads: vec![HeadInfo {
+                tree: ContentHash::of(b"tree"),
+                parents: vec![],
+            }],
+            sidecar: SidecarMeta {
+                name: "Zook Dome".to_string(),
+                format_version: 4,
+                preview_png: None,
+            },
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    #[test]
+    fn serde_round_trip_push_result() {
+        let resp = CloudResponse::PushResult(PushResult {
+            outcome: PushOutcome::NewHead,
+            heads: vec![],
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    #[test]
+    fn serde_round_trip_events() {
+        let resp = CloudResponse::Events(Events {
+            events: vec![],
+            next_since: 7,
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    /// Pinned JSON literal: the deployed format is the contract.
+    #[test]
+    fn pinned_json_literal() {
+        let resp = CloudResponse::MissingBlobs(MissingBlobs {
+            hashes: vec![ContentHash::of(b"x")],
+        });
+        assert_eq!(
+            serde_json::to_string(&resp).unwrap(),
+            alloc::format!(
+                r#"{{"missingBlobs":{{"hashes":["{}"]}}}}"#,
+                ContentHash::of(b"x")
+            )
+        );
+    }
+
+    /// `next_since` is the one multi-word field on the response wire, and the
+    /// enum's `rename_all` never applied to it. Pinned so a later
+    /// `rename_all_fields` cannot silently rename it.
+    #[test]
+    fn pinned_json_literal_events() {
+        let resp = CloudResponse::Events(Events {
+            events: vec![],
+            next_since: 7,
+        });
+        assert_eq!(
+            serde_json::to_string(&resp).unwrap(),
+            r#"{"events":{"events":[],"next_since":7}}"#
+        );
+    }
+}

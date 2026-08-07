@@ -22,7 +22,7 @@ pub(crate) fn loaded() -> Element {
 }
 
 #[story(
-    description = "The header chip across its states: branch, dirty, deployed tag, no-git fallback."
+    description = "The icon-only build chip across its states: branch, dirty (warning tone), deployed tag, no-git fallback, loading. Identity lives in the hover title and popover."
 )]
 pub(crate) fn chip_states() -> Element {
     rsx! {
@@ -51,7 +51,7 @@ fn loaded_info() -> VersionInfo {
             sha: Some("1de1f392c0a1b2c3".to_string()),
             dirty: Some(false),
             r#ref: Some("main".to_string()),
-            repository: Some("light-player/lightplayer".to_string()),
+            repository: Some("PhotomancerArt/lightplayer".to_string()),
         },
         build: VersionBuild {
             generated_at: Some("2026-07-04T13:47:00Z".to_string()),

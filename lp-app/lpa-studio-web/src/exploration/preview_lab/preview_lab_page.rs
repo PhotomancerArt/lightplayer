@@ -1,6 +1,6 @@
 //! Dev-only preview lab page (PoC A, GPU-preview discovery M1).
 //!
-//! Reached at `#/preview-lab` in `stories`-feature builds only; never linked
+//! Reached at `/preview-lab` in `stories`-feature builds only; never linked
 //! from product navigation. Spawns N live preview cards, each backed by a
 //! full browser firmware runtime, and shows per-card and aggregate frame
 //! cost so the CPU-path scaling envelope can be measured.
@@ -15,14 +15,14 @@ use crate::exploration::preview_lab_config::{LabConfig, LabProject, LabTier};
 use super::lab_runner::{LabRun, LabView, canvas_element_id, run_lab};
 
 pub fn should_show_preview_lab() -> bool {
-    location_hash().is_some_and(|hash| hash.starts_with("#/preview-lab"))
+    location_url().is_some_and(|url| url.starts_with("/preview-lab"))
 }
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PreviewLabPage() -> Element {
     let initial = use_hook(|| {
-        location_hash()
-            .and_then(|hash| LabConfig::parse_hash(&hash))
+        location_url()
+            .and_then(|url| LabConfig::parse_url(&url))
             .unwrap_or_default()
     });
     let mut config = use_signal(|| initial.clone());
@@ -43,7 +43,7 @@ pub fn PreviewLabPage() -> Element {
         }
     };
 
-    // Automation entry: `#/preview-lab?...&autostart=1` starts on mount.
+    // Automation entry: `/preview-lab?...&autostart=1` starts on mount.
     use_hook(move || {
         if initial.autostart {
             let next = Rc::new(RefCell::new(LabRun::new(initial.clone())));
@@ -266,8 +266,13 @@ fn choice_class(active: bool) -> &'static str {
     }
 }
 
-fn location_hash() -> Option<String> {
-    web_sys::window()
-        .map(|window| window.location())
-        .and_then(|location| location.hash().ok())
+/// The lab's own address: `pathname + search` (the router's boot shim has
+/// already turned a legacy `#/preview-lab?…` link into one).
+fn location_url() -> Option<String> {
+    let location = web_sys::window().map(|window| window.location())?;
+    Some(format!(
+        "{}{}",
+        location.pathname().ok()?,
+        location.search().unwrap_or_default()
+    ))
 }

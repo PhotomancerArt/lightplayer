@@ -15,7 +15,11 @@ Document in, edits out. This crate knows the mapping document schema
 assets, routes, or the Studio server — hosts own persistence:
 
 - `MapEditorPage` (the `#/mapping` route body) adds file open (picker +
-  drag-and-drop), save (data-URL download), and localStorage autosave.
+  drag-and-drop), save (data-URL download), and localStorage autosave —
+  plus the reference tracing image (`ReferenceImage`), persisted under
+  its own localStorage key so tracing state can never touch the document
+  autosave. The reference never enters the map2d document (10KB asset
+  budget; reference art is routinely larger).
 - `MapEditor` is the embeddable seam: `doc` + `doc_epoch` in,
   `on_doc_change(json)` out on every committed change. The fixture face
   mounts it and syncs via the asset pipeline's whole-body apply. Two
@@ -53,9 +57,20 @@ next ones.
 Tools V/G/R/P (select / grid / ring / path). Creation drops a default
 object and opens its properties (no drag-to-size); the path tool previews
 resolved lamps and the chain link live, Enter/double-click finishes,
-Escape backs out one vertex (never discards wholesale). Selection: click,
-shift-click, marquee, ⌘A; corner handles resize uniformly; single-path
-vertices drag; Delete removes. Views N/A/U/F: wiring numbers, direction
+Escape backs out one vertex (never discards wholesale). Selection is
+**tree-path based** (`ShapePath` + `MapSelection` in `editor_core`): a
+set of paths sharing one parent, where an ancestor of a selected path is
+the *scope* (context), never a co-selection; double-click descends into
+a group, Esc ascends, and edits through a descended path write through
+to the authored shape (every repeat instance follows). Rationale and
+invariants: `docs/adr/2026-08-05-map2d-editor-selection-tree-model.md`.
+Click, shift-click, marquee, ⌘A select; corner handles resize uniformly;
+single-path vertices drag; Delete removes (at depth it removes the whole
+object — unwrap is the keep-the-inner op). The wiring rail is the object
+TREE (group rows disclose their sub-object, ×N badged); a selected or
+scoped repeat renders instance-by-instance in distinct hues, and while
+descended only the authored primary is interactive — the other instances
+are inert, live-updating previews (the tessellation authoring loop). Views N/A/U/F: wiring numbers, direction
 arrows (gold dashed chain hops between objects), universe colors
 (auto-flow, 170 RGB lamps/universe; ranges annotate as `u:lo-hi`),
 texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.
@@ -66,4 +81,5 @@ texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.
 grid / multi-ring circle / path objects; object order is wiring order;
 universes derive from it. Rings auto-space from the outer radius; per-ring
 counts can override the circumference-derived defaults. The SVG importer
-(`lpc-mapping::import`) flattens curve commands to endpoint lines.
+(`lpc-mapping::import`) rejects curve commands (`UnsupportedCommand`) —
+it imports the straight-line subset only.

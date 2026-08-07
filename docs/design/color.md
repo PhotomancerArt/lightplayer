@@ -142,53 +142,79 @@ colorspace and color data inside the value. These structs are the
 authoring/storage model, not necessarily the shader ABI for every
 runtime path.
 
-| Kind       | Storage (`LpsType::Struct`)                                                           |
-| ---------- | ------------------------------------------------------------------------------------- |
-| `Color`    | `{ space: I32, coords: Vec3 }`                                                        |
-| `Gradient` | `{ space: I32, method: I32, count: I32, stops: Array(Struct{at: F32, c: Vec3}, 24) }` |
+| Kind       | Storage                                                        |
+| ---------- | -------------------------------------------------------------- |
+| `Color`    | `{ space: I32, coords: Vec3 }`                                 |
+| `Gradient` | `{ space: String token, method: String token, stops: String }` |
 
 There is **no separate `ColorPalette` Kind**: a discrete swatch list
 is a `Gradient` with `method: Step` (D2 of the palette spike,
 `2026-08-03-1803-palette-exploration-spike`). One collection type, one
 bake path, one editor.
 
-Conventions:
+### The stops literal
 
-- `space` is `Colorspace as i32` (per the table above). Stable repr.
-- `method` is `InterpMethod as i32` (see §6).
-- Both encoded as integers in storage so `LpsValue` stays purely
-  structural; the loader maps authored strings (`"oklch"`,
-  `"linear_srgb"`, `"srgb"`, ...) to the integer encoding.
-- **`coords` and `stops.c` are F32** per the precision contract.
-- **A gradient shares one space at the collection level.** A
-  `Gradient` carries a single `space` for all stops — never
-  per-element. Same for `method`.
+(ADR `2026-08-05-gradient-stops-string-storage`.) A gradient's
+metadata stays structural; the part that scales with content — the
+stop list — is **one compact string**, and that string is the SAME on
+every surface: `LpValue` storage, wire, `.lp/panel.json`, authored
+def JSON, catalog files, serde. There is no second encoding.
 
-### Fixed-size arrays + explicit count
+```text
+"#000 #f80@.5 (0.211,-0.017,-0.039)"
 
-`Gradient` uses a **fixed-size array** sized by a constant:
-
-```rust
-pub const MAX_GRADIENT_STOPS: u32 = 24;
+stops := stop (WS stop)*         2..=24 stops
+stop  := color [ '@' position ]
+color := #rgb | #rrggbb | #rrrrggggbbbb | (a,b,c)
 ```
 
-24 rather than the original 16: WLED gradients carry up to 18 stops
-and importing one must not truncate (D2 of the palette spike).
+- **Colors are raw coordinates in the gradient's own `space`** —
+  never converted at parse (conversions live engine-side, §7). Hex is
+  `[0,1]`-fraction notation, component = `k/(2ⁿ−1)`; decimal triplets
+  are the general form and the only way to spell negative axes
+  (Oklab `a`/`b`) or full `f32` precision. For `oklch` the triplet is
+  `(L, C, H°)` — **hue is degrees**, ratified here.
+- **Positions are optional, CSS-style**: an unpositioned first stop
+  is `0`, an unpositioned last is `1`, interior unpositioned runs
+  distribute linearly between their neighbors. Omitting all of them
+  is the common case — an evenly spaced swatch list. Explicit
+  positions must be finite and in `[0,1]`; ordering is not enforced
+  (consumers sort at resolve, mirroring `Gradient::validate`).
+- **Printing is canonical and bit-exact** (`parse(print(g)) == g`):
+  positions are omitted iff the stops sit exactly on the even grid;
+  hex prints only for the sRGB-shaped spaces (so a Lab gradient never
+  looks like RGB bytes) and only when every component is exactly
+  `k/255`; everything else prints shortest-round-trip decimals. The
+  catalog's canonicality test walks every asset file and asserts
+  parse→print reproduces it byte-for-byte.
 
-Storage is always the maximum size. The loader populates an explicit
-`count: i32` field with the number of authored entries; remaining
-slots are zero-padded. Shaders iterate `0..count`. No sentinel
-values; no ambiguity.
+`GradientConfig` stays structural around it —
+`{ kind: "static"|"cycle", set: List(Gradient), step_seconds,
+fade_seconds }` — structure for the collection, a literal per
+gradient. There are **no count fields**: the set's length is the
+count, and a literal self-describes. Limits (`MIN/MAX_GRADIENT_STOPS`
+= 2/24, `MIN/MAX_CYCLE_SET` = 2/8) are enforced at parse/validate; 24
+rather than the original 16 because WLED gradients carry up to 18
+stops and importing one must not truncate. Values exceeding a maximum
+are a load error, never a silent truncation.
 
-Authored values _exceeding_ the maximum are a load error, not
-silently truncated. Larger collections are a one-constant bump in
-v1+, not a model change.
+Why a string: the original fixed-array recipe padded every stored
+gradient to 8×24 stops — ~17.7 KiB of wire JSON regardless of
+content, larger than the whole 16 KiB project-read frame budget, which
+broke project sync the moment a palette pick landed a config on a bus
+channel (probe value echo) or in a def (slot-root echo). Structured
+count-bounded arrays fixed the realistic cases but still cost
+~110 B/stop of tagged-JSON scaffolding and left the maximal legal
+cycle over budget. The literal is ~12 B/stop, embedded-friendly (one
+JSON token through `ser-write-json`, one linear parse), and lands the
+maximal 8×24 cycle at ~4.4 KiB.
+`lp-core/lpc-shared/tests/gradient_wire_size.rs` pins the sizes.
 
-The authored JSON surface is **not** this fixed shape: it carries
-snake-case enum strings and exactly the stops that were authored.
-`lpc-model`'s `color` module owns both encodings and the conversion
-between them; the fixed shape is what `LpValue` / `LpType` and the
-GPU layout logic see.
+The stops literal also makes inline def authoring genuinely ergonomic:
+the shape-driven slot codec reads the same `{space, method, stops}`
+struct (a `String` leaf needs no per-type teaching, preserving the
+codec's shape-generic boundary), so what `shader.json` spells is what
+a catalog file spells is what the wire carries.
 
 For lpfx rendering, `Gradient` values materialize to width-by-one
 texture resources before shader binding. Shaders sample those
@@ -360,7 +386,9 @@ These crates / files implement this contract:
 
 - `lp-core/lpc-model/src/color/gradient.rs` — the `Colorspace`,
   `InterpMethod`, `MAX_GRADIENT_STOPS`, and the `Gradient` storage
-  recipe (§5) plus its authored serde surface.
+  recipe (§5; serde carries the same shape).
+- `lp-core/lpc-model/src/color/stops_string.rs` — the stops literal:
+  parser, canonical printer, and the grammar §5 specifies.
 - `lp-core/lpc-model/src/color/gradient_config.rs` — `GradientConfig`,
   the static-or-cycle read of a palette.
 - `lp-core/lpc-model/src/value/legacy_kind.rs` — the legacy `Kind`
@@ -379,6 +407,15 @@ These crates / files implement this contract:
   path above does its own).
 - Per-fixture drivers under `lp-core/lpc-engine/` — fixture-stage
   gamma, white balance, channel synthesis.
+- `lp-app/lpa-palettes/` — the checked-in palette catalog (M3):
+  FastLED/cpt-city conversions isolated behind a license contract,
+  LightPlayer Oklab originals, WLED import, and the display-sRGB
+  sampling the Studio previews share.
+- `lp-app/lpa-studio-web/src/app/node/panel/palette_chooser.rs` (and
+  siblings `palette_swatch_field.rs` / `palette_editor.rs`) — the M4
+  Studio surface: the mode-adaptive swatch, the anchored chooser
+  writing whole `GradientConfig`s, and the copy-on-use gradient
+  editor. Design record: `spikes/palettes/index.html` (§6B/§9).
 
 ## See also
 

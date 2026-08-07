@@ -29,12 +29,13 @@ pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, ProjectProbeRequest, ProjectProbeResult,
-    ProjectProbeResultHeader, RenderProductProbeRequest, RenderProductProbeResult,
-    RenderProductProbeResultHeader, TimebaseProbeRequest, TimebaseProbeResult,
-    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
-    WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
-    WireScopeRef,
+    ControlProductProbeResultHeader, OutputFrameEntry, OutputFrameEntryHeader,
+    OutputFrameProbeRequest, OutputFrameProbeResult, OutputFrameProbeResultHeader,
+    ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader, RenderProductProbeRequest,
+    RenderProductProbeResult, RenderProductProbeResultHeader, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
+    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin,
+    WirePhasorReading, WirePhasorRow, WireScopeRef,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

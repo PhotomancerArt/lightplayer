@@ -12,7 +12,7 @@ use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{Platform, StudioIcon, StudioIconName, node_kind_icon};
+use crate::base::{HelpLink, Platform, StudioIcon, StudioIconName, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -128,6 +128,16 @@ pub fn NodePane(
                         if !kind_label.is_empty() {
                             span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
                                 "{kind_label}"
+                            }
+                        }
+                        // The "?" on shader nodes: where a browsing user
+                        // first meets the concept, the docs answer is one
+                        // click away (help-link flywheel).
+                        if kind_label.eq_ignore_ascii_case("shader") {
+                            HelpLink {
+                                href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                                title: "What's a shader?",
+                                class: "tw:self-center".to_string(),
                             }
                         }
                         // No runtime here, no tabs: every tab is a view
@@ -259,7 +269,7 @@ fn NodeUnsupportedBody(
             // catalog, so a plain anchor is the whole mechanism.
             a {
                 class: "tw:text-xs tw:font-bold tw:text-status-error-foreground tw:underline tw:underline-offset-4 tw:opacity-80 tw:transition-opacity tw:hover:opacity-100",
-                href: "#/boards",
+                href: "/boards",
                 "See supported boards"
             }
         }

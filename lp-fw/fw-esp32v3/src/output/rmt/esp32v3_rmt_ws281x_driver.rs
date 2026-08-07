@@ -76,6 +76,8 @@ use crate::output::rmt::shared_driver::{
     DRIVER, FRAME_TIMEOUT, install_isr, isr_on_app_core, report_telemetry_if_due,
 };
 use crate::output::rmt::v3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
+use crate::output::rmt::wire_pusher;
+use lp_ws281x::WireOutcome;
 
 const DRIVER_ID: &str = "esp32v3-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
@@ -265,6 +267,17 @@ impl Esp32V3RmtWs281xDriver {
         // once here, after esp-hal has finished touching `APB_CONF` in
         // `configure_tx`.
         v3_rmt::init_tx();
+
+        // Hand the configured slots to the APP-core pusher (a no-op wake in
+        // the single-core fallback, where the pusher never runs and the
+        // inline start path below owns the pool instead).
+        if isr_on_app_core() {
+            let mut channels = [0u8; v3_rmt::POOLED_SLOT_CAP];
+            for (slot, pool_slot) in channels.iter_mut().zip(pool.iter()) {
+                *slot = pool_slot.rmt_channel;
+            }
+            wire_pusher::publish_slots(&channels[..pool.len().min(v3_rmt::POOLED_SLOT_CAP)]);
+        }
 
         // One-shot refill-cost floor measurement, telemetry builds only —
         // prints [PROBE] lines before any output can open. See the module.
@@ -523,6 +536,7 @@ impl Ws281xDriver for Esp32V3RmtWs281xDriver {
             gpio,
             byte_count: config.byte_count(),
             in_flight: None,
+            posted: None,
             #[cfg(feature = "frame-dump")]
             dump: FrameDump::new(),
         }))
@@ -545,12 +559,29 @@ struct Esp32V3RmtWs281xOutput {
     byte_count: u32,
     /// The frame begun by [`Ws281xOutput::start`] and not yet waited out by
     /// [`Ws281xOutput::wait_complete`]. `None` while the wire is idle.
+    /// Single-core fallback only — the dual-core path tracks [`Self::posted`]
+    /// instead.
     in_flight: Option<InFlightFrame>,
+    /// The frame posted to the APP-core pusher and not yet waited out.
+    /// Dual-core only; `None` while the wire is idle.
+    posted: Option<PostedFrame>,
     /// Serial transcript of the frames this wire transmitted. Present only
     /// in a `frame-dump` build — see [`super::frame_dump`] for why the gate is
     /// compile-time rather than a runtime flag.
     #[cfg(feature = "frame-dump")]
     dump: FrameDump,
+}
+
+/// Bookkeeping for one frame posted to the APP-core pusher: its mailbox
+/// sequence and when it was posted — the hang deadline runs from the post,
+/// since a queued second-wave frame starts late by design.
+struct PostedFrame {
+    seq: u32,
+    at: Instant,
+    #[cfg(feature = "frame-dump")]
+    ptr: *const u8,
+    #[cfg(feature = "frame-dump")]
+    len: usize,
 }
 
 /// Bookkeeping for one started frame: when it began (the hang deadline is
@@ -574,6 +605,118 @@ struct InFlightFrame {
     ptr: *const u8,
     #[cfg(feature = "frame-dump")]
     len: usize,
+}
+
+impl Esp32V3RmtWs281xOutput {
+    /// The dual-core deferred wait: spin on the mailbox until the pusher has
+    /// disposed of the posted frame, escalating through the abort-request
+    /// verb at the deadline.
+    ///
+    /// The deadline runs from the *post* — a queued second-wave frame starts
+    /// a wave late by design, and 50 ms still comfortably covers the worst
+    /// legal frame (~31 ms of wire) plus a whole wave of queueing. The
+    /// deadline check reads a timer over APB and is throttled so the common
+    /// case is a pure SRAM-atomic spin.
+    fn wait_posted(&mut self, posted: PostedFrame) -> Result<(), OutputError> {
+        let mailbox = &wire_pusher::MAILBOXES[self.index];
+        let mut iterations = 0u32;
+        let outcome = loop {
+            if let Some(outcome) = mailbox.completed_outcome(posted.seq) {
+                break Some(outcome);
+            }
+            iterations = iterations.wrapping_add(1);
+            if iterations % 1024 == 0 && posted.at.elapsed() > FRAME_TIMEOUT {
+                break None;
+            }
+        };
+        let (timed_out, outcome) = match outcome {
+            Some(outcome) => (false, outcome),
+            None => {
+                // Deadline blown: ask the pusher to dispose of the frame
+                // (aborting it off the wire if that is where it is), then
+                // give it a bounded grace to answer. Microseconds in any
+                // non-wedged boot — the bound exists for the same paranoia
+                // as the abort handshake's.
+                mailbox.request_abort(posted.seq);
+                wire_pusher::ring_doorbell();
+                const GRACE_SPINS: u32 = 10_000_000;
+                let mut spins = 0u32;
+                let outcome = loop {
+                    if let Some(outcome) = mailbox.completed_outcome(posted.seq) {
+                        break Some(outcome);
+                    }
+                    core::hint::spin_loop();
+                    spins += 1;
+                    if spins >= GRACE_SPINS {
+                        break None;
+                    }
+                };
+                match outcome {
+                    Some(outcome) => (true, outcome),
+                    None => {
+                        // The pusher never answered: the APP core wedged.
+                        // Defensively stop whatever slot the mailbox last
+                        // advertised and shout — this is a defect report,
+                        // not a recoverable condition.
+                        if let Some(channel) = mailbox.active_channel() {
+                            DRIVER.abort(channel);
+                        }
+                        log::error!(
+                            "wire {} (gpio {}): pusher did not dispose of frame \
+                             seq {} — APP core wedged?",
+                            self.index,
+                            self.gpio,
+                            posted.seq,
+                        );
+                        return Err(OutputError::Other {
+                            message: format!(
+                                "wire {} (gpio {}): pusher unresponsive",
+                                self.index, self.gpio,
+                            ),
+                        });
+                    }
+                }
+            }
+        };
+
+        // After the frame, never during it (see the fallback path).
+        report_telemetry_if_due();
+
+        match outcome {
+            // A frame that completed inside the grace window made it to the
+            // wire; the deadline scare is not an error.
+            WireOutcome::Transmitted => {
+                #[cfg(feature = "frame-dump")]
+                {
+                    // SAFETY: `start`'s contract — the bytes stay alive, in
+                    // place, and unmodified until this very call returns.
+                    let data = unsafe { core::slice::from_raw_parts(posted.ptr, posted.len) };
+                    self.dump.on_write(data);
+                }
+                Ok(())
+            }
+            WireOutcome::Aborted | WireOutcome::Cancelled => Err(OutputError::Other {
+                message: format!(
+                    "wire {} (gpio {}): frame did not complete within {} ms{}",
+                    self.index,
+                    self.gpio,
+                    FRAME_TIMEOUT.as_millis(),
+                    if timed_out {
+                        ""
+                    } else {
+                        " (disposed by a concurrent close)"
+                    },
+                ),
+            }),
+            WireOutcome::StartFailed => Err(OutputError::Other {
+                message: format!(
+                    "wire {} (gpio {}): pusher could not start the frame \
+                     (slot unconfigured or busy — a defect)",
+                    self.index, self.gpio,
+                ),
+            }),
+        }
+    }
 }
 
 impl Ws281xOutput for Esp32V3RmtWs281xOutput {
@@ -602,6 +745,34 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
                 expected: expected_len as u32,
                 actual: data.len(),
             });
+        }
+
+        // Dual-core: post to the APP-core pusher and return WITHOUT waiting
+        // for a slot — the whole point of the overlap deployment. Admission,
+        // slot binding, the matrix re-mux, and the start all happen on the
+        // pusher thread, so a fifth wire's second-wave wait never blocks the
+        // render thread (measured at ~9 ms per frame, the 23-vs-31 fps gap).
+        // The hang deadline runs from the post; see `wait_complete`.
+        if isr_on_app_core() {
+            let mailbox = &wire_pusher::MAILBOXES[self.index];
+            // SAFETY: forwarding this method's own contract through the
+            // mailbox — the caller keeps `data` alive, in place, and
+            // unmodified until `wait_complete` returns (or drops this
+            // output, whose `Drop` quiesces the wire through the pusher's
+            // close ack first).
+            let now = Instant::now();
+            let now_us = now.duration_since_epoch().as_micros() as u32;
+            let seq = unsafe { mailbox.post(self.gpio, data.as_ptr(), data.len(), now_us) };
+            wire_pusher::ring_doorbell();
+            self.posted = Some(PostedFrame {
+                seq,
+                at: now,
+                #[cfg(feature = "frame-dump")]
+                ptr: data.as_ptr(),
+                #[cfg(feature = "frame-dump")]
+                len: data.len(),
+            });
+            return Ok(());
         }
 
         // Admission is slot acquisition: spin until a pooled transmitter is
@@ -650,6 +821,9 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
     }
 
     fn wait_complete(&mut self) -> Result<(), OutputError> {
+        if let Some(posted) = self.posted.take() {
+            return self.wait_posted(posted);
+        }
         let Some(in_flight) = self.in_flight.take() else {
             return Ok(());
         };
@@ -728,7 +902,41 @@ impl Drop for Esp32V3RmtWs281xOutput {
     /// release the lease — in that order, so no slot is ever reachable from a
     /// new open while a transmitter this wire started is still running, and
     /// the pad never floats while the lease is alive.
+    ///
+    /// In the dual-core shape the stop goes through the pusher: a close
+    /// request quiesces the wire (queued frame cancelled, in-flight frame
+    /// aborted, pad bindings forgotten) and the ack is what makes it safe to
+    /// park the pad and release the lease here — the pusher never touches
+    /// this pad again after acking. The pool loop below then no-ops (the
+    /// inline path never ran), and the park/lease teardown is shared.
     fn drop(&mut self) {
+        if isr_on_app_core() {
+            let mailbox = &wire_pusher::MAILBOXES[self.index];
+            let close = mailbox.request_close();
+            wire_pusher::ring_doorbell();
+            const ACK_SPINS: u32 = 10_000_000;
+            let mut spins = 0u32;
+            while !mailbox.close_acked(close) {
+                core::hint::spin_loop();
+                spins += 1;
+                if spins >= ACK_SPINS {
+                    // Wedged pusher: same defect posture as wait_posted's
+                    // grace expiry — stop the advertised slot and shout. The
+                    // frame bytes this output's provider owns outlive the
+                    // output either way (field order in `ChannelState`).
+                    if let Some(channel) = mailbox.active_channel() {
+                        DRIVER.abort(channel);
+                    }
+                    log::error!(
+                        "wire {} (gpio {}): pusher did not ack close — APP core wedged?",
+                        self.index,
+                        self.gpio,
+                    );
+                    break;
+                }
+            }
+            self.posted = None;
+        }
         {
             let mut pool = self.pool.borrow_mut();
             for slot in pool.iter_mut() {

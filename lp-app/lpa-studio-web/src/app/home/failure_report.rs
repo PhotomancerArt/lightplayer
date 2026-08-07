@@ -145,6 +145,9 @@ mod tests {
 
     fn failed_card() -> (UiDeviceCard, CardOp) {
         let card = UiDeviceCard {
+            frame_preview: None,
+            frame_age_secs: None,
+            frame_fps: None,
             port_label: None,
             session_key: None,
             uid: None,
@@ -155,6 +158,7 @@ mod tests {
             fw: None,
             hardware: None,
             detected_chip: Some("esp32c6".to_string()),
+            board_id: None,
             safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),

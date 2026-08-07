@@ -20,11 +20,9 @@
 //!
 //! Cycle configs arrive on a bus **literal** rather than authored into the
 //! node JSON. That is not a shortcut around authoring: it is the `Shared`
-//! provenance path, which is the one this milestone has to get right, and
-//! `GradientConfig`'s authored-JSON surface is not the fixed-shape
-//! [`LpValue`] recipe the slot reader takes (`docs/design/color.md` §5), so a
-//! cycle authored inline would be an eight-entry, twenty-four-stop wall of
-//! padding. M4's studio surface is what makes that ergonomic.
+//! provenance path, which is the one this milestone has to get right.
+//! (Inline authoring itself is ordinary now — a gradient spells token
+//! metadata plus one stops literal on every surface, `color.md` §5.)
 
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -235,11 +233,22 @@ fn palette_fs(bind_palette: bool, second_shader: bool) -> LpFsMemory {
 }
 
 fn load(fs: LpFsMemory) -> Project {
+    load_with_frontend(fs, lp_shader::ShaderFrontend::LpsGlsl)
+}
+
+/// The frontend is a parameter because the palette contract has to hold on
+/// both of them: devices and native servers compile through `LpsGlsl`, while
+/// the browser CPU tier pins `Naga` (`fw-browser`'s
+/// `BROWSER_SHADER_FRONTEND`). Everything above the `LpGraphics` seam —
+/// including the `TextureBindingSpec` the shader node supplies per palette
+/// slot — is shared, so the same project must render the same strip either
+/// way.
+fn load_with_frontend(fs: LpFsMemory, frontend: lp_shader::ShaderFrontend) -> Project {
     let services = EngineServices::new(TreePath::parse("/shader_palette.show").expect("root"));
     let loaded = ProjectLoader::load_from_root(&fs, services).expect("load project");
     let (mut engine, registry) = loaded.into_parts();
     engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
+        frontend,
     ))));
     Project { engine, registry }
 }
@@ -329,6 +338,42 @@ fn a_palette_uniform_compiles_and_renders_its_baked_strip() {
         mid < 0.35,
         "an sRGB ramp's midpoint is ~0.21 in linear light, got {mid}"
     );
+}
+
+/// The same headline, on the frontend the browser Studio preview actually
+/// runs.
+///
+/// `fw-browser` pins `ShaderFrontend::Naga` for the CPU tier, and Naga's
+/// GLSL-IN has no combined-sampler type at all: `lps-frontend`'s `parse`
+/// rewrites `uniform sampler2D X` into Vulkan-style `texture2D` + a companion
+/// `sampler`. That rewrite used to require both `set=` and `binding=` in an
+/// existing `layout(…)`, while nothing in the tree writes a `set` — so
+/// `PALETTE_GLSL`'s qualified declaration slipped through unrewritten and died
+/// in Naga as "Not implemented: variable qualifier" (the bare, unqualified
+/// spelling took a different branch and was fine). Devices never saw it.
+///
+/// Asserting the rendered strip rather than just a successful compile is the
+/// point: a compile check would pass on a rewrite that mis-numbers the
+/// companion sampler, and it is the sampled output that says the texture the
+/// shader reads is the strip the engine baked.
+#[cfg(feature = "naga")]
+#[test]
+fn a_palette_uniform_compiles_and_renders_its_baked_strip_through_naga() {
+    let mut project = load_with_frontend(palette_fs(false, false), lp_shader::ShaderFrontend::Naga);
+    let shader = project.node("a.shader");
+    project.warm_up(&[shader]);
+
+    let row = project.render_row(shader);
+    let expected: Vec<[f32; 3]> = (0..OUT_WIDTH)
+        .map(|x| {
+            let u = (x as f32 + 0.5) / OUT_WIDTH as f32;
+            sample_gradient(gradient_of(&GradientConfig::default()), u)
+        })
+        .collect();
+
+    for (index, sample) in row.iter().enumerate() {
+        close(*sample, expected[index], 0.01);
+    }
 }
 
 /// A static config is baked directly: no timebase is read, and the strip is

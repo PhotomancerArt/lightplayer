@@ -29,32 +29,34 @@ equivalents, and provides optimized builtin functions (sin, cos, sqrt, etc.) imp
 efficient fixed-point algorithms. Float mode selection is a backend parameter — the IR itself is
 mode-agnostic, so the same lowered program can be emitted for either mode.
 
-## Core Application Architecture
+## Core and Application Layers
 
-The core application (`lp-core/`) provides the foundation for all LightPlayer implementations:
+The engine internals live in `lp-core/` (`lpc-*` crates), and app-facing orchestration —
+servers, clients, transports, the Studio — lives in `lp-app/` (`lpa-*` crates). See
+[`lp-core/README.md`](../lp-core/README.md) and [`lp-app/README.md`](../lp-app/README.md)
+for the full crate indexes; the load-bearing pieces:
 
-- **`lp-engine`** - The rendering engine executes GLSL shaders and manages the node graph (textures,
-  shaders, fixtures, outputs). It handles frame-based rendering, texture sampling, shader
-  compilation, and output data generation.
+- **`lpc-model`** - Shared core vocabulary: ids, paths, frame ids, node kinds, `LpValue` /
+  `LpType`, slots, and the authored project/node definitions.
 
-- **`lp-server`** - The server manages projects, handles client connections, and processes
-  filesystem changes. It uses a tick-based API that works in both async and synchronous
-  environments.
+- **`lpc-engine`** - The runtime for one loaded project: node trees, resolver caches, buses,
+  shader/runtime value conversion, and frame execution.
 
-- **`lp-model`** - Defines the data models and message protocol for client-server communication.
-  Includes project configurations, node definitions, and API types.
+- **`lpc-wire`** - The engine/client wire contract: messages, tree deltas, project requests,
+  transport errors, and partial state serialization.
 
-- **`lp-client`** - Async client library for communicating with `lp-server`. Provides transport
-  abstraction (WebSocket, serial, local) and handles filesystem synchronization and project
-  management operations.
+- **`lpc-view`** - Client-side view/cache of one engine, built incrementally from `lpc-wire`
+  updates — the basis for realtime visualization and control.
 
-- **`lp-engine-client`** - Higher-level client library that maintains a synchronized project view (
-  `ClientProjectView`) with the server state. Handles incremental updates, node watching, and data
-  retrieval for realtime visualization and control.
+- **`lpa-server`** - Embeddable server layer that hosts engines, manages projects, and serves
+  the `lpc-wire` API over app-provided transports. Tick-based, so it runs in both async and
+  synchronous (bare-metal) environments.
 
-- **`lp-shared`** - Shared utilities including filesystem abstractions (`LpFs` trait), output
-  providers, time providers, and transport traits. These abstractions enable platform-specific
-  implementations while keeping core logic portable.
+- **`lpa-client`** - Client-side transport/API layer for talking to a LightPlayer server or
+  firmware target (WebSocket, serial, local).
+
+- **`lpa-studio-core` / `lpa-studio-web`** - The headless Studio application core (controllers,
+  views, typed actions) and the Dioxus browser shell that renders it.
 
 ## Platform Implementations
 
@@ -76,18 +78,23 @@ it is not currently packaged as a user-facing deployable CLI:
 The CLI uses `lp-client` with WebSocket transport for local development, and can also connect to
 remote servers.
 
-### Firmware ESP32 (`lp-fw/fw-esp32c6/`)
+### Firmware ESP32 (`lp-fw/`)
 
-Bare-metal firmware for ESP32-C6 microcontrollers:
+Bare-metal firmware for three ESP32-family chips — `fw-esp32c6` (RISC-V), `fw-esp32s3`
+(Xtensa LX7), and `fw-esp32v3` (classic ESP32, Xtensa LX6) — sharing a chip-generic layer
+(`fw-esp32-common`). See [`lp-fw/README.md`](../lp-fw/README.md) for the full crate table.
 
-- **Bare-metal Operation** - Runs `lp-server` in a `no_std` environment using `esp-hal`
-- **Serial Transport** - USB serial communication for client connections
-- **LED Output** - Direct GPIO/RMT control for addressable LED strips (WS2812, etc.)
-- **JIT Compilation** - Compiles GLSL shaders to RISC-V code using Cranelift JIT at runtime
-- **Fixed-point Math** - Uses Q32 fixed-point arithmetic for shader execution (no floating-point
-  unit)
+- **Bare-metal Operation** - Runs the LightPlayer server in a `no_std` environment using
+  `esp-hal`
+- **Serial Transport** - USB serial (UART0 on the classic ESP32) for client connections
+- **LED Output** - The multi-channel WS281x RMT driver (`lp-ws281x`), shared by all three
+  chips; output channels are addressed through board-manifest endpoints
+- **JIT Compilation** - Compiles GLSL shaders to the chip's own instruction set (RISC-V or
+  Xtensa) at runtime via `lpvm-native`
+- **Fixed-point Math** - Uses Q32 fixed-point arithmetic for shader execution (no
+  floating-point unit required)
 
-The firmware uses `fw-core` abstractions for serial I/O and transport, with ESP32-specific
+The firmware uses `fw-core` abstractions for serial I/O and transport, with chip-specific
 implementations for hardware access.
 
 ### Firmware Emulator (`lp-fw/fw-emu/`)
@@ -111,7 +118,7 @@ Shared firmware abstractions:
 
 The GLSL compiler transforms GLSL shaders into executable code for embedded and desktop targets.
 See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and commands, and
-[`docs/lpir/`](lpir/) for the IR specification.
+[`docs/design/lpir/`](design/lpir/) for the IR specification.
 
 ### Pipeline
 
@@ -124,8 +131,9 @@ lps-frontend           Naga glsl-in → IrModule
   ▼
 LPIR                    flat, scalarized, mode-agnostic IR
   │
-  ├──► lpvm-cranelift     → native machine code (RISC-V / host JIT)
-  ├──► lps-wasm       → .wasm (browser preview, wasm.q32 filetests)
+  ├──► lpvm-native        → native machine code (RV32 + Xtensa, default on-device JIT)
+  ├──► lpvm-cranelift     → native machine code (Cranelift, reference backend)
+  ├──► lpvm-wasm          → .wasm (browser preview, wasm.q32 filetests)
   └──► lpir::interp       → in-process interpreter (testing)
 ```
 
@@ -141,12 +149,15 @@ and stable compiler internals across Cranelift version bumps.
 
 ### Backends
 
-- **`lpvm-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
-  primary target is RISC-V 32-bit (`riscv32imac`) for ESP32-C6. Host JIT uses `cranelift-native`
-  for development and testing. Optional `glsl` feature pulls in `lps-frontend` for
-  string-to-machine-code entry points.
+- **`lpvm-native`** — LPIR → machine code via LightPlayer's own lightweight codegen; the
+  default on-device JIT. Two ISA backends: RISC-V 32-bit (`riscv32imac`, ESP32-C6) and
+  Xtensa (ESP32-S3 / classic ESP32).
 
-- **`lps-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
+- **`lpvm-cranelift`** — LPIR → Cranelift → machine code; the reference backend. Supports any
+  ISA Cranelift supports; host JIT uses `cranelift-native` for development and testing.
+  Optional `glsl` feature pulls in `lps-frontend` for string-to-machine-code entry points.
+
+- **`lpvm-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
   WASM for the web demo and `wasm.q32` filetests without requiring Cranelift.
 
 - **`lpir::interp`** — Tree-walking interpreter inside the `lpir` crate. Runs LPIR directly for
@@ -172,6 +183,7 @@ expected results; the harness compiles and executes on several backends:
 - **wasm.q32** — WASM via `lpvm-wasm` + Wasmtime (the host execution target)
 - **rv32c.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
 - **rv32n.q32 / rv32lpn.q32** — RV32 via the hand-built `lpvm-native` backend + `lp-riscv-emu`
+- **xtn.q32** — Xtensa via `lpvm-native`'s `isa/xt` backend + `lp-xt-emu`
 
 Run with `./scripts/filetests.sh` or `just test-filetests`.
 
@@ -206,9 +218,16 @@ Tools for working with RISC-V code:
 - **`lp-riscv-emu-guest`** - Guest-side runtime for code running in the emulator. Provides syscall
   interface, memory management, and logging facilities.
 
+## Xtensa Tooling (`lp-xt/`)
+
+The Xtensa counterpart to `lp-riscv/`, covering the ESP32-S3 (LX7) and classic ESP32 (LX6):
+instruction model, encoder/decoder, and disassembler (`lp-xt-inst`), the windowed-register
+emulator with per-board memory maps and an FPU proven bit-equal to real S3 silicon
+(`lp-xt-emu`), and ELF loading (`lp-xt-elf`). See [`lp-xt/README.md`](../lp-xt/README.md).
+
 ## Cranelift Fork
 
-LightPlayer uses a [forked version of Cranelift](https://github.com/light-player/lp-cranelift)
+LightPlayer uses a [forked version of Cranelift](https://github.com/PhotomancerArt/lp-cranelift)
 with modifications for embedded use:
 
 - **32-bit RISC-V Support** - `riscv32imac` code generation (upstream Cranelift only supports
@@ -216,21 +235,16 @@ with modifications for embedded use:
 - **`no_std`** - Supports `no_std` + alloc for both object and JIT compilation, enabling the
   compiler to run on bare-metal targets
 - **regalloc2 fork** - Paired with a
-  [forked regalloc2](https://github.com/light-player/lp-regalloc2) with `ChunkedVec` for OOM
+  [forked regalloc2](https://github.com/PhotomancerArt/lp-regalloc2) with `ChunkedVec` for OOM
   mitigation and feature-gated ION allocator
 
 The fork maintains compatibility with upstream Cranelift while adding the necessary features for
 embedded JIT compilation.
 
-# Planned Work
+# Where Decisions Live
 
-Major features planned for future releases:
-
-- **Web UI** - Browser-based interface for creating and managing LightPlayer projects, visualizing
-  outputs, and controlling devices remotely
-
-- **GPU Shader Execution** - Support for executing shaders on GPU hardware (OpenGL/Vulkan) for
-  platforms with GPU capabilities, providing significant performance improvements
-
-- **Input Device Support** - Integration with input devices (sensors, MIDI controllers, network
-  events) to enable interactive and responsive visual effects
+This page is the standing overview; the design record is elsewhere. Accepted decisions live in
+[`adr/`](adr/) (one file per decision, dated), known conditions in [`debt/`](debt/) and event
+registries in [`defects/`](defects/), and forward-looking direction in [`roadmaps/`](roadmaps/)
+and [`future/`](future/). When this page and an ADR disagree, the ADR wins — and this page
+needs a fix.

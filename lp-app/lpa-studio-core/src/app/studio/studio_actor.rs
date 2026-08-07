@@ -100,6 +100,27 @@ impl CancelSignal for SharedCancel {
     }
 }
 
+/// Construction options for secondary actors.
+///
+/// The global `log::` sink has ONE per-thread pending queue and
+/// [`take_pending_records`] is a destructive `mem::take` — so exactly one
+/// actor per thread may drain it. The app's main actor keeps the default
+/// (`drain_logs: true`); every additional actor on the same thread (the
+/// docs-sim hosts) must pass `drain_logs: false` or it silently steals
+/// the main console's records.
+#[derive(Clone, Copy, Debug)]
+pub struct StudioActorOptions {
+    /// Drain the global `log::` sink into this controller's console ring
+    /// each batch. True for the app's single main actor only.
+    pub drain_logs: bool,
+}
+
+impl Default for StudioActorOptions {
+    fn default() -> Self {
+        Self { drain_logs: true }
+    }
+}
+
 /// The actor: owns the controller and drives it from the command queue.
 ///
 /// Tick policy is per session (runtime-pool P2): the passive pull follows
@@ -117,6 +138,7 @@ pub struct StudioActor<MakeTimer> {
     /// next tick (min over sessions of cadence/heartbeat + backoff),
     /// refreshed each batch.
     delay: Rc<Cell<Duration>>,
+    options: StudioActorOptions,
 }
 
 impl<MakeTimer, Timer> StudioActor<MakeTimer>
@@ -129,7 +151,17 @@ where
     /// `make_timer` is the platform timer factory used to build each pull's
     /// progress deadline. Call [`StudioActor::run`] to drive the loop (wasm:
     /// under `spawn_local`; tests: under a bare waker).
-    pub fn new(mut controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
+    pub fn new(controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
+        Self::new_with_options(controller, make_timer, StudioActorOptions::default())
+    }
+
+    /// [`StudioActor::new`] with explicit [`StudioActorOptions`] — the
+    /// docs-sim hosts use this to opt out of the global log-sink drain.
+    pub fn new_with_options(
+        mut controller: StudioController,
+        make_timer: MakeTimer,
+        options: StudioActorOptions,
+    ) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
         // Agent run futures report progress (and stage edits) through the
@@ -151,6 +183,7 @@ where
             view_out,
             make_timer,
             delay: Rc::clone(&delay),
+            options,
         };
         (actor, StudioHandle { tx, view, delay })
     }
@@ -214,6 +247,10 @@ where
             // Sim crash detection + guarded auto-reboot rides the same
             // cadence too — a no-op while the sim worker is healthy.
             self.controller.run_due_sim_crash_recovery().await;
+            // LAST in the tick: the device-card frame feed is a picture,
+            // and nothing structural should wait behind one. A no-op
+            // unless some card is showing its ▶ tab on a Ready device.
+            self.run_card_feed_tick().await;
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
@@ -366,6 +403,23 @@ where
         }
     }
 
+    /// Run the due device-card frame feeds under the same preempt watch
+    /// the lens pull uses: a feed is [`ActionClass::Passive`], so an
+    /// arriving user gesture flips the cancel flag and the in-flight read
+    /// ends at its next frame boundary rather than making the gesture wait
+    /// for a dome frame.
+    ///
+    /// [`ActionClass::Passive`]: crate::ActionClass::Passive
+    async fn run_card_feed_tick(&mut self) {
+        let cancel = SharedCancel::new();
+        cancel.reset();
+        let feeds = self
+            .controller
+            .run_due_card_feeds(self.make_timer.clone(), &cancel);
+        let watch = watch_for_preempt(&self.commands, &cancel);
+        pull_while_watching(feeds, watch).await;
+    }
+
     /// The lens session's passive-refresh backoff delay (zero while
     /// healthy). Per-session since runtime-pool P2; the published delay
     /// already folds it in.
@@ -389,7 +443,9 @@ where
     /// *during* a batch land in that batch's own snapshot, and records logged
     /// between batches are picked up by the next one.
     fn emit_if_changed(&mut self) {
-        self.drain_log_sink();
+        if self.options.drain_logs {
+            self.drain_log_sink();
+        }
         if let Some(view) = self.controller.view_if_changed() {
             self.view_out.send(view);
         }

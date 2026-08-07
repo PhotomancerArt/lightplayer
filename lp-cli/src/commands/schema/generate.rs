@@ -465,12 +465,18 @@ mod tests {
         }
     }
 
-    /// D2 (P4): the clock's `controls.*` fields are `SlotRole::Debug`
+    /// D2 (P4): the clock's `transport.*` fields are `SlotRole::Debug`
     /// (session-only), so `node.schema.json` must not advertise them as
     /// authorable — kills W2, where the schema previously invited a def
     /// author to write a value the loader now warns-and-ignores.
+    ///
+    /// The mount point was `controls` until plan
+    /// `2026-08-04-2355-clock-tape-hero` P1 renamed it to `transport`. No
+    /// format bump followed: nothing on disk ever carried the record (Debug
+    /// role ⇒ `is_persisted() == false`), so the only fallout is the
+    /// regenerated `schemas/` tree this test guards.
     #[test]
-    fn node_schema_omits_clock_debug_controls() {
+    fn node_schema_omits_clock_debug_transport() {
         let outputs = generate_outputs().unwrap();
         let node: Value = serde_json::from_str(&outputs["node.schema.json"]).unwrap();
         let clock_branch = node["oneOf"]
@@ -480,13 +486,13 @@ mod tests {
             .find(|branch| branch["properties"]["kind"]["const"] == json!("Clock"))
             .expect("clock branch");
 
-        let controls = &clock_branch["properties"]["controls"];
-        let controls_properties = controls["properties"]
+        let transport = &clock_branch["properties"]["transport"];
+        let transport_properties = transport["properties"]
             .as_object()
-            .expect("controls is a compiled object schema");
+            .expect("transport is a compiled object schema");
         assert!(
-            controls_properties.is_empty(),
-            "clock controls.* are all Debug-role and must be omitted: {controls}"
+            transport_properties.is_empty(),
+            "clock transport.* are all Debug-role and must be omitted: {transport}"
         );
     }
 

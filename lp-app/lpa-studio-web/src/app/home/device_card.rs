@@ -27,7 +27,7 @@ use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
     CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
     DeviceDetailAffordance, DeviceOp, DeviceRichInput, DeviceTarget, HomeOp, LinkProviderKind,
-    PreviewSource, ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
+    ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
     RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput,
     UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
     device_rich_object, sim_rich_object,
@@ -37,7 +37,7 @@ use lpa_studio_core::{UiLogEntry, UiLogLevel};
 use crate::app::home::card_sheet::{
     CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
 };
-use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_play_tab::PlayTabBody;
 use crate::app::home::package_card::home_action;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
@@ -312,7 +312,8 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
     }
 }
 
-/// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
+/// The blank board's SETUP FORM (state-flow model §1-A): the Settings
+/// front door
 /// IS the form — the board picker (M5), a prefilled date-default name,
 /// and ONE Install button; no confirm, no separate naming dialog. The
 /// name rides the provision op and stamps at first post-flash contact;
@@ -336,7 +337,6 @@ fn SetupForm(
     // `None` until the user types: the name keeps deriving from the pick
     // (spike round 2), and the first keystroke freezes it.
     let mut typed_name = use_signal(|| None::<String>);
-    let mut show_all = use_signal(|| false);
     let label = if replaces {
         "Replace with LightPlayer"
     } else {
@@ -344,39 +344,6 @@ fn SetupForm(
     };
 
     let boards = provisionable_boards();
-    let detected = detected_chip.as_deref().and_then(chip_id);
-    // A board for another chip CANNOT be flashed onto this device — the
-    // guard refuses it — so when the chip is known, the other-chip boards
-    // are not offered AT ALL. The 2026-08-02 walk collapsed them behind a
-    // "+N other boards" disclosure; the 2026-08-03 gate-1 sitting judged
-    // even that wrong — a disclosure reads as "more applicable choices",
-    // and everything behind it was a dead end. When the chip is UNKNOWN
-    // (no banner, unresolved report), the full list stands: detection, not
-    // the catalog, is the uncertain half then.
-    let applicable: Vec<&'static lpa_boards::BoardDisplayFile> = match detected {
-        Some(chip) => boards
-            .iter()
-            .filter(|board| chip_id(&board.family) == Some(chip))
-            .copied()
-            .collect(),
-        None => boards.clone(),
-    };
-    // Generic occupies the first cell, so the board capacity is one less;
-    // the overflow cell fills the 12th (4 rows of 3). Plain grid
-    // truncation — every tile behind it IS applicable.
-    let capacity = SETUP_TILE_LIMIT - 1;
-    let overflow = if show_all() {
-        0
-    } else {
-        applicable.len().saturating_sub(capacity)
-    };
-    let shown: Vec<_> = if overflow == 0 {
-        applicable
-    } else {
-        applicable.into_iter().take(capacity).collect()
-    };
-    let overflow_label = format!("+{overflow} more");
-
     let picked = setup_board
         .as_deref()
         .and_then(|id| boards.iter().find(|board| board.board_id == id).copied());
@@ -410,36 +377,18 @@ fn SetupForm(
             p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
                 "Select your board"
             }
-            div { class: "tw:grid tw:grid-cols-3 tw:gap-2",
-                // Generic leads: it is the no-decision outcome, and it has
-                // to stay findable as the grid grows (gate round 3).
-                BoardTile {
-                    board: None,
-                    caption: "Generic".to_string(),
-                    selected: setup_board.is_none(),
-                    // Nothing picked yet is the IMPLICIT generic install:
-                    // marked quietly, never as a green choice.
-                    implicit: setup_board.is_none(),
-                    on_action,
-                    card_key: card_key.clone(),
-                }
-                for board in shown {
-                    BoardTile {
-                        board: Some(board.clone()),
-                        caption: board.display_name.clone(),
-                        selected: setup_board.as_deref() == Some(board.board_id.as_str()),
-                        implicit: false,
-                        on_action,
-                        card_key: card_key.clone(),
-                    }
-                }
-                if overflow > 0 && !show_all() {
-                    button {
-                        class: "tw:flex tw:min-h-[4.5rem] tw:items-center tw:justify-center tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:text-xs tw:text-subtle-foreground tw:hover:border-strong tw:hover:text-strong-foreground",
-                        onclick: move |_| show_all.set(true),
-                        "{overflow_label}"
-                    }
-                }
+            BoardPicker {
+                selected: setup_board.clone(),
+                detected_chip: detected_chip.clone(),
+                // Nothing picked yet is the IMPLICIT generic install:
+                // marked quietly, never as a green choice.
+                generic_is_implicit: true,
+                on_pick: move |board_id| {
+                    on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectSetupBoard {
+                        card: card_key.clone(),
+                        board_id,
+                    })));
+                },
             }
             div {
                 // Same voice and same weight as "Select your board": the
@@ -479,6 +428,105 @@ fn SetupForm(
 /// allowed to grow, but not without bound).
 const SETUP_TILE_LIMIT: usize = 11;
 
+/// THE board picker: thumbnail tiles, chip-filtered, Generic first —
+/// shipped as the setup form's grid (board-selection M5, gate rounds 2–3)
+/// and reused verbatim by the setup wizard's BOARD_PICK and BOARD_FIRST
+/// steps. There is one picker in this app; `on_pick` is the only thing
+/// that differs between its callers (`None` = the generic fallback).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn BoardPicker(
+    /// The board picked so far; `None` = generic.
+    selected: Option<String>,
+    /// Chip identity from passive/probe evidence — matching boards lead.
+    /// `None` shows the whole provisionable catalog (the wizard's sim
+    /// entry, and any board whose chip nothing has named).
+    detected_chip: Option<String>,
+    /// Whether an unpicked state means "Generic is what will happen"
+    /// (the setup form's implicit install) or simply "nothing picked yet"
+    /// (the wizard, whose forward verb is not armed until a pick).
+    #[props(default = false)]
+    generic_is_implicit: bool,
+    /// Whether the Generic tile is offered at all. The wizard's sim entry
+    /// takes on a REAL board (pins, wires, limits follow it), so there is
+    /// no no-decision cell there.
+    #[props(default = true)]
+    offer_generic: bool,
+    on_pick: EventHandler<Option<String>>,
+) -> Element {
+    let mut show_all = use_signal(|| false);
+    let boards = provisionable_boards();
+    let detected = detected_chip.as_deref().and_then(chip_id);
+    // A board for another chip CANNOT be flashed onto this device — the
+    // guard refuses it — so when the chip is known, the other-chip boards
+    // are not offered AT ALL. The 2026-08-02 walk collapsed them behind a
+    // "+N other boards" disclosure; the 2026-08-03 gate-1 sitting judged
+    // even that wrong — a disclosure reads as "more applicable choices",
+    // and everything behind it was a dead end. When the chip is UNKNOWN
+    // (no banner, unresolved report), the full list stands: detection, not
+    // the catalog, is the uncertain half then.
+    let applicable: Vec<&'static lpa_boards::BoardDisplayFile> = match detected {
+        Some(chip) => boards
+            .iter()
+            .filter(|board| chip_id(&board.family) == Some(chip))
+            .copied()
+            .collect(),
+        None => boards.clone(),
+    };
+    // Generic occupies the first cell, so the board capacity is one less;
+    // the overflow cell fills the 12th (4 rows of 3). Plain grid
+    // truncation — every tile behind it IS applicable.
+    let capacity = if offer_generic {
+        SETUP_TILE_LIMIT - 1
+    } else {
+        SETUP_TILE_LIMIT
+    };
+    let overflow = if show_all() {
+        0
+    } else {
+        applicable.len().saturating_sub(capacity)
+    };
+    let shown: Vec<_> = if overflow == 0 {
+        applicable
+    } else {
+        applicable.into_iter().take(capacity).collect()
+    };
+    let overflow_label = format!("+{overflow} more");
+
+    rsx! {
+        div { class: "tw:grid tw:grid-cols-3 tw:gap-2",
+            // Generic leads: it is the no-decision outcome, and it has to
+            // stay findable as the grid grows (gate round 3).
+            if offer_generic {
+                BoardTile {
+                    board: None,
+                    caption: "Generic".to_string(),
+                    selected: selected.is_none(),
+                    implicit: generic_is_implicit && selected.is_none(),
+                    on_pick,
+                }
+            }
+            for board in shown {
+                BoardTile {
+                    board: Some(board.clone()),
+                    caption: board.display_name.clone(),
+                    selected: selected.as_deref() == Some(board.board_id.as_str()),
+                    implicit: false,
+                    on_pick,
+                }
+            }
+            if overflow > 0 && !show_all() {
+                button {
+                    class: "tw:flex tw:min-h-[4.5rem] tw:items-center tw:justify-center tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:text-xs tw:text-subtle-foreground tw:hover:border-strong tw:hover:text-strong-foreground",
+                    r#type: "button",
+                    onclick: move |_| show_all.set(true),
+                    "{overflow_label}"
+                }
+            }
+        }
+    }
+}
+
 /// One tile in the board grid: the board's own drawing over its name.
 /// `board: None` is the generic fallback, drawn as a dashed placeholder.
 ///
@@ -495,8 +543,8 @@ fn BoardTile(
     selected: bool,
     /// The unpicked generic cell: outlined quietly, never as a green pick.
     implicit: bool,
-    on_action: EventHandler<UiAction>,
-    card_key: String,
+    /// What a click means. The tile knows the board, not the flow.
+    on_pick: EventHandler<Option<String>>,
 ) -> Element {
     let board_id = board.as_ref().map(|board| board.board_id.clone());
     let class = match (selected, implicit) {
@@ -513,12 +561,8 @@ fn BoardTile(
     rsx! {
         button {
             class,
-            onclick: move |_| {
-                on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectSetupBoard {
-                    card: card_key.clone(),
-                    board_id: board_id.clone(),
-                })));
-            },
+            r#type: "button",
+            onclick: move |_| on_pick.call(board_id.clone()),
             if selected && !implicit {
                 span { class: "tw:absolute tw:right-1 tw:top-0.5 tw:text-[0.6rem] tw:font-bold tw:text-accent",
                     "✓"
@@ -580,9 +624,10 @@ fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
 }
 
 /// One roster card: the device (or live sim session) as a tabbed control
-/// panel. The grow control is the editor entry; the tabs carry status,
-/// project, settings, console (P2), and the danger zone; body clicks are
-/// quiet (drop targets stay live).
+/// panel. The grow control is the editor entry; the tabs carry the ▶
+/// picture, the Settings front door (health + technical — the Status tab
+/// folded into it at the honest-preview G1), project, console (P2), and
+/// the danger zone; body clicks are quiet (drop targets stay live).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -595,9 +640,10 @@ pub(crate) fn DeviceCard(
     #[props(default = false)]
     sim: bool,
     /// D43 pane mode: the SAME card grown into the editor's right-side
-    /// column — tall body, ⇲ shrinks back to the gallery, and the
-    /// console is a permanent bottom region (round 3.5: the Console tab
-    /// and the strip both disappear).
+    /// column — tall body, ⇲ shrinks back to the gallery. The console is
+    /// the Console tab here exactly as at card scale (G1b ruling 7
+    /// retired round 3.5's permanent bottom region and the ambient
+    /// strip).
     #[props(default = false)]
     pane: bool,
     /// Studio's bundled firmware image (packaged manifest), when known —
@@ -610,18 +656,46 @@ pub(crate) fn DeviceCard(
     /// gallery passes its hydrated project list; empty hides the picker.
     #[props(default)]
     project_choices: Vec<UiDeviceProjectChip>,
+    /// The setup flow bound to THIS card, rendered as a **body takeover**
+    /// (G2 ruling, 2026-08-05): the header stays the device's and grows
+    /// real facts as they land, while the tabs, hero strip, and op overlay
+    /// stand aside for the wizard until the flow hands back. The gallery
+    /// passes it to the one card whose key the wizard names; every other
+    /// card gets `None` and renders normally.
+    #[props(default)]
+    setup: Option<lpa_studio_core::UiSetupWizard>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
     let status_line = card.state.status_line(now);
     let faded = matches!(card.state, RosterCardState::Offline { .. });
-    // last-known, not current, on offline/error cards (card grammar)
-    let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
+    // (the "last-known, not current" dimming moved onto the ▶ tab with the
+    // hero strip's removal — `PlayTabBody` owns it now)
+    // The bound flow owns the body while it runs (G2 ruling). It borrows
+    // the CARD's live op and console tail rather than the snapshot the
+    // view build handed the wizard: those two are patched progressively
+    // between builds, so this is what keeps the flash step's bar and
+    // terminal moving at the same rate the card's own overlay would.
+    let takeover = setup.map(|mut wizard| {
+        if let Some(op) = card.ui.op.clone() {
+            wizard.flash = Some(op);
+        }
+        if !card.console_tail.is_empty() {
+            wizard.console_tail = card.console_tail.clone();
+        }
+        wizard
+    });
+    let in_setup = takeover.is_some();
     // Needs-a-name opens the name-stamping SHEET (D41 — ratified spike
-    // round 3); renaming a stamped device stays the title-bar inline edit
-    let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
-    let can_rename = card.uid.is_some() && !sim;
-    let droppable = !sim && !faded;
+    // round 3); renaming a stamped device stays the title-bar inline edit.
+    //
+    // Mid-setup the card has exactly one surface: the flow. Renaming
+    // (PROVISION owns the name), dropping a project onto a board that is
+    // still being flashed, and the hero strip's leftover project all
+    // stand aside until the flow hands back.
+    let name_inline = !sim && !in_setup && matches!(card.state, RosterCardState::NeedsAName);
+    let can_rename = card.uid.is_some() && !sim && !in_setup;
+    let droppable = !sim && !faded && !in_setup;
 
     // The rich-object view: sections wired to concrete rows here (the
     // one identity→action hop — a row dispatches or opens a card sheet),
@@ -630,6 +704,8 @@ pub(crate) fn DeviceCard(
         sim_rich_object(&SimRichInput {
             state: &card.state,
             project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
+            // D4: "as ESP32-S3 DevKitC-1" under the status line
+            board_id: card.board_id.as_deref(),
             now_secs: now,
         })
         .sections
@@ -647,6 +723,7 @@ pub(crate) fn DeviceCard(
             bundled_fw: bundled_fw.as_ref(),
             detected_chip: card.detected_chip.as_deref(),
             port_label: card.port_label.as_deref(),
+            board_id: card.board_id.as_deref(),
             now_secs: now,
         })
         .sections
@@ -656,7 +733,11 @@ pub(crate) fn DeviceCard(
     };
     let view = RichObjectView::new(sections);
     let edge_tone = view.rollup().tone;
-    let mut tabs = device_card_tabs(view);
+    // The ▶ tab exists exactly when the card holds a project: that is the
+    // one condition under which there is something honest to draw (the
+    // device's frames, or the sim's own re-simulation). A board with
+    // nothing on it gets no picture tab — its front-door body says so instead.
+    let mut tabs = device_card_tabs(view, card.project.is_some());
     // M8′: the Connected-empty device offers the Project-tab PICKER —
     // the tab exists exactly when there is something honest to offer
     // (choices in the library), mirroring the data-adaptive rule.
@@ -665,8 +746,15 @@ pub(crate) fn DeviceCard(
         && !project_choices.is_empty()
         && !tabs.iter().any(|tab| tab.tab == DeviceCardTab::Project);
     if picker_mode {
+        // Straight after the front door (Settings), wherever it sits —
+        // the ▶ tab now leads the row on cards that have one, so index 1
+        // is no longer a synonym for "after the front door".
+        let after_front_door = tabs
+            .iter()
+            .position(|tab| tab.tab == DeviceCardTab::Details)
+            .map_or(0, |index| index + 1);
         tabs.insert(
-            1,
+            after_front_door,
             CardTabView {
                 tab: DeviceCardTab::Project,
                 sections: Vec::new(),
@@ -697,18 +785,13 @@ pub(crate) fn DeviceCard(
     // interaction back to core via `HomeOp::CardUi`.
     let card_key = card.identity_key().to_string();
     // a state change may drop the selected tab (e.g. Danger during an
-    // operation): fall back to Status rather than a blank body. Pane
-    // mode has no Console tab (round 3.5) — a Console selection lands
-    // on Status.
+    // operation): fall back to Settings (the front door) rather than a
+    // blank body. Console is an ordinary tab in BOTH modes (G1b ruling
+    // 7 reversed round 3.5's pane exclusion).
     let active_tab = tabs
         .iter()
         .find(|tab| tab.tab == card.ui.tab)
-        .map_or(DeviceCardTab::Status, |tab| tab.tab);
-    let active_tab = if pane && active_tab == DeviceCardTab::Console {
-        DeviceCardTab::Status
-    } else {
-        active_tab
-    };
+        .map_or(DeviceCardTab::Details, |tab| tab.tab);
     // The open sheet projected to the render enum (confirm arm rebuilt
     // from its verb). `None` = no sheet.
     let active_sheet = card.ui.sheet.as_ref().map(|s| sheet_to_web(s, &card));
@@ -858,7 +941,7 @@ pub(crate) fn DeviceCard(
                         // shell wordmark uses (the hash may not change).
                         a {
                             class: "{grow_button_class(transport_label.is_empty())} tw:no-underline",
-                            href: "#/",
+                            href: "/devices",
                             title: "Back to the gallery",
                             aria_label: "Shrink {card.name} back to the gallery",
                             onclick: move |_| {
@@ -889,25 +972,14 @@ pub(crate) fn DeviceCard(
                     }
                 }
             }
-            // D12 hero strip (gallery-rework P05): the held/last-run
-            // project as the card's default identity treatment —
-            // replacing the small in-body chip. Live cards lease a real
-            // preview by project uid, reusing the gallery's PreviewHost
-            // machinery (gradient fallback until a frame presents);
-            // offline/not-responding cards get no lease — there is no
-            // snapshot seam yet (`card_thumb`'s M6 seam) — so the frame
-            // itself dims instead (identity, not health, per
-            // `UiDeviceProjectChip`'s doc comment). No project, no strip:
-            // the body's own "nothing on it yet" line carries that case.
-            if let Some(chip) = card.project.as_ref() {
-                CardThumb {
-                    seed: chip.uid.clone(),
-                    label: chip.name.clone(),
-                    hero: true,
-                    muted: chip_muted,
-                    source: (!chip_muted).then(|| PreviewSource::ProjectUid(chip.uid.clone())),
-                }
-            }
+            // NO hero strip. The D12/P05 strip re-simulated the project in
+            // the browser and presented the result as the board's face —
+            // which the 2026-08-05 G2 ruling called what it was:
+            // dishonest, and letterboxed besides. What the device is
+            // actually doing lives on the ▶ tab now, drawn from frames the
+            // board published; the project's identity rides that tab's
+            // meta row.
+            //
             // Everything below the title bar shares one wrapper: a D41
             // sheet dims exactly this region, so the name above it stays
             // readable (spike round 3: sheets spare the title bar).
@@ -922,13 +994,23 @@ pub(crate) fn DeviceCard(
             // the troubleshoot sheet leaving the user stuck with no
             // scroll). Content-driven height deletes the class.
             div { class: if pane { "ux-card-stack tw:min-h-0 tw:flex-1" } else { "ux-card-stack" },
+                // The flow, wearing this card's body: the rail (with the
+                // flow's ✕), the state's own component, and the abandon
+                // guard. No tabs, no console strip, no op overlay — the
+                // wizard IS the narration until it hands back, and at
+                // DEVICE_HOME the card's own body below simply returns,
+                // without the card ever leaving the grid.
+                if let Some(wizard) = takeover.as_ref() {
+                    {crate::app::home::setup_wizard::setup_takeover_body(wizard, on_action)}
+                }
+                // The card's own body: exactly when no flow has taken it.
+                if !in_setup {
                 div { class: if pane { "tw:relative tw:flex tw:min-h-0 tw:flex-col" } else { "tw:relative tw:flex tw:flex-col" },
-                    // the icon-tab row (below the title bar — spike anatomy;
-                    // pane mode drops the Console tab, round 3.5)
+                    // the icon-tab row (below the title bar — spike anatomy)
                     div {
                         class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
                         role: "tablist",
-                        for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
+                        for tab_view in tabs.iter() {
                             {tab_button(tab_view, active_tab, &card_key, on_action)}
                         }
                     }
@@ -949,8 +1031,29 @@ pub(crate) fn DeviceCard(
                     }
                     div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                         match active_tab {
-                            DeviceCardTab::Status => rsx! {
-                                {status_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
+                            DeviceCardTab::Play => rsx! {
+                                PlayTabBody {
+                                    card: card.clone(),
+                                    sim,
+                                    now,
+                                    // The same editor entry the title-bar ⤢
+                                    // dispatches (G1: the picture carries its
+                                    // own way in).
+                                    open_action: grow_action.clone(),
+                                    // The gone device's way back, IN the box
+                                    // (G1b ruling 8).
+                                    reconnect_action: (!sim
+                                        && matches!(
+                                            card.state,
+                                            RosterCardState::Offline { .. }
+                                                | RosterCardState::NotResponding
+                                        ))
+                                    .then(|| reconnect_device_action(card.uid.clone())),
+                                    on_action,
+                                }
+                            },
+                            DeviceCardTab::Details => rsx! {
+                                {details_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
                             },
                             DeviceCardTab::Console => rsx! {
                                 {console_tab_body(&card.console_tail)}
@@ -963,37 +1066,24 @@ pub(crate) fn DeviceCard(
                             },
                         }
                     }
-                    if pane {
-                        // D42 pane mode (round 3.5): the console is a
-                        // permanent expanded bottom region — a normal console;
-                        // no tab, no strip.
-                        div { class: "ux-console-region",
-                            if card.console_tail.is_empty() {
-                                p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
-                                    "No console output yet."
-                                }
-                            } else {
-                                for entry in card.console_tail.iter() {
-                                    div { class: console_line_class(entry.level), "{entry.message}" }
-                                }
-                            }
-                        }
-                    }
-                    // D42's ambient strip: the console's latest line at the
-                    // card's bottom edge; clicking jumps to the Console tab,
-                    // and the strip HIDES while that tab is active.
-                    if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
-                        {console_strip(&card.console_tail, &card_key, on_action)}
-                    }
+                    // No permanent pane console region and no ambient
+                    // strip (G1b ruling 7, amending D42/round 3.5): the
+                    // console is the Console TAB in both modes — the strip
+                    // and the always-open region earned their pixels on
+                    // neither surface.
                 }
-                if let Some(active_sheet) = active_sheet.as_ref() {
+                }
+                if let Some(active_sheet) = active_sheet.as_ref().filter(|_| !in_setup) {
                     {device_card_sheet_view(active_sheet, &card, &card_key, on_action)}
                 }
                 // In-place op progress (device-lifecycle P2): the LAST
                 // child of the body wrapper, so it covers the tab row and
                 // body (the title bar above is spared) — a heavy op takes
-                // over the card here, never an app-level modal.
-                if let Some(op) = card.ui.op.as_ref() {
+                // over the card here, never an app-level modal. Mid-setup
+                // the wizard's own flash step is already showing this op
+                // (same value, same activity view), so the overlay stands
+                // down rather than double-narrating it.
+                if let Some(op) = card.ui.op.as_ref().filter(|_| !in_setup) {
                     {card_op_overlay(op, &card, &card_key, on_action)}
                 }
             }
@@ -1077,6 +1167,15 @@ fn card_op_overlay(
             }
         };
     }
+    card_op_activity(op, tail)
+}
+
+/// The WORKING half of the card's op overlay — label, bar, terminal — with
+/// no card behind it. The setup wizard's FLASHING step renders this
+/// verbatim: the flash is the same op, narrated by the same card-owned
+/// flow, so the two surfaces cannot drift.
+pub(crate) fn card_op_activity(op: &lpa_studio_core::CardOp, tail: &[UiLogEntry]) -> Element {
+    use lpa_studio_core::CardOpPhase;
     let indeterminate = op.percent.is_none() || matches!(op.phase, CardOpPhase::AwaitingDevice);
     let bar_class = if indeterminate {
         "ux-card-op-bar is-indeterminate"
@@ -1103,33 +1202,6 @@ fn card_op_overlay(
                     }
                 }
             }
-        }
-    }
-}
-
-/// The D42 strip: one mono line (the tail's newest entry), full width,
-/// quiet; the one expansion mechanism is jumping to the Console tab.
-fn console_strip(
-    tail: &[UiLogEntry],
-    card_key: &str,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let line = tail
-        .last()
-        .map(|entry| entry.message.clone())
-        .unwrap_or_default();
-    let card_key = card_key.to_string();
-    rsx! {
-        button {
-            class: "ux-console-strip",
-            r#type: "button",
-            title: "Open the console tab",
-            onclick: move |event| {
-                event.stop_propagation();
-                on_action.call(select_tab_action(&card_key, DeviceCardTab::Console));
-            },
-            span { class: "ux-console-strip-line", "› {line}" }
-            span { class: "tw:flex-none tw:text-[10px] tw:text-dim-foreground", "▲" }
         }
     }
 }
@@ -1220,36 +1292,42 @@ fn tab_button<A>(
     }
 }
 
-/// The Status tab: the Health section with the status line up front, and
+/// The Details front door: the Health section with the status line up front, and
 /// the state-table affordance — today's card body, re-homed. The project's
-/// identity now rides the hero strip (gallery-rework P05) rather than a
-/// row here.
-fn status_tab_body(
+/// identity rides the ▶ tab's meta row (honest-device preview P3) rather
+/// than a row here.
+fn details_tab_body(
     card: &UiDeviceCard,
     tabs: &[CardTabView<CardRowAction>],
     on_action: EventHandler<UiAction>,
     card_key: &str,
     now_secs: Option<f64>,
 ) -> Element {
-    let health = tabs
+    // The folded front door (G1: Status retired; G1b: renamed Details): health
+    // sections keep their narrative treatment and the forms; Technical
+    // sections follow as plain fact rows.
+    let sections = tabs
         .iter()
-        .find(|tab| tab.tab == DeviceCardTab::Status)
+        .find(|tab| tab.tab == DeviceCardTab::Details)
         .map(|tab| tab.sections.as_slice())
         .unwrap_or_default();
-    // The blank board's Status tab IS the setup form (model §1-A): the
+    let (technical, health): (Vec<_>, Vec<_>) = sections
+        .iter()
+        .partition(|section| section.title == "Technical");
+    // The blank board's front door IS the setup form (model §1-A): the
     // form replaces the affordance rows (SetUp came through them).
     let setup_form = !card.sim
         && matches!(
             card.state,
             RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware
         );
-    // Recovery mode's Status tab carries the exit verbs DIRECTLY (bench
+    // Recovery mode's front door carries the exit verbs DIRECTLY (bench
     // feedback 2026-07-31): a user here has already done the hard part,
     // and routing them through Troubleshoot — a sheet that mostly explains
     // how to get INTO this state — was backwards.
     let recovery_face = !card.sim && card.state == RosterCardState::RecoveryMode;
     rsx! {
-        for section in health {
+        for section in health.iter() {
             for line in section.lines.iter() {
                 if line.label == "status" {
                     // the headline: tinted like the edge (the spike's
@@ -1302,7 +1380,7 @@ fn status_tab_body(
         } else if recovery_face {
             RecoveryFace { card_key: card_key.to_string(), on_action }
         } else {
-            for section in health {
+            for section in health.iter() {
                 for row in section.affordances.iter() {
                     div { class: "tw:mt-1",
                         {row_button(row, ActionButtonVariant::Quiet, on_action, card_key)}
@@ -1310,10 +1388,15 @@ fn status_tab_body(
                 }
             }
         }
+        // Technical facts follow the health story — the same rows the
+        // standalone Settings tab always drew.
+        for section in technical.iter() {
+            {fact_section(section, false, on_action, card_key)}
+        }
     }
 }
 
-/// A non-Status tab's body: the tab's sections as compact fact rows +
+/// A plain tab's body: the tab's sections as compact fact rows +
 /// advisory chip + affordances. Danger rows render as destructive menu
 /// rows (inspector-row convention); other affordances as quiet chips.
 fn sections_tab_body(
@@ -1330,32 +1413,46 @@ fn sections_tab_body(
     let menu_rows = active_tab == DeviceCardTab::Danger;
     rsx! {
         for section in sections {
-            if !section.lines.is_empty() {
-                dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-1 tw:text-xs",
-                    for line in section.lines.iter() {
-                        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[72px_minmax(0,1fr)] tw:gap-2",
-                            dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                                "{line.label}"
-                            }
-                            dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
-                                "{line.value}"
-                            }
+            {fact_section(section, menu_rows, on_action, card_key)}
+        }
+    }
+}
+
+/// One section as compact fact rows + advisory chip + affordance rows —
+/// the plain-tab treatment, also reused for the Technical facts at the
+/// bottom of the folded Settings front door.
+fn fact_section(
+    section: &RichSection<CardRowAction>,
+    menu_rows: bool,
+    on_action: EventHandler<UiAction>,
+    card_key: &str,
+) -> Element {
+    rsx! {
+        if !section.lines.is_empty() {
+            dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-1 tw:text-xs",
+                for line in section.lines.iter() {
+                    div { class: "tw:grid tw:min-w-0 tw:grid-cols-[72px_minmax(0,1fr)] tw:gap-2",
+                        dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                            "{line.label}"
+                        }
+                        dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
+                            "{line.value}"
                         }
                     }
                 }
             }
-            if let Some(chip) = section.chip.as_ref() {
-                div { StatusChip { status: chip_status(chip) } }
-            }
-            for row in section.affordances.iter() {
-                div {
-                    {row_button(
-                        row,
-                        if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
-                        on_action,
-                        card_key,
-                    )}
-                }
+        }
+        if let Some(chip) = section.chip.as_ref() {
+            div { StatusChip { status: chip_status(chip) } }
+        }
+        for row in section.affordances.iter() {
+            div {
+                {row_button(
+                    row,
+                    if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
+                    on_action,
+                    card_key,
+                )}
             }
         }
     }
@@ -1749,7 +1846,7 @@ fn NameForm(
 
 /// The name-stamping sheet (retained for the title-bar naming path;
 /// the NeedsAName FACE now names inline via [`NameForm`]): input +
-/// Enter-to-save; naming stamps the uid and the card returns to Status.
+/// Enter-to-save; naming stamps the uid and the card returns to the front door.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Element {
@@ -1811,7 +1908,7 @@ fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Eleme
 /// The name sheet's save: a non-empty name dispatches the stamp op and
 /// closes the sheet. Naming mints the device's uid, so its identity (and
 /// thus its `CardUiState` key) changes — the newly-stamped card comes up
-/// fresh on Status; no explicit tab reset needed.
+/// fresh on the front door; no explicit tab reset needed.
 fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandler<UiAction>) {
     let value = name.read().trim().to_string();
     if value.is_empty() {
@@ -1827,9 +1924,12 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
-        DeviceCardTab::Status => StudioIconName::Play,
+        // ▶ goes to the tab that actually plays something. Details wears
+        // the info glyph (G1b rename — the front door is what we KNOW
+        // about the device, not its settings).
+        DeviceCardTab::Play => StudioIconName::Play,
         DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
-        DeviceCardTab::Settings => StudioIconName::Settings,
+        DeviceCardTab::Details => StudioIconName::Info,
         DeviceCardTab::Performance => StudioIconName::Performance,
         DeviceCardTab::Console => StudioIconName::Console,
         DeviceCardTab::Danger => StudioIconName::Danger,
@@ -1850,26 +1950,57 @@ fn status_family(tone: UiStatusKind) -> &'static str {
     }
 }
 
-/// The dashed "Connect a device" affordance card. Copy comes from the
-/// action's own metadata so the card and the toolbar chip never drift.
+/// The two dashed entry cards, stacked in ONE grid cell: **connect a
+/// device** and **simulate a device**, each half height (flow design F5b).
+/// Both open the setup wizard — the first on a board at the end of a
+/// cable, the second on THE simulator, which takes on a real board and
+/// needs no hardware. Copy comes from each op's own metadata so the cards
+/// and any toolbar chip never drift.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
-    let action = connect_device_action();
+    rsx! {
+        div { class: "tw:grid tw:grid-rows-2 tw:gap-3.5",
+            SetupEntryCard { sim: false, on_action }
+            SetupEntryCard { sim: true, on_action }
+        }
+    }
+}
+
+/// One entry card. The sim wears the violet (bound) family the studio
+/// reserves for "this is the simulator", never the accent green.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn SetupEntryCard(sim: bool, on_action: EventHandler<UiAction>) -> Element {
+    let action = start_setup_action(sim);
     let meta = action.meta().clone();
+    let class = if sim {
+        "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-[var(--studio-status-bound-border)] tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-[var(--studio-status-bound-text)] tw:hover:text-strong-foreground"
+    } else {
+        "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground"
+    };
     rsx! {
         button {
-            class: "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground",
+            class,
             r#type: "button",
             title: "{meta.summary}",
             onclick: move |_| on_action.call(action.clone()),
             span { class: "tw:inline-flex tw:items-center tw:gap-2",
-                StudioIcon { name: StudioIconName::Usb, size: 16 }
+                if sim {
+                    StudioIcon { name: StudioIconName::Simulator, size: 16 }
+                } else {
+                    StudioIcon { name: StudioIconName::Usb, size: 16 }
+                }
                 span { class: "tw:text-sm tw:font-semibold", "{meta.label}" }
             }
-            span { class: "tw:text-xs tw:text-dim-foreground", "{meta.summary}" }
+            span { class: "tw:text-center tw:text-xs tw:text-dim-foreground", "{meta.summary}" }
         }
     }
+}
+
+/// Open the setup wizard on a target — the entry cards' action.
+pub(crate) fn start_setup_action(sim: bool) -> UiAction {
+    home_action(HomeOp::StartSetup { sim })
 }
 
 /// One-click reconnect for an offline/remembered device (M1): connect a
@@ -1882,19 +2013,12 @@ pub(crate) fn reconnect_device_action(uid: Option<String>) -> UiAction {
     )
 }
 
-/// Connect = the VID-filtered browser chooser, directly (D32's filter
-/// rides `requestPort`).
-pub(crate) fn connect_device_action() -> UiAction {
-    UiAction::from_op(
-        ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::OpenProvider {
-            provider_id: LinkProviderKind::BrowserSerialEsp32,
-        },
-    )
-    .with_label("Connect a device")
-    .with_summary("Connect a LightPlayer device over USB.")
-    .with_icon("usb")
-}
+// `connect_device_action` — the bare "open the VID-filtered chooser"
+// action — is GONE (P06). Connecting is now the first step of the setup
+// flow rather than a gesture of its own: the wizard's CONNECT_INTRO asks
+// for the port through the machine's `RequestPort`, so there is exactly
+// one place a port grant can start and exactly one thing that knows what
+// to do with the board on the other end.
 
 /// "Flash firmware…", the quiet secondary affordance (D33 demotion,
 /// dialog-free since M8′): with a device connected it runs the flash
@@ -2009,7 +2133,7 @@ fn project_picker_body(
 /// The D29 editor entry, now dispatched from the grow control (⤢): move
 /// the editor lens onto the device session and open its running project.
 /// The card targets the attached session (`uid: None`); the
-/// `#/device/<uid>` route passes the uid.
+/// `/device/<uid>` route passes the uid.
 fn open_device_project_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),

@@ -1,5 +1,6 @@
 //! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
+use crate::products::control::{ControlLayout, ControlProduct};
 use crate::resource::RuntimeBufferId;
 use lpc_model::{
     AssetLocation, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
@@ -150,6 +151,29 @@ pub trait NodeRuntime {
 
     /// Sink buffer backing an [`crate::nodes::OutputNode`] after [`Self::init_resources`] runs.
     fn runtime_output_sink_buffer_id(&self) -> Option<RuntimeBufferId> {
+        None
+    }
+
+    /// Sample layout of the frame last published into
+    /// [`Self::runtime_output_sink_buffer_id`].
+    ///
+    /// LATCHED by the tick that rendered the frame, never recomputed on
+    /// demand: the published-frame read
+    /// ([`lpc_wire::OutputFrameProbeRequest`]) exists precisely so a client
+    /// can see the bytes the device already pushed without making it render
+    /// again, and the layout is the interpretation half of those bytes.
+    /// `None` before the first successful render.
+    fn runtime_output_sample_layout(&self) -> Option<&ControlLayout> {
+        None
+    }
+
+    /// The control product the last published frame was rendered from.
+    ///
+    /// The output node consumes some upstream producer's control product;
+    /// that producer — not the output — is what knows the display geometry.
+    /// Latched alongside [`Self::runtime_output_sample_layout`] so a reader
+    /// can ask the right node for a layout without re-resolving the graph.
+    fn runtime_output_source_product(&self) -> Option<ControlProduct> {
         None
     }
 

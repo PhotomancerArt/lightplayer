@@ -26,6 +26,7 @@ pub(crate) mod fixture_face_stories;
 pub(crate) mod h_fader_field_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod knob_field_stories;
+pub(crate) mod lamp_view;
 pub(crate) mod map_view;
 pub(crate) mod mapping_asset_editor;
 mod node_children;
@@ -37,6 +38,10 @@ pub(crate) mod node_stories;
 pub(crate) mod node_story_fixtures;
 #[cfg(feature = "stories")]
 pub(crate) mod output_face_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod palette_chooser_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod palette_swatch_stories;
 mod panel;
 #[cfg(feature = "stories")]
 pub(crate) mod playlist_face_stories;
@@ -57,6 +62,7 @@ mod slot_dimensions_field;
 pub(crate) mod slot_edit_actions;
 mod slot_fields;
 mod slot_gesture_fields;
+mod slot_gradient_field;
 mod slot_issue_list;
 mod slot_matrix_field;
 mod slot_option_presence;
@@ -96,8 +102,11 @@ pub use face::{
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
-pub(crate) use panel::phasor_speed_display;
-pub use panel::{HFaderField, KnobField, PanelControl, PanelEmit, ToggleField};
+pub use panel::{
+    HFaderField, KnobField, PaletteCatalog, PaletteChoice, PaletteChooser, PaletteChooserTab,
+    PaletteEditTarget, PaletteEditor, PaletteGroup, PaletteOrigin, PaletteSwatchField,
+    PanelControl, PanelEmit, ToggleField, project_palette_choices,
+};
 pub use produced_product_view::ProducedProductView;
 pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};
 pub use produced_products::ProducedProducts;
@@ -115,6 +124,9 @@ pub use slot_fields::{
 };
 pub use slot_gesture_fields::{
     EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton,
+};
+pub use slot_gradient_field::{
+    GradientDisplayDensity, GradientSlotField, GradientStripBand, GradientValueDisplay,
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;

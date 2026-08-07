@@ -1,4 +1,4 @@
-//! `BoardsCatalogPage`: the public "what should I buy" page (`#/boards`).
+//! `BoardsCatalogPage`: the public "what should I buy" page (`/boards`).
 //!
 //! Boundary: catalog data in, nothing out. The page renders the embedded
 //! display sidecars ([`crate::all_boards`]) through [`BoardDiagram`] and
@@ -8,8 +8,8 @@
 //! owned by the consuming app's stylesheet.
 //!
 //! Detail is in-page selection, not routing: clicking a card swaps the grid
-//! for [`BoardDetail`], and the hash is mirrored to
-//! `#/boards/<vendor>/<product>` via `replaceState` (fires no events) so
+//! for [`BoardDetail`], and the PATH is mirrored to
+//! `/boards/<vendor>/<product>` via `replaceState` (fires no events) so
 //! board pages stay deep-linkable — the host passes the initial selection
 //! parsed from the URL.
 
@@ -139,16 +139,17 @@ fn family_chips() -> Vec<(String, String)> {
 }
 
 /// Mirror the selection into the URL without firing any events — board
-/// detail stays deep-linkable while the page keeps SPA behavior.
+/// detail stays deep-linkable while the page keeps SPA behavior. Paths, not
+/// hashes, since the Studio router moved to real paths (P09).
 fn mirror_selection_hash(selected: Option<&str>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let hash = match selected {
-            Some(board_id) => format!("#/boards/{board_id}"),
-            None => "#/boards".to_string(),
+        let path = match selected {
+            Some(board_id) => format!("/boards/{board_id}"),
+            None => "/boards".to_string(),
         };
         if let Some(history) = web_sys::window().and_then(|window| window.history().ok()) {
-            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&hash));
+            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&path));
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
