@@ -79,14 +79,39 @@ row, not two, because the silicon gave one answer — see the amendment in
 `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` §10.
 
 ⚠️ **Identical numerics, different speed.** Agreement to the bit is not a
-performance claim. On the classic, an f32 shader renders **~17 % slower** than
-the same shader in Q32 — 20 fps vs 24 fps at 1500 LEDs, tick 46 ms vs 40 ms —
-while emitting marginally *less* code and using marginally *less* heap. The S3
-showed no such penalty on a much smaller fixture. The likely cost is the frame
-boundary: it stays Q16.16-in / RGBA16-out in both modes by design, so an f32
-shader pays two conversions per coordinate per sample, which at 1500 LEDs is
-3 000 decodes per frame. Choose `float_mode: float` on the classic for the
-numerics it gives you, not for speed.
+performance claim. **Measured 2026-08-07** (dig2go classic ESP32 rev v3.1 and
+an S3 dev board; `projects/test/zook-dome-1500`, 5×300 LEDs; a band-chase
+shader against a trivial-interior control shader that isolates the frame
+boundary from the shader interior), steady-state tick:
+
+| target | shader | fixed | float | Δ |
+|---|---|---|---|---|
+| classic/LX6 | band-chase | 31–32 ms | 37–38 ms | +6 ms |
+| classic/LX6 | trivial | 28–29 ms | 30–31 ms | +2 ms |
+| S3/LX7 | band-chase | 17–18 ms | 21 ms | +3.5 ms |
+| S3/LX7 | trivial | 15 ms | 17 ms | +2 ms |
+
+The penalty is **dominated by the shader interior**, not the frame boundary.
+An earlier note here attributed it to boundary conversions ("3,000 decodes per
+frame at 1500 LEDs") — **that attribution is falsified**: the trivial control
+pays the same boundary cost as band-chase but has almost no interior, and it
+keeps only ~2 of the classic's 6 ms (and ~2 of the S3's 3.5 ms). The boundary's
+actual cost is ~2 ms/1500 samples on both chips (coordinate decode in +
+unorm16 conversion out + FP register traffic); only the input half is even
+theoretically ABI-recoverable, since output conversion is intrinsic to an
+integer LED pipeline. The remainder is FPU dependent-chain latency inside the
+shader itself: band-chase's interior alone runs 3→7 ms on the classic (≈2.3×)
+and 2.5→4 ms on the S3 (≈1.6×) — extreme-interior costs are hypothetical
+beyond this, since the heavier `examples/basic/shader.glsl` (psrdnoise) cannot
+even GLSL-compile at 1500 LEDs on the classic (OOM).
+
+**The S3 is not fps-neutral at dome scale.** An earlier neutral S3 datapoint
+(quad-strips, a much smaller fixture) was a scale artifact, not evidence the
+LX7 is exempt: at dome scale the S3 shows the same ~20% penalty ratio as the
+classic. (§4's one-Xtensa-row framing is about bit-exactness and is
+unaffected — LX6 and LX7 still agree on *what* they compute, just not on how
+fast.) Choose `float_mode: float` on Xtensa for the numerics it gives you, not
+for speed.
 
 - **Denormal (subnormal) handling.** A target may flush denormal inputs
   and/or outputs to zero. wasm and RV32F preserve denormals (their specs
