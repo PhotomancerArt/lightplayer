@@ -1,7 +1,7 @@
 use alloc::string::String;
 
-use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef};
-use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted, ValueSlot};
+use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef, ShaderSpace};
+use crate::{AssetSlot, BindingDefs, EnumSlot, MapSlot, RenderOrderSlot, Slotted, ValueSlot};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -18,6 +18,12 @@ pub struct ShaderDef {
     /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
     #[slot(name = "consumed")]
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
+    /// The space this shader declares it lives in, plus its per-target
+    /// answer cell for the opposite dimension (dimensionality-first-class
+    /// plan, vision D6/D7). Defaults to `TwoD` — every shader authored
+    /// before this plan is 2D, so existing projects stay meaning-identical.
+    /// Model layer only: not yet read by the engine or shader compiler.
+    pub space: EnumSlot<ShaderSpace>,
 }
 
 impl Default for ShaderDef {
@@ -29,6 +35,7 @@ impl Default for ShaderDef {
             float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
+            space: EnumSlot::default(),
         }
     }
 }
@@ -67,6 +74,7 @@ mod tests {
             float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
+            space: EnumSlot::default(),
         };
         assert_eq!(def.kind(), NodeKind::Shader);
     }
@@ -80,6 +88,7 @@ mod tests {
         );
         assert_eq!(def.render_order(), 0);
         assert_eq!(*def.float_mode.value(), FloatMode::Fixed);
+        assert!(matches!(def.space.value(), crate::ShaderSpace::TwoD { .. }));
     }
 
     #[test]
@@ -99,6 +108,7 @@ mod tests {
             view.float_mode().path(),
             &SlotPath::parse("float_mode").unwrap()
         );
+        assert_eq!(view.space().path(), &SlotPath::parse("space").unwrap());
     }
 
     #[test]
