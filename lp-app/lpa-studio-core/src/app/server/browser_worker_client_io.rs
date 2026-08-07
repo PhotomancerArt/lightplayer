@@ -202,7 +202,8 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogDraft> {
         | BrowserOutputEnvelope::RuntimeCreated { .. }
         | BrowserOutputEnvelope::RuntimeDestroyed { .. }
         | BrowserOutputEnvelope::SurfaceAttached { .. }
-        | BrowserOutputEnvelope::PreviewPresented { .. } => None,
+        | BrowserOutputEnvelope::PreviewPresented { .. }
+        | BrowserOutputEnvelope::PreviewOutputFrame { .. } => None,
     }
 }
 
