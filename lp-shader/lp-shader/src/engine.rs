@@ -1,7 +1,6 @@
 //! High-level engine wrapping [`lpvm::LpvmEngine`].
 
 use alloc::format;
-use alloc::string::String;
 
 use lpir::{CompilerConfig, LpirModule};
 use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
@@ -13,6 +12,7 @@ use crate::compile_job::{ShaderCompileBudget, ShaderCompileJob, ShaderCompileSte
 use crate::compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
 use crate::compute_abi::{validate_compute_abi, validate_compute_tick_sig};
 use crate::compute_shader::LpsComputeShader;
+use crate::entry_space::{RenderEntry, ShaderEntrySpace};
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
@@ -33,8 +33,9 @@ impl<E: LpvmEngine> LpsEngine<E> {
     ///
     /// `config` is passed to the LPVM backend on compile ([`LpvmEngine::compile_with_config`]).
     ///
-    /// Validates the `render(vec2 pos)` signature against `output_format`.
-    /// Returns `Validation` error if signature mismatch.
+    /// Validates the declared entry (`render_2d(vec2)` by default; see
+    /// [`crate::ShaderEntrySpace`] and [`CompilePxDesc::space`]) against
+    /// `output_format`. Returns `Validation` error if signature mismatch.
     ///
     /// Also synthesises a format-specific `__render_texture_<format>` function
     /// (see [`crate::synth::render_texture`]); it is recorded in
@@ -216,33 +217,106 @@ pub(crate) fn lower_glsl_with_naga(
     _textures: &TextureBindingSpecs,
     _compiler_config: &CompilerConfig,
 ) -> Result<(LpirModule, LpsModuleSig), LpsError> {
-    Err(LpsError::Validation(String::from(
+    Err(LpsError::Validation(alloc::string::String::from(
         "naga frontend was not built into this binary",
     )))
 }
 
-/// Validate the `render` function signature against the output format.
+/// Validate the declared entry against the source and the output format.
+///
+/// Declaration-driven (dimensionality plan D19): `space` says which entry
+/// must exist, and the source is checked against that answer rather than
+/// searched for whatever it happens to define. The four refusals are the
+/// D1 cross-validation error class — each names *both* sides:
+///
+/// - a function named `render` (the pre-v6 entry) — hard error with the
+///   rename, whatever the declaration says;
+/// - both entries defined — multi-entry is deliberately not implemented;
+/// - the *other* space's entry defined — declaration ↔ entry mismatch;
+/// - neither defined — the declared entry is missing.
+///
+/// The declaration's `SpaceAnswer` cells (how a source answers the opposite
+/// dimension) are a *sampling*-side decision and deliberately play no part
+/// here.
 pub(crate) fn validate_render_sig(
     meta: &LpsModuleSig,
     output_format: TextureStorageFormat,
-) -> Result<usize, LpsError> {
-    let (index, sig) = meta
-        .functions
-        .iter()
-        .enumerate()
-        .find(|(_, f)| f.name == "render")
-        .ok_or_else(|| LpsError::Validation(String::from("no `render` function found")))?;
+    space: ShaderEntrySpace,
+) -> Result<RenderEntry, LpsError> {
+    let index_of = |name: &str| meta.functions.iter().position(|f| f.name == name);
 
-    // Check parameter: exactly one vec2
+    if index_of("render").is_some() {
+        return Err(LpsError::Validation(format!(
+            "`render` is no longer a shader entry point: rename `render` to `{}` \
+             (a 2D shader's entry is `{}`, a 1D shader's is `{}`); \
+             projects saved before v6 are migrated automatically",
+            space.entry_name(),
+            ShaderEntrySpace::TwoD.entry_signature(),
+            ShaderEntrySpace::OneD.entry_signature(),
+        )));
+    }
+
+    let declared = index_of(space.entry_name());
+    let other = index_of(space.other().entry_name());
+
+    let index = match (declared, other) {
+        (Some(_), Some(_)) => {
+            return Err(LpsError::Validation(format!(
+                "multiple entries are not supported yet: this shader defines both \
+                 `{}` and `{}` — keep the one matching its declared space ({})",
+                ShaderEntrySpace::OneD.entry_name(),
+                ShaderEntrySpace::TwoD.entry_name(),
+                space.label(),
+            )));
+        }
+        (None, Some(_)) => {
+            return Err(LpsError::Validation(format!(
+                "declared {} but defines `{}`: a {}-declared shader's entry is `{}` — \
+                 change the declared space to {} or rename the entry to `{}`",
+                space.label(),
+                space.other().entry_name(),
+                space.label(),
+                space.entry_signature(),
+                space.other().label(),
+                space.entry_name(),
+            )));
+        }
+        (None, None) => {
+            return Err(LpsError::Validation(format!(
+                "no `{}` function found: a {}-declared shader must define `{}`",
+                space.entry_name(),
+                space.label(),
+                space.entry_signature(),
+            )));
+        }
+        (Some(index), None) => index,
+    };
+    let sig = &meta.functions[index];
+
+    // Check parameter: exactly one coordinate, of the declared space's type.
+    let expected_param = match space {
+        ShaderEntrySpace::TwoD => LpsType::Vec2,
+        ShaderEntrySpace::OneD => LpsType::Float,
+    };
     if sig.parameters.len() != 1 {
         return Err(LpsError::Validation(format!(
-            "`render` must take exactly 1 parameter (vec2 pos), found {}",
+            "`{}` must take exactly 1 parameter ({}), found {}",
+            space.entry_name(),
+            match space {
+                ShaderEntrySpace::TwoD => "vec2 pos",
+                ShaderEntrySpace::OneD => "float pos",
+            },
             sig.parameters.len()
         )));
     }
-    if sig.parameters[0].ty != LpsType::Vec2 {
+    if sig.parameters[0].ty != expected_param {
         return Err(LpsError::Validation(format!(
-            "`render` parameter must be vec2, found {:?}",
+            "`{}` parameter must be {}, found {:?}",
+            space.entry_name(),
+            match space {
+                ShaderEntrySpace::TwoD => "vec2",
+                ShaderEntrySpace::OneD => "float",
+            },
             sig.parameters[0].ty
         )));
     }
@@ -251,12 +325,15 @@ pub(crate) fn validate_render_sig(
     let expected_return = expected_return_type(output_format);
     if sig.return_type != expected_return {
         return Err(LpsError::Validation(format!(
-            "`render` return type must be {:?} for format {:?}, found {:?}",
-            expected_return, output_format, sig.return_type
+            "`{}` return type must be {:?} for format {:?}, found {:?}",
+            space.entry_name(),
+            expected_return,
+            output_format,
+            sig.return_type
         )));
     }
 
-    Ok(index)
+    Ok(RenderEntry { space, index })
 }
 
 /// Map output format to expected return type.

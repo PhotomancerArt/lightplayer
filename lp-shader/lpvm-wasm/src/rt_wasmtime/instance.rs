@@ -842,6 +842,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("synth");
 
@@ -999,6 +1000,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let options = WasmOptions {

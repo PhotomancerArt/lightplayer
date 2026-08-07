@@ -189,6 +189,12 @@ pub trait LpGraphics: Send + Sync {
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError>;
 
     /// Write all `count × 2` Q16.16 point coordinates (`[x0, y0, x1, y1, …]`).
+    ///
+    /// This is the 2D packing. A 1D-declared shader consumes tightly packed
+    /// single words (`[t0, t1, …]`) — the buffer stays pair-sized, so a 1D
+    /// writer needs a lane-aware entry point here rather than this
+    /// full-slice one (space-tagged sample requests, P4 of the
+    /// dimensionality plan).
     fn write_sample_points(
         &self,
         points: &mut SamplePointsHandle,

@@ -58,7 +58,7 @@ fn compile_px_desc_with_texture_spec_inserts_named_binding() {
         TextureWrap::ClampToEdge,
     );
     let desc = CompilePxDesc::new(
-        "vec4 render(vec2 p) { return vec4(0.0); }",
+        "vec4 render_2d(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
         ShaderFrontend::LpsGlsl,
@@ -471,7 +471,7 @@ fn field<'a>(fields: &'a [(String, LpsValueF32)], name: &str) -> Option<&'a LpsV
 #[test]
 fn compile_px_desc_new_has_empty_texture_specs() {
     let desc = CompilePxDesc::new(
-        "vec4 render(vec2 p) { return vec4(0.0); }",
+        "vec4 render_2d(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
         ShaderFrontend::LpsGlsl,
@@ -482,7 +482,7 @@ fn compile_px_desc_new_has_empty_texture_specs() {
 #[test]
 fn compile_px_desc_new_records_frontend() {
     let desc = CompilePxDesc::new(
-        "vec4 render(vec2 p) { return vec4(0.0); }",
+        "vec4 render_2d(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
         ShaderFrontend::LpsGlsl,
@@ -493,7 +493,7 @@ fn compile_px_desc_new_records_frontend() {
 
 #[test]
 fn compile_px_wrapper_and_compile_px_desc_empty_textures_match() {
-    let glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     let engine = test_engine();
     let config = lpir::CompilerConfig::default();
     let via_wrapper = engine
@@ -556,7 +556,7 @@ fn texture_buf_to_texture2d_value_matches_descriptor_format_and_byte_len() {
 #[test]
 fn compile_px_returns_monomorphic_lps_pxshader() {
     let glsl = r#"
-        vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }
+        vec4 render_2d(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }
     "#;
     let engine = test_engine();
     let shader: LpsPxShader = engine
@@ -580,7 +580,7 @@ fn compile_px_returns_monomorphic_lps_pxshader() {
 #[test]
 fn compile_px_simple_shader() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     let shader = engine
         .compile_px(
             glsl,
@@ -591,13 +591,13 @@ fn compile_px_simple_shader() {
         .expect("compile_px");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert!(!shader.meta().functions.is_empty());
-    assert_eq!(shader.render_sig().name, "render");
+    assert_eq!(shader.render_sig().name, "render_2d");
 }
 
 #[test]
 fn compile_px_desc_lps_glsl_simple_shader() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }";
     let shader = engine
         .compile_px_desc(CompilePxDesc::new(
             glsl,
@@ -607,7 +607,7 @@ fn compile_px_desc_lps_glsl_simple_shader() {
         ))
         .expect("compile_px_desc lps-glsl");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
-    assert_eq!(shader.render_sig().name, "render");
+    assert_eq!(shader.render_sig().name, "render_2d");
 }
 
 #[test]
@@ -622,14 +622,14 @@ fn compile_px_desc_lps_glsl_basic_shader() {
         ))
         .expect("compile_px_desc lps-glsl basic shader");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
-    assert_eq!(shader.render_sig().name, "render");
+    assert_eq!(shader.render_sig().name, "render_2d");
 }
 
 #[test]
 fn compile_px_desc_lps_glsl_prunes_unreachable_if_else_after_return() {
     let engine = test_engine();
     let glsl = r#"
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return vec4(1.0, 0.0, 0.0, 1.0);
     if (pos.x > 0.5) {
         return vec4(0.0, 1.0, 0.0, 1.0);
@@ -647,14 +647,14 @@ vec4 render(vec2 pos) {
         ))
         .expect("compile_px_desc lps-glsl unreachable if/else");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
-    assert_eq!(shader.render_sig().name, "render");
+    assert_eq!(shader.render_sig().name, "render_2d");
 }
 
 #[test]
 fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
     let engine = test_engine();
     let desc = CompilePxDesc::new(
-        "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }",
+        "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
         ShaderFrontend::LpsGlsl,
@@ -689,7 +689,7 @@ fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
                 assert!(saw_build_hir);
                 assert!(saw_lower_lpir);
                 assert!(saw_prepare);
-                assert_eq!(shader.render_sig().name, "render");
+                assert_eq!(shader.render_sig().name, "render_2d");
                 return;
             }
             ShaderCompileStepResult::Failed(err) => {
@@ -705,7 +705,7 @@ fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
 fn start_compile_px_job_wasm_falls_back_without_backend_stage() {
     let engine = test_engine();
     let desc = CompilePxDesc::new(
-        "vec4 render(vec2 pos) { return vec4(1.0, 0.5, 0.25, 1.0); }",
+        "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.5, 0.25, 1.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
         ShaderFrontend::LpsGlsl,
@@ -739,7 +739,7 @@ fn start_compile_px_job_wasm_falls_back_without_backend_stage() {
 fn compile_px_with_uniforms() {
     let engine = test_engine();
     let glsl = "layout(binding = 0) uniform float u_time;
-vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
+vec4 render_2d(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
     let shader = engine
         .compile_px(
             glsl,
@@ -801,7 +801,7 @@ fn texture_data_mut_writeable() {
 #[test]
 fn render_frame_no_uniforms() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(0.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(0.0); }";
     let shader = engine
         .compile_px(
             glsl,
@@ -831,7 +831,7 @@ fn render_frame_infinite_pixel_traps_with_fuel_exhausted_coords() {
     // Pixel centers are at x + 0.5, so pixels (2, 0) and (3, 0) of the 4x1
     // frame satisfy the spin condition; the wrapper traps at the FIRST one.
     let glsl = r#"
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     if (pos.x > 2.0) {
         int x = 0;
         while (true) { x = x + 1; }
@@ -870,7 +870,7 @@ vec4 render(vec2 pos) {
 #[test]
 fn render_samples_no_uniforms_writes_rgba16_points() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
     let shader = engine
         .compile_px(
             glsl,
@@ -901,7 +901,7 @@ fn render_samples_no_uniforms_writes_rgba16_points() {
 fn render_frame_sets_uniforms() {
     let engine = test_engine();
     let glsl = "layout(binding = 0) uniform float u_time;
-vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
+vec4 render_2d(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
     let shader = engine
         .compile_px(
             glsl,
@@ -926,7 +926,7 @@ vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
 fn render_frame_r16_constant_writes_expected_bytes() {
     let engine = test_engine();
     let glsl = r#"
-        float render(vec2 pos) { return 0.5; }
+        float render_2d(vec2 pos) { return 0.5; }
     "#;
     let shader = engine
         .compile_px(
@@ -960,7 +960,7 @@ fn render_frame_r16_constant_writes_expected_bytes() {
 fn render_frame_rgb16_constant_writes_expected_bytes() {
     let engine = test_engine();
     let glsl = r#"
-        vec3 render(vec2 pos) { return vec3(0.25, 0.5, 0.75); }
+        vec3 render_2d(vec2 pos) { return vec3(0.25, 0.5, 0.75); }
     "#;
     let shader = engine
         .compile_px(
@@ -997,7 +997,7 @@ fn render_frame_rgb16_constant_writes_expected_bytes() {
 fn render_frame_rgba16_constant_writes_expected_bytes() {
     let engine = test_engine();
     let glsl = r#"
-        vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.5, 1.0); }
+        vec4 render_2d(vec2 pos) { return vec4(0.0, 1.0, 0.5, 1.0); }
     "#;
     let shader = engine
         .compile_px(
@@ -1039,7 +1039,7 @@ fn render_frame_rgba16_gradient_verifies_pos_and_enumeration() {
     // `* (1.0/65536.0)` / `/ 65536.0` here — those literals mis-encode in Q32
     // (`fmul` with tiny const rounds to 0; `65536.0` saturates in `q32_encode`).
     let glsl = r#"
-        vec4 render(vec2 pos) {
+        vec4 render_2d(vec2 pos) {
             return vec4(pos.x, pos.y, 0.0, 1.0);
         }
     "#;
@@ -1113,7 +1113,7 @@ fn compile_px_missing_render_returns_validation_error() {
 #[test]
 fn compile_px_wrong_param_count_returns_validation_error() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos, float extra) { return vec4(0.0); }";
+    let glsl = "vec4 render_2d(vec2 pos, float extra) { return vec4(0.0); }";
     let result = engine.compile_px(
         glsl,
         TextureStorageFormat::Rgba16Unorm,
@@ -1132,7 +1132,7 @@ fn compile_px_wrong_param_count_returns_validation_error() {
 #[test]
 fn compile_px_wrong_param_type_returns_validation_error() {
     let engine = test_engine();
-    let glsl = "vec4 render(float x) { return vec4(x); }";
+    let glsl = "vec4 render_2d(float x) { return vec4(x); }";
     let result = engine.compile_px(
         glsl,
         TextureStorageFormat::Rgba16Unorm,
@@ -1151,7 +1151,7 @@ fn compile_px_wrong_param_type_returns_validation_error() {
 #[test]
 fn compile_px_wrong_return_type_returns_validation_error() {
     let engine = test_engine();
-    let glsl = "vec3 render(vec2 pos) { return vec3(0.0); }";
+    let glsl = "vec3 render_2d(vec2 pos) { return vec3(0.0); }";
     let result = engine.compile_px(
         glsl,
         TextureStorageFormat::Rgba16Unorm,
@@ -1170,7 +1170,7 @@ fn compile_px_wrong_return_type_returns_validation_error() {
 #[test]
 fn compile_px_r16_accepts_float_return() {
     let engine = test_engine();
-    let glsl = "float render(vec2 pos) { return 0.5; }";
+    let glsl = "float render_2d(vec2 pos) { return 0.5; }";
     assert!(
         engine
             .compile_px(
@@ -1186,7 +1186,7 @@ fn compile_px_r16_accepts_float_return() {
 #[test]
 fn compile_px_r16_rejects_vec4_return() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(1.0); }";
     match engine.compile_px(
         glsl,
         TextureStorageFormat::R16Unorm,
@@ -1202,7 +1202,7 @@ fn compile_px_r16_rejects_vec4_return() {
 #[test]
 fn compile_px_rgb16_accepts_vec3_return() {
     let engine = test_engine();
-    let glsl = "vec3 render(vec2 pos) { return vec3(0.5); }";
+    let glsl = "vec3 render_2d(vec2 pos) { return vec3(0.5); }";
     assert!(
         engine
             .compile_px(
@@ -1218,7 +1218,7 @@ fn compile_px_rgb16_accepts_vec3_return() {
 #[test]
 fn compile_px_rgb16_rejects_vec4_return() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(1.0); }";
     match engine.compile_px(
         glsl,
         TextureStorageFormat::Rgb16Unorm,
@@ -1237,7 +1237,7 @@ fn compile_px_with_helpers_and_uniforms() {
     let glsl = "
 layout(binding = 0) uniform float u_time;
 float brightness(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec3 col = vec3(pos / vec2(32.0), sin(u_time));
     return vec4(col, 1.0);
 }
@@ -1252,7 +1252,7 @@ vec4 render(vec2 pos) {
         .expect("compile_px");
     assert!(shader.meta().uniforms_type.is_some());
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
-    assert_eq!(shader.render_sig().name, "render");
+    assert_eq!(shader.render_sig().name, "render_2d");
 }
 
 #[test]
@@ -1260,7 +1260,7 @@ fn compile_px_desc_succeeds_with_matching_sampler2d_spec_no_texture_ops() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(0.0); }
+vec4 render_2d(vec2 pos) { return vec4(0.0); }
 "#;
     let desc = CompilePxDesc::new(
         glsl,
@@ -1278,7 +1278,7 @@ fn compile_px_desc_fails_when_sampler_declared_but_spec_map_empty() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(0.0); }
+vec4 render_2d(vec2 pos) { return vec4(0.0); }
 "#;
     let desc = CompilePxDesc::new(
         glsl,
@@ -1299,7 +1299,7 @@ vec4 render(vec2 pos) { return vec4(0.0); }
 fn compile_px_desc_fails_when_spec_names_unknown_sampler() {
     let engine = test_engine();
     let glsl = r#"
-vec4 render(vec2 pos) { return vec4(0.0); }
+vec4 render_2d(vec2 pos) { return vec4(0.0); }
 "#;
     let desc = CompilePxDesc::new(
         glsl,
@@ -1320,7 +1320,7 @@ vec4 render(vec2 pos) { return vec4(0.0); }
 #[test]
 fn compile_px_texture_free_succeeds_without_texture_specs() {
     let engine = test_engine();
-    let glsl = "vec4 render(vec2 pos) { return vec4(0.0); }";
+    let glsl = "vec4 render_2d(vec2 pos) { return vec4(0.0); }";
     engine
         .compile_px(
             glsl,
@@ -1338,7 +1338,7 @@ fn render_frame_texel_fetch_with_typed_texture_binding_succeeds() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -1387,7 +1387,7 @@ fn render_frame_lps_glsl_texel_fetch_with_typed_texture_binding_succeeds() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -1436,7 +1436,7 @@ struct Inner {
     float x;
 };
 layout(set = 0, binding = 1) uniform Inner u;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return vec4(pad + u.x, 0.0, 0.0, 1.0);
 }
 "#;
@@ -1483,7 +1483,7 @@ struct Inner {
     float x;
 };
 layout(set = 0, binding = 1) uniform Inner u;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return vec4(pad + u.x, 0.0, 0.0, 1.0);
 }
 "#;
@@ -1528,7 +1528,7 @@ fn test_meta_params_gradient_rgba16() -> LpsModuleSig {
     LpsModuleSig {
         functions: vec![
             LpsFnSig {
-                name: String::from("render"),
+                name: String::from("render_2d"),
                 return_type: LpsType::Vec4,
                 parameters: vec![FnParam {
                     name: String::from("pos"),
@@ -1785,7 +1785,7 @@ fn render_frame_height_one_palette_texture_samples_through_public_api() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D palette;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float u = 0.5;
     float y = pos.y;
     return texture(palette, vec2(u, y));
@@ -1845,7 +1845,7 @@ fn render_frame_missing_texture_uniform_field_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -1879,7 +1879,7 @@ fn render_frame_wrong_value_type_for_texture_uniform_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -1916,7 +1916,7 @@ fn render_frame_texture_format_mismatch_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -1959,7 +1959,7 @@ fn render_frame_texture_height_one_mismatch_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -2011,7 +2011,7 @@ fn render_frame_texture_row_stride_too_small_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -2054,7 +2054,7 @@ fn render_frame_texture_row_stride_not_load_aligned_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -2097,7 +2097,7 @@ fn render_frame_texture_ptr_alignment_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -2140,7 +2140,7 @@ fn render_frame_texture_footprint_exceeds_byte_len_returns_render_error() {
     let engine = test_engine();
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -2263,5 +2263,254 @@ void tick() {
             .expect("out b")
             .approx_eq_default(&LpsValueF32::F32(30.0)),
         "instance B accumulator polluted by instance A"
+    );
+}
+
+// ============================================================================
+// Explicit render entries (dimensionality plan D19): declaration-driven
+// validation, the 1D entry end to end, and the four refusals.
+// ============================================================================
+
+fn compile_with_space(
+    engine: &LpsEngine<WasmLpvmEngine>,
+    glsl: &str,
+    space: crate::ShaderEntrySpace,
+) -> Result<LpsPxShader, LpsError> {
+    engine.compile_px_desc(
+        CompilePxDesc::new(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
+        )
+        .with_space(space),
+    )
+}
+
+fn validation_error(result: Result<LpsPxShader, LpsError>) -> String {
+    match result {
+        Err(LpsError::Validation(message)) => message,
+        Err(other) => panic!("expected Validation error, got {other:?}"),
+        Ok(_) => panic!("expected Validation error, got Ok"),
+    }
+}
+
+/// The pre-v6 entry is refused outright — no alias, and the message carries
+/// the rename plus the migration promise (P3's `lpa-upgrade` step).
+#[test]
+fn bare_render_is_refused_with_migration_guidance() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+        crate::ShaderEntrySpace::TwoD,
+    ));
+    assert!(
+        message.contains("`render` is no longer a shader entry point"),
+        "{message}"
+    );
+    assert!(message.contains("render_2d"), "{message}");
+    assert!(message.contains("migrated automatically"), "{message}");
+}
+
+/// …including when the shader also defines the right entry: `render` in the
+/// source means the file has not been migrated, whatever else it contains.
+#[test]
+fn bare_render_beside_a_valid_entry_is_still_refused() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render(vec2 pos) { return vec4(0.0); }\n\
+         vec4 render_2d(vec2 pos) { return vec4(1.0); }",
+        crate::ShaderEntrySpace::TwoD,
+    ));
+    assert!(
+        message.contains("no longer a shader entry point"),
+        "{message}"
+    );
+}
+
+/// Declaration ↔ entry mismatch names both sides in both directions.
+#[test]
+fn declared_one_d_defining_render_2d_names_both_sides() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render_2d(vec2 pos) { return vec4(0.0); }",
+        crate::ShaderEntrySpace::OneD,
+    ));
+    assert!(
+        message.contains("declared 1D but defines `render_2d`"),
+        "{message}"
+    );
+    assert!(message.contains("render_1d"), "{message}");
+}
+
+#[test]
+fn declared_two_d_defining_render_1d_names_both_sides() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render_1d(float pos) { return vec4(0.0); }",
+        crate::ShaderEntrySpace::TwoD,
+    ));
+    assert!(
+        message.contains("declared 2D but defines `render_1d`"),
+        "{message}"
+    );
+    assert!(message.contains("render_2d"), "{message}");
+}
+
+/// Multi-entry is deliberately refused in v1 (vision D9).
+#[test]
+fn defining_both_entries_is_refused_as_not_yet_supported() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render_1d(float pos) { return vec4(0.0); }\n\
+         vec4 render_2d(vec2 pos) { return vec4(1.0); }",
+        crate::ShaderEntrySpace::TwoD,
+    ));
+    assert!(
+        message.contains("multiple entries are not supported yet"),
+        "{message}"
+    );
+    assert!(
+        message.contains("render_1d") && message.contains("render_2d"),
+        "{message}"
+    );
+}
+
+#[test]
+fn missing_declared_entry_names_the_signature_to_write() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 helper(float pos) { return vec4(0.0); }",
+        crate::ShaderEntrySpace::OneD,
+    ));
+    assert!(
+        message.contains("no `render_1d` function found"),
+        "{message}"
+    );
+    assert!(message.contains("vec4 render_1d(float pos)"), "{message}");
+}
+
+#[test]
+fn one_d_entry_taking_a_vec2_is_refused_on_its_parameter() {
+    let engine = test_engine();
+    let message = validation_error(compile_with_space(
+        &engine,
+        "vec4 render_1d(vec2 pos) { return vec4(0.0); }",
+        crate::ShaderEntrySpace::OneD,
+    ));
+    assert!(
+        message.contains("`render_1d` parameter must be float"),
+        "{message}"
+    );
+}
+
+/// The 1D entry runs the whole product pipeline: compile → synthesised
+/// single-row walk → unorm16 texels. Pixel centres are `x + 0.5`, so a
+/// `pos * 0.25` ramp over a 4-wide strip is 0.125/0.375/0.625/0.875.
+#[test]
+fn one_d_shader_fills_a_single_row_texture() {
+    let engine = test_engine();
+    let shader = compile_with_space(
+        &engine,
+        "vec4 render_1d(float pos) { return vec4(pos * 0.25, 0.5, 0.25, 1.0); }",
+        crate::ShaderEntrySpace::OneD,
+    )
+    .expect("compile 1D shader");
+    assert_eq!(shader.render_sig().name, "render_1d");
+    assert_eq!(shader.space(), crate::ShaderEntrySpace::OneD);
+
+    let mut tex = engine
+        .alloc_texture(4, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    shader
+        .render_frame(&uniforms, &mut tex)
+        .expect("render_frame");
+
+    let codes: Vec<u16> = tex
+        .data()
+        .chunks_exact(2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            8192, 32768, 16384, 65535, // x = 0.5 → 0.125
+            24576, 32768, 16384, 65535, // 1.5 → 0.375
+            40960, 32768, 16384, 65535, // 2.5 → 0.625
+            57344, 32768, 16384, 65535, // 3.5 → 0.875
+        ]
+    );
+}
+
+/// A 1D shader renders a strip, not a plane: a taller target is refused
+/// rather than left with black rows below the first.
+#[test]
+fn one_d_shader_refuses_a_taller_target() {
+    let engine = test_engine();
+    let shader = compile_with_space(
+        &engine,
+        "vec4 render_1d(float pos) { return vec4(1.0); }",
+        crate::ShaderEntrySpace::OneD,
+    )
+    .expect("compile 1D shader");
+    let mut tex = engine
+        .alloc_texture(4, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    match shader.render_frame(&uniforms, &mut tex) {
+        Err(LpsError::Render(message)) => {
+            assert!(message.contains("single row"), "{message}");
+        }
+        other => panic!("expected a Render error, got {other:?}"),
+    }
+}
+
+/// 1D sample points are **tightly packed single Q16.16 words** — the
+/// contract space-tagged sample requests must produce. The buffer is still
+/// allocated pair-sized; only the first `count` words are read.
+#[test]
+fn one_d_samples_read_tightly_packed_single_lane_points() {
+    let engine = test_engine();
+    let shader = compile_with_space(
+        &engine,
+        "vec4 render_1d(float pos) { return vec4(pos, 0.5, 0.25, 1.0); }",
+        crate::ShaderEntrySpace::OneD,
+    )
+    .expect("compile 1D shader");
+
+    let mut points = engine.alloc_sample_points(3).expect("points");
+    // [0.0, 0.5, 0.25] packed one word per point; the tail is slack.
+    points
+        .data_mut()
+        .copy_from_slice(&[0, 32768, 16384, 0, 0, 0]);
+    let mut out = engine.alloc_sample_rgba16(3).expect("out");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    shader
+        .sample_points_rgba16(&uniforms, &mut points, &mut out)
+        .expect("sample");
+
+    assert_eq!(
+        out.data(),
+        &[
+            0, 32768, 16384, 65535, // 0.0
+            32768, 32768, 16384, 65535, // 0.5
+            16384, 32768, 16384, 65535, // 0.25
+        ]
     );
 }

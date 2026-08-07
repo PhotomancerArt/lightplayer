@@ -15,7 +15,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
+use lp_gfx::{
+    GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, ShaderEntrySpace, TextureHandle,
+};
 use lpc_model::{
     AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
     OptionSlot, PhasorConfig, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
@@ -74,6 +76,11 @@ pub struct ShaderNode {
     /// flips `needs_compile`; [`semantics_for`] turns it into the
     /// [`lp_gfx::ShaderSemantics`] tier the backend is asked for.
     float_mode: ValueSlot<FloatMode>,
+    /// Authored declared space, as the compiler's entry contract. Read from
+    /// the `space` slot (`ShaderDef::space`) and re-read per tick like
+    /// `float_mode`; a change flips `needs_compile`, because the entry a
+    /// source must define changes with it.
+    space: ShaderEntrySpace,
     visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
     /// The last successfully compiled program. Kept through source/config
@@ -124,6 +131,7 @@ impl ShaderNode {
             glsl_source: source.text,
             consumed_slots: def.consumed_slots,
             float_mode: def.float_mode,
+            space: entry_space_for(def.space.value()),
             visual_uniforms,
             config_accessors: None,
             shader: None,
@@ -244,6 +252,10 @@ impl ShaderNode {
             semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
             textures: palette_texture_specs(&self.consumed_slots),
+            // The authored space *is* the entry contract: the backend
+            // validates (CPU) or splices (GPU) `render_2d` / `render_1d`
+            // against it rather than sniffing the source.
+            space: self.space,
             ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
         };
 
@@ -305,6 +317,13 @@ impl ShaderNode {
         let next_float_mode = accessors.float_mode.get(ctx)?;
         if *self.float_mode.value() != next_float_mode {
             self.float_mode = ValueSlot::with_version(ctx.revision(), next_float_mode);
+            self.needs_compile = true;
+            self.compilation_error = None;
+        }
+        if let Some(next_space) = try_read_authored_space(ctx)
+            && self.space != next_space
+        {
+            self.space = next_space;
             self.needs_compile = true;
             self.compilation_error = None;
         }
@@ -767,6 +786,37 @@ pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
     ctx.resolve_consumed_slot_value(&SlotPath::parse(path).map_err(|e| {
         NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
     })?)
+}
+
+/// The compiler's entry contract for an authored [`lpc_model::ShaderSpace`]
+/// declaration: the model carries the per-target answer cells too, but which
+/// entry the source must define depends only on the primary variant.
+fn entry_space_for(space: &lpc_model::ShaderSpace) -> ShaderEntrySpace {
+    match space {
+        lpc_model::ShaderSpace::TwoD { .. } => ShaderEntrySpace::TwoD,
+        lpc_model::ShaderSpace::OneD { .. } => ShaderEntrySpace::OneD,
+    }
+}
+
+/// The authored `space` declaration's variant, read through the same
+/// overlay-aware view as the other per-tick config syncs. `None` when the
+/// query does not resolve or the slot is not an enum (unit fakes without
+/// authored defs) — the loaded declaration then stands.
+fn try_read_authored_space(ctx: &mut TickContext<'_>) -> Option<ShaderEntrySpace> {
+    let production = ctx
+        .resolve(&QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("space").expect("static path"),
+        })
+        .ok()?;
+    let lpc_model::SlotData::Enum(declaration) = production.data() else {
+        return None;
+    };
+    match declaration.variant.as_str() {
+        "TwoD" => Some(ShaderEntrySpace::TwoD),
+        "OneD" => Some(ShaderEntrySpace::OneD),
+        _ => None,
+    }
 }
 
 /// The authored `consumed` map's string key set, read through the same
