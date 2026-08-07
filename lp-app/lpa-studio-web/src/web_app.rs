@@ -1076,6 +1076,7 @@ mod tests {
                     }
                     CssRule::Media(media) => assert_unnested(&media.rules, "@media"),
                     CssRule::Supports(supports) => assert_unnested(&supports.rules, "@supports"),
+                    CssRule::LayerBlock(layer) => assert_unnested(&layer.rules, "@layer"),
                     _ => {}
                 }
             }
