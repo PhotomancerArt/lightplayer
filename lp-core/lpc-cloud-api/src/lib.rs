@@ -20,26 +20,34 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+pub mod ack;
 pub mod actor;
 pub mod call_spec;
 pub mod envelope;
 pub mod error;
 pub mod head_info;
+pub mod login_options;
+pub mod me_info;
 pub mod project_meta;
 pub mod request;
 pub mod response;
+pub mod session_info;
 pub mod sidecar_meta;
 pub mod version;
 pub mod visibility;
 
+pub use ack::Ack;
 pub use actor::Actor;
 pub use call_spec::CloudCallSpec;
 pub use envelope::{CloudCall, CloudReply};
 pub use error::CloudError;
 pub use head_info::{HeadInfo, PushOutcome};
+pub use login_options::{DevChoice, DevPickerOptions, LoginOptionsInfo, OidcOption};
+pub use me_info::MeInfo;
 pub use project_meta::ProjectMeta;
 pub use request::CloudRequest;
 pub use response::CloudResponse;
+pub use session_info::{SessionInfo, SessionList};
 pub use sidecar_meta::SidecarMeta;
 pub use version::{CLOUD_API_VERSION, check_version};
 pub use visibility::Visibility;

@@ -89,6 +89,13 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             CloudRequest::HaveBlobs(request) => self.have_blobs(actor, request).map(Into::into),
             CloudRequest::PushCommit(request) => self.push_commit(actor, request).map(Into::into),
             CloudRequest::GetEvents(request) => self.get_events(actor, request).map(Into::into),
+            // Vocabulary-v2 calls (P1 adds the `lpc_cloud_api` shapes only);
+            // handlers land in P2. P2 replaces every arm below.
+            CloudRequest::GetMe => Err(unimplemented_call()),
+            CloudRequest::UpdateMe(_) => Err(unimplemented_call()),
+            CloudRequest::ListSessions => Err(unimplemented_call()),
+            CloudRequest::RevokeSession(_) => Err(unimplemented_call()),
+            CloudRequest::LoginOptions => Err(unimplemented_call()),
         }
     }
 
@@ -534,6 +541,17 @@ fn invalid(detail: &str) -> CloudError {
     CloudError::InvalidRequest {
         detail: detail.into(),
     }
+}
+
+/// Placeholder answer for the vocabulary-v2 calls (`GetMe`, `UpdateMe`,
+/// `ListSessions`, `RevokeSession`, `LoginOptions`) added in P1.
+///
+/// P1 lands the `lpc_cloud_api` shapes only, to keep [`CloudService::handle`]'s
+/// match exhaustive; P2 gives each call its real handler and this function
+/// goes away. Not a stable `CloudError` meaning — a client should never see
+/// it once P2 lands.
+fn unimplemented_call() -> CloudError {
+    invalid("not implemented until P2")
 }
 
 // Tests for this file live in `tests/cloud_service.rs`, not below: they run
