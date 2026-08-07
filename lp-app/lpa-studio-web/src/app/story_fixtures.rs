@@ -391,6 +391,7 @@ pub(crate) fn project_manifest() -> lpa_studio_core::UiProjectManifest {
         format: Some(3),
         uid: Some("prj_7k2mQx4vN8pL".to_string()),
         name: Some("Demo".to_string()),
+        kind: "General".to_string(),
     }
 }
 

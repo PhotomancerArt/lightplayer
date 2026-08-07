@@ -34,7 +34,7 @@ pub use inventory::project_inventory::ProjectInventory;
 pub use inventory::project_node::{ProjectNode, ProjectNodeOrigin};
 pub use inventory::project_node_placement::ProjectNodePlacement;
 pub use inventory::project_tree::ProjectTree;
-pub use manifest::{ManifestParseError, PROJECT_FORMAT_VERSION, ProjectManifest};
+pub use manifest::{ManifestParseError, PROJECT_FORMAT_VERSION, ProjectKind, ProjectManifest};
 pub use node_attach_site::NodeAttachSite;
 pub use overlay_commit::commit_result::CommitResult;
 pub use overlay_mutation::mutation_result::{MutationBatchResults, MutationResult};

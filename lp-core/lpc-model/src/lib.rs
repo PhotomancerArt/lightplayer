@@ -151,7 +151,7 @@ pub use project::overlay_mutation::{
 pub use project::{
     ChangeSummary, CommitResult, LocationSeg, ManifestParseError, MutationBatchResults,
     MutationResult, NodeAttachSite, NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary,
-    ProjectConfig, ProjectInventory, ProjectManifest, ProjectNode, ProjectNodeOrigin,
+    ProjectConfig, ProjectInventory, ProjectKind, ProjectManifest, ProjectNode, ProjectNodeOrigin,
     ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};

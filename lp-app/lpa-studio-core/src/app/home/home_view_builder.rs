@@ -700,11 +700,15 @@ fn package_card(
 ) -> Result<UiPackageCard, crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
-    // Advisory board target (vision D3): straight passthrough from the
-    // container manifest, same seam `provenance`/`on_device` use — no
-    // catalog lookup here, that's the web renderer's job.
-    let target =
-        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?.target;
+    // Advisory board target (vision D3) + authored project kind (module
+    // authoring unit, P1): straight passthrough from the container
+    // manifest, same seam `provenance`/`on_device` use — no catalog lookup
+    // here, that's the web renderer's job.
+    let manifest_fields =
+        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?;
+    let target = manifest_fields.target;
+    let project_kind =
+        crate::app::library::package_manifest::kind_label(&manifest_fields.kind).to_string();
 
     let last_saved_at = handle
         .history
@@ -729,6 +733,7 @@ fn package_card(
     Ok(UiPackageCard {
         uid,
         kind: summary.kind,
+        project_kind,
         slug: summary.slug,
         last_saved_at,
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
@@ -748,6 +753,12 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
     UiPackageCard {
         uid: summary.uid.to_string(),
         kind: summary.kind,
+        // A degraded package's manifest may be unreadable; fall back to
+        // the default kind rather than claim one we could not read.
+        project_kind: crate::app::library::package_manifest::kind_label(
+            &lpc_model::ProjectKind::General,
+        )
+        .to_string(),
         slug: summary.slug,
         last_saved_at: None,
         provenance: None,

@@ -5,11 +5,12 @@
 //!
 //! - `project.schema.json` — the `project.json` container manifest (not a
 //!   node envelope): `format` pinned to
-//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`/`target`
-//!   plus the optional provenance fields (`author`/`version`/`license`/
-//!   `created`), nothing else (mirrors the loader gate in `lpc-registry`,
-//!   which hard-refuses a missing/malformed manifest and rejects mismatched
-//!   formats).
+//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`/`target`,
+//!   the optional provenance fields (`author`/`version`/`license`/
+//!   `created`), and the optional authored `kind`/`exports` pair (P1 of the
+//!   module authoring plan), nothing else (mirrors the loader gate in
+//!   `lpc-registry`, which hard-refuses a missing/malformed manifest and
+//!   rejects mismatched formats).
 //! - `module.schema.json` — the `module.json` root module node artifact:
 //!   top-level `kind: "Module"` const plus the compiled `ModuleDef` shape.
 //! - `node.schema.json` — any authored node artifact: `oneOf` over every
@@ -146,8 +147,9 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 /// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
 /// carries the workspace identity — `format` pinned to the current
 /// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the advisory `target`,
-/// and the optional provenance fields `author`/`version`/`license`/`created`
-/// — and nothing else (`additionalProperties: false` mirrors the strict
+/// the optional provenance fields `author`/`version`/`license`/`created`,
+/// and the optional authored `kind`/`exports` pair (module authoring unit,
+/// P1) — and nothing else (`additionalProperties: false` mirrors the strict
 /// streaming reader in `lpc_model::ProjectManifest`, which rejects unknown
 /// fields). The property list must track `ProjectManifest`'s fields
 /// one-for-one: the reader accepts exactly these keys, so a field missing
@@ -187,6 +189,24 @@ fn project_schema() -> Result<Value> {
             "created": {
                 "title": "Provenance: ISO date the project was created",
                 "type": "string",
+            },
+            "kind": {
+                "title": "Authored project kind",
+                "description": "General project (absent/\"general\"), or \
+    one of two library kinds (\"pattern\"/\"rig\") that export named \
+    modules via `exports`, or a \"show\" project. Never read by the \
+    engine — Studio-side lint and UI only.",
+                "enum": ["general", "pattern", "show", "rig"],
+            },
+            "exports": {
+                "title": "Authored module export list",
+                "description": "Module folder names this project exports, \
+    for other projects to import. Only meaningful alongside a \"pattern\" \
+    or \"rig\" kind.",
+                "type": "array",
+                "items": {
+                    "type": "string",
+                },
             },
             "target": {
                 "title": "Advisory board target",
@@ -506,13 +526,72 @@ mod tests {
         );
         assert_eq!(project["required"], json!(["format"]));
         assert_eq!(project["additionalProperties"], json!(false));
+        // P1 (module authoring unit): the container's own `kind` is now a
+        // real property — an authored project kind, never a node-kind
+        // discriminator. A node envelope's `kind` is always a single
+        // `const` naming one node kind; this one is a closed *enum* over
+        // the four project kinds, which is how it stays distinguishable
+        // from a node envelope despite the shared key name.
+        assert_eq!(
+            project["properties"]["kind"]["enum"],
+            json!(["general", "pattern", "show", "rig"])
+        );
         assert!(
-            project["properties"]["kind"].is_null(),
-            "not a node envelope"
+            project["properties"]["kind"].get("const").is_none(),
+            "project kind is an enum, not a single const like a node envelope's kind"
         );
         assert_eq!(
             project["$id"],
             json!(format!("{SCHEMA_ID_BASE}project.schema.json"))
+        );
+    }
+
+    /// P1: `kind`/`exports` validate as the closed pair the model enforces
+    /// at parse time — an unknown `kind` value or a stray `exports` are
+    /// still refused (the schema mirrors the reader, not the reverse; the
+    /// model's cross-field rule that `exports` needs a library `kind` is
+    /// NOT expressible in this flat JSON Schema and is enforced by the
+    /// reader alone).
+    #[test]
+    fn project_schema_validates_kind_and_exports() {
+        let outputs = generate_outputs().unwrap();
+        let project: Value = serde_json::from_str(&outputs["project.schema.json"]).unwrap();
+        let validator = jsonschema::draft202012::new(&project).expect("compiles");
+
+        let pattern_project = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "kind": "pattern",
+            "exports": ["chase", "sparkle"],
+        });
+        assert!(
+            validator.is_valid(&pattern_project),
+            "a pattern project with exports must validate: {:?}",
+            validator.iter_errors(&pattern_project).collect::<Vec<_>>()
+        );
+
+        let general_project = json!({ "format": PROJECT_FORMAT_VERSION });
+        assert!(
+            validator.is_valid(&general_project),
+            "kind stays optional — an untagged project must still validate"
+        );
+
+        let unknown_kind = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "kind": "diorama",
+        });
+        assert!(
+            !validator.is_valid(&unknown_kind),
+            "kind must be one of the four known values"
+        );
+
+        let wrong_typed_exports = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "kind": "pattern",
+            "exports": "chase",
+        });
+        assert!(
+            !validator.is_valid(&wrong_typed_exports),
+            "exports must be an array, not a bare string"
         );
     }
 
