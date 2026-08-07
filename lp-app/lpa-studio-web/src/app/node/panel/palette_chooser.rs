@@ -83,8 +83,9 @@ impl PaletteChooserTab {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PaletteChooser(
-    /// The config the control currently holds — every gesture is expressed
-    /// as a whole replacement of this.
+    /// The EFFECTIVE config the control is showing — every gesture is
+    /// expressed as a whole replacement of this, so a set built here grows
+    /// from what is playing rather than from the authored default.
     config: GradientConfig,
     /// Backing slot for the slot-local write path.
     #[props(default = None)]

@@ -18,13 +18,17 @@
 //! — "diving into the control", the same join the label's detail popover
 //! makes one level up.
 //!
+//! What the band draws is the palette that is PLAYING, not the authored one
+//! ([`lpa_studio_core::UiPanelControl::shown_palette`]) — a driven palette
+//! now reads back as a config, not only as the summary string the readout
+//! prints. That is what lets a pick, which writes the panel channel rather
+//! than the authored slot, show up on the control that made it.
+//!
 //! The live member ring — highlighting which member of a running cycle is
-//! showing right now — is NOT here, and it is not a styling omission: a
-//! panel control has no phase reading in hand. A driven palette's live
-//! value arrives as a formatted SUMMARY STRING
-//! ([`lpa_studio_core::format_live_panel_value`]), the timebase φ lives on
-//! the clock face's own probe (`UiPhasorReading`), and nothing on the panel
-//! path carries either. Adding the ring means plumbing a φ read onto
+//! showing right now — is still NOT here, and it is not a styling omission:
+//! a panel control has no PHASE reading in hand. The timebase φ lives on the
+//! clock face's own probe (`UiPhasorReading`), and nothing on the panel path
+//! carries it. Adding the ring means plumbing a φ read onto
 //! `UiPanelControl` first.
 //!
 //! Colors are the panel families: violet when the backing slot is bound,
@@ -56,9 +60,11 @@ const BAND_TRIGGER_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PaletteSwatchField(
-    /// The palette this control presents — the authored config, even when a
-    /// channel is driving the slot (a live reading is text, not a config
-    /// this could sample).
+    /// The palette this control presents: the EFFECTIVE config — what the
+    /// channel is playing when one drives the slot, the authored value
+    /// otherwise. Every chooser gesture is expressed as a whole replacement
+    /// of this, so it has to be the live one: derived from a stale value,
+    /// each gesture would silently discard the one before it.
     config: GradientConfig,
     state: UiSlotFieldState,
     /// Violet bound treatment on the frame.
