@@ -2160,6 +2160,18 @@ label:has(> input:not(:disabled)) {
     inset: 5.5%;
 }
 
+/* A custom hero's product header: name + publish chip, detail popover at
+   the far end. Same metrics as `.ux-map-toggle-bar`, which is the fixture
+   face's version of this row (it merged the chrome into the bar it already
+   had rather than stacking a second one). */
+.ux-product-header {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--studio-color-border);
+}
+
 /* Pinned above the lamp display inside the output section (not floating).
    Also the produced product's header — name and publish chip lead it — so
    it centres its items rather than stretching them. */
