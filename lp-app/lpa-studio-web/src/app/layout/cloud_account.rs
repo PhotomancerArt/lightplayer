@@ -156,13 +156,23 @@ pub fn SignInMenu(options: LoginOptionsInfo, next: String) -> Element {
 /// for. Pure — stories mount it without a popover.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SignInPanel(options: LoginOptionsInfo, next: String) -> Element {
+pub fn SignInPanel(
+    options: LoginOptionsInfo,
+    next: String,
+    /// The panel's own "Sign in" title. Off where the surface already said
+    /// it — the `/account` page (P6) headlines the ask itself, and two
+    /// headings stacked reads as a mistake.
+    #[props(default = true)]
+    header: bool,
+) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
-            div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
-                strong { class: "tw:text-sm tw:text-strong-foreground", "Sign in" }
-                span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground",
-                    "Publishing and sharing use your account"
+            if header {
+                div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
+                    strong { class: "tw:text-sm tw:text-strong-foreground", "Sign in" }
+                    span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground",
+                        "Publishing and sharing use your account"
+                    }
                 }
             }
             if !options.oidc.is_empty() {
@@ -519,11 +529,21 @@ fn current_path() -> String {
 /// should show us still signed in.
 fn sign_out(mut refresh: CloudSessionRefresh) {
     spawn(async move {
-        if let Err(error) = gloo_net::http::Request::post("/auth/logout").send().await {
-            log::warn!("sign-out request failed: {error}");
-        }
+        end_session().await;
         refresh.refresh();
     });
+}
+
+/// Ask the server to drop THIS browser's session cookie.
+///
+/// Shared with the `/account` page's "Sign out everywhere" (P6), which ends
+/// the other sessions first and then this one. Failures are logged, never
+/// raised: the caller refreshes afterwards either way, and the service is
+/// the authority on whether the cookie is actually gone.
+pub async fn end_session() {
+    if let Err(error) = gloo_net::http::Request::post("/auth/logout").send().await {
+        log::warn!("sign-out request failed: {error}");
+    }
 }
 
 /// What the signed-out slot should render, given the server's options.

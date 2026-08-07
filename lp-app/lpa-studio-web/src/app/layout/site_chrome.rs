@@ -49,7 +49,9 @@ use crate::router::StudioRoute;
 /// underline in a tab's stead (G3 feedback). Session is the editor lens
 /// fronted: no tab lights, because the active session CHIP is the
 /// current-place marker there (D15 — the chip is the editor's
-/// representation in the nav).
+/// representation in the nav). Account lights no tab either: `/account` is
+/// reached from the identity dropdown, and the AVATAR is its marker — the
+/// same argument as Session's, one cluster to the right.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
     Home,
@@ -59,6 +61,7 @@ pub enum SiteSection {
     Boards,
     Docs,
     Session,
+    Account,
 }
 
 /// The shared top bar. `children` render at the start of the right-hand
