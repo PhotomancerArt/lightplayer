@@ -10,7 +10,9 @@ use util::corpus::CORPUS;
 #[test]
 fn whole_corpus_translates_to_wgsl() {
     for shader in CORPUS {
-        let translated = compile_wgsl(shader.source, &TextureBindingSpecs::new())
+        // A `sampler2D` uniform needs its spec at translation time, so the
+        // corpus supplies the palette specs its shaders declare.
+        let translated = compile_wgsl(shader.source, &util::palette::texture_specs(shader))
             .unwrap_or_else(|e| panic!("{}: {e}", shader.name));
         assert!(
             translated.wgsl.contains("fn main"),
