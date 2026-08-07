@@ -750,7 +750,7 @@ mod tests {
                 project_uid: None,
             }),
             SetupStateKind::DeviceHome => SetupState::DeviceHome {
-                project_uid: Some("prj_1".to_string()),
+                project_uid: Some("prj1".to_string()),
                 adopted: false,
             },
             SetupStateKind::Closed => closed(CloseReason::Cancelled),
@@ -785,7 +785,7 @@ mod tests {
                 name: "Porch sign".to_string(),
             },
             SetupEventKind::ProjectGenerated => SetupEvent::ProjectGenerated {
-                project_uid: "prj_1".to_string(),
+                project_uid: "prj1".to_string(),
             },
             SetupEventKind::PushCompleted => SetupEvent::PushCompleted,
             SetupEventKind::CloseRequested => SetupEvent::CloseRequested,
@@ -1200,7 +1200,7 @@ mod tests {
         assert!(flow.handle(SetupEvent::PushCompleted).is_empty());
 
         let commands = flow.handle(SetupEvent::ProjectGenerated {
-            project_uid: "prj_1".to_string(),
+            project_uid: "prj1".to_string(),
         });
         assert_eq!(
             commands.iter().map(SetupCommand::label).collect::<Vec<_>>(),
@@ -1209,7 +1209,7 @@ mod tests {
         // Generated twice: the second is inert.
         assert!(
             flow.handle(SetupEvent::ProjectGenerated {
-                project_uid: "prj_2".to_string(),
+                project_uid: "prj2".to_string(),
             })
             .is_empty()
         );
@@ -1224,7 +1224,7 @@ mod tests {
         assert_eq!(
             flow.state(),
             &SetupState::DeviceHome {
-                project_uid: Some("prj_1".to_string()),
+                project_uid: Some("prj1".to_string()),
                 adopted: false,
             }
         );
@@ -1255,7 +1255,7 @@ mod tests {
             &context,
             state,
             SetupEvent::ProjectGenerated {
-                project_uid: "prj_1".to_string(),
+                project_uid: "prj1".to_string(),
             },
         );
         assert_eq!(
@@ -1446,7 +1446,7 @@ mod tests {
                 SetupEvent::FlashSucceeded,
                 SetupEvent::Confirm,
                 SetupEvent::ProjectGenerated {
-                    project_uid: "prj_1".to_string(),
+                    project_uid: "prj1".to_string(),
                 },
                 SetupEvent::PushCompleted,
             ],
@@ -1466,7 +1466,7 @@ mod tests {
         assert_eq!(
             flow.state(),
             &SetupState::DeviceHome {
-                project_uid: Some("prj_1".to_string()),
+                project_uid: Some("prj1".to_string()),
                 adopted: false,
             }
         );
@@ -1483,7 +1483,7 @@ mod tests {
                 SetupEvent::Confirm,
                 SetupEvent::Confirm,
                 SetupEvent::ProjectGenerated {
-                    project_uid: "prj_1".to_string(),
+                    project_uid: "prj1".to_string(),
                 },
                 SetupEvent::PushCompleted,
             ],

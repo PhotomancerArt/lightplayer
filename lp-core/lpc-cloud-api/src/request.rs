@@ -305,7 +305,7 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
-            r#"{"getProject":{"uid":"prj_0000000000000000"}}"#
+            r#"{"getProject":{"uid":"prj0000000000000000"}}"#
         );
     }
 
@@ -319,7 +319,7 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
-            r#"{"getEvents":{"uid":"prj_0000000000000000","since":7}}"#
+            r#"{"getEvents":{"uid":"prj0000000000000000","since":7}}"#
         );
     }
 }

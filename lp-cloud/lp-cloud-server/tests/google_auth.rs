@@ -228,13 +228,10 @@ async fn a_relative_next_is_where_you_land() {
     let google = StubGoogle::start().await;
     let server = google.server(&[]);
 
-    let started = start_sign_in(&server, Some("/p/zook-dome-prj_abc")).await;
+    let started = start_sign_in(&server, Some("/p/zook-dome-prjabc")).await;
     let (response, _) = finish_sign_in(&server, &started, "yona").await;
 
-    assert_eq!(
-        location(&response),
-        Some("/p/zook-dome-prj_abc".to_string())
-    );
+    assert_eq!(location(&response), Some("/p/zook-dome-prjabc".to_string()));
 }
 
 /// Identity is the Google `sub`, not the address: changing your email at

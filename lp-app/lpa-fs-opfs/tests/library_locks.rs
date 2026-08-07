@@ -33,7 +33,7 @@ async fn acquire_eventually(lock: &LibraryLock) -> LibraryLockGuard {
 
 #[wasm_bindgen_test]
 async fn released_lock_can_be_reacquired() {
-    let lock = LibraryLock::Project("prj_test_release".to_string());
+    let lock = LibraryLock::Project("prjtestrelease".to_string());
 
     let guard = try_acquire(&lock).await.unwrap().expect("first acquire");
     assert!(
@@ -48,7 +48,7 @@ async fn released_lock_can_be_reacquired() {
 
 #[wasm_bindgen_test]
 async fn drop_releases_the_lock() {
-    let lock = LibraryLock::Project("prj_test_drop".to_string());
+    let lock = LibraryLock::Project("prjtestdrop".to_string());
     {
         let _guard = try_acquire(&lock).await.unwrap().expect("acquire");
         assert!(try_acquire(&lock).await.unwrap().is_none());
@@ -60,7 +60,7 @@ async fn drop_releases_the_lock() {
 #[wasm_bindgen_test]
 async fn catalog_and_project_locks_do_not_conflict() {
     let catalog = try_acquire(&LibraryLock::Catalog).await.unwrap();
-    let project = try_acquire(&LibraryLock::Project("prj_test_disjoint".to_string()))
+    let project = try_acquire(&LibraryLock::Project("prjtestdisjoint".to_string()))
         .await
         .unwrap();
     assert!(catalog.is_some());
@@ -69,7 +69,7 @@ async fn catalog_and_project_locks_do_not_conflict() {
 
 #[wasm_bindgen_test]
 async fn query_lists_held_project_locks() {
-    let uid = "prj_test_query";
+    let uid = "prjtestquery";
     let guard = try_acquire(&LibraryLock::Project(uid.to_string()))
         .await
         .unwrap()
@@ -102,13 +102,13 @@ async fn filtered_mount_skips_rejected_subtrees() {
     write_file(&dir, LpPath::new("/packages/x/project.json"), b"{}")
         .await
         .unwrap();
-    write_file(&dir, LpPath::new("/history/prj_x/events.jsonl"), b"{}\n")
+    write_file(&dir, LpPath::new("/history/prjx/events.jsonl"), b"{}\n")
         .await
         .unwrap();
-    write_file(&dir, LpPath::new("/history/prj_x/blobs/abc"), b"payload")
+    write_file(&dir, LpPath::new("/history/prjx/blobs/abc"), b"payload")
         .await
         .unwrap();
-    write_file(&dir, LpPath::new("/history/prj_x/trees/def.json"), b"{}")
+    write_file(&dir, LpPath::new("/history/prjx/trees/def.json"), b"{}")
         .await
         .unwrap();
 
@@ -126,18 +126,18 @@ async fn filtered_mount_skips_rejected_subtrees() {
     );
     assert!(
         snapshot
-            .file_exists(LpPath::new("/history/prj_x/events.jsonl"))
+            .file_exists(LpPath::new("/history/prjx/events.jsonl"))
             .unwrap()
     );
     // skipped before descending: payload subtrees
     assert!(
         !snapshot
-            .file_exists(LpPath::new("/history/prj_x/blobs/abc"))
+            .file_exists(LpPath::new("/history/prjx/blobs/abc"))
             .unwrap()
     );
     assert!(
         !snapshot
-            .file_exists(LpPath::new("/history/prj_x/trees/def.json"))
+            .file_exists(LpPath::new("/history/prjx/trees/def.json"))
             .unwrap()
     );
 }

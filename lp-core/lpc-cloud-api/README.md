@@ -37,7 +37,7 @@ of at every call site.
 
 **This restructuring did not move a byte on the wire.** Serde's external
 tagging writes a newtype variant exactly as it wrote the struct variant —
-`{"getProject":{"uid":"prj_…"}}` — and the enums' `rename_all = "camelCase"`
+`{"getProject":{"uid":"prj…"}}` — and the enums' `rename_all = "camelCase"`
 renames variants, never fields, so the message structs carry no `rename_all`
 of their own and `next_since` stays snake_case. The pinned JSON literal tests
 in `request.rs` and `response.rs` are the check.

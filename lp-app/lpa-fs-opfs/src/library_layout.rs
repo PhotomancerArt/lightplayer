@@ -3,7 +3,7 @@
 //! ```text
 //! <opfs root>/<LIBRARY_ROOT_DIR>/
 //!   packages/<dir>/         package directories (projects, later modules)
-//!   history/<prj_uid>/      lpc-history roots — beside, never inside, the
+//!   history/<prj-uid>/      lpc-history roots — beside, never inside, the
 //!                           package (history must not ship on push/export)
 //! ```
 
@@ -28,7 +28,7 @@ pub async fn open_library_root() -> Result<FileSystemDirectoryHandle, OpfsError>
 }
 
 /// Open a subdirectory of the library root by lp-style path, e.g.
-/// `/packages/porch-sign` or `/history/prj_…` — the per-scope mount points
+/// `/packages/porch-sign` or `/history/prj…` — the per-scope mount points
 /// of the per-project locking model.
 pub async fn open_library_subdir(
     path: &str,
