@@ -15,7 +15,7 @@ use lpc_cloud_api::{DevChoice, DevPickerOptions, LoginOptionsInfo, MeInfo, OidcO
 use lpc_history::{PrefixedUid, UidPrefix};
 
 use crate::app::layout::cloud_account::{
-    AccountAvatar, AccountMenu, AvatarFace, PendingPill, SignInLink, SignInPanel,
+    AccountAvatar, AccountMenu, AvatarFace, PendingPill, SignInLink, SignInMenu, SignInPanel,
 };
 use crate::cloud::account_memory::RememberedAccount;
 
@@ -89,6 +89,44 @@ pub(crate) fn sign_in_panel_dev_picker() -> Element {
                 }),
             },
             next: "/projects".to_string(),
+        }
+    })
+}
+
+#[story(
+    label = "Sign-in popover, open in the bar",
+    description = "The chooser as it actually ships: the real popover, mounted open at the end of a chrome-width row. This is the story that catches what a panel-only fixture cannot — the trigger's open treatment (the ⋯ menu's quiet chrome, not a bright pill) and the panel's placement and width against the bar's right edge."
+)]
+pub(crate) fn sign_in_popover_open() -> Element {
+    rsx! {
+        // Room for the panel under the bar; the popover paints in the top
+        // layer, so the frame only has to hold the trigger's row.
+        div { class: "tw:min-h-[360px]",
+            div { class: "tw:flex tw:items-center tw:justify-end tw:gap-2 tw:border-b tw:border-border-subtle tw:pb-2.5",
+                SignInMenu {
+                    options: dev_options(),
+                    next: "/projects".to_string(),
+                    initially_open: true,
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A fresh local server: dev auth on, no OIDC connection configured, and nobody signed in yet — so the picker exists with an empty list. The group says so and names the door, rather than showing a headed void with nothing to click."
+)]
+pub(crate) fn sign_in_panel_no_profiles() -> Element {
+    panel(rsx! {
+        SignInPanel {
+            options: LoginOptionsInfo {
+                oidc: Vec::new(),
+                dev_picker: Some(DevPickerOptions {
+                    start_path: "/auth/dev".to_string(),
+                    choices: Vec::new(),
+                }),
+            },
+            next: "/".to_string(),
         }
     })
 }

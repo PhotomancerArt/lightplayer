@@ -126,10 +126,16 @@ pub fn SignInLink(href: String) -> Element {
 /// than one way in (a dev picker, a second connection).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SignInMenu(options: LoginOptionsInfo, next: String) -> Element {
+pub fn SignInMenu(
+    options: LoginOptionsInfo,
+    next: String,
+    /// Stories only: mount the chooser open (capture cannot click).
+    #[props(default = false)]
+    initially_open: bool,
+) -> Element {
     rsx! {
         PopoverButton {
-            class: NAV_TAB_SECONDARY_IDLE.to_string(),
+            class: SIGN_IN_TRIGGER_CLASS.to_string(),
             open_class: SIGN_IN_TRIGGER_OPEN_CLASS.to_string(),
             // The word carries its own type: the trigger is a `button`, and
             // `style.css` resets `button { font: inherit }` unlayered —
@@ -142,10 +148,16 @@ pub fn SignInMenu(options: LoginOptionsInfo, next: String) -> Element {
             label: "Sign in".to_string(),
             title: "Sign in to publish and share your own work".to_string(),
             popup_class: SIGN_IN_POPUP_CLASS.to_string(),
-            chrome_class: "ux-popover-chrome-neutral".to_string(),
+            // The QUIET chrome, like the ⋯ menu this word sits beside: the
+            // merged outline then fills the open trigger with the terminal
+            // surface. (Neutral is the bordered-chip family — the version
+            // badge and the settings gear; on a borderless text trigger its
+            // raised fill reads as a bright pill glued to the bar.)
+            chrome_class: "ux-popover-chrome-quiet".to_string(),
             placement: PopoverPlacement::BottomEnd,
             // The trigger is text in its own padded box, not a lone glyph.
             layer_keeps_layout: true,
+            initially_open,
             SignInPanel { options, next }
         }
     }
@@ -190,6 +202,19 @@ pub fn SignInPanel(
             if let Some(picker) = options.dev_picker.as_ref() {
                 div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
                     span { class: LABEL_CLASS, "Pick a profile" }
+                    // A dev server nobody has signed into yet has a picker
+                    // and no profiles. Say so, and name the door: an empty
+                    // group under a label reads as a surface that failed to
+                    // load, and on a deployment with no OIDC connection
+                    // there is otherwise nothing here to act on.
+                    if picker.choices.is_empty() {
+                        p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
+                            "No profiles yet — the first sign-in creates one:"
+                        }
+                        code { class: "tw:min-w-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:select-all tw:[overflow-wrap:anywhere]",
+                            "{picker.start_path}?email=you@example.com"
+                        }
+                    }
                     for choice in picker.choices.iter() {
                         AuthLink {
                             key: "{choice.email}",
@@ -714,11 +739,31 @@ fn encode_query_value(value: &str) -> String {
 const AVATAR_TRIGGER_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:p-0";
 const AVATAR_TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-full tw:border tw:border-border-strong tw:bg-card-raised tw:p-0";
 /// The identity dropdown, at the spike's 236px.
-const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[min(236px,calc(100vw-24px))] tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-/// The signed-out chooser (§4): wider, because provider rows carry copy.
-const SIGN_IN_POPUP_CLASS: &str = "tw:grid tw:w-[min(288px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-/// The text trigger while its popover is open: the quiet word, lit.
-const SIGN_IN_TRIGGER_OPEN_CLASS: &str = "tw:cursor-pointer tw:rounded-sm tw:border-0 tw:bg-background-wash tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-strong-foreground tw:no-underline";
+///
+/// Plain `w-[…]`, the shipped ⋯ menu's idiom (`OVERFLOW_POPUP_CLASS`): the
+/// primitive's own `.ux-popover-panel` already caps every panel at
+/// `calc(100vw - 24px)`, and a second viewport clamp inside the width fought
+/// the measured layout.
+const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[236px] tw:min-w-0 tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// The signed-out chooser (§4): the ⋯ menu's 288px, because provider rows
+/// carry copy. No `overflow-hidden` — the merged outline draws this panel's
+/// chrome, and clipping the body only hides a layout fault instead of
+/// showing it.
+const SIGN_IN_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:min-w-0 tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// The quiet word as a popover trigger — the secondary tab's treatment on a
+/// `button` instead of an `a`.
+///
+/// Two things a tab class never had to say, because tabs are anchors:
+/// `bg-transparent` (this build imports Tailwind's theme and utilities but
+/// NO preflight, so an unstyled button paints the UA's light `buttonface` —
+/// which is what read as a bright pill glued into the bar), and a
+/// TRANSPARENT border at rest, so opening — which lights that border —
+/// cannot resize the button and nudge the row.
+const SIGN_IN_TRIGGER_CLASS: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
+/// The same trigger while open: the ⋯ menu's quiet open treatment (the
+/// merged outline paints over this in the top layer; it is what shows for
+/// the frame before the first measurement lands).
+const SIGN_IN_TRIGGER_OPEN_CLASS: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-strong tw:bg-terminal tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-strong-foreground tw:no-underline";
 /// One connection row in the chooser.
 const PROVIDER_BUTTON_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-3 tw:py-2 tw:text-xs tw:font-bold tw:text-strong-foreground tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent";
 /// One dev-picker profile row.
