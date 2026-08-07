@@ -2625,6 +2625,16 @@ mod tests {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic"))
     }
 
+    fn examples_plasma_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma"))
+    }
+
+    fn examples_plasma_duo_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma-duo"),
+        )
+    }
+
     /// The published output-channel bytes for the output node behind `path` —
     /// the core-path end product the M4 differential tests compare.
     fn output_buffer_bytes(rt: &Engine, path: &str) -> alloc::vec::Vec<u8> {
@@ -4378,11 +4388,35 @@ mod tests {
     /// body samples it.
     #[test]
     fn palette_examples_render_after_the_compile_window() {
-        for (label, fs) in [
-            ("fyeah-sign", examples_fyeah_sign_fs()),
-            ("fyeah-button", examples_fyeah_button_fs()),
-            ("button-sign", examples_button_sign_fs()),
-            ("button-playlist", examples_button_playlist_fs()),
+        // `plasma-duo` names two outputs deliberately: one palette channel
+        // feeding two fixtures is the thing it proves that `plasma` cannot.
+        for (label, fs, outputs) in [
+            (
+                "fyeah-sign",
+                examples_fyeah_sign_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "fyeah-button",
+                examples_fyeah_button_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "button-sign",
+                examples_button_sign_fs(),
+                &["/output.json"][..],
+            ),
+            (
+                "button-playlist",
+                examples_button_playlist_fs(),
+                &["/output.json"][..],
+            ),
+            ("plasma", examples_plasma_fs(), &["/output.json"][..]),
+            (
+                "plasma-duo",
+                examples_plasma_duo_fs(),
+                &["/disc_out.json", "/grid_out.json"][..],
+            ),
         ] {
             let fs: &dyn LpFs = &fs;
             let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
@@ -4406,13 +4440,15 @@ mod tests {
             rt.tick(40)
                 .unwrap_or_else(|e| panic!("{label} tick 2: {e:?}"));
 
-            assert!(
-                output_buffer_bytes(&rt, "/output.json")
-                    .iter()
-                    .any(|byte| *byte != 0),
-                "{label} rendered black — its palette shader did not compile or \
-                 the strip did not reach the sampler"
-            );
+            for output in outputs {
+                assert!(
+                    output_buffer_bytes(&rt, output)
+                        .iter()
+                        .any(|byte| *byte != 0),
+                    "{label} rendered black at {output} — its palette shader did \
+                     not compile or the strip did not reach the sampler"
+                );
+            }
         }
     }
 

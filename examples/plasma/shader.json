@@ -11,6 +11,9 @@
     },
     "phase": {
       "source": "bus:speed"
+    },
+    "palette": {
+      "source": "bus:palette"
     }
   },
   "float_mode": "fixed",
@@ -36,6 +39,24 @@
       "default": 0,
       "label": "Phase",
       "description": "Plasma base cycle position (0-1); every field rides a whole multiple of it"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp the plasma field reads its colors from",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.7636,0.1313,0.0501) (0.6905,0.225,-0.0628) (0.6383,0.2493,-0.1553) (0.6345,0.1689,-0.192) (0.6799,0.0349,-0.1699) (0.7497,-0.0739,-0.111) (0.8193,-0.1352,-0.0356) (0.8731,-0.1588,0.043) (0.9034,-0.1541,0.1144) (0.9065,-0.1243,0.1662) (0.882,-0.0664,0.1809) (0.8322,0.0225,0.1413) (0.7636,0.1313,0.0501)"
+          }
+        ]
+      }
     }
   }
 }
