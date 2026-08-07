@@ -547,6 +547,18 @@ pub(crate) fn shader_face(speed_bound: bool, agent_status: UiAgentStatus) -> UiS
     }
 }
 
+/// A shader whose visual output is published to a bus channel and read
+/// downstream — what the output header's publish chip and the detail
+/// popover's Output aspect are for.
+pub(crate) fn shader_face_bound_output(agent_status: UiAgentStatus) -> UiShaderFace {
+    let mut face = shader_face(false, agent_status);
+    face.preview.binding.revision = Some("rev 104".to_string());
+    face.preview.binding.bindings.bus_target = Some(UiBindingEndpoint::new("bus:visual.out"));
+    face.preview.binding.bindings.consumers =
+        vec![UiBindingEndpoint::new("fixture:halo").with_detail("input")];
+    face
+}
+
 /// A full shader node card view with the face installed (stories exercise
 /// the `NodePane` face branch this way; controllers still seed `None`).
 pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -> UiNodeView {
@@ -557,6 +569,13 @@ pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(shader_sections())])
         .with_node_id("shader-aurora");
     view.face = Some(UiNodeFace::Shader(shader_face(speed_bound, agent_status)));
+    view
+}
+
+/// The same shader card carrying a specific face (the bound-output state).
+pub(crate) fn shader_node_view_with_face(face: UiShaderFace) -> UiNodeView {
+    let mut view = shader_node_view(false, UiAgentStatus::Idle);
+    view.face = Some(UiNodeFace::Shader(face));
     view
 }
 

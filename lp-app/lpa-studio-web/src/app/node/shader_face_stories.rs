@@ -9,8 +9,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::UiAgentStatus;
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::face_story_fixtures::{period_knob, shader_node_view};
-use crate::app::node::{NodePane, PanelControl};
+use crate::app::node::face_story_fixtures::{
+    period_knob, shader_face_bound_output, shader_node_view, shader_node_view_with_face,
+};
+use crate::app::node::{NodePane, PanelControl, ShaderFace};
 use crate::base::Platform;
 
 #[component]
@@ -43,6 +45,36 @@ fn bound_knob() -> Element {
         ShaderCardCanvas {
             NodePane {
                 view: shader_node_view(true, UiAgentStatus::Idle),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The visual output's own header above the hero: name, the violet publish chip when the render is wired to a bus channel, and the 'i' detail affordance. The full-bleed hero replaced the boxed product pane, and this chrome came back with it."
+)]
+fn output_header_bound() -> Element {
+    rsx! {
+        ShaderCardCanvas {
+            NodePane {
+                view: shader_node_view_with_face(shader_face_bound_output(UiAgentStatus::Idle)),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The output header's detail popover open: type info plus the Output aspect's routing rows (published channel, who reads it, revision) — the same popover every slot surface opens."
+)]
+fn output_detail_open() -> Element {
+    rsx! {
+        ShaderCardCanvas {
+            ShaderFace {
+                face: shader_face_bound_output(UiAgentStatus::Idle),
+                node: "/fyeah_sign.show/aurora.shader".to_string(),
+                output_detail_initially_open: true,
                 on_action: move |_| {},
             }
         }
