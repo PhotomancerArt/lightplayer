@@ -37,9 +37,9 @@ lpa-board-editor = { path = "../lpa-board-editor" }
 lpa-boards = { path = "../lpa-boards", features = ["diagram"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
-# Share links carry a `prj_…` uid; the router parses it with the same type
+# Share links carry a `prj…` uid; the router parses it with the same type
 # the server's `page::share_path` does, so both halves agree about what a
-# `/p/<slug>-prj_x` link means.
+# `/p/<slug>-prjx` link means.
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 # Markdown parsing for agent chat replies (parser only; rendering goes
 # through Dioxus nodes — never raw HTML).

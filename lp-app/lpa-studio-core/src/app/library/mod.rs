@@ -5,7 +5,7 @@
 //! `LpFsMemory` in host tests — with randomness and timestamps injected.
 //!
 //! Invariants:
-//! - **The uid is identity** (`prj_…` in `project.json`); directory names
+//! - **The uid is identity** (`prj…` in `project.json`); directory names
 //!   are human-friendly slugs and may collide-suffix freely.
 //! - Layout: `/packages/<slug>/` package dirs; `/history/<prj_uid>/`
 //!   lpc-history roots — beside, never inside, the package.

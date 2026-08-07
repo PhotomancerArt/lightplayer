@@ -657,7 +657,7 @@ mod tests {
     fn device_uid_association_derives_from_the_hello() {
         let mut pool = RuntimePool::new();
 
-        // Booting hardware: the RuntimeId exists, the dev_ uid does not yet.
+        // Booting hardware: the RuntimeId exists, the dev uid does not yet.
         install(
             &mut pool,
             RuntimePayload::stub_device_for_test(DeviceState::Booting),
@@ -673,13 +673,13 @@ mod tests {
         // the second board ADDS — resolve it by its own id.)
         let mut hello_state = ready_state_for_test();
         if let DeviceState::Ready { hello } = &mut hello_state {
-            hello.device_uid = Some("dev_aaaaaaaaaaaaaaaa".to_string());
+            hello.device_uid = Some("devaaaaaaaaaaaaaaaa".to_string());
         }
         let with_hello = install(&mut pool, RuntimePayload::stub_device_for_test(hello_state));
         assert_eq!(
             pool.session(with_hello)
                 .and_then(RuntimeSession::device_uid),
-            Some("dev_aaaaaaaaaaaaaaaa".to_string())
+            Some("devaaaaaaaaaaaaaaaa".to_string())
         );
 
         // The sim never associates a device uid (D22).

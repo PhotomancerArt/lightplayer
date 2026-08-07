@@ -36,7 +36,7 @@ pub enum PreviewSource {
     /// the id [`crate::UiExampleCard`] carries); materialized via
     /// [`super::example_deploy_files`].
     Example(String),
-    /// A library package by `prj_…` uid (or slug), materialized from a
+    /// A library package by `prj…` uid (or slug), materialized from a
     /// library catalog snapshot via [`super::catalog_deploy_files`].
     ProjectUid(String),
 }

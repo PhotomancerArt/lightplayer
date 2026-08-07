@@ -20,7 +20,7 @@ pub const REGISTRY_PATH: &str = "/registry.json";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisteredDevice {
-    /// `dev_…` uid (string form; stamped on the device per M5's flow).
+    /// `dev…` uid (string form; stamped on the device per M5's flow).
     pub uid: String,
     pub name: String,
     /// Transport label recorded at last sight, from the live session's
@@ -243,7 +243,7 @@ mod tests {
 
         let device = RegisteredDevice {
             transport: "USB".to_string(),
-            uid: "dev_0000000000000001".to_string(),
+            uid: "dev0000000000000001".to_string(),
             name: "Luna's porch sign".to_string(),
             last_seen_at: 1.0,
             association: Some(DeviceAssociation {
@@ -279,7 +279,7 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_0000000000000001".to_string(),
+                uid: "dev0000000000000001".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
@@ -291,12 +291,12 @@ mod tests {
             .unwrap();
 
         registry
-            .rename("dev_0000000000000001", "Luna's sign")
+            .rename("dev0000000000000001", "Luna's sign")
             .unwrap();
         assert_eq!(registry.list().unwrap()[0].name, "Luna's sign");
 
         assert!(matches!(
-            registry.rename("dev_0000000000000002", "x"),
+            registry.rename("dev0000000000000002", "x"),
             Err(LibraryError::NotFound(_))
         ));
     }
@@ -307,7 +307,7 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_0000000000000001".to_string(),
+                uid: "dev0000000000000001".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
@@ -318,10 +318,10 @@ mod tests {
             })
             .unwrap();
 
-        registry.forget("dev_0000000000000001").unwrap();
+        registry.forget("dev0000000000000001").unwrap();
         assert!(registry.list().unwrap().is_empty());
         // forgetting again (or an unknown uid) is a no-op, not an error
-        registry.forget("dev_0000000000000001").unwrap();
+        registry.forget("dev0000000000000001").unwrap();
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod tests {
         let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
         let legacy = serde_json::json!({
             "devices": [{
-                "uid": "dev_0000000000000001",
+                "uid": "dev0000000000000001",
                 "name": "Porch sign",
                 "transport": "USB",
                 "lastSeenAt": 1.0,
@@ -359,7 +359,7 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_000000000000old1".to_string(),
+                uid: "dev00000000000past1".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
@@ -372,8 +372,8 @@ mod tests {
 
         registry
             .rekey_or_merge(
-                "dev_000000000000old1",
-                "dev_000000000000new1",
+                "dev00000000000past1",
+                "dev000000000000new1",
                 "efuse:aa:bb:cc:dd:ee:ff",
             )
             .unwrap();
@@ -381,8 +381,8 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(listed.len(), 1, "moved, not duplicated");
         let row = &listed[0];
-        assert_eq!(row.uid, "dev_000000000000new1");
-        assert_eq!(row.previous_uids, vec!["dev_000000000000old1".to_string()]);
+        assert_eq!(row.uid, "dev000000000000new1");
+        assert_eq!(row.previous_uids, vec!["dev00000000000past1".to_string()]);
         assert_eq!(row.hardware_id.as_deref(), Some("efuse:aa:bb:cc:dd:ee:ff"));
         assert_eq!(row.name, "Porch sign");
         assert_eq!(row.board_id.as_deref(), Some("esp32-c6-devkit"));
@@ -397,31 +397,31 @@ mod tests {
         // the OLD (stamped) row: seen first, carries an older association
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_000000000000old1".to_string(),
+                uid: "dev00000000000past1".to_string(),
                 name: "Stamped name".to_string(),
                 transport: "".to_string(),
                 last_seen_at: 10.0,
                 association: Some(DeviceAssociation {
-                    device: "dev_000000000000old1".parse().unwrap(),
+                    device: "dev00000000000past1".parse().unwrap(),
                     project,
                     version: ContentHash::of(b"v1"),
                     at: 10.0,
                 }),
                 board_id: None,
                 hardware_id: None,
-                previous_uids: vec!["dev_00000000eviction".to_string()],
+                previous_uids: vec!["dev00000000ev1ct10n".to_string()],
             })
             .unwrap();
 
         // the NEW (derived) row: seen more recently, empty name/transport
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_000000000000new1".to_string(),
+                uid: "dev000000000000new1".to_string(),
                 name: "".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 20.0,
                 association: Some(DeviceAssociation {
-                    device: "dev_000000000000new1".parse().unwrap(),
+                    device: "dev000000000000new1".parse().unwrap(),
                     project,
                     version: ContentHash::of(b"v2"),
                     at: 20.0,
@@ -434,8 +434,8 @@ mod tests {
 
         registry
             .rekey_or_merge(
-                "dev_000000000000old1",
-                "dev_000000000000new1",
+                "dev00000000000past1",
+                "dev000000000000new1",
                 "efuse:aa:bb:cc:dd:ee:ff",
             )
             .unwrap();
@@ -447,7 +447,7 @@ mod tests {
             "the old row is dropped, not kept alongside"
         );
         let row = &listed[0];
-        assert_eq!(row.uid, "dev_000000000000new1");
+        assert_eq!(row.uid, "dev000000000000new1");
         // transport: new row is more recent AND non-empty -> new wins
         assert_eq!(row.transport, "USB");
         // name: new row is more recent but EMPTY -> falls back to old's
@@ -465,8 +465,8 @@ mod tests {
         let mut previous = row.previous_uids.clone();
         previous.sort();
         let mut expected = vec![
-            "dev_00000000eviction".to_string(),
-            "dev_000000000000old1".to_string(),
+            "dev00000000ev1ct10n".to_string(),
+            "dev00000000000past1".to_string(),
         ];
         expected.sort();
         assert_eq!(previous, expected);
@@ -478,7 +478,7 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_000000000000new1".to_string(),
+                uid: "dev000000000000new1".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
@@ -491,8 +491,8 @@ mod tests {
 
         registry
             .rekey_or_merge(
-                "dev_000000000000none",
-                "dev_000000000000new1",
+                "dev000000000000n0ne",
+                "dev000000000000new1",
                 "efuse:aa:bb:cc:dd:ee:ff",
             )
             .unwrap();
@@ -508,7 +508,7 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_0000000000000001".to_string(),
+                uid: "dev0000000000000001".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
@@ -521,8 +521,8 @@ mod tests {
 
         registry
             .rekey_or_merge(
-                "dev_0000000000000001",
-                "dev_0000000000000001",
+                "dev0000000000000001",
+                "dev0000000000000001",
                 "efuse:aa:bb:cc:dd:ee:ff",
             )
             .unwrap();
@@ -537,8 +537,8 @@ mod tests {
         let registry = DeviceRegistry::new(fs);
         registry
             .rekey_or_merge(
-                "dev_000000000000one1",
-                "dev_000000000000two1",
+                "dev0000000000001st1",
+                "dev0000000000002nd1",
                 "efuse:aa:bb:cc:dd:ee:ff",
             )
             .unwrap();

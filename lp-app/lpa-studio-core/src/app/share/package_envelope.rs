@@ -193,10 +193,10 @@ mod tests {
     fn the_source_uid_rides_along_for_provenance() {
         let files = vec![(
             "project.json".to_string(),
-            br#"{"kind":"Module","uid":"prj_abc123"}"#.to_vec(),
+            br#"{"kind":"Module","uid":"prjabc123"}"#.to_vec(),
         )];
         let envelope = PackageEnvelope::encode("Demo", &files);
-        assert_eq!(envelope.original_uid().as_deref(), Some("prj_abc123"));
+        assert_eq!(envelope.original_uid().as_deref(), Some("prjabc123"));
 
         // A project that never entered a library has no uid to carry.
         let anonymous = PackageEnvelope::encode(

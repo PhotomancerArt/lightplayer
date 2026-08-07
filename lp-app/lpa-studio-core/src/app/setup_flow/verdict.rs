@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn an_unknown_mac_recognises_nothing() {
-        let registry = vec![row("dev_0000000000000001", "Someone else")];
+        let registry = vec![row("dev0000000000000001", "Someone else")];
         let summary = classify_board(
             &ProbeEvidence {
                 no_firmware_signature: true,
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn recognition_follows_the_origin_column_and_previous_uids() {
-        let mut by_origin = row("dev_legacy_row_00001", "By origin");
+        let mut by_origin = row("devlegacyrow00001", "By origin");
         by_origin.hardware_id = Some("efuse:aa:bb:cc:dd:ee:ff".to_string());
         let summary = classify_board(
             &ProbeEvidence {
@@ -360,7 +360,7 @@ mod tests {
         );
 
         let derived = HardwareId::from_base_mac(MAC).unwrap().device_uid();
-        let mut by_history = row("dev_0000000000000009", "By history");
+        let mut by_history = row("dev0000000000000009", "By history");
         by_history.previous_uids = vec![derived.to_string()];
         let summary = classify_board(
             &ProbeEvidence {

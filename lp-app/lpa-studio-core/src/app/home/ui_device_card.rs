@@ -15,7 +15,7 @@ use crate::app::roster::RosterCardState;
 /// not status.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceCard {
-    /// `dev_…` uid when the device is registered; `None` for a live
+    /// `dev…` uid when the device is registered; `None` for a live
     /// connection that has no stamped identity yet.
     pub uid: Option<String>,
     /// The live session's pool identity (`RuntimeId` rendering), stable for
@@ -198,7 +198,7 @@ impl UiDeviceCard {
 /// (last-known, not current); the chip itself stays legible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceProjectChip {
-    /// `prj_…` uid — thumbnail seed and the push/review target key.
+    /// `prj…` uid — thumbnail seed and the push/review target key.
     pub uid: String,
     /// Display name (library slug; a deleted project falls back to uid).
     pub name: String,
