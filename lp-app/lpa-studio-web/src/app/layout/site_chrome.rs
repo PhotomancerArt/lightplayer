@@ -516,7 +516,7 @@ const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font
 const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 /// Secondary-family idle: reduced weight and dimmed, full strength on
 /// hover.
-const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
+pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 
 /// The lockup's wrapper at Home: the tabs' accent underline under the
 /// brand — the logo IS Home's tab, so at Home it marks the place like
@@ -525,7 +525,7 @@ const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-
 const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 
 /// ⋯ menu section/session row, idle.
-const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 /// ⋯ menu section/session row, current place.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
 
@@ -543,7 +543,7 @@ const SESSION_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:c
 /// rows ride the same width.
 const OVERFLOW_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 /// Mini-header labelling each group of the ⋯ menu.
-const GROUP_HEADER_CLASS: &str = "tw:px-1.5 tw:pt-1.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground tw:first:pt-0.5";
+pub(crate) const GROUP_HEADER_CLASS: &str = "tw:px-1.5 tw:pt-1.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground tw:first:pt-0.5";
 /// Rows are cards, not text links: fixed three-column grid so the title and
 /// detail wrap inside their own column instead of around the glyphs.
 const TOOL_CARD_CLASS: &str = "tw:grid tw:grid-cols-[auto_minmax(0,1fr)_auto] tw:items-start tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:px-2 tw:py-2 tw:no-underline tw:transition-colors tw:hover:border-border tw:hover:bg-card-raised";

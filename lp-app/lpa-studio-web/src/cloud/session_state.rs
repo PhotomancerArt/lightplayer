@@ -37,8 +37,15 @@ pub enum CloudSession {
     /// has it configured; `None` when that second call did not land (a
     /// sign-in affordance with nowhere to go is worse than none).
     Anonymous { options: Option<LoginOptionsInfo> },
-    /// Reached, signed in.
-    SignedIn { me: MeInfo },
+    /// Reached, signed in. `options` rides along because the identity
+    /// dropdown's switch and add-account rows are sign-in links too (spike
+    /// §5: a switch IS a re-auth), and the client never hard-codes a
+    /// provider path; `None` when that call did not land, and those rows
+    /// are then omitted rather than pointed nowhere.
+    SignedIn {
+        me: MeInfo,
+        options: Option<LoginOptionsInfo>,
+    },
     /// Not reached, or reached and unintelligible. The chrome stays quiet.
     Unreachable,
 }
@@ -47,15 +54,18 @@ impl CloudSession {
     /// The signed-in account, if there is one.
     pub fn me(&self) -> Option<&MeInfo> {
         match self {
-            CloudSession::SignedIn { me } => Some(me),
+            CloudSession::SignedIn { me, .. } => Some(me),
             _ => None,
         }
     }
 
-    /// The configured ways to sign in, when signed out and we know them.
+    /// The configured ways to sign in, when the service told us — signed
+    /// out (to sign in) or signed in (to switch or add an account).
     pub fn login_options(&self) -> Option<&LoginOptionsInfo> {
         match self {
-            CloudSession::Anonymous { options } => options.as_ref(),
+            CloudSession::Anonymous { options } | CloudSession::SignedIn { options, .. } => {
+                options.as_ref()
+            }
             _ => None,
         }
     }
@@ -68,9 +78,11 @@ impl CloudSession {
 
 /// Ask the service who we are.
 ///
-/// One call when signed in or unreachable, two when anonymous: the extra
-/// `LoginOptions` round trip only happens on the path that is about to render
-/// a sign-in affordance, and only its own failure is tolerated.
+/// One call when unreachable, two when anonymous, three when signed in: the
+/// extra `LoginOptions` round trip happens on every path that is about to
+/// render a sign-in link — the chrome's word when signed out, the identity
+/// dropdown's switch/add rows when signed in (both are the same flow, spike
+/// §5) — and only its own failure is tolerated.
 pub async fn load_session<P: CloudPort + ?Sized>(port: &P) -> CloudSession {
     let Ok(info) = lpa_cloud_client::call(port, WhoAmI).await else {
         return CloudSession::Unreachable;
@@ -83,7 +95,10 @@ pub async fn load_session<P: CloudPort + ?Sized>(port: &P) -> CloudSession {
         // disagreement, not a signed-out state: staying quiet beats rendering
         // a nameless avatar.
         Actor::User(_) => match lpa_cloud_client::call(port, GetMe).await {
-            Ok(me) => CloudSession::SignedIn { me },
+            Ok(me) => CloudSession::SignedIn {
+                me,
+                options: lpa_cloud_client::call(port, LoginOptions).await.ok(),
+            },
             Err(_) => CloudSession::Unreachable,
         },
     }
@@ -118,7 +133,7 @@ pub fn use_cloud_session_provider() {
         session.set(CloudSession::Pending);
         spawn(async move {
             let next = load_session(&FetchCloudPort::new()).await;
-            if let CloudSession::SignedIn { me } = &next {
+            if let CloudSession::SignedIn { me, .. } = &next {
                 account_memory::remember(me, js_sys::Date::now());
             }
             session.set(next);
@@ -224,13 +239,42 @@ mod tests {
         let session = run(vec![
             ok(who(Actor::User(me().uid))),
             ok(CloudResponse::MeInfo(me())),
+            ok(CloudResponse::LoginOptionsInfo(options())),
         ]);
-        assert_eq!(session, CloudSession::SignedIn { me: me() });
+        assert_eq!(
+            session,
+            CloudSession::SignedIn {
+                me: me(),
+                options: Some(options()),
+            }
+        );
         assert_eq!(
             session.me().map(|m| m.email.as_str()),
             Some("yona@example.com")
         );
+        // The dropdown's switch/add rows are sign-in links too, so a
+        // signed-in session carries the options as well.
+        assert!(session.login_options().is_some());
         assert!(!session.is_pending());
+    }
+
+    /// Options that do not land leave the account intact — the identity
+    /// dropdown simply omits the rows that would have nowhere to go.
+    #[test]
+    fn a_signed_in_caller_survives_unanswered_login_options() {
+        let session = run(vec![
+            ok(who(Actor::User(me().uid))),
+            ok(CloudResponse::MeInfo(me())),
+            Err(TransportError::Offline),
+        ]);
+        assert_eq!(
+            session,
+            CloudSession::SignedIn {
+                me: me(),
+                options: None,
+            }
+        );
+        assert!(session.login_options().is_none());
     }
 
     /// Anonymous costs the one extra call, and only then.
