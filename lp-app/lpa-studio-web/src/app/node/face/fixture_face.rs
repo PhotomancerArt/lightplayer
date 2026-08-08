@@ -33,6 +33,12 @@
 //! edit-mode state are view-local for now, same as the drawer open-state (a
 //! CardUiState re-home is an existing follow-up).
 //!
+//! Between the output and the settings sits the `space` section — the
+//! CONSUMER half of the two-sided space model (D13): this fixture's
+//! `consume` policy and its "does strip order mean something?" bit,
+//! rendered by the same component the shader card renders its declaration
+//! with, so the two cannot drift apart.
+//!
 //! The `controls` section holds one dominant horizontal fader bound to
 //! `FixtureDef.brightness.some`.
 
@@ -50,6 +56,8 @@ use crate::app::node::mapping_asset_editor::MappingAssetEditor;
 use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
+
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -73,6 +81,9 @@ pub fn FixtureFace(
     /// tap. Absent (stories) leaves the readout inert.
     #[props(default = None)]
     node: Option<String>,
+    /// Open this space cell's tile picker on first render (stories).
+    #[props(default = None)]
+    space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
@@ -193,6 +204,18 @@ pub fn FixtureFace(
                         on_action,
                         live: view().live,
                     }
+                }
+            }
+        }
+        // The consumer half of the mirror, in the same slot the shader card
+        // gives the producer half: between the output and the settings
+        // (D13). Same DTO, same component, opposite side.
+        if let Some(space) = face.space.clone() {
+            NodeCardSection { label: SPACE_SECTION_LABEL,
+                SpaceSection {
+                    section: space,
+                    picker_open_cell: space_picker_open_cell,
+                    on_action,
                 }
             }
         }

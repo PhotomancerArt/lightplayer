@@ -21,7 +21,9 @@ mod node_face_body;
 mod output_face;
 mod phasor_trace;
 mod playlist_face;
+mod preview_spaces;
 mod shader_face;
+mod space_section;
 mod tape_driver;
 mod tape_transport;
 
@@ -33,6 +35,7 @@ pub use node_face_body::NodeFaceBody;
 pub use output_face::OutputFace;
 pub use playlist_face::PlaylistFace;
 pub use shader_face::ShaderFace;
+pub(crate) use space_section::{face_space_badge, space_badge_title};
 pub use tape_transport::TapeTransport;
 pub(crate) use tape_transport::{
     RATE_DETENTS, adjacent_detent, apply_detents, frac_rate, rate_frac,

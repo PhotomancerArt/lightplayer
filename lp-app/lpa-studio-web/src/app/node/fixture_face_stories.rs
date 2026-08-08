@@ -5,12 +5,13 @@
 //! advanced drawer open.
 
 use dioxus::prelude::*;
+use lpa_studio_core::UiSpaceCellRole;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_face_bound_output, fixture_face_limiting, fixture_face_within_budget,
-    fixture_node_view, fixture_node_view_with_face, fyeah_presentable_doc, map2d_fixture_face,
-    map2d_fixture_face_editing,
+    fixture_face_bound_output, fixture_face_limiting, fixture_face_policy,
+    fixture_face_within_budget, fixture_node_view, fixture_node_view_with_face,
+    fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
 };
 use crate::app::node::map_view::MapViewOptions;
 use crate::app::node::{FixtureFace, NodePane};
@@ -194,6 +195,65 @@ fn mapping_edit_mode() -> Element {
             FixtureFace {
                 face: map2d_fixture_face_editing(&fyeah_presentable_doc()),
                 edit_initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+// -- the space section, consumer side (plan-B P4 / gate G1) ------------------
+
+#[story(
+    description = "The MIRROR (D13): the fixture's `space` section sits in the same slot the shader card gives its declaration — between output and settings, same rail, same row shape, rendered by the same component off the same DTO. What differs is the voice: a shader declares a space, a fixture states a policy, so this side reads `consumes: auto` and carries the one authored bit a shape cannot answer for itself — does strip order mean something (D3). `auto` expands into nothing else on purpose: a fixture with no opinion follows whatever each source declares, and the line under the primary says exactly that."
+)]
+fn space_auto() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            NodePane {
+                view: fixture_node_view(),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An authored policy: `consumes: policy` opens the `from 1D sources` cell — the same picker the shader's `default projection` cell opens, mirrored — with the `force` bit inline on the row it qualifies (spike §3). Unforced, this only fills a silence: a source that declares its own projection still wins, which is what the line beneath says."
+)]
+fn space_policy() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_policy(false),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The same policy FORCED: this fixture's default now wins over a source's own declaration, and the who-wins line flips to say so. The one line is the compact form of the spike's precedence ladder — the rung that can still surprise the person reading this card, stated where the gesture that changes it lives."
+)]
+fn space_policy_forced() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_policy(true),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). The tiles, the glyphs, the merged outline and the select-and-close are identical to the shader card's; only the cell it writes differs (`consume.Policy.from_1d`). Note the absent `consumer decides` tile: a fixture that has opened a policy has to name one, so the deferring choice does not exist on this side."
+)]
+fn space_projection_picker_open() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_policy(false),
+                space_picker_open_cell: UiSpaceCellRole::ConsumerFrom1d,
                 on_action: move |_| {},
             }
         }
