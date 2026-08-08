@@ -26,6 +26,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use lp_cloud_domain::{Caller, session_token_hash};
 use lpc_cloud_api::{CLOUD_API_VERSION, CloudCall, CloudReply, check_version};
 
 use crate::app_state::AppState;
@@ -54,7 +55,12 @@ pub async fn post_api(State(state): State<AppState>, headers: HeaderMap, body: B
             match check_version(call.version) {
                 Ok(()) => {
                     let actor = core.actor_for(token.as_deref());
-                    core.service.handle(actor, call.request)
+                    // The caller cannot report its own session id itself
+                    // (the token lives in an HttpOnly cookie it never
+                    // reads), so `ListSessions`/`RevokeSession` need it
+                    // threaded through here — see `lp_cloud_domain::Caller`.
+                    let session = token.as_deref().map(session_token_hash);
+                    core.service.handle(Caller { actor, session }, call.request)
                 }
                 Err(mismatch) => Err(mismatch),
             }

@@ -78,21 +78,21 @@ mod tests {
     #[test]
     fn pinned_json_literal() {
         let call = CloudCall {
-            version: 1,
+            version: 2,
             request: CloudRequest::WhoAmI,
         };
         assert_eq!(
             serde_json::to_string(&call).unwrap(),
-            r#"{"version":1,"request":"whoAmI"}"#
+            r#"{"version":2,"request":"whoAmI"}"#
         );
 
         let reply = CloudReply {
-            version: 1,
+            version: 2,
             result: Err(CloudError::NotFound),
         };
         assert_eq!(
             serde_json::to_string(&reply).unwrap(),
-            r#"{"version":1,"result":{"Err":"notFound"}}"#
+            r#"{"version":2,"result":{"Err":"notFound"}}"#
         );
     }
 }

@@ -907,7 +907,7 @@ mod tests {
             "{remedy}"
         );
         // its identity is addressable, so the card's delete/export work
-        assert!(stale.uid.starts_with("prj_"));
+        assert!(stale.uid.starts_with("prj"));
 
         let healthy = view
             .projects
@@ -946,7 +946,7 @@ mod tests {
                     board_id: None,
                     ..Default::default()
                 },
-                device_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+                device_uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
             },
         }
     }
@@ -978,7 +978,7 @@ mod tests {
         // case for is now structural.
         let registered = UiDeviceCard {
             session_key: None,
-            uid: Some("dev_other".to_string()),
+            uid: Some("devother".to_string()),
             ..card.clone()
         };
         assert!(!registered.takes_card_op("runtime-1"));
@@ -1027,20 +1027,20 @@ mod tests {
         // the registry row never appears (D36: chip = session).
         let mut evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "Desk C6".to_string(),
             }),
             content: DeviceContent::Empty,
         });
         evidence.session_key = Some("session-1".to_string());
         let mut offline_card = device_card_from_live_evidence(&HomeDeviceEvidence::default());
-        offline_card.uid = Some("dev_bbbbbbbbbbbbbbbb".to_string());
+        offline_card.uid = Some("devbbbbbbbbbbbbbbbb".to_string());
         offline_card.name = "Shelf sign".to_string();
         let pool = HomePoolEvidence {
             devices: vec![evidence],
             sim: Some(HomeSimEvidence {
                 project: Some(UiDeviceProjectChip {
-                    uid: "prj_cccccccccccccccc".to_string(),
+                    uid: "prjcccccccccccccccc".to_string(),
                     name: "zook-dome".to_string(),
                 }),
                 ..HomeSimEvidence::default()
@@ -1051,7 +1051,7 @@ mod tests {
             std::slice::from_ref(&offline_card),
             &pool,
             Some(&crate::UiLensRuntime::Device {
-                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+                uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
             }),
         );
 
@@ -1064,7 +1064,7 @@ mod tests {
         assert_eq!(
             sessions[0].target,
             crate::UiChromeSessionTarget::Sim {
-                project_key: Some("prj_cccccccccccccccc".to_string())
+                project_key: Some("prjcccccccccccccccc".to_string())
             }
         );
         assert!(!sessions[0].lensed);
@@ -1082,7 +1082,7 @@ mod tests {
         assert_eq!(
             device.target,
             crate::UiChromeSessionTarget::Device {
-                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string())
+                uid: Some("devaaaaaaaaaaaaaaaa".to_string())
             }
         );
     }
@@ -1100,7 +1100,7 @@ mod tests {
         };
         let mut evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "TestBoard1".to_string(),
             }),
             content: DeviceContent::Empty,
@@ -1269,7 +1269,7 @@ mod tests {
 
     #[test]
     fn same_named_registered_devices_keep_unique_render_keys() {
-        // Erasing and re-provisioning a board registers a NEW dev_… uid
+        // Erasing and re-provisioning a board registers a NEW dev… uid
         // under the SAME name. Duplicate render keys panic the keyed diff
         // and kill the whole app (2026-07-15 crash) — uid-based keys must
         // stay unique, and both cards must survive.
@@ -1314,7 +1314,7 @@ mod tests {
                 frame_fps: None,
                 port_label: None,
                 session_key: None,
-                uid: Some("dev_a".to_string()),
+                uid: Some("deva".to_string()),
                 name: "one".to_string(),
                 transport: "USB".to_string(),
                 state: offline.clone(),
@@ -1334,7 +1334,7 @@ mod tests {
                 frame_fps: None,
                 port_label: None,
                 session_key: None,
-                uid: Some("dev_a".to_string()),
+                uid: Some("deva".to_string()),
                 name: "two".to_string(),
                 transport: "USB".to_string(),
                 state: offline,
@@ -1411,7 +1411,7 @@ mod tests {
         let registry = DeviceRegistry::new(store.fs_handle());
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "TestBoard1".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
@@ -1427,7 +1427,7 @@ mod tests {
             connect: ConnectEvidence::Connecting {
                 phase: crate::ConnectPhase::Connecting,
             },
-            pending_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            pending_uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
             ..HomeDeviceEvidence::default()
         };
         let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
@@ -1435,7 +1435,7 @@ mod tests {
         assert_eq!(view.devices.len(), 1, "the remembered card, no twin");
         let card = &view.devices[0];
         assert_eq!(card.name, "TestBoard1");
-        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert_eq!(card.uid.as_deref(), Some("devaaaaaaaaaaaaaaaa"));
         assert!(matches!(
             card.state,
             RosterCardState::ConnectingRetrying { .. }
@@ -1452,7 +1452,7 @@ mod tests {
         let registry = DeviceRegistry::new(store.fs_handle());
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "TestBoard1".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
@@ -1466,7 +1466,7 @@ mod tests {
 
         let evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "TestBoard1".to_string(),
             }),
             content: DeviceContent::Unreadable {
@@ -1478,7 +1478,7 @@ mod tests {
         assert_eq!(view.devices.len(), 1, "one card, not an anonymous twin");
         let card = &view.devices[0];
         assert_eq!(card.name, "TestBoard1");
-        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert_eq!(card.uid.as_deref(), Some("devaaaaaaaaaaaaaaaa"));
         assert!(matches!(
             card.state,
             RosterCardState::HoldsUnreadableData { .. }
@@ -1494,7 +1494,7 @@ mod tests {
         let registry = DeviceRegistry::new(store.fs_handle());
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
@@ -1508,7 +1508,7 @@ mod tests {
 
         let mut evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
             }),
             content: DeviceContent::Known {
@@ -1574,7 +1574,7 @@ mod tests {
 
         let evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+                uid: "devbbbbbbbbbbbbbbbb".to_string(),
                 name: "Live one".to_string(),
             }),
             content: DeviceContent::Empty,
@@ -1592,7 +1592,7 @@ mod tests {
 
         let blank = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+                uid: "devbbbbbbbbbbbbbbbb".to_string(),
                 name: "Fresh board".to_string(),
             }),
             content: DeviceContent::Empty,
@@ -1622,7 +1622,7 @@ mod tests {
         let registry = DeviceRegistry::new(store.fs_handle());
         registry
             .upsert(RegisteredDevice {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
                 transport: "USB".to_string(),
                 last_seen_at: 50.0,
@@ -1652,11 +1652,11 @@ mod tests {
     fn opening_and_issue_pass_through() {
         let view = build_home_view(
             None,
-            Some("prj_x".to_string()),
+            Some("prjx".to_string()),
             Some(UiIssue::new("boom")),
             &HomePoolEvidence::default(),
         );
-        assert_eq!(view.opening.as_deref(), Some("prj_x"));
+        assert_eq!(view.opening.as_deref(), Some("prjx"));
         assert_eq!(view.issue.as_ref().unwrap().message, "boom");
         assert_eq!(
             view.render_text_lines(),
@@ -1665,7 +1665,7 @@ mod tests {
                     "Home: 0 devices, 0 projects, {} examples",
                     embedded_examples().len()
                 ),
-                "  opening prj_x".to_string(),
+                "  opening prjx".to_string(),
                 "  issue: boom".to_string(),
             ]
         );
@@ -1734,7 +1734,7 @@ mod tests {
 
         let device = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
             }),
             content: DeviceContent::Known {
@@ -1853,14 +1853,14 @@ mod tests {
             session_key: Some("rt_7".to_string()),
             ..live(DeviceSyncState {
                 identity: Some(DeviceIdentity {
-                    uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                    uid: "devaaaaaaaaaaaaaaaa".to_string(),
                     name: "TestBoard1".to_string(),
                 }),
                 content: DeviceContent::Empty,
             })
         };
         let card = live_device_card(&evidence).expect("live card");
-        assert_eq!(card.identity_key(), "dev_aaaaaaaaaaaaaaaa");
+        assert_eq!(card.identity_key(), "devaaaaaaaaaaaaaaaa");
     }
 
     #[test]

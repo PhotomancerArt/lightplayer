@@ -58,6 +58,11 @@ pub trait MetaStore {
     /// Look a user up by normalized email.
     fn user_by_email(&self, email: &str) -> Option<CloudUser>;
 
+    /// Up to `limit` accounts, oldest (`created_at`) first — the dev
+    /// picker's candidate list (P3): a deployment with the picker on shows
+    /// its earliest-seeded profiles, not an arbitrary sample.
+    fn users(&self, limit: usize) -> Vec<CloudUser>;
+
     // ---- sessions ----------------------------------------------------
 
     /// Insert or replace a session row, keyed by its token hash.
@@ -70,6 +75,12 @@ pub trait MetaStore {
 
     /// Delete a session row (logout). Silent if there was none.
     fn delete_session(&mut self, token_hash: ContentHash);
+
+    /// Every session open on this account, in no particular order — a
+    /// caller that cares about order (`ListSessions` sorts newest-first)
+    /// does its own sort. Includes expired rows, same as
+    /// [`session`](Self::session): expiry is the domain's business.
+    fn sessions_for_user(&self, user: PrefixedUid) -> Vec<SessionRecord>;
 
     // ---- projects ----------------------------------------------------
 

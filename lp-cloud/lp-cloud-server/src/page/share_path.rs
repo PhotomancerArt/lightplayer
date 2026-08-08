@@ -1,7 +1,7 @@
 //! Reading a project uid out of a share URL.
 //!
-//! A share URL is `/p/<slug>-prj_<16 base62>` (D24). The uid is the whole of
-//! the identity — it is the link token, 95 bits of it — and the slug in
+//! A share URL is `/p/<slug>-prj<16 base32>` (D24). The uid is the whole of
+//! the identity — it is the link token, 80 bits of it — and the slug in
 //! front of it is **cosmetic**: it exists so a pasted link says what it
 //! points at, and it is ignored here. Renaming a project therefore never
 //! breaks a link that is already in somebody's chat history, and the same
@@ -10,13 +10,13 @@
 //! This is the server half of the rule; `lpa-studio-web`'s router parses the
 //! same shape client-side (P09).
 
-use lpc_history::{PrefixedUid, UidPrefix};
+use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
 
 /// The uid a share path points at, or `None` if there is not one in it.
 ///
-/// Only the last segment is examined: `/p/zook-dome-prj_XXXXXXXXXXXXXXXX`
-/// and `/p/anything/else/prj_XXXXXXXXXXXXXXXX` both resolve, and a path with
-/// no uid resolves to nothing rather than to a guess.
+/// Only the last segment is examined: `/p/zook-dome-prjXXXXXXXXXXXXXXXXXXXX`
+/// and `/p/anything/else/prjXXXXXXXXXXXXXXXXXXXX` both resolve, and a path
+/// with no uid resolves to nothing rather than to a guess.
 pub fn project_uid(share_path: &str) -> Option<PrefixedUid> {
     let segment = share_path
         .trim_end_matches('/')
@@ -24,12 +24,13 @@ pub fn project_uid(share_path: &str) -> Option<PrefixedUid> {
         .next()
         .filter(|segment| !segment.is_empty())?;
 
-    // The slug may itself contain '-', and a base62 uid body may contain
-    // anything alphanumeric, so the split point is the LAST `prj_`. Parsing
-    // is strict about the 16-character body, which is what makes trailing
-    // junk a miss rather than a truncation.
-    let start = segment.rfind("prj_")?;
-    let uid: PrefixedUid = segment[start..].parse().ok()?;
+    // The slug may itself contain '-' — and `prj` can even occur inside a
+    // uid body — but the uid's length is FIXED, so the split point is
+    // simply the last `"prj".len() + UID_BODY_LEN` characters. Strict
+    // parsing of that tail is what makes trailing junk a miss rather than
+    // a truncation.
+    let start = segment.len().checked_sub("prj".len() + UID_BODY_LEN)?;
+    let uid: PrefixedUid = segment.get(start..)?.parse().ok()?;
     (uid.prefix() == UidPrefix::Project).then_some(uid)
 }
 
@@ -76,9 +77,9 @@ mod tests {
             "",
             "/",
             "zook-dome",
-            "prj_tooshort",
-            "prj_0000000000000000extra",
-            "usr_0000000000000000",
+            "prjtooshort",
+            "prj0000000000000000extra",
+            "usr0000000000000000",
         ] {
             assert_eq!(project_uid(path), None, "for {path:?}");
         }

@@ -1,7 +1,7 @@
 //! Everything a client can ask the cloud service for.
 //!
 //! Each request is a **struct**, and [`CloudRequest`] is the closed set of
-//! them: a unit variant for the two requests that carry no payload, and a
+//! them: a unit variant for the requests that carry no payload, and a
 //! newtype variant wrapping the struct for the rest. The struct is the source
 //! of truth for what a request carries, which is what lets
 //! [`CloudCallSpec`](crate::call_spec::CloudCallSpec) name the one response
@@ -53,6 +53,16 @@ pub enum CloudRequest {
     PushCommit(PushCommit),
     /// See [`GetEvents`].
     GetEvents(GetEvents),
+    /// See [`GetMe`].
+    GetMe,
+    /// See [`UpdateMe`].
+    UpdateMe(UpdateMe),
+    /// See [`ListSessions`].
+    ListSessions,
+    /// See [`RevokeSession`].
+    RevokeSession(RevokeSession),
+    /// See [`LoginOptions`].
+    LoginOptions,
 }
 
 /// Who is the caller? Answered with [`crate::response::UserInfo`]; never
@@ -162,6 +172,42 @@ pub struct GetEvents {
     pub since: u64,
 }
 
+/// The caller's own account record. Answered with
+/// [`crate::me_info::MeInfo`]. Requires an authenticated caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetMe;
+
+/// Edit the caller's own given/family name. `None` clears the field;
+/// trimming and length limits are service policy (P2), not vocabulary.
+/// Answered with the updated [`crate::me_info::MeInfo`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateMe {
+    /// New given (first) name, or `None` to clear it.
+    pub given_name: Option<String>,
+    /// New family (last) name, or `None` to clear it.
+    pub family_name: Option<String>,
+}
+
+/// List every session open on the caller's own account. Answered with
+/// [`crate::session_info::SessionList`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListSessions;
+
+/// End one of the caller's own sessions by id (the id
+/// [`crate::session_info::SessionInfo::id`] reports). Answered with
+/// [`crate::ack::Ack`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RevokeSession {
+    /// The session to end.
+    pub id: String,
+}
+
+/// Ask what ways there are to sign in. Works anonymous — this is how a
+/// signed-out client discovers what its "Sign in" affordance should do.
+/// Answered with [`crate::login_options::LoginOptionsInfo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginOptions;
+
 impl From<WhoAmI> for CloudRequest {
     fn from(_: WhoAmI) -> Self {
         CloudRequest::WhoAmI
@@ -225,6 +271,36 @@ impl From<PushCommit> for CloudRequest {
 impl From<GetEvents> for CloudRequest {
     fn from(request: GetEvents) -> Self {
         CloudRequest::GetEvents(request)
+    }
+}
+
+impl From<GetMe> for CloudRequest {
+    fn from(_: GetMe) -> Self {
+        CloudRequest::GetMe
+    }
+}
+
+impl From<UpdateMe> for CloudRequest {
+    fn from(request: UpdateMe) -> Self {
+        CloudRequest::UpdateMe(request)
+    }
+}
+
+impl From<ListSessions> for CloudRequest {
+    fn from(_: ListSessions) -> Self {
+        CloudRequest::ListSessions
+    }
+}
+
+impl From<RevokeSession> for CloudRequest {
+    fn from(request: RevokeSession) -> Self {
+        CloudRequest::RevokeSession(request)
+    }
+}
+
+impl From<LoginOptions> for CloudRequest {
+    fn from(_: LoginOptions) -> Self {
+        CloudRequest::LoginOptions
     }
 }
 
@@ -305,7 +381,7 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
-            r#"{"getProject":{"uid":"prj_0000000000000000"}}"#
+            r#"{"getProject":{"uid":"prj0000000000000000"}}"#
         );
     }
 
@@ -319,7 +395,77 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
-            r#"{"getEvents":{"uid":"prj_0000000000000000","since":7}}"#
+            r#"{"getEvents":{"uid":"prj0000000000000000","since":7}}"#
+        );
+    }
+
+    #[test]
+    fn serde_round_trip_update_me() {
+        let req = CloudRequest::UpdateMe(UpdateMe {
+            given_name: Some("Yona".to_string()),
+            family_name: None,
+        });
+        let json = serde_json::to_string(&req).unwrap();
+        let back: CloudRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn serde_round_trip_revoke_session() {
+        let req = CloudRequest::RevokeSession(RevokeSession {
+            id: "abc123".to_string(),
+        });
+        let json = serde_json::to_string(&req).unwrap();
+        let back: CloudRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, req);
+    }
+
+    /// Pinned JSON literals for the vocabulary-v2 calls: unit (`getMe`),
+    /// single-field (`revokeSession`), and multi-field (`updateMe`) shapes.
+    #[test]
+    fn pinned_json_literal_get_me() {
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::GetMe).unwrap(),
+            "\"getMe\""
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_list_sessions() {
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::ListSessions).unwrap(),
+            "\"listSessions\""
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_login_options() {
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::LoginOptions).unwrap(),
+            "\"loginOptions\""
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_update_me() {
+        let req = CloudRequest::UpdateMe(UpdateMe {
+            given_name: Some("Yona".to_string()),
+            family_name: None,
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"updateMe":{"given_name":"Yona","family_name":null}}"#
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_revoke_session() {
+        let req = CloudRequest::RevokeSession(RevokeSession {
+            id: "abc123".to_string(),
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"revokeSession":{"id":"abc123"}}"#
         );
     }
 }

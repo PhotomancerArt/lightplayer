@@ -18,7 +18,7 @@ use serde::Deserialize;
 /// Root path of the stamped device identity file.
 pub const DEVICE_IDENTITY_PATH: &str = "/.lp/device.json";
 
-/// Read the stamped `dev_…` uid from the root identity file. Missing or
+/// Read the stamped `dev…` uid from the root identity file. Missing or
 /// unparseable file → `None` (an unstamped device).
 pub fn read_device_uid(fs: &dyn LpFs) -> Option<String> {
     let bytes = fs.read_file(DEVICE_IDENTITY_PATH.as_path()).ok()?;
@@ -45,14 +45,11 @@ mod tests {
         let fs = LpFsMemory::new();
         fs.write_file(
             DEVICE_IDENTITY_PATH.as_path(),
-            br#"{"uid":"dev_0000000000000001","name":"Porch sign"}"#,
+            br#"{"uid":"dev0000000000000001","name":"Porch sign"}"#,
         )
         .unwrap();
 
-        assert_eq!(
-            read_device_uid(&fs).as_deref(),
-            Some("dev_0000000000000001")
-        );
+        assert_eq!(read_device_uid(&fs).as_deref(), Some("dev0000000000000001"));
     }
 
     #[test]

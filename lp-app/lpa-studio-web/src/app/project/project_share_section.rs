@@ -31,7 +31,7 @@ use crate::base::{StudioIcon, StudioIconName};
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectShareSection(
-    /// The open project's library identity (`prj_…` uid, slug).
+    /// The open project's library identity (`prj…` uid, slug).
     uid: String,
     slug: String,
     /// Unsaved persisted edits: while any exist, both forms would export

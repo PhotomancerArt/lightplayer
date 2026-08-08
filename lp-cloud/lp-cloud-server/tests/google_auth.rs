@@ -228,13 +228,10 @@ async fn a_relative_next_is_where_you_land() {
     let google = StubGoogle::start().await;
     let server = google.server(&[]);
 
-    let started = start_sign_in(&server, Some("/p/zook-dome-prj_abc")).await;
+    let started = start_sign_in(&server, Some("/p/zook-dome-prjabc")).await;
     let (response, _) = finish_sign_in(&server, &started, "yona").await;
 
-    assert_eq!(
-        location(&response),
-        Some("/p/zook-dome-prj_abc".to_string())
-    );
+    assert_eq!(location(&response), Some("/p/zook-dome-prjabc".to_string()));
 }
 
 /// Identity is the Google `sub`, not the address: changing your email at
@@ -248,6 +245,94 @@ async fn a_changed_email_is_still_the_same_account() {
     let second = sign_in_with(&server, "yona-renamed").await;
 
     assert_eq!(actor(&server, &first).await, actor(&server, &second).await);
+}
+
+/// A first login is where the provider's profile fields land, verbatim
+/// (given/family through the shared name derivation, picture as a hotlink).
+#[tokio::test]
+async fn a_first_login_captures_the_providers_profile_fields() {
+    let google = StubGoogle::start().await;
+    let server = google.server(&[]);
+    let session = sign_in_with(&server, "priya").await;
+
+    let reply = server.call(CloudRequest::GetMe, Some(&session)).await;
+    let Ok(CloudResponse::MeInfo(info)) = reply.result else {
+        panic!("expected MeInfo, got {:?}", reply.result);
+    };
+    assert_eq!(info.given_name.as_deref(), Some("Priya"));
+    assert_eq!(info.family_name.as_deref(), Some("Devi"));
+    assert_eq!(info.display_name, "Priya Devi");
+    assert_eq!(
+        info.picture_url.as_deref(),
+        Some("https://img.example/priya-v1.png")
+    );
+}
+
+/// Q4/Q5: a *returning* login refreshes the picture the provider reports —
+/// and only the picture. The names (and the display name they drove) stay
+/// exactly what they were at creation, even when the provider's own idea of
+/// them has since changed — an edit via `UpdateMe` must never be clobbered
+/// by a provider re-reporting its name on a later login.
+#[tokio::test]
+async fn a_returning_login_refreshes_only_the_picture() {
+    let google = StubGoogle::start().await;
+    let server = google.server(&[]);
+    let _first = sign_in_with(&server, "priya").await;
+    let second = sign_in_with(&server, "priya-later").await;
+
+    let reply = server.call(CloudRequest::GetMe, Some(&second)).await;
+    let Ok(CloudResponse::MeInfo(info)) = reply.result else {
+        panic!("expected MeInfo, got {:?}", reply.result);
+    };
+    assert_eq!(info.given_name.as_deref(), Some("Priya"));
+    assert_eq!(info.family_name.as_deref(), Some("Devi"));
+    assert_eq!(info.display_name, "Priya Devi");
+    assert_eq!(
+        info.picture_url.as_deref(),
+        Some("https://img.example/priya-v2.png"),
+        "the picture is the one field a returning login is allowed to change"
+    );
+}
+
+/// The edge captures the browser's own `User-Agent`, truncated, onto the
+/// session row it mints — what `ListSessions`/`/account` show for "where
+/// you're signed in".
+#[tokio::test]
+async fn the_user_agent_lands_on_the_session_row() {
+    let google = StubGoogle::start().await;
+    let server = google.server(&[]);
+    let started = start_sign_in(&server, None).await;
+
+    let response = server
+        .request(
+            Request::builder()
+                .uri(format!(
+                    "/auth/google/callback?code=yona&state={}",
+                    encode(&started.state)
+                ))
+                .header(header::COOKIE, &started.cookie)
+                .header(header::USER_AGENT, "TestBrowser/1.0 (edge test)")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let set_cookie = cookie_named(&response, "lp_session").expect("a session cookie");
+    let session = Session {
+        cookie: set_cookie.split(';').next().unwrap().to_string(),
+        set_cookie,
+    };
+
+    let reply = server
+        .call(CloudRequest::ListSessions, Some(&session))
+        .await;
+    let Ok(CloudResponse::SessionList(list)) = reply.result else {
+        panic!("expected SessionList, got {:?}", reply.result);
+    };
+    assert_eq!(list.sessions.len(), 1);
+    assert_eq!(
+        list.sessions[0].user_agent.as_deref(),
+        Some("TestBrowser/1.0 (edge test)")
+    );
 }
 
 /// Logout deletes the row before it clears the cookie: a cookie cleared in
@@ -452,6 +537,23 @@ async fn stub_userinfo(headers: HeaderMap) -> Response {
         Some("unverified") => serde_json::json!({
             "sub": "3003", "email": "someone@example.com",
             "email_verified": false, "name": "Unverified",
+        }),
+        // The full profile shape: given/family/picture alongside the name —
+        // what a *first* login should capture verbatim.
+        Some("priya") => serde_json::json!({
+            "sub": "9001", "email": "priya@example.com",
+            "email_verified": true, "name": "Priya Devi",
+            "given_name": "Priya", "family_name": "Devi",
+            "picture": "https://img.example/priya-v1.png",
+        }),
+        // Same `sub` as "priya" (a *returning* login), but the provider now
+        // reports different names and a new picture — proving the service
+        // refreshes only the picture (Q4/Q5).
+        Some("priya-later") => serde_json::json!({
+            "sub": "9001", "email": "priya@example.com",
+            "email_verified": true, "name": "Someone Else",
+            "given_name": "Someone", "family_name": "Else",
+            "picture": "https://img.example/priya-v2.png",
         }),
         _ => return StatusCode::UNAUTHORIZED.into_response(),
     };

@@ -60,7 +60,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&meta).unwrap(),
-            r#"{"uid":"prj_0000000000000000","slug":"zook-dome","visibility":"private","owner":"anonymous"}"#
+            r#"{"uid":"prj0000000000000000","slug":"zook-dome","visibility":"private","owner":"anonymous"}"#
         );
     }
 }

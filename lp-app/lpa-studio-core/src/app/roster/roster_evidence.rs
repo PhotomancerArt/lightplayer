@@ -326,7 +326,7 @@ mod tests {
     fn adopted_content_maps_to_running_up_to_date() {
         let ready = ready_link();
         let content = DeviceContent::Adopted {
-            project_uid: "prj_zzzzzzzzzzzzzzzz".to_string(),
+            project_uid: "prjzzzzzzzzzzzzzzzz".to_string(),
             slug: "wild-one".to_string(),
             observed: ContentHash::of(b"w"),
         };
@@ -579,14 +579,14 @@ mod tests {
                     board_id: None,
                     ..Default::default()
                 },
-                device_uid: Some("dev_0000000000000001".to_string()),
+                device_uid: Some("dev0000000000000001".to_string()),
             },
         }
     }
 
     fn old_format(class: FormatClass) -> DeviceContent {
         DeviceContent::OldFormat {
-            project_uid: Some("prj_0000000000000001".to_string()),
+            project_uid: Some("prj0000000000000001".to_string()),
             slug: Some("porch-sign".to_string()),
             observed: ContentHash::of(b"v"),
             class,
@@ -595,7 +595,7 @@ mod tests {
 
     fn known(relation: SyncRelation) -> DeviceContent {
         DeviceContent::Known {
-            project_uid: "prj_0000000000000001".to_string(),
+            project_uid: "prj0000000000000001".to_string(),
             slug: "porch-sign".to_string(),
             observed: ContentHash::of(b"v"),
             relation,
@@ -604,7 +604,7 @@ mod tests {
 
     fn registered() -> RegisteredDevice {
         RegisteredDevice {
-            uid: "dev_0000000000000001".to_string(),
+            uid: "dev0000000000000001".to_string(),
             name: "Porch sign".to_string(),
             transport: "USB".to_string(),
             last_seen_at: 50.0,

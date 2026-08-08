@@ -119,7 +119,13 @@ test_xt_jit_corpus = [
 # hard stop rather than a quiet mis-comparison. It is `no_std`, dependency-free
 # and performs no float arithmetic, so it costs this image nothing but its own
 # table constants.
-test_xt_fp_conformance = ["dep:lp-xt-fp-vectors"]
+#
+# The rig itself lives in `lp-xt-fp-harness` rather than in this crate: the
+# classic ESP32 runs the same corpus on its own FPU, and a second copy of a
+# *correctness oracle* is how two chips end up being diffed against subtly
+# different vector sets while both look healthy. This crate supplies only the
+# entrypoint and its `BoardId`.
+test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
@@ -269,7 +275,7 @@ lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false
 # The M6 FP conformance corpus generator. Harness-only, `no_std`, no
 # dependencies of its own, and float-free by a checked property — it must be,
 # since on this board it would otherwise need the very FPU it characterizes.
-lp-xt-fp-vectors = { path = "../../lp-xt/lp-xt-fp-vectors", optional = true }
+lp-xt-fp-harness = { path = "../../lp-xt/lp-xt-fp-harness", optional = true }
 
 [lints]
 workspace = true

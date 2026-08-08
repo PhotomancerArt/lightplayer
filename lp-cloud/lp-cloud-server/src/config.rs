@@ -24,6 +24,8 @@ use std::fmt;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+use lp_cloud_domain::{DevPickerConnection, LoginProviders, OidcConnection};
+
 /// How long a minted session lasts. Long enough that a browser tab left open
 /// over a weekend still works; short enough to be a value rather than
 /// "forever".
@@ -149,6 +151,32 @@ impl ServerConfig {
     /// cookie, which looks exactly like a broken login.
     pub fn cookies_are_secure(&self) -> bool {
         self.base_url.starts_with("https://")
+    }
+
+    /// The sign-in connections this deployment reports to `LoginOptions`
+    /// (P3): a `"google"` entry when both OAuth halves are configured
+    /// ([`GoogleSettings::credentials`]), the dev picker only when
+    /// [`dev_auth`](Self) — the flag *and* the localhost gate
+    /// ([`dev_auth_allowed`]) — is on. Neither implies the other: a deployed
+    /// server with real Google credentials never grows a dev picker just
+    /// because someone set the flag, and a bare local run with no OAuth
+    /// client id still gets one. The dev picker's live choices are not
+    /// configuration — `CloudService::login_options` reads them from the
+    /// store at answer time.
+    pub fn login_providers(&self) -> LoginProviders {
+        let oidc = if self.google.credentials().is_some() {
+            vec![OidcConnection {
+                id: "google".to_string(),
+                label: "Google".to_string(),
+                start_path: "/auth/google".to_string(),
+            }]
+        } else {
+            Vec::new()
+        };
+        let dev_picker = self.dev_auth.then(|| DevPickerConnection {
+            start_path: "/auth/dev".to_string(),
+        });
+        LoginProviders { oidc, dev_picker }
     }
 }
 
@@ -438,6 +466,68 @@ mod tests {
             .credentials(),
             Some(("id.apps.googleusercontent.com", "shh"))
         );
+    }
+
+    /// The four permutations `LoginOptions` has to answer truthfully: neither
+    /// connection configured, each alone, and both together. Google and the
+    /// dev picker gate independently — one being on never implies the other.
+    #[test]
+    fn login_providers_reflects_every_config_permutation() {
+        let neither = from(&[]).login_providers();
+        assert!(neither.oidc.is_empty());
+        assert!(neither.dev_picker.is_none());
+
+        let google_only = from(&[
+            ("LP_CLOUD_GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com"),
+            ("LP_CLOUD_GOOGLE_CLIENT_SECRET", "shh"),
+        ])
+        .login_providers();
+        assert_eq!(google_only.oidc.len(), 1);
+        assert_eq!(google_only.oidc[0].id, "google");
+        assert_eq!(google_only.oidc[0].label, "Google");
+        assert_eq!(google_only.oidc[0].start_path, "/auth/google");
+        assert!(google_only.dev_picker.is_none());
+
+        let dev_only = from(&[
+            ("LP_CLOUD_DEV_AUTH", "1"),
+            ("LP_CLOUD_BASE_URL", "http://localhost:9000"),
+        ])
+        .login_providers();
+        assert!(dev_only.oidc.is_empty());
+        assert_eq!(
+            dev_only.dev_picker.expect("dev picker on").start_path,
+            "/auth/dev"
+        );
+
+        let both = from(&[
+            ("LP_CLOUD_GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com"),
+            ("LP_CLOUD_GOOGLE_CLIENT_SECRET", "shh"),
+            ("LP_CLOUD_DEV_AUTH", "1"),
+            ("LP_CLOUD_BASE_URL", "http://localhost:9000"),
+        ])
+        .login_providers();
+        assert_eq!(both.oidc.len(), 1);
+        assert!(both.dev_picker.is_some());
+
+        // Half a Google credential is the same as none — the dev picker
+        // still answers on its own gate.
+        let half_google_plus_dev = from(&[
+            ("LP_CLOUD_GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com"),
+            ("LP_CLOUD_DEV_AUTH", "1"),
+            ("LP_CLOUD_BASE_URL", "http://localhost:9000"),
+        ])
+        .login_providers();
+        assert!(half_google_plus_dev.oidc.is_empty());
+        assert!(half_google_plus_dev.dev_picker.is_some());
+
+        // The flag with no localhost origin is off (Q23's second lock),
+        // which `login_providers` must inherit rather than re-deciding.
+        let dev_flag_but_not_localhost = from(&[
+            ("LP_CLOUD_DEV_AUTH", "1"),
+            ("LP_CLOUD_BASE_URL", "https://lightplayer.app"),
+        ])
+        .login_providers();
+        assert!(dev_flag_but_not_localhost.dev_picker.is_none());
     }
 
     /// A recipe forwarding `${VAR:-}` passes an empty string, which must not
