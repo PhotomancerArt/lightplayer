@@ -564,7 +564,7 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
             let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
             Some(StudioRoute::Project {
                 uid,
-                slug: view.open_project_slug.clone(),
+                slug: view.open_project_name.clone(),
                 play: false,
             })
         }

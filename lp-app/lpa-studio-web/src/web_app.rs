@@ -291,7 +291,7 @@ pub fn App() -> Element {
                 *loop_open_ids.borrow_mut() = next
                     .open_project_uid
                     .clone()
-                    .zip(next.open_project_slug.clone());
+                    .zip(next.open_project_name.clone());
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
                 // mid-session reads the same latch synchronously).
@@ -431,7 +431,7 @@ pub fn App() -> Element {
                     let canonical = StudioRoute::Project {
                         uid: *uid,
                         slug: next
-                            .open_project_slug
+                            .open_project_name
                             .as_deref()
                             .map(share_link::slugify)
                             .filter(|slug| !slug.is_empty()),
