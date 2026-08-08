@@ -65,7 +65,7 @@ pub enum DeviceDetailAffordance {
 pub struct DeviceRichInput<'a> {
     /// The derived card state (via `derive_roster_card_state`).
     pub state: &'a RosterCardState,
-    /// `dev_…` uid when registered/stamped.
+    /// `dev…` uid when registered/stamped.
     pub uid: Option<&'a str>,
     /// Transport label ("USB"); empty while a connect resolves.
     pub transport: &'a str,
@@ -274,7 +274,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     // The chip's OWN identity, from efuse. Worth its own line above the
     // capability gaps: unlike everything else here it is permanent — it
     // survives an erase, and since 2026-08-04 it is what the board's
-    // `dev_…` uid is DERIVED from, so the two lines say one thing.
+    // `dev…` uid is DERIVED from, so the two lines say one thing.
     if let Some(hardware) = input.hardware {
         if let Some(mac) = hardware.base_mac.as_deref() {
             lines.push(RichLine::new("mac", mac));
@@ -503,7 +503,7 @@ mod tests {
     /// The chip's own efuse identity reaches the Technical tab (2026-08-03).
     ///
     /// The MAC matters beyond display: it is the identity of a board that
-    /// SURVIVES AN ERASE, and the one the `dev_…` uid now derives from.
+    /// SURVIVES AN ERASE, and the one the `dev…` uid now derives from.
     /// Before this the card had no permanent way to say which physical
     /// board it was.
     #[test]
@@ -918,7 +918,7 @@ mod tests {
     fn input<'a>(state: &'a RosterCardState) -> DeviceRichInput<'a> {
         DeviceRichInput {
             state,
-            uid: Some("dev_7pQr5St89uVwXy2C"),
+            uid: Some("dev7pQr5St89uVwXy2C"),
             transport: "USB",
             project_name: Some("porch-sign"),
             fw: Some(&DEVICE_FW),

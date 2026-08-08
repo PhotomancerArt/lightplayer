@@ -1,4 +1,4 @@
-//! Prefixed base-62 identifiers for packages and devices.
+//! Prefixed base-32 identifiers for packages and devices.
 
 pub mod prefixed_uid;
 pub mod uid_prefix;

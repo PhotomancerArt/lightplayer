@@ -165,6 +165,7 @@ holds the full context.
 | Server session-set switching (several concurrently-valid sessions per browser, switched without a re-auth round trip) | `2026-08-07-provider-based-auth` | Switch-account usage or complaints show the lean re-auth round trip is the friction point |
 | Local password method for self-host (the `local` connection's password method, sibling to the dev picker) | `2026-08-07-provider-based-auth` | A self-host deployment target is prioritized |
 | Identities link table `(connection, subject) → user` for multi-provider accounts on one user | `2026-08-07-provider-based-auth` | A second connection type ships and accounts need to merge across them |
+| Old-format (`prj_…` base-62) uids on the live cloud dev store — wipe or re-mint | `2026-08-07-uid-format-single-token-base32` | Next lightplayer.app deploy |
 
 ## Relationship To Shared Planning
 

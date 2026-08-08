@@ -122,7 +122,7 @@ pub fn App() -> Element {
     // browser-navigation listener dispatches actions for back/forward and
     // in-app link clicks.
     //
-    // A share link (`/p/<slug>-prj_x`) is the one route that does NOT become
+    // A share link (`/p/<slug>-prjx`) is the one route that does NOT become
     // the app's route: it lands on Home holding a pending intent (D24), and
     // the URL is left exactly as the sender wrote it — the open/pull flow
     // and its canonicalization are the post-chrome round.
@@ -185,7 +185,7 @@ pub fn App() -> Element {
         // on browser timers; without this the core default fires every
         // deadline immediately.
         controller.set_device_timers(make_device_timers());
-        // Crypto randomness for identity minting (`dev_` uids). Host
+        // Crypto randomness for identity minting (`dev` uids). Host
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
         controller.set_random(crate::library_host_opfs::random_bytes);

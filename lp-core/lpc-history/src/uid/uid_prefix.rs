@@ -8,13 +8,13 @@ use super::prefixed_uid::UidParseError;
 /// Kind prefix of a prefixed uid: what sort of thing the uid names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UidPrefix {
-    /// A project package (`prj_…`).
+    /// A project package (`prj…`).
     Project,
-    /// A module package (`mod_…`).
+    /// A module package (`mod…`).
     Module,
-    /// A physical or virtual device (`dev_…`).
+    /// A physical or virtual device (`dev…`).
     Device,
-    /// A cloud user account (`usr_…`).
+    /// A cloud user account (`usr…`).
     User,
 }
 
@@ -27,7 +27,8 @@ impl UidPrefix {
         UidPrefix::User,
     ];
 
-    /// The canonical three-letter prefix string (without the `_` separator).
+    /// The canonical three-letter prefix string; the body follows it
+    /// directly, with no separator.
     pub fn as_str(&self) -> &'static str {
         match self {
             UidPrefix::Project => "prj",
