@@ -180,18 +180,18 @@ With `just cloud-serve` running at `$BASE` (the URL it printed):
 # 1. sign in — dev auth, no Google needed; keep the cookie
 curl -c /tmp/lp.jar "$BASE/auth/dev?email=you@example.com"
 
-# 2. publish a project at a client-minted uid, link-visible
+# 2. publish a project at a client-minted uid, readable by anyone with the link
 UID=prj$(LC_ALL=C tr -dc '0-9a-hj-km-np-tv-z' </dev/urandom | head -c 16)
 curl -b /tmp/lp.jar -X POST "$BASE/api" -H 'content-type: application/json' \
-  -d "{\"version\":1,\"request\":{\"publishProject\":{\"uid\":\"$UID\",\"visibility\":\"link\",\"slug\":\"zook-dome\"}}}"
+  -d "{\"version\":3,\"request\":{\"publishProject\":{\"uid\":\"$UID\",\"access\":\"view\",\"slug\":\"zook-dome\"}}}"
 
 # 3. upload a preview PNG on the blob plane (address = sha256 of the body)
 HASH=$(shasum -a 256 preview.png | cut -d' ' -f1)
 curl -b /tmp/lp.jar -X PUT --data-binary @preview.png "$BASE/b/$HASH"
 
-# 4. read the project back ANONYMOUSLY — no cookie, link visibility only
+# 4. read the project back ANONYMOUSLY — no cookie, the link is the credential
 curl -X POST "$BASE/api" -H 'content-type: application/json' \
-  -d "{\"version\":1,\"request\":{\"getProject\":{\"uid\":\"$UID\"}}}"
+  -d "{\"version\":3,\"request\":{\"getProject\":{\"uid\":\"$UID\"}}}"
 
 # 5. the share URL, with its OG tags
 curl -s "$BASE/p/zook-dome-$UID" | grep 'og:'
@@ -200,10 +200,10 @@ curl -s "$BASE/p/zook-dome-$UID" | grep 'og:'
 curl -sI "$BASE/b/$HASH" | grep -i cache-control
 ```
 
-Steps 4 and 5 against a `"visibility":"private"` project return the same
-shapes with nothing in them — `notFound` and a plain document. That is
-deliberate: a private project must be indistinguishable from one that never
-existed, or the uid space becomes searchable.
+Steps 4 and 5 against an `"access":"none"` — or archived — project return the
+same shapes with nothing in them: `notFound` and a plain document. That is
+deliberate: a project you cannot reach must be indistinguishable from one
+that never existed, or the uid space becomes searchable.
 
 ## Testing
 
@@ -212,5 +212,5 @@ existed, or the uid space becomes searchable.
 "artifact" — no port is bound and no web build is needed. The one exception
 is `tests/google_auth.rs`, which binds a loopback port for its stub Google so
 the sign-in handler's two outbound calls are real HTTP. Domain rules
-(visibility, membership, push validation) are `lp-cloud-domain`'s tests and
+(access rules, membership, push validation) are `lp-cloud-domain`'s tests and
 are not repeated here.

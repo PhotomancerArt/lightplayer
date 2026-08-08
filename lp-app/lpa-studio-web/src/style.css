@@ -2748,6 +2748,61 @@ label:has(> input:not(:disabled)) {
     right: 0;
 }
 
+/* ---- the transient confirmation line (base/toast.rs) -------------------
+   One sentence, bottom centre, replaced rather than stacked. It fades
+   itself out with the keyframe below instead of a timer — see the module
+   docs — and ends `visibility: hidden` so a spent line cannot swallow a
+   click on whatever is under it. */
+.ux-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 34px;
+    /* Also on the base rule, not only in the keyframes: story capture
+       disables animations, and a line centred only by its animation would
+       land half a page to the right. */
+    transform: translateX(-50%);
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    max-width: min(480px, calc(100vw - 32px));
+    padding: 9px 16px;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    background: var(--studio-color-surface-raised);
+    color: var(--studio-color-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5);
+    animation: ux-toast-life 3.4s ease forwards;
+}
+
+.ux-toast-warn {
+    border-color: var(--studio-status-warning-border);
+    background: var(--studio-status-warning-bg);
+    color: var(--studio-status-warning-text);
+}
+
+@keyframes ux-toast-life {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+
+    7%,
+    82% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+
+    100% {
+        opacity: 0;
+        visibility: hidden;
+        transform: translateX(-50%) translateY(6px);
+    }
+}
+
 .ux-popover-layer {
     position: fixed;
     inset: 0;

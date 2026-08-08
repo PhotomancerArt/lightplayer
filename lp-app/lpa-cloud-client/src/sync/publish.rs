@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use lpc_cloud_api::{ProjectMeta, SidecarMeta, Visibility};
+use lpc_cloud_api::{Access, ProjectMeta, SidecarMeta};
 
 use crate::cloud_binding::CloudBinding;
 use crate::cloud_port::CloudPort;
@@ -15,7 +15,7 @@ use crate::sync_error::SyncError;
 /// What publishing produced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublishReport {
-    /// The service's record of the project: uid, slug, visibility, owner.
+    /// The service's record of the project: uid, slug, access, owner.
     pub meta: ProjectMeta,
     /// The initial push of the project's content and history.
     pub push: PushReport,
@@ -37,18 +37,18 @@ impl PublishReport {
 /// keyspace, so holding the link is the permission.
 ///
 /// Publishing an already-published project of your own restates its slug and
-/// visibility and pushes whatever is new; it is not an error. Publishing a
+/// access and pushes whatever is new; it is not an error. Publishing a
 /// uid somebody else owns answers `NotFound` — the same answer as a uid that
 /// was never published, because the alternative turns the endpoint into an
 /// oracle for which uids exist.
 pub async fn publish<P: CloudPort + ?Sized>(
     port: &P,
     project: &LocalProject<'_>,
-    visibility: Visibility,
+    access: Access,
     slug: impl Into<String>,
     sidecar: &SidecarMeta,
 ) -> Result<PublishReport, SyncError> {
-    let remote = publish_project(port, project.uid(), visibility, slug.into()).await?;
+    let remote = publish_project(port, project.uid(), access, slug.into()).await?;
 
     let mut binding = project
         .binding()?
@@ -83,7 +83,7 @@ mod tests {
         let report = block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "zook-dome",
             &sidecar("Zook Dome"),
         ))
@@ -92,7 +92,7 @@ mod tests {
         // identity is the local uid, not a service-minted one
         assert_eq!(report.meta.uid, dome.uid());
         assert_eq!(report.meta.slug, "zook-dome");
-        assert_eq!(report.meta.visibility, Visibility::Link);
+        assert_eq!(report.meta.access, Access::View);
         assert!(report.push.advanced());
         assert_eq!(report.push.heads()[0].tree, v1);
         assert_eq!(
@@ -119,7 +119,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Private,
+            Access::None,
             "dome",
             &sidecar("Dome"),
         ))
@@ -127,13 +127,13 @@ mod tests {
         let again = block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "zook-dome",
             &sidecar("Dome"),
         ))
         .unwrap();
 
-        assert_eq!(again.meta.visibility, Visibility::Link);
+        assert_eq!(again.meta.access, Access::View);
         assert_eq!(again.meta.slug, "zook-dome");
         // nothing new to send the second time
         assert!(matches!(again.push, PushReport::UpToDate { .. }));
@@ -151,7 +151,7 @@ mod tests {
         let error = block_on(publish(
             &stranger,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

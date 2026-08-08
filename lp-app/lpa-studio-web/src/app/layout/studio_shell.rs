@@ -51,7 +51,7 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
-        open_project_slug: _,
+        open_project_name: _,
         // the lens card renders the sync facts (D43)
         device_sync: _,
         lens_card,
