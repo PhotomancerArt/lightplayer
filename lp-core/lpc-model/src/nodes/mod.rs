@@ -5,6 +5,7 @@ pub mod fluid;
 pub mod module;
 pub mod node_def;
 pub mod output;
+pub mod pattern_project;
 pub mod playlist;
 pub mod provenance_def;
 pub mod radio;
@@ -32,6 +33,9 @@ pub use node_def::{
 pub use output::{
     OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView,
+};
+pub use pattern_project::{
+    PATTERN_EXPORT_FOLDER, pattern_project_files_1d, pattern_project_files_2d,
 };
 pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,

@@ -19,7 +19,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -102,7 +102,7 @@ fn load_root_reports_parse_error_for_inline_child_def() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -139,7 +139,7 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -172,7 +172,7 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -217,7 +217,7 @@ fn load_root_accepts_current_project_format() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -283,7 +283,7 @@ fn vendored_module_folder_loads_under_the_projects_gate() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 6\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 7\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -357,7 +357,11 @@ fn load_root_rejects_missing_container_manifest() {
 #[test]
 fn load_root_rejects_pre_mitosis_kind_tagged_manifest() {
     // A format-2 root (single-file, kind-tagged `project.json`) must fail
-    // with a diagnosable manifest error, not a deep parse failure.
+    // with a diagnosable manifest error, not a deep parse failure. Since
+    // `kind` became a KNOWN container key (P1, project kinds), the
+    // pre-mitosis root is now diagnosed by its first genuinely unknown
+    // key (`nodes`); the node-kind-as-value case (`"kind": "Module"`
+    // alone) is pinned in lpc-model's manifest tests.
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
@@ -376,7 +380,7 @@ fn load_root_rejects_pre_mitosis_kind_tagged_manifest() {
         matches!(err, RegistryError::Manifest { .. }),
         "expected a manifest error, got {err:?}"
     );
-    assert!(err.to_string().contains("kind"), "{err}");
+    assert!(err.to_string().contains("nodes"), "{err}");
 }
 
 #[test]

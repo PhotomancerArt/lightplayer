@@ -54,25 +54,33 @@
       {
         "name": "float_mode",
         "shape": {
-          "value": {
-            "shape": {
-              "editor": {
-                "dropdown": {
-                  "options": [
-                    {
-                      "label": "Float",
-                      "value": "float"
-                    },
-                    {
-                      "label": "Fixed",
-                      "value": "fixed"
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "dropdown": {
+                      "options": [
+                        {
+                          "label": "Float (f32)",
+                          "value": "float"
+                        },
+                        {
+                          "label": "Fixed (Q32)",
+                          "value": "fixed"
+                        }
+                      ]
                     }
-                  ]
+                  },
+                  "id": 4255570002,
+                  "meta": {
+                    "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+                    "label": "Float mode"
+                  },
+                  "ty": "string"
                 }
-              },
-              "id": 4255570002,
-              "meta": {},
-              "ty": "string"
+              }
             }
           }
         }

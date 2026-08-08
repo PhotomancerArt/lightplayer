@@ -11,8 +11,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AssetLocation, ComputeShaderDef, FloatMode, NodeId, NodeRuntimeStatus, Revision,
-    ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    AssetLocation, ComputeShaderDef, NodeId, NodeRuntimeStatus, Revision, ShaderHeaderGenError,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
     generate_compute_shader_header,
 };
 use lpc_registry::AssetText;
@@ -29,8 +29,7 @@ use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::shader_node::{
     TimeProductCache, format_compile_stats, input_resolve_warning, note_input_resolve_failures,
-    read_authored_value, resolve_or_default_input, set_slot_if_changed,
-    sync_shader_slot_def_from_authored,
+    resolve_or_default_input, sync_float_mode_pin, sync_shader_slot_def_from_authored,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -268,10 +267,7 @@ impl ComputeShaderNode {
 
     fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut compile_changed = false;
-        compile_changed |= set_slot_if_changed(
-            &mut self.def.float_mode,
-            read_authored_value::<FloatMode>(ctx, "float_mode")?,
-        );
+        compile_changed |= sync_float_mode_pin(ctx, &mut self.def.float_mode)?;
 
         let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
         for key in consumed_keys {
@@ -857,7 +853,7 @@ void tick() {{
         ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
-            float_mode: lpc_model::ValueSlot::default(),
+            float_mode: lpc_model::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         }

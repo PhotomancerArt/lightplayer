@@ -311,9 +311,24 @@ fn agent_collapse_preserves_the_composer_draft_end_to_end() {
     assert_eq!(
         shader.card_ui,
         NodeCardUiState::default(),
-        "a fresh card starts expanded with no mirrored draft"
+        "a fresh card starts with no mirrored draft"
+    );
+    assert!(
+        shader.card_ui.agent_collapsed,
+        "a fresh card starts with the agent section collapsed (G1 R-F)"
     );
     let node = shader.header.path.clone();
+
+    // Expand it first — the flip alone, from the collapsed rest state.
+    for op in NodeUiOp::toggle_agent_section(&node, true, "") {
+        handle.tx.send(node_ui_command(op));
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("expand emits a snapshot");
+    assert!(
+        !node_by_kind(&snapshot, "Shader").card_ui.agent_collapsed,
+        "expanding from the collapsed default opens the section"
+    );
 
     // Collapse with a half-typed draft on hand: mirror rides first, then
     // the flip — the choreography the ShaderFace toggle dispatches.
@@ -1414,6 +1429,20 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
              open onto live controls, not an empty panel",
             example.id
         );
+        // R-E: a nested group is a bordered box with a name on it, so a
+        // group with no controls anywhere inside it is a label pointing at
+        // nothing. Groups that DO publish must survive the filter, which is
+        // what the `published` count above keeps honest.
+        assert!(
+            face.panel.groups.iter().all(|group| !group.is_empty()),
+            "{}: an empty panel group reached the root card: {:?}",
+            example.id,
+            face.panel
+                .groups
+                .iter()
+                .map(|group| (group.label.clone(), group.controls.len()))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -1762,7 +1791,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1885,7 +1914,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1990,7 +2019,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -2101,7 +2130,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2413,7 +2442,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2525,7 +2554,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2625,7 +2654,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 7\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {

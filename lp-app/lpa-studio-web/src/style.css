@@ -180,6 +180,16 @@
     --studio-status-bound-bg: #241a33;
     --studio-status-bound-border: #5f4a85;
     --studio-status-bound-text: #c9b1f5;
+    /* EXPORT (sage): "this ships from here" — the module-authoring family
+       (spike gate 2026-08-07 ruling D11). A desaturated green-grey that sits
+       one step off `--studio-color-heading` (#94b8aa), which is exactly why
+       it was picked: exports are a quiet, structural property of the
+       project, not a status you would clear. Deliberately NOT good-green
+       (nothing here is "valid"), NOT bound-violet (that is bus linkage), and
+       NOT engaged-gold (that reads as a hand on a control right now). */
+    --studio-status-export-bg: rgba(148, 184, 170, 0.1);
+    --studio-status-export-border: #567a6d;
+    --studio-status-export-text: #94b8aa;
 
     --studio-step-marker-bg: #151a1f;
     --studio-step-active-bg: #2a2916;
@@ -217,11 +227,17 @@ body {
     var(--studio-color-bg);
 }
 
-button,
-input,
-textarea,
-select {
-    font: inherit;
+/* In `base` so Tailwind utilities (`tw:text-*`, `tw:font-*`) on the element
+   itself still win — an unlayered reset beats every layered rule and silently
+   killed them. Still overrides UA form-control fonts: UA styles lose to any
+   author layer. */
+@layer base {
+    button,
+    input,
+    textarea,
+    select {
+        font: inherit;
+    }
 }
 
 /* Tailwind v4 preflight no longer sets a pointer cursor on buttons, which left

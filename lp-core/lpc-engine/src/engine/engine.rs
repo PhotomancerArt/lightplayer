@@ -480,7 +480,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
