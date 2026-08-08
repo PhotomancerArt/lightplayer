@@ -624,7 +624,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 5,\n  \"created\": \"2026-08-07\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\",\n    \"sparkle\"\n  ],\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 6,\n  \"created\": \"2026-08-07\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\",\n    \"sparkle\"\n  ],\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -650,7 +650,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 5,\n  \"kind\": \"rig\",\n  \"exports\": []\n}\n"
+            "{\n  \"format\": 6,\n  \"kind\": \"rig\",\n  \"exports\": []\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -672,7 +672,7 @@ mod tests {
             ..ProjectManifest::default()
         };
         let text = manifest.write_json();
-        assert_eq!(text, "{\n  \"format\": 5,\n  \"kind\": \"show\"\n}\n");
+        assert_eq!(text, "{\n  \"format\": 6,\n  \"kind\": \"show\"\n}\n");
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
         assert_eq!(read.project_kind(), ProjectKind::Show);
