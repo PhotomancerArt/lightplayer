@@ -8,7 +8,13 @@
 //! project root — and the playlist strip's add chip (attach = that
 //! playlist). Deliberately one flat popover, no submenu: the source
 //! dimension (blank/copy/import/examples) grows inside this panel — the
-//! "Paste node" row below is its first inhabitant.
+//! "Paste node" row is its first inhabitant, and "Import pattern" (module
+//! authoring unit, P5) its second.
+//!
+//! Both extra sources are sections in the same flat list, not a submenu:
+//! the whole reason the picker is one panel is that "what am I adding" and
+//! "where is it coming from" are one decision, and a submenu would make the
+//! second one cost an extra gesture.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -72,6 +78,41 @@ pub fn AddNodePicker(
                     PasteNodeMenuRow { attach: menu.attach.clone(), on_action }
                 }
             }
+            // The third source: a pattern already in your library, vendored
+            // in as your own copy. Absent entirely on menus that are not an
+            // import site (a playlist's, this round) — the controller says
+            // so by leaving both the rows AND the empty-state reason unset.
+            if !menu.imports.is_empty() || menu.imports_empty.is_some() {
+                DetailSection { title: "Import pattern",
+                    div { class: "tw:grid tw:gap-0.5",
+                        for entry in menu.imports.clone() {
+                            AddNodeMenuRow { entry, on_action }
+                        }
+                        if let Some(reason) = menu.imports_empty.clone() {
+                            EmptySourceRow { reason }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The empty-state row of a source that has nothing to offer: the same menu
+/// row, disabled, saying why. A source that vanished when empty would leave
+/// a hole where an affordance was, and no answer to "where did import go?"
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn EmptySourceRow(reason: String) -> Element {
+    rsx! {
+        button {
+            class: "{menu_item_action_class()} tw:opacity-55",
+            r#type: "button",
+            disabled: true,
+            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                StudioIcon { name: StudioIconName::Add, size: 14 }
+            }
+            span { "{reason}" }
         }
     }
 }

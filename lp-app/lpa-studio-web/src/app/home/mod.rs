@@ -20,6 +20,8 @@ pub(crate) mod new_project_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod new_project_menu_stories;
 pub(crate) mod package_card;
+#[cfg(feature = "stories")]
+pub(crate) mod package_card_stories;
 pub(crate) mod package_export;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]

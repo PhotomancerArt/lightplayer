@@ -61,10 +61,10 @@ pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
     ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp,
-    NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp,
-    PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
+    NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp,
+    PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
     ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
-    UiNodeRemovePreflight,
+    UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;

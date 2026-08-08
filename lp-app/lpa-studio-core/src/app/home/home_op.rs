@@ -101,6 +101,23 @@ pub enum HomeOp {
     CreateProject {
         template: ProjectTemplate,
     },
+    /// Create a project BUILT AROUND a library pattern's export, and open
+    /// it (module authoring unit, P5): the pattern-project rig with the
+    /// vendored export designated. The card-side twin of the add-node
+    /// picker's import — import brings a pattern into what you are already
+    /// working on, this hands you a workbench for it.
+    ///
+    /// Unlike [`Self::CreateProject`] it carries a `name`: the card's
+    /// inline form has one, prefilled from the export, because "a project
+    /// about someone else's fire module" deserves a name you chose.
+    CreateFromPattern {
+        /// Source package `prj_…` uid.
+        uid: String,
+        /// Which export folder to build around.
+        export: String,
+        /// The new project's label (slugged/dated/deduped by the library).
+        name: String,
+    },
     RenamePackage {
         uid: String,
         name: String,
@@ -202,6 +219,16 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("add"),
+            Self::CreateFromPattern { export, .. } => ActionMeta::new(
+                "New project from this…",
+                format!(
+                    "Create a pattern project built around this project's {export} module — a \
+                     rig to judge it on, with your own copy of the module designated as the \
+                     export — and open it."
+                ),
+                ActionPriority::Secondary,
+            )
+            .with_icon("add"),
             Self::RenamePackage { .. } => {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
                     .with_icon("edit")
@@ -281,11 +308,12 @@ impl ControllerOp for HomeOp {
             // Opens push files to the runtime and load the project — the
             // demo-load quiet-gap budget fits. Create-and-open ends in the
             // same open, so it shares the budget.
-            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::CreateProject { .. } => {
-                ActionClass::Foreground {
-                    deadline: PROJECT_LOAD_DEADLINE,
-                }
-            }
+            Self::OpenPackage { .. }
+            | Self::OpenExample { .. }
+            | Self::CreateProject { .. }
+            | Self::CreateFromPattern { .. } => ActionClass::Foreground {
+                deadline: PROJECT_LOAD_DEADLINE,
+            },
             // Library/registry CRUD is local store work (a device rename's
             // live write-back is one small wire write); the standard budget
             // bounds it.

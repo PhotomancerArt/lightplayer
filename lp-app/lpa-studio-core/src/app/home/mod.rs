@@ -12,6 +12,7 @@ pub mod card_ui_state;
 pub mod embedded_example;
 pub mod home_op;
 pub mod home_view_builder;
+pub mod pattern_from_export;
 pub mod setup_wizard;
 pub mod template_project;
 pub mod ui_device_card;
@@ -25,7 +26,10 @@ pub use board_project::{
 pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ProjectTemplate, ZipBytes};
-pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};
+pub use home_view_builder::{
+    HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence, importable_patterns,
+};
+pub use pattern_from_export::project_files_from_export;
 pub use setup_wizard::{
     SetupSession, UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, setup_rail,
 };

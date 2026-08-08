@@ -19,6 +19,12 @@ pub struct UiPackageCard {
     /// project's own authored designation, feeding the P4/P5 gallery UI.
     /// `"General"` for a degraded card whose manifest could not be read.
     pub project_kind: String,
+    /// The module folders this project exports, in manifest order (module
+    /// authoring unit, P1/P5). Empty for every kind that exports nothing —
+    /// and for a degraded card whose manifest could not be read. Feeds the
+    /// card's "New project from this…" row (which export to vendor) and
+    /// the add-node picker's import source.
+    pub exports: Vec<String>,
     /// THE user-facing identifier (dated: `2026-07-09-1421-basic`): card
     /// title, URL, export name. Rename edits it.
     pub slug: String,
