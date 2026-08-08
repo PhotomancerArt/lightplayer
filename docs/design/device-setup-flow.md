@@ -50,14 +50,23 @@ BOARD_FIRST                      full-catalog board pick, then board-specific co
   —BoardChosen→                  BOARD_FIRST           (records the choice; pre-seeds BOARD_PICK)
   —ItsPluggedIn→                 PORT_PICKING          [RequestPort]
   —Back→                         CONNECT_INTRO
-PORT_PICKING
+PORT_PICKING                     the browser owns the chooser dialog
+  —PortChosen→                   CONNECTING            (the chooser answered; the connect
+                                 it started is already running, so this asks for nothing)
   —PortGranted→                  PROBING               [ProbeBoard]
+                                 (a grant with no CONNECTING in between: the port was
+                                  already open, or a caller that does not split the phases)
   —PortPickerCancelled→          CONNECT_INTRO         (hint: picker closed)
   —PortPickerEmpty→              CONNECT_INTRO         (hint escalates to BOARD_FIRST)
+CONNECTING                       opening the port, resetting, waiting for the hello —
+                                 the SECONDS that used to wear PORT_PICKING's copy
+  —PortGranted→                  PROBING               [ProbeBoard]
+  —PortPickerCancelled→          CONNECT_INTRO         (the connect ended with no session)
 PROBING                          chip probe + board-state detection, one spinner
   —ProbeCompleted(Blank)→        BOARD_PICK            (chip known → catalog filtered + Generic)
   —ProbeCompleted(Wled)→         WLED_FOUND
   —ProbeCompleted(LightPlayer)→  ALREADY_LP
+  —ProbeCompleted(StaleLightPlayer)→ STALE_LP
   —ProbeCompleted(Unresponsive)→ PROBE_FAILED
   —PortLost→                     CONNECT_INTRO         (hint: device disconnected)
 BOARD_PICK                       picker filtered to the detected chip + Generic;
@@ -87,6 +96,9 @@ ALREADY_LP                       "Already running LightPlayer" + identity card
   —AdoptAndOpen→                 DEVICE_HOME           [RecordSighting?, OpenDeviceHome]
                                  (secondary "Open in the editor →" — what Done used to do)
   —SetUpFresh→                   BOARD_PICK            (re-flash path; warns before writing)
+STALE_LP                         "Running an older LightPlayer" + identity card
+  —UpdateFirmware→               BOARD_PICK            (the update IS a flash; warns before writing)
+  —Back→                         CONNECT_INTRO         [ReleasePort]
 FLASHING                         activity view + step checklist
   —FlashSucceeded→               PROVISION
   —FlashFailed→                  FLASH_FAILED
@@ -187,11 +199,12 @@ in silicon and an erase keeps it (`docs/adr/2026-08-04-device-identity-anchored-
 
 ## 4 · Board-state detection (Flash step, hardware)
 
-One probe pass, four verdicts — a first-class enum, not scattered ifs:
+One probe pass, one verdict — a first-class enum, not scattered ifs:
 
 | Verdict | Evidence | Flow |
 |---|---|---|
 | `LightPlayer { known }` | a proto-matching `ServerHello` arrived — **and nothing else** | ALREADY_LP |
+| `StaleLightPlayer { known }` | the link classified the peer `DeviceState::Incompatible` — LightPlayer framing, no proto-matching hello | STALE_LP |
 | `Wled { known }` | a serial/Improv line names WLED | WLED_FOUND |
 | `Blank { known }` | a no-firmware boot signature (`invalid header: 0xffffffff`, ROM download mode, a known replaceable banner) | BOARD_PICK |
 | `Unresponsive { known }` | nothing intelligible | PROBE_FAILED |
@@ -208,6 +221,15 @@ and the flash confirmation still guards the data. Over-claiming
 board into ALREADY_LP and offers to adopt it. So the hello is the ONLY
 evidence that yields `LightPlayer`, and WLED detection is deliberately
 conservative (a banner match; ambiguous Improv traffic alone is not enough).
+
+`StaleLightPlayer` is the one verdict that reads LightPlayer-ish and still
+must not be `LightPlayer`: the board speaks our framing but offers no
+protocol this Studio can use, so there is nothing to adopt. It outranks the
+WLED banner and the no-firmware signature because it names the firmware
+exactly, and it lands on STALE_LP — whose one affordance is the reflash the
+link layer already prescribes (`DeviceState::Incompatible`). Before it
+existed, a board on old firmware fell through to `Unresponsive` and was told
+to hold BOOT, which fixes nothing.
 
 ## 5 · Device home
 
@@ -377,7 +399,7 @@ nothing. Each `SetupCommand` names machinery that already exists:
 
 | Command | Existing machinery |
 |---|---|
-| `RequestPort` | `DeviceOp::OpenProvider { BrowserSerialEsp32 }` |
+| `RequestPort` | `DeviceOp::OpenProvider { BrowserSerialEsp32 }` — run as its two phases (`DeviceController::choose_provider_endpoint`, then `connect_endpoint`) so the executor can report `PortChosen` between them; that interim event is the one thing a command reports before it finishes, and it is state-only by construction (there is no queue to run commands on from inside a command) |
 | `ProbeBoard` | read `DeviceSession::snapshot()` (`detected_chip`, `probed_mac`, `recent_lines`) → `classify_board`; escalate with `DeviceOp::ProbeBootloaderMode` only when the passive read is `Unresponsive` |
 | `ReleasePort` | `DeviceOp::DisconnectDevice { target }` |
 | `Flash` | `DeviceOp::ProvisionFirmware { target, setup_name: None, board_id }` — `setup_name` is `None` because naming is a Provision-time registry write |
@@ -397,8 +419,8 @@ of the flow. Two frames, one seam:
 
 | Frame | When | What it is |
 |---|---|---|
-| **Standalone** | no verdict yet: CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, PROBING — and the whole simulator path until the sim session starts | a card of its own in the entry-cards slot, at the roster's card width, where the setup form used to sit. There is no device card to be the body of. |
-| **Takeover** | from the VERDICT on: BOARD_PICK, WLED_FOUND, ALREADY_LP, PROBE_FAILED, FLASHING, FLASH_FAILED, ABANDON_GUARD, PROVISION | the bound board's OWN roster card renders the wizard as its body: same card, same identity key, same grid slot (pinned first). The header stays the device's and grows real facts as they land; the ✕ moves to the steps rail. |
+| **Standalone** | no verdict yet: CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, CONNECTING, PROBING — and the whole simulator path until the sim session starts | a card of its own in the entry-cards slot, at the roster's card width, where the setup form used to sit. There is no device card to be the body of. |
+| **Takeover** | from the VERDICT on: BOARD_PICK, WLED_FOUND, ALREADY_LP, STALE_LP, PROBE_FAILED, FLASHING, FLASH_FAILED, ABANDON_GUARD, PROVISION | the bound board's OWN roster card renders the wizard as its body: same card, same identity key, same grid slot (pinned first). The header stays the device's and grows real facts as they land; the ✕ moves to the steps rail. |
 
 **Why the verdict is the seam.** Between the port grant and the probe's
 answer the live session is anonymous, so a board the registry already
@@ -427,10 +449,12 @@ state beside it.
 | CONNECT_INTRO | headline + two stacked full-width CTAs; the `ConnectHint` line escalates toward the secondary |
 | BOARD_FIRST | the shipped board picker (full catalog, no Generic) + board-specific connect guidance (CH340 driver steps or cable/port tips) + "it's plugged in" |
 | PORT_PICKING | indeterminate wait — the browser owns the dialog |
-| PROBING | indeterminate wait, one line about what is being read |
+| CONNECTING | indeterminate wait ("Connecting to the board…"), with the op overlay's own TERMINAL under it — from the grant on, the link has lines to show |
+| PROBING | indeterminate wait, one line about what is being read, the same terminal under it |
 | BOARD_PICK | recognition line, chip-filtered picker + Generic, picked-board bio, the forward verb (armed only when something is picked), Back |
 | WLED_FOUND | verdict + the wipe warning (migration is future work) + wipe / keep-WLED |
 | ALREADY_LP | registry name + chip, "Done writes nothing and you stay here", Done (primary) / Open in the editor → (secondary) / set-up-fresh |
+| STALE_LP | registry name + chip, "this firmware is too old for this Studio", update-the-firmware (the only verb, and it is a flash) / back |
 | PROBE_FAILED | the failure, the BOOT-button hint, retry / driver help / back |
 | FLASHING | the card-owned op flow's OWN activity view, verbatim; attempt number when > 1 |
 | FLASH_FAILED | the detail, "retry re-runs from erase", replug guidance from attempt 2, retry / abandon |

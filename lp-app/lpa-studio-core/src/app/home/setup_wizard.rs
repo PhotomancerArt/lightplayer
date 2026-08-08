@@ -159,6 +159,7 @@ const HARDWARE_RAIL: [(&str, &[SetupStateKind]); 4] = [
             SetupStateKind::ConnectIntro,
             SetupStateKind::BoardFirst,
             SetupStateKind::PortPicking,
+            SetupStateKind::Connecting,
         ],
     ),
     (
@@ -169,6 +170,7 @@ const HARDWARE_RAIL: [(&str, &[SetupStateKind]); 4] = [
             SetupStateKind::BoardPick,
             SetupStateKind::WledFound,
             SetupStateKind::AlreadyLp,
+            SetupStateKind::StaleLp,
             SetupStateKind::Flashing,
             SetupStateKind::FlashFailed,
             SetupStateKind::AbandonGuard,
