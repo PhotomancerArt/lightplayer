@@ -1179,7 +1179,12 @@ label:has(> input:not(:disabled)) {
     background: transparent;
     font-family: var(--studio-font-mono);
     font-size: 0.68rem;
-    line-height: 1.45;
+    /* Integral line box, not a unitless ratio: 1.45 × 10.88px lands every
+       baseline at a different fractional phase, so some line is ALWAYS
+       parked on a device-pixel rounding tie and a sub-pixel container move
+       flips it alone (2026-08-05-popover-line-parked-on-a-rounding-tie).
+       A whole-pixel pitch gives all lines one rounding phase. */
+    line-height: 16px;
     white-space: pre;
 }
 
@@ -3315,7 +3320,9 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
     font-family: var(--studio-font-mono);
     font-size: 0.68rem;
-    line-height: 1.45;
+    /* Integral line box — same rounding-tie reasoning as
+       .ux-node-ui-status-popup-error-detail above. */
+    line-height: 16px;
     white-space: pre;
 }
 

@@ -1161,11 +1161,22 @@ fn trigger_placeholder_style(attached: bool, anchored: bool, rect: Option<RectSn
 }
 
 /// Fixed-position style for the top-layer trigger visual.
+///
+/// Position rounds to the device-pixel grid for the same reason the panel
+/// position does (the copy's glyphs otherwise inherit the measurement's
+/// sub-pixel wobble — the trigger half of the rounding-tie defect); the size
+/// CEILS so the copy can never be a fraction narrower than the in-flow
+/// button it clones, which could re-wrap its content.
 fn open_trigger_style(rect: Option<RectSnapshot>) -> String {
     rect.map(|rect| {
+        let dpr = device_pixel_ratio();
+        let dpr = if dpr > 0.0 { dpr } else { 1.0 };
         format!(
             "left: {:.1}px; top: {:.1}px; width: {:.1}px; height: {:.1}px;",
-            rect.x, rect.y, rect.width, rect.height
+            snap_to_device_px(rect.x),
+            snap_to_device_px(rect.y),
+            (rect.width * dpr).ceil() / dpr,
+            (rect.height * dpr).ceil() / dpr
         )
     })
     .unwrap_or_default()
@@ -1454,6 +1465,23 @@ fn device_pixel_ratio() -> f64 {
         .unwrap_or(1.0)
 }
 
+/// Snap a CSS-px coordinate to the device-pixel grid (nearest device pixel).
+///
+/// Every emitted popover position goes through this: the position is derived
+/// from async DOM measurements that wobble a fraction of a pixel run to run,
+/// and a fractional `top`/`left` puts every descendant text baseline at a
+/// fractional offset — where a line parked on a rounding tie moves a whole
+/// device pixel under a 0.1px nudge (defect
+/// 2026-08-05-popover-line-parked-on-a-rounding-tie; the story-capture
+/// baselines flapped on exactly this). A whole-device-pixel position pins
+/// each descendant's sub-pixel phase to what CSS alone dictates, so
+/// measurement jitter below half a device pixel changes nothing at all.
+fn snap_to_device_px(v: f64) -> f64 {
+    let dpr = device_pixel_ratio();
+    let dpr = if dpr > 0.0 { dpr } else { 1.0 };
+    (v * dpr).round() / dpr
+}
+
 #[derive(Clone, Copy, Debug)]
 struct RectSnapshot {
     x: f64,
@@ -1563,9 +1591,12 @@ impl PopoverPosition {
             viewport_width,
         );
 
+        // Snapped HERE, not in `style()`, so every consumer — the emitted
+        // style, the animated outline's final rect, the clip inset — reads
+        // the same whole-device-pixel geometry.
         Self {
-            left,
-            top,
+            left: snap_to_device_px(left),
+            top: snap_to_device_px(top),
             visible: true,
             side,
         }
