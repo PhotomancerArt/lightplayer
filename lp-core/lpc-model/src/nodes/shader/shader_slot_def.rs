@@ -207,6 +207,15 @@ impl ShaderSlotDef {
         }
     }
 
+    /// A dense-mapped map slot over a builtin scalar/vector element
+    /// (`float heat[N];`): the map key is the element index.
+    pub fn map_dense_builtin(value: &str, len: u32) -> Self {
+        Self {
+            value: ValueSlot::new(ShaderValueShapeRef::builtin(value)),
+            ..Self::map_u32_native(value, ShaderSlotMappingDef::dense(len))
+        }
+    }
+
     pub fn default_value(&self) -> LpValue {
         self.default
             .data
