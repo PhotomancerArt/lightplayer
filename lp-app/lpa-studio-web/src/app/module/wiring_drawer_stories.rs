@@ -213,6 +213,7 @@ fn output_bus_view() -> UiBusView {
 fn drawer_only_face(wiring: UiBusView) -> UiModuleFace {
     UiModuleFace {
         preview: None,
+        hero_choice: None,
         panel: UiPanelGroup::new("Aurora Sign", ROOT_SCOPE).with_target(scope_target(ROOT_SCOPE)),
         wiring: Some(wiring),
         wiring_open: true,

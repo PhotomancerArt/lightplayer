@@ -100,4 +100,5 @@ like [lygia](https://lygia.xyz) are a good hunting ground.
 
 - [Brightness and smooth fades](#/docs/brightness-and-smooth-fades) —
   what the output settings do to your colors.
-- [The guide](#/docs/guide) — the map of everything else.
+- [What is LightPlayer?](#/docs/guide) — the bigger picture, and where
+  the rest of the guide is headed.

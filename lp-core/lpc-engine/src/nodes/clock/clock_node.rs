@@ -1,7 +1,7 @@
 use alloc::format;
 
 use lpc_model::{
-    ClockDef, ClockState, NodeId, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
+    ClockDef, ClockState, NodeId, PlayState, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
     SlotShapeRegistryError, StaticSlotShape, TimeProduct,
 };
 
@@ -35,7 +35,10 @@ impl ClockNode {
     fn update_from_controls(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let accessors = ClockAccessors::get_or_compile(&mut self.accessors, ctx.slot_shapes())
             .map_err(|e| NodeError::msg(format!("compile clock controls view: {e}")))?;
-        let running: bool = ctx.resolve_consumed_slot_accessor_value(&accessors.running)?;
+        // The transport's REQUESTED state; the effective state is what this
+        // node then publishes. `PlayState` rides the slot as its wire tag.
+        let play_state: PlayState =
+            ctx.resolve_consumed_slot_accessor_value(&accessors.play_state)?;
         let rate: f32 = ctx.resolve_consumed_slot_accessor_value(&accessors.rate)?;
         let scrub_offset_seconds: f32 =
             ctx.resolve_consumed_slot_accessor_value(&accessors.scrub_offset_seconds)?;
@@ -46,8 +49,12 @@ impl ClockNode {
             .map_or(0.0, |previous| (now - previous).max(0.0));
         self.last_engine_seconds = Some(now);
 
-        let clock_delta = if running { engine_delta * rate } else { 0.0 };
-        if running {
+        let clock_delta = if play_state.is_playing() {
+            engine_delta * rate
+        } else {
+            0.0
+        };
+        if play_state.is_playing() {
             self.accumulated_seconds += clock_delta;
         }
 
@@ -121,7 +128,7 @@ impl NodeRuntime for ClockNode {
 
 struct ClockAccessors {
     registry_revision: lpc_model::Revision,
-    running: SlotAccessor,
+    play_state: SlotAccessor,
     rate: SlotAccessor,
     scrub_offset_seconds: SlotAccessor,
 }
@@ -130,7 +137,7 @@ impl ClockAccessors {
     fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
         Ok(Self {
             registry_revision: registry.revision(),
-            running: compile_clock_accessor("transport.running", registry)?,
+            play_state: compile_clock_accessor("transport.play_state", registry)?,
             rate: compile_clock_accessor("transport.rate", registry)?,
             scrub_offset_seconds: compile_clock_accessor(
                 "transport.scrub_offset_seconds",
@@ -178,7 +185,7 @@ mod tests {
     use super::*;
     use alloc::string::{String, ToString};
     use alloc::vec::Vec;
-    use lpc_model::{LpValue, Revision, SlotShapeRegistry, WithRevision};
+    use lpc_model::{LpValue, Revision, SlotShapeRegistry, ToLpValue, WithRevision};
 
     use crate::dataflow::resolver::{
         Production, ProductionSource, QueryKey, ResolveError, TickResolver,
@@ -191,16 +198,16 @@ mod tests {
     /// in a project file cannot drive this seam. Feeding them straight to
     /// the node is how the rate/pause contract gets pinned.
     struct ControlsResolver {
-        running: bool,
+        play_state: PlayState,
         rate: f32,
         scrub_offset_seconds: f32,
         published: Vec<(f32, f32)>,
     }
 
     impl ControlsResolver {
-        fn new(running: bool, rate: f32) -> Self {
+        fn new(play_state: PlayState, rate: f32) -> Self {
             Self {
-                running,
+                play_state,
                 rate,
                 scrub_offset_seconds: 0.0,
                 published: Vec::new(),
@@ -214,7 +221,7 @@ mod tests {
                 .consumed_slot_path()
                 .ok_or_else(|| ResolveError::new(String::from("unexpected query kind")))?;
             let value = match path.to_string().as_str() {
-                "transport.running" => LpValue::Bool(self.running),
+                "transport.play_state" => self.play_state.to_lp_value(),
                 "transport.rate" => LpValue::F32(self.rate),
                 "transport.scrub_offset_seconds" => LpValue::F32(self.scrub_offset_seconds),
                 other => {
@@ -303,7 +310,7 @@ mod tests {
 
     #[test]
     fn a_running_clock_publishes_seconds_and_delta() {
-        let mut resolver = ControlsResolver::new(true, 1.0);
+        let mut resolver = ControlsResolver::new(PlayState::Playing, 1.0);
 
         let published = run(&mut resolver, 3, 0.5);
 
@@ -316,7 +323,7 @@ mod tests {
 
     #[test]
     fn a_paused_clock_publishes_a_zero_delta_and_a_still_clock() {
-        let mut resolver = ControlsResolver::new(false, 1.0);
+        let mut resolver = ControlsResolver::new(PlayState::Paused, 1.0);
 
         let published = run(&mut resolver, 4, 0.5);
 
@@ -333,8 +340,8 @@ mod tests {
         // Global speed is sacred: the rate multiplies the delta every phasor
         // rides on, so a 2× clock advances every phase 2× — no per-phasor
         // rate anywhere.
-        let mut single = ControlsResolver::new(true, 1.0);
-        let mut double = ControlsResolver::new(true, 2.0);
+        let mut single = ControlsResolver::new(PlayState::Playing, 1.0);
+        let mut double = ControlsResolver::new(PlayState::Playing, 2.0);
 
         let at_one = run(&mut single, 3, 0.5);
         let at_two = run(&mut double, 3, 0.5);
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn the_scrub_offset_shifts_seconds_without_touching_delta() {
-        let mut resolver = ControlsResolver::new(true, 1.0);
+        let mut resolver = ControlsResolver::new(PlayState::Playing, 1.0);
         resolver.scrub_offset_seconds = 10.0;
 
         let published = run(&mut resolver, 3, 0.5);
@@ -366,7 +373,7 @@ mod tests {
     #[test]
     fn a_backward_scrub_publishes_a_negative_delta() {
         let shapes = SlotShapeRegistry::default();
-        let mut resolver = ControlsResolver::new(true, 1.0);
+        let mut resolver = ControlsResolver::new(PlayState::Playing, 1.0);
         let mut node = ClockNode::new(NodeId::new(1));
         let run_frame = |node: &mut ClockNode, resolver: &mut ControlsResolver, frame: i64| {
             let mut ctx = TickContext::with_render_services(
@@ -402,7 +409,7 @@ mod tests {
 
     #[test]
     fn the_published_timebase_matches_the_produced_slots() {
-        let mut resolver = ControlsResolver::new(true, 1.5);
+        let mut resolver = ControlsResolver::new(PlayState::Playing, 1.5);
         let shapes = SlotShapeRegistry::default();
         let mut node = ClockNode::new(NodeId::new(1));
 

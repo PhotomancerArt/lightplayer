@@ -57,15 +57,12 @@ pub struct DocPage {
 pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "guide",
-        title: "User guide",
+        title: "Welcome",
         markdown: include_str!("../../../../../docs/user-guide/README.md"),
-        sims: &[],
-    },
-    DocPage {
-        slug: "brightness-and-smooth-fades",
-        title: "Brightness & smooth fades",
-        markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.md"),
-        sims: &[],
+        sims: &[DocsSimSpec {
+            name: "main",
+            example_id: "examples/plasma-duo",
+        }],
     },
     DocPage {
         slug: "what-is-a-shader",
@@ -75,6 +72,12 @@ pub const PAGES: &[DocPage] = &[
             name: "main",
             example_id: "examples/plasma-duo",
         }],
+    },
+    DocPage {
+        slug: "brightness-and-smooth-fades",
+        title: "Brightness & smooth fades",
+        markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.md"),
+        sims: &[],
     },
 ];
 

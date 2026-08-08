@@ -17,13 +17,13 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    ExportFinding, LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp,
-    SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView,
-    UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView,
-    UiPanelEmit, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
-    UiProductKind, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue,
-    UiStatus,
+    ExportFinding, LpValue, ModuleHeroProduct, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView,
+    UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace,
+    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
+    UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
+    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -130,6 +130,7 @@ fn knob(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -158,6 +159,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -182,6 +184,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -213,6 +216,7 @@ fn swatch(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -248,6 +252,98 @@ pub(crate) fn palette_panel() -> UiPanelGroup {
                 swatch(ROOT_SCOPE, "held", "engaged", &palette_cycle()),
                 "show \u{b7} palette",
             ),
+        ])
+}
+
+// ------------------------------------------------------- clock transport
+
+/// The clock's default wiring: each transport leaf on its own `clock.*`
+/// channel, promoted onto the panel by the record's `panel = "show"`.
+pub(crate) const TRANSPORT_CHANNELS: [(UiPanelWireRole, &str); 3] = [
+    (UiPanelWireRole::Rate, "clock.rate"),
+    (UiPanelWireRole::PlayState, "clock.play_state"),
+    (UiPanelWireRole::Scrub, "clock.scrub"),
+];
+
+/// The clock's GROUPED Transport control on a module panel (P8): one
+/// control, three wires, one faceplate.
+///
+/// `channels` is the per-dimension wiring in anchor order (rate first), so
+/// a story can retarget one leaf — an authored binding on `rate` — and see
+/// the group re-anchor without the faceplate changing shape.
+pub(crate) fn transport_control(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelControlView {
+    let target = |channel: &str| lpa_studio_core::UiPanelTarget {
+        scope: scope_target(ROOT_SCOPE),
+        channel: channel.to_string(),
+        engaged: false,
+    };
+    let slot = |role: UiPanelWireRole| match role {
+        UiPanelWireRole::Rate => "transport.rate",
+        UiPanelWireRole::PlayState => "transport.play_state",
+        UiPanelWireRole::Scrub => "transport.scrub_offset_seconds",
+    };
+    let wires: Vec<lpa_studio_core::UiPanelWire> = channels
+        .into_iter()
+        .map(|(role, channel)| lpa_studio_core::UiPanelWire {
+            role,
+            address: Some(walk_address(ROOT_SCOPE, slot(role))),
+            panel_target: Some(target(channel)),
+            live_value: None,
+        })
+        .collect();
+    // The anchor is the first wired dimension in the list (Q22).
+    let anchor = channels[0].1;
+    UiPanelControlView::new(
+        anchor,
+        UiPanelControl {
+            label: "Time".to_string(),
+            address: Some(walk_address(ROOT_SCOPE, "transport.rate")),
+            widget: UiPanelWidget::Transport {
+                transport: transport.clone(),
+            },
+            value: UiSlotValue::f32(transport.rate),
+            emit: UiPanelEmit::Value,
+            live_value: None,
+            live_gradient: None,
+            panel_target: Some(target(anchor)),
+            unit: None,
+            state: UiSlotFieldState::editable(),
+            aspects: Vec::new(),
+            wires,
+        },
+    )
+}
+
+/// A root panel with the clock's Transport in its own "Clock" child group
+/// (the production assembly shape — an instrument never sits in the flat
+/// strip; G2 feedback 2026-08-08), plus the scarf's brightness fader and a
+/// knob in the flat strip — the real shape of the panel a phone opens
+/// onto, so the instrument is judged in company rather than alone.
+pub(crate) fn transport_panel(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelGroup {
+    UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            ),
+            following(
+                knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
+                "0.41",
+                "lfo · hue",
+            ),
+        ])
+        .with_groups(vec![
+            UiPanelGroup::new("Clock", "/aurora.sign/clock").with_controls(vec![at_default(
+                transport_control(transport, channels),
+                "the clock's own transport",
+            )]),
         ])
 }
 
@@ -334,6 +430,9 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 5))
                 .with_preview(aurora_preview(48, 15, seed)),
         ),
+        // An embedded effect's scope carries a visual and nothing else, so
+        // its hero is not a choice.
+        hero_choice: None,
         panel,
         wiring: Some(plasma_wiring()),
         wiring_open: false,
@@ -472,6 +571,9 @@ pub(crate) fn root_face() -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 7))
                 .with_preview(aurora_preview(48, 21, 0.0)),
         ),
+        // The sign's scope drives no lamps of its own (its wiring publishes
+        // `visual.out` and nothing else), so there is nothing to switch to.
+        hero_choice: None,
         panel: root_panel(),
         wiring: Some(root_wiring()),
         wiring_open: false,
@@ -493,6 +595,9 @@ pub(crate) fn control_root_face() -> UiModuleFace {
                 .with_detail("16 RGB lamps · mirrors control.out")
                 .with_tracking(UiProductTrackingState::Tracking),
         ),
+        // Control only: no channel here carries a visual, so the hero is
+        // forced rather than chosen and no toggle rides it.
+        hero_choice: None,
         panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
             .with_target(scope_target(ROOT_SCOPE))
             .with_controls(vec![at_default(
@@ -538,6 +643,69 @@ fn control_wiring() -> UiBusView {
             },
         ],
     }
+}
+
+/// The ordinary fixture-project shape: a shader paints `visual.out`, the
+/// fixture turns it into `control.out` lamps, so the scope resolves BOTH
+/// primaries and the hero is a **choice** — lamps by default, the raster one
+/// toggle away.
+///
+/// The face carries the hero already resolved, exactly as
+/// `ProjectController::module_face` hands it over: one preview plus the
+/// preference the toggle reflects, never both products at once.
+pub(crate) fn both_products_root_face(hero: ModuleHeroProduct) -> UiModuleFace {
+    let preview = match hero {
+        ModuleHeroProduct::Control => control_preview_product("output")
+            .with_detail("16 RGB lamps · mirrors control.out")
+            .with_tracking(UiProductTrackingState::Tracking),
+        ModuleHeroProduct::Visual => UiProducedProduct::visual("output")
+            .with_detail("256 x 256 · mirrors visual.out")
+            .with_tracking(UiProductTrackingState::Tracking)
+            .with_frame(UiProductPreviewFrame::new(16, 7))
+            .with_preview(aurora_preview(48, 21, 0.0)),
+    };
+    UiModuleFace {
+        preview: Some(preview),
+        hero_choice: Some(hero),
+        panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
+            .with_target(scope_target(ROOT_SCOPE))
+            .with_controls(vec![at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            )]),
+        wiring: Some(both_products_wiring()),
+        wiring_open: false,
+        provenance: None,
+        auto_save: Some(true),
+        // A root face: designation rows ride every card BUT the root.
+        export: None,
+    }
+}
+
+/// [`control_wiring`] with the shader's raster in front of it — the chain
+/// the toggle picks two points on.
+fn both_products_wiring() -> UiBusView {
+    let mut wiring = control_wiring();
+    wiring.channels.insert(
+        1,
+        UiBusChannelView {
+            primary_visual: true,
+            preview: Some(UiBusChannelPreview {
+                kind: UiProductKind::Visual,
+                preview: aurora_preview(48, 21, 0.0),
+                tracking: UiProductTrackingState::Tracking,
+                frame: UiProductPreviewFrame::new(16, 7),
+            }),
+            ..channel(
+                "visual.out",
+                "Color",
+                Some("visual product #4:0"),
+                vec![site("scanner", "visual")],
+                vec![site("Fixture", "input")],
+            )
+        },
+    );
+    wiring
 }
 
 /// The root module's children, as sibling cards BELOW its card: two leaves

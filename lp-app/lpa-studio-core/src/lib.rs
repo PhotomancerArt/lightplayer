@@ -14,7 +14,8 @@ pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
     ControlSampleSpan, ExportFinding, ExportSeverity, LampType, LpFeature, LpValue, NodeId,
-    NodeKind, PhasorConfig, Revision, SlotMapKey, SlotPath, SlotPathSegment, ToLpValue, Waveform,
+    NodeKind, PhasorConfig, PlayState, Revision, SlotMapKey, SlotPath, SlotPathSegment, ToLpValue,
+    Waveform,
 };
 
 pub mod app;
@@ -58,14 +59,14 @@ pub use app::node::{
     UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
     UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget,
-    UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
-    UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
-    UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
-    UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus,
-    phasor_rate_display,
+    UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
+    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -75,9 +76,9 @@ pub use app::preview_host::{
 };
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, ModuleExportOp, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
+    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
     ProjectAssetContentRun, ProjectConnectResult, ProjectController, ProjectEditRun,
     ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,

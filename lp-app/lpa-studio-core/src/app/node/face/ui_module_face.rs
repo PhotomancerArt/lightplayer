@@ -6,7 +6,8 @@
 //! same face as a child card inside its host; play mode renders the root
 //! module's panel alone, without any face at all.
 //!
-//! Top-down: output-mirror hero (R7) → panel (R8) → the bus-as-wiring
+//! Top-down: product hero (control-first, R7 mirror one toggle away) →
+//! panel (R8) → the bus-as-wiring
 //! drawer → provenance. The split between the panel and the wiring drawer
 //! REPLACED the sidebar bus pane, which is deleted (P3): bus-as-controls
 //! sits on the face, bus-as-writers/readers goes in a drawer.
@@ -21,15 +22,21 @@
 //! `ProjectController::module_face`; the story fixtures mirror those
 //! shapes rather than standing in for them.
 
-use crate::{UiBusView, UiPanelGroup, UiProducedProduct};
+use crate::{ModuleHeroProduct, UiBusView, UiPanelGroup, UiProducedProduct};
 
 /// A module node card's permanent face.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiModuleFace {
-    /// The module's produced `output` slot, mirroring its own scope's
-    /// `visual.out` (R7) — the face hero. `None` for a module with no
-    /// visual, which is a legitimate shape (E6).
+    /// The face hero: whichever of the module scope's primary products
+    /// [`Self::hero_choice`] settles on — by default the `control.out`
+    /// lamps, else the R7 `visual.out` mirror. `None` for a module whose
+    /// scope resolves neither, which is a legitimate shape (E6).
     pub preview: Option<UiProducedProduct>,
+    /// The hero's per-card product preference, present only when the scope
+    /// resolves BOTH products — i.e. exactly when the hero is a *choice*
+    /// and the face draws its toggle. `None` means there is nothing to
+    /// offer: the hero is whatever single product the scope has.
+    pub hero_choice: Option<ModuleHeroProduct>,
     /// The module's panel: this scope's channels plus each child module's
     /// panel as a nested group (R8).
     pub panel: UiPanelGroup,
@@ -124,6 +131,7 @@ impl UiModuleFace {
     pub fn new(panel: UiPanelGroup) -> Self {
         Self {
             preview: None,
+            hero_choice: None,
             panel,
             wiring: None,
             wiring_open: false,
