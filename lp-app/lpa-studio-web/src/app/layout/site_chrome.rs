@@ -371,18 +371,19 @@ fn SessionChip(session: UiChromeSession, on_editor: bool) -> Element {
     }
 }
 
-/// The chip's route (D37 keys): `/sim/<project-uid>` for the sim,
+/// The chip's route (D37 keys): `/p/<project-uid>` for the sim,
 /// `/device/<dev-uid>` for hardware; `None` while no honest address
 /// exists.
+///
+/// The sim's link is the BARE uid: the chip knows the session, not the
+/// project's display name, and inventing a slug here would put a second
+/// spelling of the link in circulation. The address bar heals to the
+/// canonical `/p/<slug>-<uid>` on arrival (D10, `web_app.rs`).
 fn session_href(session: &UiChromeSession) -> Option<String> {
     match &session.target {
-        UiChromeSessionTarget::Sim { project_key } => project_key.as_ref().map(|key| {
-            StudioRoute::Sim {
-                key: key.clone(),
-                play: false,
-            }
-            .path()
-        }),
+        UiChromeSessionTarget::Sim { project_key } => project_key
+            .as_ref()
+            .map(|uid| crate::router::canonical_share_path("", uid)),
         UiChromeSessionTarget::Device { uid } => uid.as_ref().map(|uid| {
             StudioRoute::Device {
                 uid: uid.clone(),

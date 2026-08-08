@@ -3649,8 +3649,8 @@ impl ProjectController {
         )
     }
 
-    /// The open library package's slug (drives the web shell's
-    /// `#/sim/<slug>` URL).
+    /// The open library package's slug (the cosmetic half of the web
+    /// shell's `/p/<slug>-<uid>` URL).
     pub fn active_library_slug(&self) -> Option<String> {
         Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
     }

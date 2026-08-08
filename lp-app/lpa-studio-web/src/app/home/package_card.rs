@@ -10,6 +10,9 @@ use lpa_studio_core::{
 };
 
 use lpa_studio_core::core::time_ago::time_ago;
+use lpc_cloud_api::share_link::slugify;
+
+use crate::router::canonical_share_path;
 
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_export::export_package_to_download;
@@ -58,6 +61,13 @@ pub(crate) fn PackageCard(
     };
     // the slug IS the title; the thumbnail initial skips its date stamp
 
+    // The card's open link IS the project's share link (identity vision
+    // D1/D9): one address, so "copy what the address bar says" is the
+    // whole share gesture. The slug is recomputed from the display name
+    // rather than trusted from the library, so a rename shows up in the
+    // link the moment the card does.
+    let open_href = canonical_share_path(&slugify(&card.slug), &card.uid);
+
     rsx! {
         article {
             class: package_card_class(opening, blocked.is_some()),
@@ -73,9 +83,9 @@ pub(crate) fn PackageCard(
                 }
             },
             // Opening a card is NAVIGATION, so it is a real <a> to the
-            // sim route (D37: the URL points at a runtime — a project
+            // project route (D37: the URL points at a runtime — a project
             // always opens on the sim, never a device takeover): plain
-            // click rides the hashchange → open path, and cmd/middle-click
+            // click rides the route listener → open path, and cmd/middle-click
             // "open in new tab" works natively. The link stretches over
             // the card (absolute overlay) instead of wrapping it, so the
             // card menu isn't interactive-inside-interactive markup; the
@@ -83,7 +93,7 @@ pub(crate) fn PackageCard(
             if blocked.is_none() {
                 a {
                     class: "tw:absolute tw:inset-0 tw:z-[1]",
-                    href: "/sim/{card.slug}",
+                    href: "{open_href}",
                     aria_label: "Open {card.slug}",
                     onclick: move |event| {
                         if busy || opening {
@@ -190,7 +200,7 @@ pub(crate) fn PackageCard(
                 if blocked.is_none() {
                     a {
                         class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
-                        href: "/sim/{card.slug}",
+                        href: "{open_href}",
                         title: "Open this project in the simulator.",
                         onclick: move |event| {
                             if busy || opening {

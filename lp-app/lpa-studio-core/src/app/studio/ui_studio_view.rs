@@ -8,16 +8,20 @@ use crate::{
 
 /// Which runtime session the editor lens is bound to (D35/D37 — the SDI
 /// record: one lens shown at a time, and **the URL is the focused
-/// document**). The web shell's route reconciliation binds `#/sim/<key>`
-/// and `#/device/<uid>` to this, never to raw project identity.
+/// document**). The web shell's route reconciliation binds
+/// `/p/<slug>-<project-uid>` and `/device/<uid>` to this, never to raw
+/// project identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiLensRuntime {
     /// The lens is on THE sim session. A sim runtime's identity is its
-    /// project: `project_key` is the loaded project's slug (the D37 route
-    /// key), read from the session's loaded-project record so re-attach
-    /// flows (the sim-card click) address the same document; `None` while
-    /// nothing library-backed is loaded (the storeless demo path).
-    Sim { project_key: Option<String> },
+    /// project: `project_uid` is the loaded project's `prj…` uid — the
+    /// whole of the project route's identity — read from the session's
+    /// loaded-project record so re-attach flows (the sim-card click)
+    /// address the same document; `None` while nothing library-backed is
+    /// loaded (the storeless demo path). The slug that decorates the
+    /// address is cosmetic and comes from
+    /// [`UiStudioView::open_project_slug`], which tracks renames live.
+    Sim { project_uid: Option<String> },
     /// The lens is on the hardware device session. `uid` is the stamped
     /// `dev…` identity (the D37 route key) once the hello or the
     /// connect-as-pull carried it; `None` for a not-yet-identified device
@@ -76,7 +80,7 @@ pub enum UiChromeSessionStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiChromeSessionTarget {
     /// THE sim session; `project_key` is the loaded project's `prj…`
-    /// uid (a valid `#/sim/<key>` route key), `None` while nothing
+    /// uid (a valid `/p/<uid>` route key), `None` while nothing
     /// library-backed is loaded.
     Sim { project_key: Option<String> },
     /// A device session; `uid` is the stamped `dev…` identity, `None`
@@ -100,8 +104,9 @@ pub struct UiStudioView {
     /// running project (identity for route↔view comparisons).
     pub open_project_uid: Option<String>,
     /// The open package's slug — the user-facing identifier the web shell
-    /// mirrors into `#/sim/<slug>` (URL follows the view, covering
-    /// example opens and clearing on disconnect without action plumbing).
+    /// mirrors into the cosmetic half of `/p/<slug>-<uid>` (URL follows
+    /// the view, covering example opens and clearing on disconnect without
+    /// action plumbing).
     pub open_project_slug: Option<String>,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
     /// D22): identity + content classification. Feeds the device pane,

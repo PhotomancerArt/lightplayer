@@ -190,7 +190,7 @@ pub(crate) fn dropdown_awkward_identity() -> Element {
             me: maria(),
             accounts: vec![remembered(&yamada(), "Dev"), remembered(&cher(), "Google")],
             options: Some(dev_options()),
-            next: "/sim/zook-dome".to_string(),
+            next: "/p/zook-dome-prjh7kq9xy2mq4tb8wz".to_string(),
         }
     })
 }
