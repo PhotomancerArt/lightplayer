@@ -199,6 +199,42 @@ fn the_uid_transcode_is_reported_by_name() {
     );
 }
 
+#[test]
+fn the_report_names_the_dropped_pins() {
+    let mut files = read_tree(&corpus_root(5).join("fyeah-sign"));
+    let report = upgrade_to_current(&mut files).expect("upgrade");
+    assert_report_notes_cover_changes(&report);
+    for artifact in ["idle.json", "blast.json"] {
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.starts_with(artifact) && note.contains("float_mode")),
+            "no note for {artifact} in {:?}",
+            report.notes
+        );
+    }
+}
+
+/// The point of the whole step, asserted over real projects rather than the
+/// step's own one-file fixtures.
+#[test]
+fn no_migrated_project_still_pins_fixed() {
+    for version in corpus_versions() {
+        for project in corpus_projects(version) {
+            let mut files = read_tree(&corpus_root(version).join(&project));
+            upgrade_to_current(&mut files).expect("upgrade");
+            for (path, bytes) in files.iter() {
+                let text = String::from_utf8_lossy(bytes);
+                assert!(
+                    !text.contains(r#""float_mode": "fixed""#),
+                    "v{version}/{project}/{path} still pins the pre-posture default"
+                );
+            }
+        }
+    }
+}
+
 fn assert_report_notes_cover_changes(report: &UpgradeReport) {
     for path in &report.changed_files {
         assert!(
