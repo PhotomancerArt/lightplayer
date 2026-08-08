@@ -1,9 +1,12 @@
-//! The shader card's permanent face: output hero → controls → agent chat.
+//! The shader card's permanent face: output hero → space → controls →
+//! agent chat.
 //!
 //! Top-down per the spike (perf line deliberately absent — separate run of
 //! work), recast in the flat section grammar (P2b item 1): the produced
 //! visual renders full-bleed as the `output` section, the panel controls
-//! sit directly on the card in the `controls` section, and the condensed
+//! sit directly on the card in the `controls` section, the two-sided space
+//! model's producer half is the `space` section between them (D13 — the
+//! fixture card grows its mirror), and the condensed
 //! agent chat is the `agent` section — labeled with the sparkles role icon
 //! and a plain-language subline so it reads as *an agent that edits this
 //! shader* (item 2). The code and advanced drawers render below via
@@ -30,14 +33,18 @@
 //! `NodeCardUiState` module doc).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{NodeUiOp, UiAction, UiAgentView, UiShaderFace as UiShaderFaceData};
+use lpa_studio_core::{
+    NodeUiOp, UiAction, UiAgentView, UiProductKind, UiShaderFace as UiShaderFaceData,
+};
 
 use crate::app::node::{
-    AgentChatPane, NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
+    AgentChatPane, NodeCardSection, PanelControl, ProductIdentity, SlotDetailButton,
 };
 use crate::base::StudioIconName;
 
 use super::node_ui_action;
+use super::preview_spaces::{PreviewSpaceToggles, SpacedProductPreview, preview_space_state};
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection};
 
 /// The agent section's plain-language role subline (item 2): active voice,
 /// no jargon.
@@ -66,9 +73,24 @@ pub fn ShaderFace(
     /// (stories).
     #[props(default = false)]
     output_detail_initially_open: bool,
+    /// Open this space cell's tile picker on first render (stories).
+    #[props(default = None)]
+    space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
+    // D15's checkboxes: shown on a VISUAL hero only (they ask which
+    // coordinate space to render a picture in, which is not a question a
+    // control or time product has). The checked set is read back from the
+    // per-space views core fanned out, so the bar and the hero can never
+    // disagree — see `preview_space_state`.
+    let space_toggles = preview.kind == UiProductKind::Visual;
+    let preview_spaces = preview_space_state(
+        &preview,
+        face.space
+            .as_ref()
+            .and_then(|section| section.declared_space),
+    );
     // The OpenRouter connect wiring, #142 parity with `ShaderEditorTabs`:
     // App-provided context (absent under stories, which render the
     // needs-setup CTA inert) so the agent section's empty state leads with
@@ -102,6 +124,17 @@ pub fn ShaderFace(
             div { class: "ux-product-header",
                 ProductIdentity { product: preview.clone() }
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                    // The space checkboxes ride the hero's own chrome row,
+                    // beside the detail affordance: they are about THIS
+                    // preview, and a second bar over the same picture is
+                    // exactly the chrome two toggles have not earned.
+                    if space_toggles {
+                        PreviewSpaceToggles {
+                            node: Some(node.clone()),
+                            spaces: preview_spaces,
+                            on_action,
+                        }
+                    }
                     SlotDetailButton {
                         label: preview.name.clone(),
                         aspects: preview.visible_aspects(),
@@ -111,13 +144,19 @@ pub fn ShaderFace(
                     }
                 }
             }
-            ProductPreview {
-                kind: preview.kind,
-                preview: preview.preview.clone(),
-                tracking: preview.tracking,
-                frame: preview.frame,
-                focus_action: None,
-                on_action,
+            SpacedProductPreview { product: preview.clone(), on_action }
+        }
+        // The declaration sits between what this shader PRODUCES and how it
+        // is tuned — identity before settings, and the same rank as both
+        // (D13). Its rows are claimed out of the advanced drawer in core, so
+        // this is their only surface.
+        if let Some(space) = face.space.clone() {
+            NodeCardSection { label: SPACE_SECTION_LABEL,
+                SpaceSection {
+                    section: space,
+                    picker_open_cell: space_picker_open_cell,
+                    on_action,
+                }
             }
         }
         if !face.controls.is_empty() {

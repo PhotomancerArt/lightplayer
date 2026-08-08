@@ -6,7 +6,7 @@ use lpa_studio_core::{
 
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneCollapse, RichObjectPane};
-use crate::app::node::face::node_ui_action;
+use crate::app::node::face::{face_space_badge, node_ui_action, space_badge_title};
 use crate::app::node::slot_edit_actions::node_clear_debug_action;
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
@@ -85,6 +85,11 @@ pub fn NodePane(
     // controller supplies a kind-specific face (shader/fixture/playlist
     // today); every other kind keeps the classic sections fallback.
     let face = view.face.clone();
+    // The dimensionality badge (spike §4B): a producer's DECLARED space,
+    // beside the kind label. Absent wherever there is nothing declared — a
+    // fixture states a consume policy, not a space, and a card with no
+    // space section has nothing to say here at all.
+    let space_badge = view.face.as_ref().and_then(face_space_badge);
     // A module card's face carries two things the popup wants: the export
     // designation row (module authoring unit, P3) and the provenance line.
     let module_face = match view.face.as_ref() {
@@ -149,6 +154,13 @@ pub fn NodePane(
                                 class: export_chip_class(worst),
                                 title: export_chip_title(worst),
                                 "export"
+                            }
+                        }
+                        if let Some(badge) = space_badge {
+                            span {
+                                class: SPACE_BADGE_CLASS,
+                                title: space_badge_title(),
+                                "{badge}"
                             }
                         }
                         if !kind_label.is_empty() {
@@ -261,6 +273,11 @@ pub fn NodePane(
         }
     }
 }
+
+/// The declared-space badge beside the kind label: a mono chip, quiet
+/// enough to read as identity rather than status (it is neither a state nor
+/// a warning — it is what this node IS).
+const SPACE_BADGE_CLASS: &str = "tw:self-center tw:whitespace-nowrap tw:rounded-xs tw:border tw:border-border-subtle tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10px] tw:font-bold tw:tracking-wide tw:text-subtle-foreground";
 
 /// The export chip's tone: sage while the export reads clean, and the
 /// finding's own tone when it does not — the family colour says what kind
