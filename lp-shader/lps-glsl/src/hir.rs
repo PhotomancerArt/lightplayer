@@ -110,7 +110,7 @@ impl<'src> HirBuildJob<'src> {
         let state = core::mem::replace(&mut self.state, HirBuildState::Done);
         match state {
             HirBuildState::Header { bodies } => {
-                let array_size_consts =
+                let (array_size_consts, const_init_cache) =
                     build_array_size_consts(self.source, &self.tokens, &self.index)?;
                 let structs = build_struct_types(&self.index, &array_size_consts)?;
                 let (uniforms, uniforms_type, uniforms_size) =
@@ -137,6 +137,7 @@ impl<'src> HirBuildJob<'src> {
                     &array_size_consts,
                     &mut imports,
                     &self.options.texture_specs,
+                    const_init_cache,
                 )?;
                 self.state = HirBuildState::Functions(Box::new(HirBuildFunctionState {
                     array_size_consts,
@@ -168,8 +169,6 @@ impl<'src> HirBuildJob<'src> {
             }
             HirBuildState::ShaderInit(mut state) => {
                 if let Some(init) = synthesize_shader_init(
-                    self.source,
-                    &self.tokens,
                     &state.global_inits,
                     &state.functions_sigs,
                     &state.uniforms,
@@ -274,7 +273,7 @@ pub fn build_hir(
     bodies: Vec<(String, ParsedFunctionBody)>,
     options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
-    let array_size_consts = build_array_size_consts(source, tokens, index)?;
+    let (array_size_consts, const_init_cache) = build_array_size_consts(source, tokens, index)?;
     let structs = build_struct_types(index, &array_size_consts)?;
     let (uniforms, uniforms_type, uniforms_size) =
         build_uniforms(index, &structs, &array_size_consts)?;
@@ -299,6 +298,7 @@ pub fn build_hir(
         &array_size_consts,
         &mut imports,
         &options.texture_specs,
+        const_init_cache,
     )?;
     let body_map = function_body_map(bodies);
     let mut functions = Vec::new();
@@ -345,8 +345,6 @@ pub fn build_hir(
     }
 
     if let Some(init) = synthesize_shader_init(
-        source,
-        tokens,
         &global_inits,
         &functions_sigs,
         &uniforms,
@@ -617,25 +615,34 @@ fn array_base_and_lens(ty: &LpsType) -> Option<(LpsType, Vec<u32>)> {
     }
 }
 
+/// Parses each `int`/`uint` const initializer once and returns both the
+/// folded array-size table and the parsed expressions themselves (aligned
+/// index-for-index with `index.consts`, `None` for entries this pass didn't
+/// touch). [`build_global_consts`] consumes the cache instead of re-parsing
+/// the same spans.
 fn build_array_size_consts(
     source: &str,
     tokens: &[Token],
     index: &TopLevelIndex,
-) -> Result<ArraySizeConsts, Diagnostic> {
+) -> Result<(ArraySizeConsts, Vec<Option<ParsedExpr>>), Diagnostic> {
     let mut consts = VecMap::new();
+    let mut parsed_cache = Vec::with_capacity(index.consts.len());
     for konst in &index.consts {
         if !matches!(konst.ty.name.as_str(), "int" | "uint") {
+            parsed_cache.push(None);
             continue;
         }
         let Some(init_span) = konst.init_span else {
+            parsed_cache.push(None);
             continue;
         };
         let parsed = parse_expr_tokens(source, tokens, init_span)?;
         if let Some(value) = eval_parsed_array_size_expr(&parsed, &consts) {
             consts.insert(konst.name.clone(), value);
         }
+        parsed_cache.push(Some(parsed));
     }
-    Ok(consts)
+    Ok((consts, parsed_cache))
 }
 
 fn eval_parsed_array_size_expr(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<u32> {
@@ -769,6 +776,9 @@ struct GlobalInit {
     ty: LpsType,
     byte_offset: u32,
     init_span: Span,
+    /// Parsed once in [`build_global_vars`] (validation pass); carried here
+    /// so [`synthesize_shader_init`] doesn't parse the same span again.
+    init: ParsedExpr,
 }
 
 fn function_body_map(
@@ -826,12 +836,13 @@ fn build_global_vars(
             ty: ty.clone(),
         });
         if let Some(init_span) = init_span {
-            let _ = parse_expr_tokens(source, tokens, init_span)?;
+            let init = parse_expr_tokens(source, tokens, init_span)?;
             inits.push(GlobalInit {
                 name: name.clone(),
                 ty: ty.clone(),
                 byte_offset,
                 init_span,
+                init,
             });
         }
         globals.insert(name, GlobalInfo { ty, byte_offset });
@@ -859,9 +870,10 @@ fn build_global_consts(
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
+    mut const_init_cache: Vec<Option<ParsedExpr>>,
 ) -> Result<VecMap<String, GlobalConst>, Diagnostic> {
     let mut globals = VecMap::new();
-    for konst in &index.consts {
+    for (const_index, konst) in index.consts.iter().enumerate() {
         let ty = type_ref_to_lps_with_structs(&konst.ty, structs, array_size_consts)?;
         let Some(init_span) = konst.init_span else {
             return Err(Diagnostic::error(
@@ -869,7 +881,13 @@ fn build_global_consts(
                 "const declaration requires initializer",
             ));
         };
-        let parsed = parse_expr_tokens(source, tokens, init_span)?;
+        // `build_array_size_consts` already parsed this span for int/uint
+        // consts; parsing is a pure function of (source, tokens, span), so
+        // reusing that result is identical to re-parsing.
+        let parsed = match const_init_cache.get_mut(const_index).and_then(Option::take) {
+            Some(cached) => cached,
+            None => parse_expr_tokens(source, tokens, init_span)?,
+        };
         let mut ctx = TypeCtx::global_const(
             functions,
             uniforms,
@@ -898,8 +916,6 @@ fn build_global_consts(
     reason = "synthetic init needs the same typing context as functions"
 )]
 fn synthesize_shader_init(
-    source: &str,
-    tokens: &[Token],
     inits: &[GlobalInit],
     functions: &[FunctionSig],
     uniforms: &VecMap<String, UniformInfo>,
@@ -931,8 +947,10 @@ fn synthesize_shader_init(
     );
     let mut statements = Vec::new();
     for init in inits {
-        let parsed = parse_expr_tokens(source, tokens, init.init_span)?;
-        let expr = ctx.type_expr(&parsed)?;
+        // Already parsed once in `build_global_vars`; parsing is a pure
+        // function of (source, tokens, span), so this is behaviorally
+        // identical to re-parsing `init.init_span` here.
+        let expr = ctx.type_expr(&init.init)?;
         let value = ctx.coerce_expr(expr, &init.ty)?;
         let target = ctx.arena.push_place(HirPlace::global(
             init.name.clone(),

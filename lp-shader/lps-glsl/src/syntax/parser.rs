@@ -1,25 +1,38 @@
-use alloc::vec::Vec;
-
+use crate::index::StructDecl;
 use crate::{Diagnostic, Span, Token, TokenKind};
 
 use crate::syntax::{ParsedExpr, ParsedFunctionBody, ParsedStmt};
+
+/// Slice `tokens` (emitted in ascending span order by the lexer, see
+/// `src/lexer.rs`) down to the contiguous run fully contained in `span`.
+///
+/// Tokens are non-overlapping and ascending, so both `span.start` and
+/// `span.end` predicates below are monotonic over the whole tape, and their
+/// partition points bound a single contiguous subslice — no per-call Vec or
+/// full-tape scan required. The trailing Eof token sits at source end with
+/// an empty span past every real span, so it can never land inside `span`;
+/// that's asserted rather than filtered.
+fn token_subslice<'tok>(tokens: &'tok [Token], span: Span) -> &'tok [Token] {
+    let lo = tokens.partition_point(|t| t.span.start < span.start);
+    let hi = tokens
+        .partition_point(|t| t.span.end <= span.end)
+        .max(lo);
+    let subslice = &tokens[lo..hi];
+    debug_assert!(
+        subslice.iter().all(|t| !matches!(t.kind, TokenKind::Eof)),
+        "Eof token unexpectedly fell inside a body/init span"
+    );
+    subslice
+}
 
 pub fn parse_function_body(
     source: &str,
     tokens: &[Token],
     body_span: Span,
-    struct_names: &[alloc::string::String],
+    struct_names: &[StructDecl],
 ) -> Result<ParsedFunctionBody, Diagnostic> {
-    let body_tokens = tokens
-        .iter()
-        .copied()
-        .filter(|t| {
-            t.span.start >= body_span.start
-                && t.span.end <= body_span.end
-                && !matches!(t.kind, TokenKind::Eof)
-        })
-        .collect::<Vec<_>>();
-    BodyParser::new(source, &body_tokens, struct_names).parse()
+    let body_tokens = token_subslice(tokens, body_span);
+    BodyParser::new(source, body_tokens, struct_names).parse()
 }
 
 pub fn parse_expr_tokens(
@@ -27,16 +40,8 @@ pub fn parse_expr_tokens(
     tokens: &[Token],
     span: Span,
 ) -> Result<ParsedExpr, Diagnostic> {
-    let expr_tokens = tokens
-        .iter()
-        .copied()
-        .filter(|t| {
-            t.span.start >= span.start
-                && t.span.end <= span.end
-                && !matches!(t.kind, TokenKind::Eof)
-        })
-        .collect::<Vec<_>>();
-    let mut parser = BodyParser::new(source, &expr_tokens, &[]);
+    let expr_tokens = token_subslice(tokens, span);
+    let mut parser = BodyParser::new(source, expr_tokens, &[]);
     let expr = parser.parse_expr(0)?;
     if !parser.at_end() {
         return Err(Diagnostic::error(
@@ -50,7 +55,7 @@ pub fn parse_expr_tokens(
 pub(super) struct BodyParser<'src, 'tok> {
     pub(super) source: &'src str,
     pub(super) tokens: &'tok [Token],
-    pub(super) struct_names: &'tok [alloc::string::String],
+    pub(super) struct_names: &'tok [StructDecl],
     pub(super) pos: usize,
 }
 
@@ -58,7 +63,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     fn new(
         source: &'src str,
         tokens: &'tok [Token],
-        struct_names: &'tok [alloc::string::String],
+        struct_names: &'tok [StructDecl],
     ) -> Self {
         Self {
             source,
