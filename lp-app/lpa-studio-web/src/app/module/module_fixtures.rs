@@ -17,13 +17,13 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    ExportFinding, ExportSeverity, LpValue, ProjectNodeAddress, ProjectSlotAddress,
-    ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView,
-    UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportRow, UiExportsSection, UiModuleExport,
-    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
-    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    ExportFinding, LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp,
+    SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView,
+    UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader,
+    UiNodeSection, UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView,
+    UiPanelEmit, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue,
+    UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -38,6 +38,12 @@ pub(crate) const ROOT_SCOPE: &str = "/aurora.module";
 /// why their controls are independent (R8).
 pub(crate) const PLASMA_1_SCOPE: &str = "/aurora.module/plasma_1.module";
 pub(crate) const PLASMA_2_SCOPE: &str = "/aurora.module/plasma_2.module";
+/// The pattern-project fixture's sub-module scopes: three folders this
+/// project EXPORTS, and one it keeps (module authoring unit, R-A).
+pub(crate) const FIRE_SCOPE: &str = "/aurora.module/fire.module";
+pub(crate) const NOISE_PARTY_SCOPE: &str = "/aurora.module/noise_party.module";
+pub(crate) const RIPPLE_SCOPE: &str = "/aurora.module/ripple_interference_cascade.module";
+pub(crate) const COMMON_SCOPE: &str = "/aurora.module/common.module";
 
 /// The structured scope behind each fixture scope path — what the real
 /// derivation carries on `UiPanelGroup::target` and every control's
@@ -57,6 +63,10 @@ pub(crate) fn scope_target(scope: &str) -> lpc_wire::WireScopeRef {
         ROOT_SCOPE => module(1),
         PLASMA_1_SCOPE => module(2),
         PLASMA_2_SCOPE => module(3),
+        FIRE_SCOPE => module(11),
+        NOISE_PARTY_SCOPE => module(12),
+        RIPPLE_SCOPE => module(13),
+        COMMON_SCOPE => module(14),
         "/aurora.module/set.playlist/drift.shader" => sink(0),
         "/aurora.module/set.playlist/whirl.shader" => sink(1),
         other => panic!("unknown fixture scope {other}"),
@@ -71,6 +81,10 @@ pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
             1 => ROOT_SCOPE,
             2 => PLASMA_1_SCOPE,
             3 => PLASMA_2_SCOPE,
+            11 => FIRE_SCOPE,
+            12 => NOISE_PARTY_SCOPE,
+            13 => RIPPLE_SCOPE,
+            14 => COMMON_SCOPE,
             other => panic!("unknown fixture scope owner {other}"),
         },
         lpc_wire::WireScopeRef::Sink { entry: 0, .. } => "/aurora.module/set.playlist/drift.shader",
@@ -325,7 +339,6 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
         wiring_open: false,
         provenance: Some("PhotomancerArt · v1.2 · CC0-1.0".to_string()),
         auto_save: None,
-        exports: None,
         export: None,
     }
 }
@@ -465,9 +478,6 @@ pub(crate) fn root_face() -> UiModuleFace {
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
         // The project root owns panel persistence (P11).
         auto_save: Some(true),
-        // A plain project exports nothing, so the root card grows no
-        // exports rail (spike 2·ii).
-        exports: None,
         export: None,
     }
 }
@@ -493,7 +503,6 @@ pub(crate) fn control_root_face() -> UiModuleFace {
         wiring_open: false,
         provenance: None,
         auto_save: Some(true),
-        exports: None,
         export: None,
     }
 }
@@ -754,20 +763,11 @@ pub(crate) fn module_node_view(
 
 // --------------------------------------------------------------- exports
 
-/// The exports family (module authoring unit, P3): the fixture project is
-/// `yona-noise`, a pattern project shipping three module folders. The three
-/// verdicts below are the three states the rail has to hold.
+/// The exports family (module authoring unit, P3; regrouped by G1's R-A):
+/// the fixture project is `yona-noise`, a pattern project shipping module
+/// folders. The three verdicts below are the three states the grouped
+/// column has to hold.
 pub(crate) const EXPORT_PROJECT: &str = "yona-noise";
-
-fn export_rows(worst: &[(&str, Option<ExportSeverity>)]) -> Vec<UiExportRow> {
-    worst
-        .iter()
-        .map(|(name, worst)| UiExportRow {
-            name: (*name).to_string(),
-            worst: *worst,
-        })
-        .collect()
-}
 
 /// The sibling-feed warning (P2's graph half): an exported module reads a
 /// channel only scaffolding writes, so an imported copy runs on the
@@ -794,47 +794,124 @@ pub(crate) fn escaping_ref_error() -> ExportFinding {
     )
 }
 
-/// Three exports, every one of them clean — the reassuring state.
-pub(crate) fn clean_exports() -> UiExportsSection {
-    UiExportsSection {
-        rows: export_rows(&[
-            ("fire", None),
-            ("noise_party", None),
-            ("ripple_interference_cascade", None),
-        ]),
-        findings: Vec::new(),
-    }
+/// One exported module's own card: the same module face every depth wears,
+/// carrying a DESIGNATED export row so its header grows the export chip
+/// (tinted by this export's own findings).
+///
+/// The wiring drawer is dropped and the panel kept small deliberately —
+/// these stories are about the COLUMN, and three full-height effect cards
+/// plus the rig would push the grouping off the canvas.
+fn export_child(
+    name: &str,
+    scope: &'static str,
+    seed: f32,
+    findings: Vec<ExportFinding>,
+) -> UiNodeChild {
+    let mut face = plasma_face(plasma_read_panel(scope), seed);
+    face.wiring = None;
+    face.export = Some(designated_export(name, findings));
+    let mut child = plain_child(name, "Module", scope, "effect · exported");
+    child.face = Some(UiNodeFace::Module(face));
+    child
+}
+
+/// The scaffolding that stays home: the clock every effect reads, the
+/// shared `common` module that is NOT exported, and the fixture the rig
+/// actually drives. This is the "rig" half of the column — D17's word for
+/// composition-as-context.
+fn rig_children() -> Vec<UiNodeChild> {
+    let mut common = plasma_face(plasma_read_panel(COMMON_SCOPE), 5.7);
+    common.wiring = None;
+    common.preview = None;
+    let mut common_child = plain_child("common", "Module", COMMON_SCOPE, "shared noise field");
+    common_child.face = Some(UiNodeFace::Module(common));
+    vec![
+        plain_child("clock", "Clock", "clock.json", "seconds → bus:time"),
+        common_child,
+        controls_child(
+            "halo",
+            "Fixture",
+            "fixture.json",
+            "241 LEDs · input ← bus:visual.out",
+            UiPanelGroup::new("halo", ROOT_SCOPE)
+                .with_target(scope_target(ROOT_SCOPE))
+                .with_controls(vec![at_default(
+                    fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                    "authored 200",
+                )]),
+        ),
+    ]
+}
+
+/// A pattern project's whole workspace column, grouped (R-A): the named
+/// export folders' cards first, then the rig, with `findings` as the
+/// aggregate preamble under the `exports` header.
+fn exporting_root_view(
+    exports: &[(&str, &'static str)],
+    findings: Vec<ExportFinding>,
+) -> UiNodeView {
+    let mut children: Vec<UiNodeChild> = exports
+        .iter()
+        .enumerate()
+        .map(|(index, (name, scope))| {
+            let own: Vec<ExportFinding> = findings
+                .iter()
+                .filter(|finding| finding.export == *name)
+                .cloned()
+                .collect();
+            export_child(name, scope, 3.1 + index as f32 * 1.7, own)
+        })
+        .collect();
+    let keys: Vec<String> = children.iter().map(|child| child.detail.clone()).collect();
+    children.extend(rig_children());
+
+    let summary = format!("{} nodes · {} exports", children.len(), exports.len());
+    let mut view = module_node_view(EXPORT_PROJECT, ROOT_SCOPE, &summary, root_face());
+    view.children = children;
+    view.exports = Some(UiExportsGroup { keys, findings });
+    view
+}
+
+/// Two exports, both clean — the reassuring state.
+pub(crate) fn clean_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[("fire", FIRE_SCOPE), ("noise_party", NOISE_PARTY_SCOPE)],
+        Vec::new(),
+    )
 }
 
 /// One export carrying a warning: it would still ship, just poorer for it.
-pub(crate) fn warning_exports() -> UiExportsSection {
-    UiExportsSection {
-        rows: export_rows(&[
-            ("fire", Some(ExportSeverity::Warning)),
-            ("noise_party", None),
-        ]),
-        findings: vec![scaffolding_warning()],
-    }
+pub(crate) fn warning_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[("fire", FIRE_SCOPE), ("noise_party", NOISE_PARTY_SCOPE)],
+        vec![scaffolding_warning()],
+    )
 }
 
-/// Both severities at once: the rail has to rank them without letting the
-/// warning hide the error.
-pub(crate) fn error_exports() -> UiExportsSection {
-    UiExportsSection {
-        rows: export_rows(&[
-            ("fire", Some(ExportSeverity::Warning)),
-            ("noise_party", None),
-            ("ripple_interference_cascade", Some(ExportSeverity::Error)),
-        ]),
-        findings: vec![scaffolding_warning(), escaping_ref_error()],
-    }
+/// Both severities at once: the preamble has to rank them without letting
+/// the warning hide the error, and each card's chip has to carry its own.
+pub(crate) fn error_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[
+            ("fire", FIRE_SCOPE),
+            ("noise_party", NOISE_PARTY_SCOPE),
+            ("ripple_interference_cascade", RIPPLE_SCOPE),
+        ],
+        vec![scaffolding_warning(), escaping_ref_error()],
+    )
 }
 
-/// The root card of a pattern project, with `exports` filled in.
-pub(crate) fn exporting_root_face(exports: UiExportsSection) -> UiModuleFace {
-    let mut face = root_face();
-    face.exports = Some(exports);
-    face
+/// A DESIGNATED export's row, carrying whatever lint it has — the shape
+/// the header chip reads its tone from.
+pub(crate) fn designated_export(folder: &str, findings: Vec<ExportFinding>) -> UiModuleExport {
+    UiModuleExport {
+        folder: folder.to_string(),
+        project: EXPORT_PROJECT.to_string(),
+        designated: true,
+        disabled_reason: None,
+        upgrades_to_pattern: false,
+        findings,
+    }
 }
 
 /// `fire`'s designation row as its popup shows it: a live checkbox on a

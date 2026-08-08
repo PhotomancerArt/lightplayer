@@ -24,7 +24,7 @@ fn ShaderCardCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "Idle shader card: preview hero, knob row (blue live-edited scale label, mirror toggle), condensed agent chat, collapsed code/advanced drawers."
+    description = "Idle shader card AT REST: preview hero, knob row (blue live-edited scale label, mirror toggle), and three collapsed lids — agent, code, advanced. The agent section is collapsed by default now (G1 R-F): a shader card stacks a lot, and the chat is a thing you go to on purpose, so it announces itself with a labeled summary row rather than by occupying the card."
 )]
 fn idle() -> Element {
     rsx! {
@@ -104,13 +104,31 @@ fn phasor_period() -> Element {
 }
 
 #[story(
-    description = "Mid-run agent chat on the face: streaming cursor and Stop button in the condensed chat while the preview and knobs stay put."
+    description = "Mid-run agent chat on the face, EXPANDED: streaming cursor and Stop button in the condensed chat while the preview and knobs stay put. Expanding is a per-card gesture that persists (`NodeCardUiState.agent_collapsed`), so this is what the section looks like once you have opened it."
 )]
 fn chat_streaming() -> Element {
+    let mut view = shader_node_view(true, UiAgentStatus::Streaming);
+    view.card_ui.agent_collapsed = false;
     rsx! {
         ShaderCardCanvas {
             NodePane {
-                view: shader_node_view(true, UiAgentStatus::Streaming),
+                view,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The agent section EXPANDED at idle — the state one click from the default. Read against `idle`: collapsing costs nothing but the composer, and the collapsed row still names the section and carries its status summary, which is what makes the new default safe."
+)]
+fn agent_expanded() -> Element {
+    let mut view = shader_node_view(true, UiAgentStatus::Idle);
+    view.card_ui.agent_collapsed = false;
+    rsx! {
+        ShaderCardCanvas {
+            NodePane {
+                view,
                 on_action: move |_| {},
             }
         }
@@ -153,7 +171,7 @@ fn advanced_open() -> Element {
 }
 
 #[story(
-    description = "Agent section collapsed to its summary row: sparkles icon + status-aware summary (turn count and cost estimate); expanding restores the chat with any half-typed draft intact."
+    description = "Agent section collapsed to its summary row — the DEFAULT resting state (G1 R-F): sparkles icon + status-aware summary (turn count and cost estimate); expanding restores the chat with any half-typed draft intact."
 )]
 fn agent_collapsed() -> Element {
     let mut view = shader_node_view(true, UiAgentStatus::Idle);

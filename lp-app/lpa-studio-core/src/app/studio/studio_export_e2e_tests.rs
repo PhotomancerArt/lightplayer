@@ -15,8 +15,9 @@
 //! - toggling it patches the library manifest through P1's canonical
 //!   writer, upgrading `General` → `Pattern` on the first export and back
 //!   on the last;
-//! - the root card's `exports` rail appears and disappears with it, with
-//!   the lint verdict attached, WITHOUT reopening the project;
+//! - the workspace child column's exports/rig grouping (G1 R-A, which
+//!   replaced P3's on-face rail) appears and disappears with it, with the
+//!   aggregate lint verdict attached, WITHOUT reopening the project;
 //! - the runtime copy of `project.json` moves with the library copy, so
 //!   the save path's library/runtime hash tripwire stays quiet.
 
@@ -33,8 +34,8 @@ use crate::app::studio::studio_edit_e2e_tests::{
 };
 use crate::{
     ControllerId, HOME_NODE_ID, HomeOp, ModuleExportOp, ProjectController, StudioActor,
-    StudioCommand, StudioController, StudioServerClient, UiAction, UiExportsSection,
-    UiModuleExport, UiNodeFace, UiStudioView,
+    StudioCommand, StudioController, StudioServerClient, UiAction, UiExportsGroup, UiModuleExport,
+    UiNodeFace, UiStudioView,
 };
 
 /// The fixture project: a root module with a clock plus an `effect/` FOLDER
@@ -182,6 +183,32 @@ fn root_face(view: &UiStudioView) -> crate::UiModuleFace {
     face
 }
 
+/// How the root card's CHILD COLUMN is grouped (R-A): the exports/rig split
+/// that replaced P3's on-face rail.
+fn root_exports(view: &UiStudioView) -> Option<UiExportsGroup> {
+    project_editor(view)
+        .nodes
+        .first()
+        .expect("the root module card")
+        .exports
+        .clone()
+}
+
+/// The labels of the child cards the grouping puts under `exports`.
+fn exported_child_labels(view: &UiStudioView) -> Vec<String> {
+    let root = project_editor(view)
+        .nodes
+        .first()
+        .expect("the root module card")
+        .clone();
+    let keys = root.exports.map(|group| group.keys).unwrap_or_default();
+    root.children
+        .iter()
+        .filter(|child| keys.contains(&child.detail))
+        .map(|child| child.label.clone())
+        .collect()
+}
+
 /// The `effect` child card's designation row.
 fn effect_export(view: &UiStudioView) -> UiModuleExport {
     let root = project_editor(view)
@@ -208,15 +235,15 @@ fn effect_export(view: &UiStudioView) -> UiModuleExport {
 }
 
 #[test]
-fn designation_round_trips_from_the_module_card_to_the_root_rail() {
+fn designation_round_trips_from_the_module_card_to_the_child_grouping() {
     let (mut actor, tx, mut view, store, summary, server, snapshot) =
         open_fixture!(folder_module_files(), "Yona noise");
 
     // -- before: a plain General project ----------------------------------
     assert_eq!(
-        root_face(&snapshot).exports,
+        root_exports(&snapshot),
         None,
-        "a project that exports nothing keeps the root card visually plain"
+        "a project that exports nothing keeps its child column ungrouped"
     );
     assert_eq!(
         root_face(&snapshot).export,
@@ -244,13 +271,17 @@ fn designation_round_trips_from_the_module_card_to_the_root_rail() {
         "the library manifest carries the designation: {manifest}"
     );
 
-    let exports: UiExportsSection = root_face(&snapshot)
-        .exports
-        .expect("the root card grew an exports rail without a reopen");
-    assert_eq!(exports.rows.len(), 1);
-    assert_eq!(exports.rows[0].name, "effect");
+    let exports: UiExportsGroup =
+        root_exports(&snapshot).expect("the child column grouped without a reopen");
+    assert_eq!(exports.keys.len(), 1);
     assert_eq!(
-        exports.rows[0].worst, None,
+        exported_child_labels(&snapshot),
+        vec!["Effect".to_string()],
+        "the effect card moved under the EXPORTS header"
+    );
+    assert_eq!(
+        exports.worst(),
+        None,
         "a licensed, self-contained folder reads clean: {:?}",
         exports.findings
     );
@@ -284,9 +315,9 @@ fn designation_round_trips_from_the_module_card_to_the_root_rail() {
         "removing the last export clears both keys: {manifest}"
     );
     assert_eq!(
-        root_face(&snapshot).exports,
+        root_exports(&snapshot),
         None,
-        "the rail leaves with the last export"
+        "the grouping leaves with the last export"
     );
     assert!(!effect_export(&snapshot).designated);
 }
@@ -295,7 +326,7 @@ fn designation_round_trips_from_the_module_card_to_the_root_rail() {
 /// designation even though the package write never advanced `last_synced`
 /// (P2's manual epoch is what makes that true).
 #[test]
-fn the_lint_verdict_reaches_the_popup_row_and_the_root_rail() {
+fn the_lint_verdict_reaches_the_popup_row_and_the_exports_preamble() {
     // The same fixture with the effect module's provenance stripped: the
     // static half's "an importer cannot tell who wrote this" warning.
     let mut files = folder_module_files();
@@ -315,9 +346,7 @@ fn the_lint_verdict_reaches_the_popup_row_and_the_root_rail() {
 
     let snapshot = designate!(actor, tx, view, "effect", true);
 
-    let exports = root_face(&snapshot)
-        .exports
-        .expect("the rail appears with the first export");
+    let exports = root_exports(&snapshot).expect("the grouping appears with the first export");
     assert_eq!(
         exports.worst(),
         Some(lpc_model::ExportSeverity::Warning),

@@ -532,6 +532,42 @@ fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project()
         );
     }
 
+    // R-A: the manifest's designation groups the CHILD COLUMN — the effect
+    // card sits under the EXPORTS header, the rig cards under the other one
+    // (P3's on-face rail is gone).
+    let exports = root
+        .exports
+        .clone()
+        .expect("the designated template opens with its child column grouped");
+    let exported: Vec<&str> = root
+        .children
+        .iter()
+        .filter(|child| exports.keys.contains(&child.detail))
+        .map(|child| child.label.as_str())
+        .collect();
+    assert_eq!(
+        exported,
+        vec!["Effect"],
+        "exactly the export folder's card is grouped as an export"
+    );
+
+    // R-E: no bordered group with nothing in it. The template's effect
+    // invocation publishes no channel of its own, and an empty "EFFECT" box
+    // on the root panel is a label pointing at nothing.
+    let Some(crate::UiNodeFace::Module(root_face)) = root.face.clone() else {
+        panic!("the root card wears a module face");
+    };
+    assert!(
+        root_face.panel.groups.iter().all(|group| !group.is_empty()),
+        "an empty panel group reached the root card: {:?}",
+        root_face
+            .panel
+            .groups
+            .iter()
+            .map(|group| (group.label.clone(), group.controls.len()))
+            .collect::<Vec<_>>()
+    );
+
     // the library slug came from the TEMPLATE's label, not "Project"
     let summary = store
         .list()

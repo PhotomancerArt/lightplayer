@@ -292,30 +292,6 @@ fn export_folder_shape(def_path: &str) -> ExportFolder<'_> {
     }
 }
 
-/// The root card's exports rail, or `None` when the project exports
-/// nothing (a General project stays visually plain — spike 2·ii).
-fn exports_section(context: &ExportDesignationContext) -> Option<crate::UiExportsSection> {
-    if context.exports.is_empty() {
-        return None;
-    }
-    let rows = context
-        .exports
-        .iter()
-        .map(|name| crate::UiExportRow {
-            name: name.clone(),
-            worst: context
-                .report
-                .for_export(name)
-                .map(|finding| finding.severity)
-                .max(),
-        })
-        .collect();
-    Some(crate::UiExportsSection {
-        rows,
-        findings: context.report.findings.clone(),
-    })
-}
-
 /// The kind the manifest takes after one designation edit.
 ///
 /// The first export on a `General` project makes it a `Pattern` (vision
@@ -599,9 +575,11 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
-        // Hoisted out of the per-channel pass: the always-live set is a
-        // graph scan, and every value box asks the same question of it.
-        let always_live = self.always_live_products();
+        // Hoisted out of the per-channel pass: the subscription set is a
+        // walk of the node tree, and every value box asks the same question
+        // of it (R-C — a borrowed surface is tracking exactly while its
+        // product is still being pulled).
+        let subscribed = self.subscribed_products();
         // Sites carry their binding's priority out so the per-channel pass
         // below can mark shadowed writers and top-priority ties (E3).
         let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
@@ -719,7 +697,7 @@ impl ProjectController {
                     Some(crate::UiBusChannelPreview {
                         kind: ui_product_kind(product),
                         preview: bytes,
-                        tracking: borrowed_tracking(&always_live, product),
+                        tracking: borrowed_tracking(&subscribed, product),
                         frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
                     })
                 });
@@ -3040,8 +3018,13 @@ impl ProjectController {
         // in the workspace is asking the same question about the same
         // project (P3).
         let exports = self.export_designation_context();
+        // The CURRENT subscription set, read once per view build: every
+        // borrowed surface (a module hero re-homed onto its scope's
+        // product, a wiring value box) asks the same question of it, and
+        // the answer costs a walk of the whole node tree (R-C).
+        let subscribed = self.subscribed_products();
         for node in nodes {
-            self.apply_child_module_faces(&mut node.children, graph, exports.as_ref());
+            self.apply_child_module_faces(&mut node.children, graph, exports.as_ref(), &subscribed);
             if node.header.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -3053,9 +3036,16 @@ impl ProjectController {
                 &node.children,
                 node.card_ui.wiring_open,
                 exports.as_ref(),
+                &subscribed,
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
+            // The child column's exports/rig split (R-A) — computed after
+            // the child faces exist, because it partitions the finished
+            // child cards rather than the manifest's name list.
+            node.exports = exports
+                .as_ref()
+                .and_then(|context| self.root_exports_group(node, context));
         }
     }
 
@@ -3064,9 +3054,10 @@ impl ProjectController {
         children: &mut [crate::UiNodeChild],
         graph: &lpc_wire::WireBindingGraph,
         exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
     ) {
         for child in children {
-            self.apply_child_module_faces(&mut child.children, graph, exports);
+            self.apply_child_module_faces(&mut child.children, graph, exports, subscribed);
             if child.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -3078,6 +3069,7 @@ impl ProjectController {
                 &child.children,
                 child.card_ui.wiring_open,
                 exports,
+                subscribed,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -3234,6 +3226,7 @@ impl ProjectController {
         children: &[crate::UiNodeChild],
         wiring_open: bool,
         exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
         let node = self.node(&address)?;
@@ -3259,6 +3252,11 @@ impl ProjectController {
         // while its idle shader carried two knobs. The group is the entry's,
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
+        // A group with nothing in it says nothing (R-E): an invocation whose
+        // scope publishes no channel used to render as a bordered box with a
+        // name and no controls. Child faces are finished before this runs,
+        // so one pass per level clears the whole tree.
+        groups.retain(|group| !group.is_empty());
 
         // The module's own visual mirror (R7); a module with no output
         // simply has no hero (E6). The mirror ROW supplies identity and
@@ -3280,7 +3278,7 @@ impl ProjectController {
                     .and_then(|sync| sync.product_preview(&product))
                 {
                     hero.preview = bytes.clone();
-                    hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                    hero.tracking = borrowed_tracking(subscribed, product);
                     hero.product = Some(product);
                 }
             } else if let Some(product) = self
@@ -3327,15 +3325,11 @@ impl ProjectController {
                 .is_root_module(owner)
                 .then(|| self.panel_auto_save())
                 .flatten(),
-            // Exports are a property of the CONTAINER, so the rail rides
-            // the root card; designation is a property of one module, so
-            // the popup row rides every card but the root (an export must
-            // never point at the root — vision Q3).
-            exports: if self.is_root_module(owner) {
-                exports.and_then(exports_section)
-            } else {
-                None
-            },
+            // Designation is a property of one module, so the popup row
+            // rides every card but the root (an export must never point at
+            // the root — vision Q3). The CONTAINER's own exports are not on
+            // this face at all any more: they group the child column
+            // instead (R-A, [`crate::UiNodeView::exports`]).
             export: if self.is_root_module(owner) {
                 None
             } else {
@@ -3371,6 +3365,59 @@ impl ProjectController {
             // Q4).
             device_session: matches!(self.lens_runtime_kind, Some(crate::RuntimeKind::Device)),
         })
+    }
+
+    /// How the ROOT card's child column splits into exports and rig (R-A).
+    ///
+    /// `None` for any card but the root, for a project that exports
+    /// nothing, and for a manifest whose export names match no child card
+    /// — in all three the column renders exactly as it always did.
+    ///
+    /// Membership is read from each child's DEF ARTIFACT, not from its
+    /// designation row: the row is hidden on `Show`/`Rig` projects, and a
+    /// rig's exports are still exports.
+    fn root_exports_group(
+        &self,
+        node: &UiNodeView,
+        context: &ExportDesignationContext,
+    ) -> Option<crate::UiExportsGroup> {
+        if context.exports.is_empty() {
+            return None;
+        }
+        let address = ProjectNodeAddress::parse(&node.header.path).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        if !self.is_root_module(owner) {
+            return None;
+        }
+        let keys: Vec<String> = node
+            .children
+            .iter()
+            .filter(|child| {
+                self.child_export_folder(child)
+                    .is_some_and(|folder| context.exports.iter().any(|name| name == folder))
+            })
+            .map(|child| child.detail.clone())
+            .collect();
+        if keys.is_empty() {
+            return None;
+        }
+        Some(crate::UiExportsGroup {
+            keys,
+            findings: context.report.findings.clone(),
+        })
+    }
+
+    /// The export folder one child card would ship, when it is a module
+    /// whose def IS a direct sub-folder's `module.json` — the one
+    /// exportable shape ([`export_folder_shape`]).
+    fn child_export_folder(&self, child: &crate::UiNodeChild) -> Option<&str> {
+        let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let def_path = self.def_artifacts.get(&owner)?.file_path().as_str();
+        match export_folder_shape(def_path) {
+            ExportFolder::Direct(folder) => Some(folder),
+            ExportFolder::Nested | ExportFolder::Inline | ExportFolder::Unknown => None,
+        }
     }
 
     /// The export designation row for ONE module card's detail popup.
@@ -6756,14 +6803,21 @@ fn ui_product_kind(product: UiProductRef) -> crate::UiProductKind {
 }
 
 /// How a product presents on a surface that BORROWS it (a channel's value
-/// box, a module's output hero) rather than owning it: always-live products
-/// read as tracking, anything else as paused — Studio has bytes for it, but
-/// this surface is not what keeps them coming.
+/// box, a module's output hero) rather than owning it.
+///
+/// The honest question is whether the bytes are still coming, so the
+/// predicate is the CURRENT subscription set
+/// ([`ProjectController::subscribed_products`]) — not the always-live pair
+/// (R-C). Keying on always-live said "paused" over a child module hero that
+/// was visibly animating, because under a sim lens every expanded node is
+/// subscribed and only the root's `visual.out`/`control.out` are always
+/// live. Under a device lens the set really is small (the focused node plus
+/// the always-live pair), so Paused stays truthful there.
 fn borrowed_tracking(
-    always_live: &[UiProductRef],
+    subscribed: &[UiProductRef],
     product: UiProductRef,
 ) -> crate::UiProductTrackingState {
-    if always_live.contains(&product) {
+    if subscribed.contains(&product) {
         crate::UiProductTrackingState::Tracking
     } else {
         crate::UiProductTrackingState::Paused
@@ -9715,6 +9769,135 @@ mod tests {
         };
         let hero = face.preview.expect("the module's output hero");
         assert_eq!(hero.kind, crate::UiProductKind::Visual);
+    }
+
+    /// R-C: a borrowed hero reads Tracking exactly while its product is
+    /// still being pulled.
+    ///
+    /// The bug this pins: a CHILD module's hero said "Visual output paused"
+    /// over pixels that were visibly moving, because the predicate was the
+    /// always-live pair (root `visual.out` + `control.out`) while the bytes
+    /// rode the subscription set (sim lens = every expanded node). Same
+    /// fixture, both lenses — sim is honest about live, device is honest
+    /// about paused.
+    #[test]
+    fn a_child_module_hero_is_tracking_while_its_product_is_subscribed() {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.module/inner.module",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        // The inner module owns the produced visual the hero mirrors.
+        install_ui_projection_slots(&mut view, 2, Revision::new(4));
+
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        let product = VisualProduct::new(NodeId::new(2), 0);
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(2),
+        };
+        // The INNER scope's own `visual.out` — deliberately not flagged
+        // `primary_visual`, because the project's primary visual is the
+        // root's and always-live products are exactly what this predicate
+        // stopped keying on.
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: Vec::new(),
+                channels: vec![lpc_wire::WireBusChannel {
+                    scope: Some(scope),
+                    name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::Product(lpc_model::ProductRef::visual(product))),
+                        error: None,
+                    }),
+                    primary_visual: false,
+                }],
+            });
+        // Fresh bytes in the stream — the re-home branch the old predicate
+        // stamped Paused inside.
+        let bytes = vec![10, 20, 30, 40, 50, 60];
+        let _ = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(8),
+                },
+                ProjectReadEvent::Probe {
+                    index: 0,
+                    event: ProjectReadProbeEvent::Result(ProjectProbeResult::RenderProduct(
+                        RenderProductProbeResult::Texture {
+                            product,
+                            revision: Revision::new(8),
+                            width: 1,
+                            height: 2,
+                            format: WireTextureFormat::Srgb8,
+                            bytes: bytes.clone(),
+                        },
+                    )),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(8),
+                },
+            ])
+            .unwrap();
+
+        let child_hero = |project: &ProjectController| {
+            let editor =
+                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let child = editor.nodes[0].children[0].clone();
+            let Some(crate::UiNodeFace::Module(face)) = child.face else {
+                panic!("the inner module card wears a module face");
+            };
+            face.preview.expect("the inner module's output hero")
+        };
+
+        // Sim lens: an expanded child node is subscribed, so its hero is
+        // live and must say so.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        let hero = child_hero(&project);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_visual_product(product))
+        );
+        assert_eq!(
+            hero.tracking,
+            UiProductTrackingState::Tracking,
+            "the bytes behind this hero are still being pulled"
+        );
+
+        // Device lens, nothing focused: the product genuinely stopped
+        // streaming, and Paused is the honest word for the cached frame.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert!(
+            !project
+                .subscribed_products()
+                .contains(&UiProductRef::from_visual_product(product)),
+            "the fixture's premise: nothing subscribes this product"
+        );
+        assert_eq!(
+            child_hero(&project).tracking,
+            UiProductTrackingState::Paused
+        );
     }
 
     #[test]

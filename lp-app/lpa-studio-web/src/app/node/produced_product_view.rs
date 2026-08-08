@@ -445,6 +445,13 @@ fn ProductMessage(tone: ProductMessageTone, message: String) -> Element {
     }
 }
 
+/// The "not tracked / paused" wash over a product's frame.
+///
+/// The detail line is an INSTRUCTION ("Click to view"), so it renders only
+/// when the overlay is actually a button (G1 R-C). Every node-face hero
+/// passes `focus_action: None` — the overlay there is a dead `<div>`, and
+/// telling someone to click a thing that does not respond is worse than
+/// saying nothing. The title alone still explains the state.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProductTrackingOverlay(
@@ -471,7 +478,6 @@ fn ProductTrackingOverlay(
     rsx! {
         div { class: "ux-produced-product-overlay",
             strong { "{title}" }
-            span { "{detail}" }
         }
     }
 }
