@@ -6,8 +6,8 @@
 //! [`BlobStore`](lp_cloud_domain::BlobStore) are **infallible ports**: the
 //! domain's error vocabulary is what a client is told, and there is nothing
 //! useful to tell a client about a database that stopped answering. So the
-//! backend-failure policy lives here, in the adapter, and it is to **panic
-//! with the operation named**.
+//! backend-failure policy lives here, in the adapter, and it is to **abort
+//! the process with the operation named**.
 //!
 //! That is the honest policy for this deployment shape, not a shortcut:
 //!
@@ -26,9 +26,34 @@
 use core::fmt::Display;
 
 /// Unwrap a backend result, or die naming `operation`.
+///
+/// "Die" means the **process**, not the thread. A `panic!` here unwinds
+/// into tokio's task machinery, poisons the store mutex, and leaves a
+/// zombie: every later request panics on the poison while `/healthz`
+/// (which never takes the lock) keeps answering ok — production served
+/// exactly that on 2026-08-08 (`docs/defects/
+/// 2026-08-08-fatal-store-panic-poisons-not-restarts.md`). The module
+/// doc's recovery story is "the supervisor restarts us onto a Litestream
+/// restore", and only an abort actually invokes the supervisor.
 pub(crate) fn fatal<T, E: Display>(operation: &str, result: Result<T, E>) -> T {
     match result {
         Ok(value) => value,
-        Err(error) => panic!("lp-cloud-store-sqlite: {operation} failed: {error}"),
+        Err(error) => {
+            // In this crate's own unit tests, unwind instead: `should_panic`
+            // is how the fatal contract is asserted, and an abort would kill
+            // the whole test binary. Production (and every other crate's
+            // build of this one) aborts.
+            #[cfg(test)]
+            panic!("lp-cloud-store-sqlite: {operation} failed: {error}");
+            #[cfg(not(test))]
+            {
+                // eprintln! rather than log:: so the message survives even
+                // if the logger is not initialized; abort flushes nothing.
+                eprintln!(
+                    "lp-cloud-store-sqlite: FATAL: {operation} failed: {error} — aborting so the supervisor restarts us"
+                );
+                std::process::abort();
+            }
+        }
     }
 }
