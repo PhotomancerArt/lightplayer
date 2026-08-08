@@ -254,6 +254,7 @@ matrix".
 | partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
 | incomplete-subset | 2026-07-31 | [mksadj-missing-from-fp-subset](2026-07-31-mksadj-missing-from-fp-subset.md) | fixed | lp-xt/lp-xt-inst (FP subset) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
+| split-source-of-truth | 2026-08-07 | [wasm-f32-unorm-scale-convention](2026-08-07-wasm-f32-unorm-scale-convention.md) | fixed | lpvm-wasm/emit (F32 unorm lowering) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |

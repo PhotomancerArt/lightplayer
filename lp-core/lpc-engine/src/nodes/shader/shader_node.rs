@@ -2685,12 +2685,14 @@ mod tests {
     /// This is the C6 case, and the whole reason the tier request is explicit:
     /// a board given different numerics than the author asked for, with no
     /// signal, is the failure `2026-07-09-preview-fidelity-tiers.md` §4
-    /// forbids. Here the real `TargetLpvmGraphics` does the refusing — the
-    /// host engine is Q32-only, exactly like a device image without the float
-    /// backend linked.
+    /// forbids. The refusing backend is `CountingGraphics::fixed_only` rather
+    /// than the real `TargetLpvmGraphics`, which used to refuse here only
+    /// because the host engine happened to be Q32-only — it compiles Float as
+    /// of 2026-08-07. What is under test is the *node's* handling of a
+    /// refusal, so the refusal belongs in the stand-in.
     #[test]
     fn a_float_shader_on_a_fixed_only_backend_errors_instead_of_rendering_fixed() {
-        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
+        let graphics = Arc::new(CountingGraphics::fixed_only());
         let def = ShaderDef {
             float_mode: ValueSlot::new(FloatMode::Float),
             ..ShaderDef::default()
@@ -2748,6 +2750,8 @@ mod tests {
         inner: TargetLpvmGraphics,
         compile_count: AtomicU32,
         fail_compile: AtomicBool,
+        /// Refuse `F32Cpu` the way a board without the float lowering does.
+        refuse_float: AtomicBool,
         /// The tier of the last compile request, so a test can assert what the
         /// node *asked for* rather than only what came back.
         last_semantics: core::sync::atomic::AtomicU8,
@@ -2759,6 +2763,7 @@ mod tests {
                 inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
                 compile_count: AtomicU32::new(0),
                 fail_compile: AtomicBool::new(false),
+                refuse_float: AtomicBool::new(false),
                 last_semantics: core::sync::atomic::AtomicU8::new(u8::MAX),
             }
         }
@@ -2766,6 +2771,19 @@ mod tests {
         fn failing() -> Self {
             let graphics = Self::new();
             graphics.set_fail(true);
+            graphics
+        }
+
+        /// A backend without the float lowering linked — the ESP32-C6 case.
+        ///
+        /// It has to be modelled rather than borrowed: the host's real
+        /// backend compiles Float since 2026-08-07, so nothing reachable from
+        /// a host test refuses it any more. Standing this up explicitly also
+        /// stops the assertion from depending on an incidental property of
+        /// whichever engine the host build happened to link.
+        fn fixed_only() -> Self {
+            let graphics = Self::new();
+            graphics.refuse_float.store(true, Ordering::Relaxed);
             graphics
         }
 
@@ -2801,6 +2819,18 @@ mod tests {
                 },
                 Ordering::Relaxed,
             );
+            // Refuse before counting: a backend that cannot compile the tier
+            // never reaches its compiler, and the message mirrors the real
+            // one (`LpvmGraphics::compile_shader`) down to naming the slot.
+            if self.refuse_float.load(Ordering::Relaxed)
+                && _options.semantics == lp_gfx::ShaderSemantics::F32Cpu
+            {
+                return Err(GfxError::Backend(format!(
+                    "this build's {} backend does not compile Float shaders; \
+                     the shader's float_mode must be Fixed on this device",
+                    self.backend_name()
+                )));
+            }
             let count = self.compile_count.fetch_add(1, Ordering::Relaxed) + 1;
             if self.fail_compile.load(Ordering::Relaxed) {
                 return Err(GfxError::Compile(String::from("test compile failure")));
