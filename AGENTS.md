@@ -162,6 +162,28 @@ The core is IO-free state machines; async belongs to platform edges. See
   use error-text sniffing or silent format probing. See
   `docs/adr/2026-07-14-wire-hello-versioning.md`.
 
+## Persisted-format compatibility (the wire rule does NOT apply here)
+
+- The wire's "no compatibility" freedom stops at anything **persisted**:
+  project.json / package files, the cloud store, and stamped device
+  identity. Real user data already exists at the current
+  `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
+- **A change to persisted bytes IS a format bump, even when no field is
+  added or removed.** The 2026-08-07 uid-format change re-rendered a
+  *string* (`prj_…` base-62 → `prj…` base-32) with zero structural change,
+  and every deployed project refused to load — "at the current format but
+  could not be read" — because the classifier had no version to key an
+  upgrade on. The drill: `just format-bump` (snapshot + step scaffold),
+  bump `PROJECT_FORMAT_VERSION`, write the `lpa-upgrade` step, bless the
+  corpus goldens, and migrate `examples/` + `projects/` in the same change.
+  The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
+  worked example — value-preserving transcode, keyed off shape, never off
+  field names.
+- The tell to watch for in review: a serde `Serialize`/`Deserialize`/
+  `Display`/`FromStr` change in a type that appears in `schemas/` or in any
+  `*.json` a user's library can hold. If old bytes would no longer round-
+  trip, the change ships WITH its migration step or it does not ship.
+
 ## Architecture Quick Reference
 
 ```
