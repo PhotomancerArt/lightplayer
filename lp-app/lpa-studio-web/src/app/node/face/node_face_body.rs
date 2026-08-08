@@ -123,9 +123,13 @@ pub fn NodeFaceBody(
                     OutputFace { face: output, on_action }
                 },
                 // The clock's phasor listing is a READ-ONLY debug surface
-                // (D10) — it keeps the ordinary drawers under it, since the
-                // clock's own controls (running, rate, scrub) live in the
-                // slot sections exactly as they always have.
+                // (D10) — it keeps the ordinary drawers under it. The
+                // transport (play/pause, rate, scrub) is no longer a slot
+                // row at all: the face claims it into the tape instrument
+                // at the top of the "output" section
+                // (`retire_face_claimed_debug_rows`, plan
+                // 2026-08-04-2355-clock-tape-hero P5), so the drawers below
+                // never carry it.
                 UiNodeFace::Clock(clock) => rsx! {
                     ClockFace { face: clock, on_action }
                     NodeCardDrawers {
