@@ -15,10 +15,10 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    EXPORT_PROJECT, HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, clean_exports, control_root_face,
-    error_exports, exporting_root_face, fire_export, held_root_face, held_root_view,
+    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, clean_exports_view, control_root_face,
+    designated_export, error_exports_view, fire_export, held_root_face, held_root_view,
     module_card_with_export, module_node_view, plasma_children, plasma_face, plasma_one_panel,
-    root_module_node_view, warning_exports,
+    root_module_node_view, scaffolding_warning, warning_exports_view,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -154,71 +154,58 @@ fn workspace_no_bus_pane() -> Element {
 }
 
 #[story(
-    description = "The root card of a PATTERN project: the exports section (module authoring unit, P3) sits between the wiring drawer and the provenance footer, wearing the sage export wash and a sage rail. Three folders, every one clean — sage dots, no lint lines. Sage is the whole family's hue: it reads as a structural property of the project ('this ships from here'), not as a status you would clear. A project that exports nothing has no section at all, which is what keeps a plain project plain (spike 2·ii)."
+    description = "A PATTERN project's workspace column, grouped (module authoring unit, G1 R-A): the root card, then its children split into what this project HANDS OUT and what stays home. The `exports` header wears the sage export family and the effect folders' cards sit under it, each with the display-only chip on its header; `rig` collects the clock, the shared non-exported `common` module, and the fixture — D17's word for scaffolding-as-context. Both exports read clean, so there is no preamble at all. P3 put this on the root card as a rail of names; here the exports are the cards themselves, so 'what does this ship' is answered by where a card sits."
 )]
-fn root_card_exports_clean() -> Element {
+fn child_grouping_clean() -> Element {
     rsx! {
         WorkspaceCanvas {
-            NodePane {
-                view: module_node_view(
-                    EXPORT_PROJECT,
-                    ROOT_SCOPE,
-                    "5 nodes · 3 exports",
-                    exporting_root_face(clean_exports()),
-                ),
-                on_action: move |_| {},
-            }
+            NodePane { view: clean_exports_view(), on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "The same section with one export carrying a WARNING: fire reads a channel only scaffolding writes, so an imported copy runs on the authored default. The row's dot takes the warning tone while the section keeps its sage identity — the family colour says what kind of thing this is, the dot says how it is doing. The aggregate line under the rows is the same sentence the module's own popup shows."
+    description = "The same column with one export carrying a WARNING: fire reads a channel only the non-exported `common` writes, so an imported copy runs on the authored default. The aggregate line sits directly under the `exports` header, above the cards — say it once for the group — and fire's own chip takes the warning tone so the sentence and the card that owns it are connected without a name lookup. The `rig` half stays untouched: nothing about a warning changes what scaffolding is."
 )]
-fn root_card_exports_warning() -> Element {
+fn child_grouping_warning() -> Element {
     rsx! {
         WorkspaceCanvas {
-            NodePane {
-                view: module_node_view(
-                    EXPORT_PROJECT,
-                    ROOT_SCOPE,
-                    "5 nodes · 2 exports",
-                    exporting_root_face(warning_exports()),
-                ),
-                on_action: move |_| {},
-            }
+            NodePane { view: warning_exports_view(), on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "Both severities at once: a warning and a hard ERROR (a file inside the export folder points outside it, so the vendored copy would not load). The error dot must not be swallowed by the warning above it, and the two lint lines rank worst-last in report order — this is the story that says whether the section can carry bad news without the sage wash softening it."
+    description = "Both severities at once: a warning and a hard ERROR (a file inside ripple_interference_cascade points outside the folder, so the vendored copy would not load). Two preamble lines rank worst-last in report order, and each card's chip carries its OWN verdict — warning on fire, error on ripple, plain sage on the clean one. This is the story that says whether the group can carry bad news: the error must not be swallowed by the warning above it, and the sage header must not soften either."
 )]
-fn root_card_exports_error() -> Element {
+fn child_grouping_error() -> Element {
     rsx! {
         WorkspaceCanvas {
-            NodePane {
-                view: module_node_view(
-                    EXPORT_PROJECT,
-                    ROOT_SCOPE,
-                    "5 nodes · 3 exports",
-                    exporting_root_face(error_exports()),
-                ),
-                on_action: move |_| {},
-            }
+            NodePane { view: error_exports_view(), on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "A designated child module card: the header wears the display-only `export` chip (D12 — the chip never toggles anything; the gesture lives in the popup behind the ⓘ). Beside it, the same card undesignated, so the two read against each other — the chip is the only difference, and it has to be findable without being loud."
+    description = "The chip alone, four ways, on cards out of any column: clean (sage), warning, error, and undesignated. The chip is DISPLAY only (D12 — it never toggles anything; the gesture lives in the popup behind the ⓘ), and its tone is this export's own lint verdict, so a card that would ship badly says so where you can see it. Read top to bottom: the chip has to be findable without being loud, and the three tones have to be distinguishable at chip size."
 )]
 fn child_card_export_chip() -> Element {
     rsx! {
         WorkspaceCanvas {
             div { class: "tw:grid tw:gap-3",
                 NodePane {
-                    view: module_card_with_export("fire", fire_export(true)),
+                    view: module_card_with_export("noise_party", designated_export("noise_party", Vec::new())),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export(
+                        "fire",
+                        designated_export("fire", vec![scaffolding_warning()]),
+                    ),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export("ripple_interference_cascade", fire_export(true)),
                     on_action: move |_| {},
                 }
                 NodePane {

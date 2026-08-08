@@ -464,8 +464,8 @@ fn new_project_from_a_pattern_opens_a_rig_around_the_vendored_export() {
         "nothing of the template's OWN export survives beside the vendored one"
     );
 
-    // The manifest designates it, so P3's exports rail is up with no
-    // further gesture — and the lint on it reads clean.
+    // The manifest designates it, so the child column is already grouped
+    // with no further gesture (R-A) — and the lint on it reads clean.
     let manifest = lpc_model::ProjectManifest::read_json(&runtime_file(&server, "project.json"))
         .expect("manifest parses");
     assert_eq!(
@@ -474,18 +474,23 @@ fn new_project_from_a_pattern_opens_a_rig_around_the_vendored_export() {
             exports: vec!["effect".to_string()]
         }
     );
-    let crate::UiNodeFace::Module(root_face) = project_editor(&snapshot).nodes[0]
-        .face
-        .clone()
-        .expect("the root card wears a face")
-    else {
-        panic!("the root card wears a module face");
-    };
-    let exports = root_face
+    let root = &project_editor(&snapshot).nodes[0];
+    assert!(
+        matches!(root.face, Some(crate::UiNodeFace::Module(_))),
+        "the root card wears a module face"
+    );
+    let exports = root
         .exports
-        .expect("the composed project arrives with its exports rail");
-    assert_eq!(exports.rows.len(), 1);
-    assert_eq!(exports.rows[0].name, "effect");
+        .clone()
+        .expect("the composed project arrives with its child column grouped");
+    assert_eq!(exports.keys.len(), 1);
+    assert!(
+        root.children
+            .iter()
+            .any(|child| child.detail == exports.keys[0]
+                && child.label.eq_ignore_ascii_case("effect")),
+        "the grouped key names the vendored effect card"
+    );
     assert_eq!(
         exports.worst(),
         None,

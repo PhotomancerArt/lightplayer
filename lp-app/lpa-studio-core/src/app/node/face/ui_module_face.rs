@@ -49,15 +49,6 @@ pub struct UiModuleFace {
     /// project's root module that owns it, and an embedded module carries
     /// `None` rather than repeating its host's switch.
     pub auto_save: Option<bool>,
-    /// The project's **exports rail** (module authoring unit, P3): the
-    /// manifest's `exports` list with its lint verdict, rendered as a
-    /// section between the wiring drawer and the provenance footer.
-    ///
-    /// Carried by the ROOT module only — exports are a property of the
-    /// project container, and the root card is the container's face.
-    /// `None` when the project exports nothing, which keeps a plain
-    /// General project visually plain (spike 2·ii).
-    pub exports: Option<UiExportsSection>,
     /// This module's own **export designation** row, for its detail popup
     /// (spike 2·i). `None` when designation is not a question for this card
     /// — the root module (an export must never point at the root), a
@@ -69,32 +60,39 @@ pub struct UiModuleFace {
     pub export: Option<UiModuleExport>,
 }
 
-/// The root card's `exports` section: one row per designated module plus
-/// the aggregate lint lines beneath them.
+/// How the ROOT card's **child column** splits (module authoring unit, R-A).
+///
+/// P3 put the project's exports on the root card as a rail of names. G1's
+/// ruling replaced it: the exports are the child CARDS themselves, so the
+/// column below the root card groups them under an `exports` header and
+/// leaves everything else under `rig` — the D17 word for the scaffolding
+/// that stays home. Nothing about the root card's own face changed; this
+/// rides [`crate::UiNodeView::exports`], because the thing being grouped is
+/// the workspace column, not the face.
+///
+/// `None` (or an empty [`Self::keys`]) means the column renders exactly as
+/// it always did — a project that exports nothing stays visually plain
+/// (spike 2·ii).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiExportsSection {
-    /// One row per manifest `exports` entry, in manifest order.
-    pub rows: Vec<UiExportRow>,
+pub struct UiExportsGroup {
+    /// The child cards that ARE the project's exports, keyed by
+    /// [`crate::UiNodeChild::detail`] (the child's address path) so the
+    /// renderer partitions by identity, not by display name. Child order,
+    /// not manifest order: the column stays the column.
+    pub keys: Vec<String>,
     /// Every lint finding across all exports, in report order — the
-    /// aggregate view the spike puts under the rows.
+    /// aggregate preamble under the `exports` header. Per-export findings
+    /// still ride each child's own [`UiModuleExport::findings`], which is
+    /// what tints its card chip.
     pub findings: Vec<lpc_model::ExportFinding>,
 }
 
-impl UiExportsSection {
-    /// The worst severity anywhere in the section, or `None` when every
+impl UiExportsGroup {
+    /// The worst severity anywhere in the group, or `None` when every
     /// export reads clean.
     pub fn worst(&self) -> Option<lpc_model::ExportSeverity> {
         self.findings.iter().map(|finding| finding.severity).max()
     }
-}
-
-/// One row of the root card's exports section.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UiExportRow {
-    /// The export folder name, exactly as the manifest spells it.
-    pub name: String,
-    /// The worst finding about THIS export; `None` reads clean (an ok dot).
-    pub worst: Option<lpc_model::ExportSeverity>,
 }
 
 /// One module's export-designation state, as its detail popup presents it.
@@ -131,7 +129,6 @@ impl UiModuleFace {
             wiring_open: false,
             provenance: None,
             auto_save: None,
-            exports: None,
             export: None,
         }
     }

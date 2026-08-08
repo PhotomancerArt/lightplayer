@@ -19,13 +19,16 @@
 //!    surface, wiring is an authoring diagnostic. Its open state is
 //!    core-owned (`NodeCardUiState::wiring_open`), like every other card
 //!    drawer.
-//! 4. `exports` — the project's own face (module authoring unit, P3), on
-//!    the ROOT card only: what this project hands out, with its lint
-//!    verdict. Absent when the project exports nothing, so a standalone
-//!    project stays visually plain. DISPLAY only — designation is a gesture
-//!    on each module's detail popup (D12).
-//! 5. provenance — a quiet footer line (§8), derived from the module def's
+//! 4. provenance — a quiet footer line (§8), derived from the module def's
 //!    authored `ProvenanceDef` fields.
+//!
+//! P3 briefly put a fifth `exports` section here — the project's manifest
+//! list as a sage rail. G1's R-A took it back off: what a project hands out
+//! is a property of the child CARDS, so the workspace column below this one
+//! groups them under an `exports` header instead
+//! ([`crate::app::node::NodeChildren`]). Designation itself never lived on
+//! the face — it is a gesture on each module's detail popup (D12) — and
+//! that has not moved.
 //!
 //! **Children are NOT here.** They expand under the card as full sibling
 //! cards, via [`crate::app::node::NodeChildren`] — the grammar the playlist
@@ -48,7 +51,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ExportFinding, ExportSeverity, NodeCardDrawer, NodeUiOp, UiAction, UiExportsSection,
+    ExportFinding, ExportSeverity, NodeCardDrawer, NodeUiOp, UiAction,
     UiModuleFace as UiModuleFaceData,
 };
 
@@ -137,16 +140,6 @@ pub fn ModuleFace(
                 }
             }
         }
-        // 5. exports — the CONTAINER's face (module authoring unit, P3).
-        // Root card only, and only when the project exports something: a
-        // standalone project stays visually a plain project (spike 2·ii).
-        // Display only; the designation gesture lives in each module's own
-        // detail popup (D12).
-        if let Some(exports) = face.exports.clone() {
-            NodeCardSection { label: "exports", export_tint: true,
-                ExportsRail { exports }
-            }
-        }
         if let Some(provenance) = face.provenance.clone() {
             div { class: "tw:border-t tw:border-border-strong tw:px-4 tw:py-2 tw:text-xs tw:text-dim-foreground",
                 "{provenance}"
@@ -155,37 +148,9 @@ pub fn ModuleFace(
     }
 }
 
-/// The exports section's body: one row per export with its own lint dot,
-/// then the aggregate findings underneath (spike §1).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ExportsRail(exports: UiExportsSection) -> Element {
-    rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
-            ul { class: "tw:m-0 tw:grid tw:min-w-0 tw:list-none tw:gap-1 tw:p-0",
-                for row in exports.rows.iter() {
-                    li {
-                        key: "{row.name}",
-                        class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:text-xs",
-                        span {
-                            class: export_dot_class(row.worst),
-                            aria_hidden: "true",
-                        }
-                        span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-muted-foreground",
-                            "{row.name}/"
-                        }
-                    }
-                }
-            }
-            for finding in exports.findings.iter() {
-                ExportFindingRow { finding: finding.clone() }
-            }
-        }
-    }
-}
-
-/// One lint line, in the severity's own tone. Shared by the card rail and
-/// the module detail popup so a finding reads the same in both places.
+/// One lint line, in the severity's own tone. Shared by the workspace
+/// column's exports preamble and the module detail popup so a finding reads
+/// the same in both places.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ExportFindingRow(finding: ExportFinding) -> Element {
@@ -204,20 +169,6 @@ pub fn ExportFindingRow(finding: ExportFinding) -> Element {
         p { class,
             span { class: "tw:flex-none", aria_hidden: "true", "{glyph}" }
             span { class: "tw:min-w-0 tw:break-words", "{finding.message}" }
-        }
-    }
-}
-
-/// The per-export status dot: sage when the export reads clean, and the
-/// warning/error tone when it does not.
-fn export_dot_class(worst: Option<ExportSeverity>) -> &'static str {
-    match worst {
-        None => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-export-foreground",
-        Some(ExportSeverity::Warning) => {
-            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-warning-foreground"
-        }
-        Some(ExportSeverity::Error) => {
-            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-error-foreground"
         }
     }
 }

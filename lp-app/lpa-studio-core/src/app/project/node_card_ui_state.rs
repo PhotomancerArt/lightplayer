@@ -28,9 +28,10 @@
 
 /// One node card's UI view-state. `Default` is a fresh card: drawers
 /// closed (the Debug section included — most of the time those controls are
-/// not wanted, so it opens on demand), agent section expanded, no mirrored
-/// draft.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// not wanted, so it opens on demand), agent section COLLAPSED (G1 R-F —
+/// cards carry many sections now, and the chat is the one you go looking
+/// for), no mirrored draft.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeCardUiState {
     /// Whether the code drawer (inline GLSL editor) is expanded.
     pub code_open: bool,
@@ -48,11 +49,27 @@ pub struct NodeCardUiState {
     /// debug territory stays announced and clearable without expanding.
     pub debug_open: bool,
     /// Whether the shader face's agent section is collapsed to its
-    /// summary row.
+    /// summary row. Default `true` (G1 R-F): a shader card now stacks
+    /// output, controls, code and advanced, and the agent chat is a thing
+    /// you go to on purpose — its collapsed row still names it and carries
+    /// the status summary, so nothing about it becomes unfindable.
     pub agent_collapsed: bool,
     /// The composer draft as last mirrored by the web (write-on-collapse;
     /// see the module doc — this is the remount seed, not the live text).
     pub composer_draft: String,
+}
+
+impl Default for NodeCardUiState {
+    fn default() -> Self {
+        Self {
+            code_open: false,
+            advanced_open: false,
+            wiring_open: false,
+            debug_open: false,
+            agent_collapsed: true,
+            composer_draft: String::new(),
+        }
+    }
 }
 
 impl NodeCardUiState {
@@ -150,7 +167,11 @@ mod tests {
     fn ops_round_trip_through_the_state() {
         let node = "/demo.module/orbit.shader".to_string();
         let mut state = NodeCardUiState::default();
-        assert!(!state.code_open && !state.advanced_open && !state.agent_collapsed);
+        assert!(!state.code_open && !state.advanced_open);
+        assert!(
+            state.agent_collapsed,
+            "the agent section defaults to collapsed (G1 R-F)"
+        );
         assert!(
             !state.wiring_open,
             "the wiring drawer defaults to collapsed: the panel is the \

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot, UiNodeDirtyState,
-    UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, ExportSeverity, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot,
+    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
@@ -93,10 +93,14 @@ pub fn NodePane(
     };
     // The DISPLAY-only export chip on a designated module's header (D12 —
     // the chip never toggles anything; the popup owns the gesture).
-    let export_chip = module_face
+    // `Some(worst)` is "this module is an export"; the severity inside is
+    // this export's own lint verdict, so a card that would ship badly says
+    // so where you can see it without opening anything (R-A).
+    let export_chip: Option<Option<ExportSeverity>> = module_face
         .as_ref()
         .and_then(|face| face.export.as_ref())
-        .is_some_and(|export| export.designated);
+        .filter(|export| export.designated)
+        .map(|export| export.findings.iter().map(|finding| finding.severity).max());
     let face_sections = main_tab_sections(&view);
     // Disclosure state is core-owned (`NodeCardUiState`), keyed by the
     // node's address path — the header path carries it for panes and
@@ -108,6 +112,9 @@ pub fn NodePane(
     let debug_open = view.card_ui.debug_open;
     let face_card_ui = view.card_ui.clone();
     let add_node_menu = view.add_node_menu.clone();
+    // The root card's exports/rig split for the column below (R-A);
+    // `None` on every other card, which renders the plain column.
+    let child_exports = view.exports.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -137,10 +144,10 @@ pub fn NodePane(
                     on_action,
                     trailing: rsx! {
                         NodeDebugMarker { count: debug_overrides }
-                        if export_chip {
+                        if let Some(worst) = export_chip {
                             span {
-                                class: "tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-export-border tw:bg-status-export-bg tw:px-1.5 tw:py-0.5 tw:text-[10px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-status-export-foreground",
-                                title: "This module is exported from the project.",
+                                class: export_chip_class(worst),
+                                title: export_chip_title(worst),
                                 "export"
                             }
                         }
@@ -248,8 +255,43 @@ pub fn NodePane(
                     pending_edits,
                     dirty_tint,
                     module_panel,
+                    exports: child_exports,
                 }
             }
+        }
+    }
+}
+
+/// The export chip's tone: sage while the export reads clean, and the
+/// finding's own tone when it does not — the family colour says what kind
+/// of thing this is, the tone says how it is doing (the same convention the
+/// popup's lint rows use inside a sage section).
+fn export_chip_class(worst: Option<ExportSeverity>) -> &'static str {
+    // Written out per arm rather than composed: Tailwind's scanner reads
+    // literals, so a class assembled at runtime never gets generated.
+    match worst {
+        None => {
+            "tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:px-1.5 tw:py-0.5 tw:text-[10px] tw:font-bold tw:lowercase tw:tracking-wide tw:border-status-export-border tw:bg-status-export-bg tw:text-status-export-foreground"
+        }
+        Some(ExportSeverity::Warning) => {
+            "tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:px-1.5 tw:py-0.5 tw:text-[10px] tw:font-bold tw:lowercase tw:tracking-wide tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground"
+        }
+        Some(ExportSeverity::Error) => {
+            "tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:px-1.5 tw:py-0.5 tw:text-[10px] tw:font-bold tw:lowercase tw:tracking-wide tw:border-status-error-border tw:bg-status-error-bg tw:text-status-error-foreground"
+        }
+    }
+}
+
+/// What the chip's tooltip says, which is where the severity is spelled
+/// out in words.
+fn export_chip_title(worst: Option<ExportSeverity>) -> &'static str {
+    match worst {
+        None => "This module is exported from the project.",
+        Some(ExportSeverity::Warning) => {
+            "This module is exported from the project, with a warning — see its ⓘ."
+        }
+        Some(ExportSeverity::Error) => {
+            "This module is exported from the project, and would not load as an import — see its ⓘ."
         }
     }
 }
