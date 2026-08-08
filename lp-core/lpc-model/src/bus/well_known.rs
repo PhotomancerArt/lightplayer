@@ -22,6 +22,17 @@ pub const PRIMARY_CONTROL_CHANNEL: &str = "control.out";
 /// The scope's palette channel. The one place this name is written.
 pub const PALETTE_CHANNEL: &str = "palette";
 
+/// The clock transport's three leaf channels (D21: `clock.*` purpose-first
+/// namespacing, an amendment to the naming norm recorded by the tape-hero
+/// plan's ADR). One record in the model, three wires on the bus — the bus
+/// has no read-modify-write primitive, so a whole-transport channel would
+/// make every multi-producer patch a lost-update race.
+pub const CLOCK_RATE_CHANNEL: &str = "clock.rate";
+/// See [`CLOCK_RATE_CHANNEL`].
+pub const CLOCK_PLAY_STATE_CHANNEL: &str = "clock.play_state";
+/// See [`CLOCK_RATE_CHANNEL`].
+pub const CLOCK_SCRUB_CHANNEL: &str = "clock.scrub";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +77,28 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: PALETTE_CHANNEL,
         kind: Kind::Gradient,
         doc: "The scope's palette as a GradientConfig — static gradient or cycle; consumers bake it to a height-one texture.",
+        carries_product: false,
+    },
+    // The clock transport's three leaves. Kinds are NEAREST-FIT from the
+    // legacy set (Q21): the true ranges live in these doc strings, which is
+    // where the picker reads them from, rather than in a kind that would
+    // have to be invented per control.
+    WellKnownChannel {
+        name: CLOCK_RATE_CHANNEL,
+        kind: Kind::Ratio,
+        doc: "Clock speed multiplier (¼×–8×); the transport fader's channel.",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: CLOCK_PLAY_STATE_CHANNEL,
+        kind: Kind::Choice,
+        doc: "Clock transport state: playing | paused (desired state; effective state reads from bus:time).",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: CLOCK_SCRUB_CHANNEL,
+        kind: Kind::Duration,
+        doc: "Clock scrub offset in signed seconds off live.",
         carries_product: false,
     },
     WellKnownChannel {

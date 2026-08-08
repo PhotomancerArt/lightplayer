@@ -589,7 +589,7 @@ mod tests {
                 SlotEditOp::AssignValue(LpValue::F32(2.0)),
             ),
             (
-                at("transport.running"),
+                at("transport.play_state"),
                 SlotEditOp::AssignValue(LpValue::Bool(false)),
             ),
             (
@@ -604,7 +604,7 @@ mod tests {
         let persistence = BTreeMap::from([
             (at("brightness"), SlotPersistence::Persisted),
             (at("transport.rate"), SlotPersistence::Transient),
-            (at("transport.running"), SlotPersistence::Transient),
+            (at("transport.play_state"), SlotPersistence::Transient),
             (
                 ProjectSlotAddress::new(
                     other.clone(),

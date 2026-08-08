@@ -350,7 +350,7 @@ impl DriverInner {
         });
         let t = f64::from(transport.seconds)
             + preview_delta
-            + if transport.running {
+            + if transport.play_state.is_playing() {
                 elapsed * f64::from(transport.rate)
             } else {
                 0.0

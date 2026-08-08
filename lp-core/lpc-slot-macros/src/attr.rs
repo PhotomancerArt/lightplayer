@@ -202,14 +202,15 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
             }
         })?;
     }
-    if panel.is_some() && default_bind.is_none() {
-        if let Some(attr) = slot_attrs(attrs).next() {
-            return Err(syn::Error::new_spanned(
-                attr,
-                "a panel hint promotes a default binding; declare default_bind beside it",
-            ));
-        }
-    }
+    // A panel hint still has to promote SOMETHING, but the something is not
+    // always the annotated field's own `default_bind`: a promoted RECORD
+    // field (`ClockDef::transport`) groups its leaves' bindings into one
+    // control, and this macro cannot see through a field's type to know
+    // whether it is a record. The rule therefore lives where the whole
+    // catalog is visible — `lpc-model/tests/shape_guardrails.rs`
+    // (`panel_show_must_promote_a_default_bind`), which is strictly stronger
+    // than the lexical check it replaces: it fails a bare leaf carrying
+    // `panel` without `default_bind` too.
     Ok(FieldAttrs {
         name,
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
