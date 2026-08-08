@@ -26,7 +26,7 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
     p.push_str(
         "## Shader contract\n\
          \n\
-         - The entry point is `vec4 render(vec2 pos)`. `pos` is in pixel space \
+         - The entry point is `vec4 render_2d(vec2 pos)`. `pos` is in pixel space \
          (0..outputSize); returned components are RGBA in [0, 1].\n\
          - By convention the uniform `vec2 outputSize` exists when declared; \
          declare uniforms with `layout(binding = N) uniform ...`.\n\
@@ -210,7 +210,7 @@ mod tests {
                 },
             ],
         };
-        let source = "layout(binding = 0) uniform float phase;\n\nvec4 render(vec2 pos) {\n    return vec4(sin(phase * 6.28318530718), 0.0, 0.0, 1.0);\n}\n";
+        let source = "layout(binding = 0) uniform float phase;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(sin(phase * 6.28318530718), 0.0, 0.0, 1.0);\n}\n";
         let prompt = build_system_prompt(&ctx, source);
 
         if std::env::var("LPA_AGENT_UPDATE_SNAPSHOTS").is_ok() {
@@ -226,9 +226,9 @@ mod tests {
 
     #[test]
     fn prompt_covers_required_sections() {
-        let prompt = build_system_prompt(&ShaderContext::default(), "vec4 render(vec2 pos) {}");
+        let prompt = build_system_prompt(&ShaderContext::default(), "vec4 render_2d(vec2 pos) {}");
         for needle in [
-            "vec4 render(vec2 pos)",
+            "vec4 render_2d(vec2 pos)",
             "cannot read GLSL",
             "keep-last-good",
             "## Builtin functions",

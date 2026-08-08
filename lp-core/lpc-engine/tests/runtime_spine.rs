@@ -178,7 +178,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 7\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 8\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -256,7 +256,7 @@ fn project_apply_asset_body_change_refreshes_existing_shader_node() {
 
     fs.write_file_mut(
         LpPath::new("/shader.glsl"),
-        b"vec4 render(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }",
+        b"vec4 render_2d(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }",
     )
     .expect("write shader source");
     let shapes = engine.slot_shapes().clone();
@@ -446,7 +446,7 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 fn fixture_map2d_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 7\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 8\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -489,7 +489,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
 
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 7\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 8\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -522,7 +522,7 @@ fn clock_project_fs() -> LpFsMemory {
 
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 7\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 8\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -550,7 +550,7 @@ fn shader_project_fs() -> LpFsMemory {
     .expect("write shader def");
     fs.write_file_mut(
         LpPath::new("/shader.glsl"),
-        b"vec4 render(vec2 pos) { return vec4(0.0, pos.y, 0.0, 1.0); }",
+        b"vec4 render_2d(vec2 pos) { return vec4(0.0, pos.y, 0.0, 1.0); }",
     )
     .expect("write shader source");
     fs

@@ -17,7 +17,7 @@ vec4 worley_demo(vec2 scaledCoord, float huePhase) {
     return vec4(rgb, 1.0);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Pan through noise using three phasors with oscillation to stay bounded.
     // Oscillate between minZoom and maxZoom to avoid unbounded growth.
     // sin returns [-1, 1], map to [0, 1] then use mix for interpolation.

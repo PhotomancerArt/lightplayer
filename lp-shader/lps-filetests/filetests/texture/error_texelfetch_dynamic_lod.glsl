@@ -7,6 +7,6 @@
 uniform sampler2D inputColor;
 
 // Dynamic LOD via parameter (non-literal); scalar uniforms require layout(binding=) in this pipeline.
-vec4 render(vec2 pos, int lod) {
+vec4 probe(vec2 pos, int lod) {
     return texelFetch(inputColor, ivec2(0, 0), lod);
 }

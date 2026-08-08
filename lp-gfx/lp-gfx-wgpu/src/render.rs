@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use lp_gfx::{GfxError, LpShader, SampleOutHandle, SamplePointsHandle, TextureHandle};
-use lp_shader::TextureBindingSpecs;
+use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
 use lps_shared::{LpsValueF32, TextureShapeHint, TextureStorageFormat};
 
 use crate::gpu_graphics::GpuShared;
@@ -43,6 +43,9 @@ pub struct GpuShader {
     /// Compile-time texture specs, kept so the sample unit lowers texture
     /// call sites identically to the render unit.
     texture_specs: TextureBindingSpecs,
+    /// Declared space of the authored shader: which entry the wrappers
+    /// call, and how many lanes a packed sample point carries.
+    space: ShaderEntrySpace,
     /// Sample-point pass (the LED-output path), built on the first
     /// `sample_rgba16` call — render-only consumers never pay for it.
     sample_pass: Option<SamplePass>,
@@ -83,8 +86,9 @@ impl GpuShader {
         shared: Arc<GpuShared>,
         authored: &str,
         textures: &TextureBindingSpecs,
+        space: ShaderEntrySpace,
     ) -> Result<Self, GfxError> {
-        let compiled = compile_wgsl(authored, textures)?;
+        let compiled = compile_wgsl(authored, textures, space)?;
         let table = reflect_uniforms(&compiled.module)?;
         let texture_globals = reflect_textures(&compiled.module, textures)?;
         let device = &shared.device;
@@ -222,6 +226,7 @@ impl GpuShader {
             pipeline,
             bindings,
             texture_specs: textures.clone(),
+            space,
             sample_pass: None,
         })
     }
@@ -232,8 +237,11 @@ impl GpuShader {
     /// and build the point-list pipeline over the shared bind group layout.
     fn ensure_sample_pass(&mut self) -> Result<(), GfxError> {
         if self.sample_pass.is_none() {
-            let compiled =
-                crate::wgsl_compile::compile_sample_wgsl(&self.authored, &self.texture_specs)?;
+            let compiled = crate::wgsl_compile::compile_sample_wgsl(
+                &self.authored,
+                &self.texture_specs,
+                self.space,
+            )?;
             let sample_table = reflect_uniforms(&compiled.module)?;
             let interface = |table: &UniformTable| -> Vec<(String, u32, u32)> {
                 table
@@ -253,6 +261,7 @@ impl GpuShader {
                 &self.shared,
                 &compiled.wgsl,
                 self.bindings.as_ref().map(|bindings| &bindings.layout),
+                self.space,
             ));
         }
         Ok(())
@@ -547,7 +556,11 @@ impl LpShader for GpuShader {
             }
         }
 
-        let point_coords = &sample_points(points)?.0;
+        // The point buffer is allocated pair-sized in both spaces; a 1D
+        // shader reads the tightly packed `[t0, t1, …]` prefix and the rest
+        // of the allocation is slack (see `lp_shader::synth::render_samples`).
+        let lanes = self.space.coord_lanes();
+        let point_coords = &sample_points(points)?.0[..points.count() as usize * lanes];
         let out_channels = &mut sample_out_mut(out)?.0;
         let Self {
             shared,
