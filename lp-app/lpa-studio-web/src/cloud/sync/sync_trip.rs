@@ -63,7 +63,18 @@ pub async fn run_trip<P: CloudPort + ?Sized>(
 
     let bound = project.binding()?.is_some();
     if bound && !restate {
-        return Ok(TripReport::Pushed(push(port, project, sidecar).await?));
+        match push(port, project, sidecar).await {
+            Ok(pushed) => return Ok(TripReport::Pushed(pushed)),
+            // The binding names a record the service no longer has — a dev
+            // mem-store restart, or production restored to a point before
+            // this project existed. The service forgetting is not the
+            // owner's problem: fall through and publish the record back
+            // into existence. (A VISITOR's push can also answer NotFound —
+            // access revoked to None — but their fallback publish is
+            // refused as not-theirs, so nothing leaks through this arm.)
+            Err(SyncError::Cloud(CloudError::NotFound)) => {}
+            Err(error) => return Err(error),
+        }
     }
 
     let access = current_access(port, project).await?;
@@ -281,6 +292,36 @@ mod tests {
             world.trip(&dome, "zook-dome", false).unwrap(),
             TripReport::Published(_)
         ));
+    }
+
+    /// Service amnesia — a dev mem-store restart, or production restored to
+    /// an earlier point: the binding survives locally but the record is
+    /// gone. The owner's next trip publishes it back rather than failing
+    /// forever against a row that no longer exists.
+    #[test]
+    fn a_bound_project_republishes_after_service_amnesia() {
+        let world = World::new();
+        let dome = world.project(1, b"{\"n\":1}");
+        world.trip(&dome, "zook-dome", false).unwrap();
+        assert!(dome.local().binding().unwrap().is_some());
+
+        // The same library against a service that has forgotten everything.
+        let fresh = InProcessServer::new(2_000.0);
+        let (client, _) =
+            InProcessCloud::sign_in(fresh, "sub-yona", "yona@example.com", "Yona");
+        let report = block_on(run_trip(
+            &client,
+            &dome.local(),
+            &sidecar(),
+            "zook-dome",
+            false,
+        ))
+        .unwrap();
+        let TripReport::Published(published) = report else {
+            panic!("expected a re-publish, got {report:?}");
+        };
+        assert_eq!(published.meta.uid, dome.uid);
+        assert_eq!(published.meta.access, Access::View);
     }
 
     /// A signed-out client is denied, not retried: the driver does not even
