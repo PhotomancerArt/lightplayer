@@ -9,10 +9,18 @@ use crate::syntax::{ParsedExpr, ParsedFunctionBody, ParsedStmt};
 /// Tokens are non-overlapping and ascending, so both `span.start` and
 /// `span.end` predicates below are monotonic over the whole tape, and their
 /// partition points bound a single contiguous subslice — no per-call Vec or
-/// full-tape scan required. The trailing Eof token sits at source end with
-/// an empty span past every real span, so it can never land inside `span`;
-/// that's asserted rather than filtered.
+/// full-tape scan required.
+///
+/// The trailing Eof token is dropped first. Its span is empty *at* source
+/// end, not past it, so a body that closes on the last byte of the source
+/// (no trailing newline) ends exactly where Eof sits and would otherwise
+/// swallow it — the parser then reports "unexpected tokens after function
+/// body". Dropping it here restores the filter this slicing replaced.
 fn token_subslice<'tok>(tokens: &'tok [Token], span: Span) -> &'tok [Token] {
+    let tokens = match tokens.split_last() {
+        Some((last, rest)) if matches!(last.kind, TokenKind::Eof) => rest,
+        _ => tokens,
+    };
     let lo = tokens.partition_point(|t| t.span.start < span.start);
     let hi = tokens.partition_point(|t| t.span.end <= span.end).max(lo);
     let subslice = &tokens[lo..hi];
