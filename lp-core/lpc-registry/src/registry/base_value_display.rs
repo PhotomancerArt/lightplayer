@@ -290,8 +290,8 @@ mod tests {
             "unauthored (and unauthorable) leaves display their shape default"
         );
         assert_eq!(
-            base_display_in_def(&def, &path("transport.running"), &ctx),
-            Some("true".to_string()),
+            base_display_in_def(&def, &path("transport.play_state"), &ctx),
+            Some("playing".to_string()),
             "unauthored leaves display their shape default"
         );
     }
@@ -414,8 +414,9 @@ mod tests {
     fn debug_role_authored_value_never_becomes_base() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        let def =
-            clock_def(r#"{ "kind": "Clock", "transport": { "rate": 2.5, "running": false } }"#);
+        let def = clock_def(
+            r#"{ "kind": "Clock", "transport": { "rate": 2.5, "play_state": "paused" } }"#,
+        );
 
         assert_eq!(
             base_value_in_def(&def, &path("transport.rate"), &ctx),
@@ -423,9 +424,9 @@ mod tests {
             "authored 2.5 must not become the base; the shape default (1.0) wins"
         );
         assert_eq!(
-            base_display_in_def(&def, &path("transport.running"), &ctx),
-            Some("true".to_string()),
-            "authored false must not become the base; the shape default (true) wins"
+            base_display_in_def(&def, &path("transport.play_state"), &ctx),
+            Some("playing".to_string()),
+            "authored `paused` must not become the base; the shape default wins"
         );
         assert!(
             base_presence_in_def(&def, &path("transport.rate"), &ctx),

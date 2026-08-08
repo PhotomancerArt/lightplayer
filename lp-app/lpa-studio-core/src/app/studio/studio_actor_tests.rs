@@ -902,7 +902,7 @@ fn queued_set_values_for_one_address_coalesce_to_the_last() {
 fn set_values_for_different_addresses_keep_their_order() {
     let plan = CommandPlan::from_batch(vec![
         set_value_action("transport.rate", 1.0),
-        set_value_action("transport.running", 0.0),
+        set_value_action("transport.play_state", 0.0),
         set_value_action("transport.rate", 2.0),
     ]);
 
@@ -910,7 +910,7 @@ fn set_values_for_different_addresses_keep_their_order() {
         planned_slot_ops(&plan),
         vec![
             ("transport.rate".to_string(), Some(2.0)),
-            ("transport.running".to_string(), Some(0.0)),
+            ("transport.play_state".to_string(), Some(0.0)),
         ],
         "latest value wins in place; order across addresses is preserved"
     );
