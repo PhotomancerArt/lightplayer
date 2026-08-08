@@ -25,8 +25,8 @@ use lpa_cloud_client::{
     ProjectLink, PullReport, PushReport, SyncError, apply_fast_forward, block_on, call,
     open_shared, publish, pull, push, request, resolve_clobber,
 };
-use lpc_cloud_api::request::{AddMember, GetHeads, SetVisibility};
-use lpc_cloud_api::{CloudRequest, SidecarMeta, Visibility};
+use lpc_cloud_api::request::{AddMember, ArchiveProject, GetHeads, RestoreProject, SetAccess};
+use lpc_cloud_api::{Access, CloudRequest, SidecarMeta};
 use lpc_history::{
     ContentHash, EventKind, HistoryEvent, PrefixedUid, ProjectHistory, SyncRelation, UidPrefix,
 };
@@ -256,11 +256,11 @@ impl Project {
     }
 
     /// Put the project on the cloud and return its share link.
-    pub fn publish(&self, visibility: Visibility) -> ProjectLink {
+    pub fn publish(&self, access: Access) -> ProjectLink {
         block_on(publish(
             &*self.client,
             &self.local(),
-            visibility,
+            access,
             self.name.clone(),
             &self.sidecar(),
         ))
@@ -268,12 +268,22 @@ impl Project {
         .link()
     }
 
-    /// Change who can reach the project.
-    pub fn set_visibility(&self, visibility: Visibility) {
-        self.send(SetVisibility {
+    /// Change what holding the link grants.
+    pub fn set_access(&self, access: Access) {
+        self.send(SetAccess {
             uid: self.uid,
-            visibility,
+            access,
         });
+    }
+
+    /// Put the project away: off the link, frozen against writes.
+    pub fn archive(&self) {
+        self.send(ArchiveProject { uid: self.uid });
+    }
+
+    /// Bring it back.
+    pub fn restore(&self) {
+        self.send(RestoreProject { uid: self.uid });
     }
 
     /// Grant access by email — to an account that may not exist yet.

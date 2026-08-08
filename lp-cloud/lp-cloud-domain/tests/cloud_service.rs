@@ -19,65 +19,69 @@ use lp_cloud_domain::{
 };
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::request::{
-    AddMember, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
-    RemoveMember, RevokeSession, SetVisibility, UpdateMe,
+    AddMember, ArchiveProject, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject,
+    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, UpdateMe,
 };
 use lpc_cloud_api::response::{
     Events, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Ack, Actor, CloudError, CloudRequest, CloudResponse, PushOutcome, SidecarMeta, Visibility,
+    Access, Ack, Actor, CloudError, CloudRequest, CloudResponse, MemberRole, PushOutcome,
+    SidecarMeta,
 };
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 
 type Service = CloudService<MemMetaStore, MemClock, MemIdMint>;
 
-// ---- visibility matrix -------------------------------------------
+// ---- access matrix -----------------------------------------------
 
-/// Reads: `Link` is open to everyone holding the uid; `Private` is open
-/// to members only, and everyone else is told `NotFound`.
+/// Reads: `View` and `Edit` are open to everyone holding the uid; `None`
+/// is open to members only, and everyone else is told `NotFound`.
 #[test]
 fn read_access_matrix() {
-    for visibility in [Visibility::Private, Visibility::Link] {
+    for access in [Access::None, Access::View, Access::Edit] {
         let mut svc = service();
-        let world = World::publish(&mut svc, visibility);
+        let world = World::publish(&mut svc, access);
 
         for actor in [world.owner, world.member] {
             assert!(
                 svc.handle(actor, get_project(world.project)).is_ok(),
-                "members read {visibility:?} projects"
+                "members read {access:?} projects"
             );
         }
 
         for actor in [Actor::Anonymous, world.stranger] {
             let answer = svc.handle(actor, get_project(world.project));
-            match visibility {
-                Visibility::Link => assert!(answer.is_ok(), "link projects are open"),
-                Visibility::Private => assert_eq!(
+            match access {
+                Access::View | Access::Edit => {
+                    assert!(answer.is_ok(), "a {access:?} link opens the project")
+                }
+                Access::None => assert_eq!(
                     answer,
                     Err(CloudError::NotFound),
-                    "a private project must not confirm its own existence"
+                    "a project no link reaches must not confirm its own existence"
                 ),
             }
         }
     }
 }
 
-/// Writes: members only. Anonymous is `NotAuthenticated`; a non-member
-/// gets `NotAuthorized` where existence is already public and
-/// `NotFound` where it is not.
+/// Writes: members always, plus anybody holding an `Edit` link — anonymous
+/// included (D-Q6). Otherwise anonymous is `NotAuthenticated`; a non-member
+/// gets `NotAuthorized` where existence is already public and `NotFound`
+/// where it is not.
 #[test]
 fn write_access_matrix() {
-    for visibility in [Visibility::Private, Visibility::Link] {
+    for access in [Access::None, Access::View, Access::Edit] {
         let mut svc = service();
-        let world = World::publish(&mut svc, visibility);
-        // Restates the visibility it already has: the point is who may
-        // write, and the matrix must not move the project out from under
-        // the row being tested.
+        let world = World::publish(&mut svc, access);
+        // Restates the access it already has: the point is who may write,
+        // and the matrix must not move the project out from under the row
+        // being tested.
         let request = || {
-            CloudRequest::SetVisibility(SetVisibility {
+            CloudRequest::SetAccess(SetAccess {
                 uid: world.project,
-                visibility,
+                access,
             })
         };
 
@@ -85,24 +89,307 @@ fn write_access_matrix() {
             assert!(svc.handle(actor, request()).is_ok(), "members write");
         }
 
+        let expected_anonymous = match access {
+            Access::Edit => None,
+            _ => Some(CloudError::NotAuthenticated),
+        };
         assert_eq!(
-            svc.handle(Actor::Anonymous, request()),
-            Err(CloudError::NotAuthenticated)
+            svc.handle(Actor::Anonymous, request()).err(),
+            expected_anonymous,
+            "anonymous on a {access:?} project"
         );
 
-        let expected = match visibility {
-            Visibility::Link => CloudError::NotAuthorized,
-            Visibility::Private => CloudError::NotFound,
+        let expected_stranger = match access {
+            Access::Edit => None,
+            Access::View => Some(CloudError::NotAuthorized),
+            Access::None => Some(CloudError::NotFound),
         };
-        assert_eq!(svc.handle(world.stranger, request()), Err(expected));
+        assert_eq!(
+            svc.handle(world.stranger, request()).err(),
+            expected_stranger,
+            "a signed-in non-member on a {access:?} project"
+        );
     }
+}
+
+/// The one that makes the `Edit` link a real capability: no account, no
+/// membership, and the push lands.
+#[test]
+fn anonymous_pushes_to_an_edit_project() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::Edit);
+
+    let pushed = push(
+        &mut svc,
+        Actor::Anonymous,
+        world.project,
+        &[],
+        v(1),
+        origin_batch(1),
+    );
+    assert_eq!(outcome_of(&pushed), PushOutcome::Advanced);
+    assert_eq!(heads_of(&pushed), vec![v(1)]);
+}
+
+/// `HaveBlobs` is the pre-flight of a push, so it has to be reachable by
+/// everybody a push is: it names no project, and the hash is the secret.
+#[test]
+fn have_blobs_is_anonymous_callable() {
+    let mut svc = service();
+    svc.store_mut().record_blob(v(1), 10);
+    let CloudResponse::MissingBlobs(MissingBlobs { hashes }) = svc
+        .handle(
+            Actor::Anonymous,
+            CloudRequest::HaveBlobs(HaveBlobs {
+                hashes: vec![v(1), v(2)],
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("expected MissingBlobs");
+    };
+    assert_eq!(hashes, vec![v(2)]);
+}
+
+// ---- members exposure --------------------------------------------
+
+/// The member list is a list of people's email addresses: the people on it
+/// get it, and a link-holder does not — not even one holding an `Edit` link
+/// they may push with.
+#[test]
+fn the_member_list_goes_only_to_members() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::Edit);
+
+    let editors =
+        members_seen_by(&mut svc, world.member, world.project).expect("an editor sees it");
+    let emails: Vec<&str> = editors.iter().map(|m| m.email.as_str()).collect();
+    assert_eq!(emails, vec!["member@example.com", "owner@example.com"]);
+    let owner_row = editors
+        .iter()
+        .find(|m| m.email == "owner@example.com")
+        .unwrap();
+    assert_eq!(owner_row.role, MemberRole::Owner);
+    assert!(!owner_row.pending);
+    assert_eq!(
+        editors
+            .iter()
+            .find(|m| m.email == "member@example.com")
+            .unwrap()
+            .role,
+        MemberRole::Editor
+    );
+
+    assert_eq!(
+        members_seen_by(&mut svc, Actor::Anonymous, world.project),
+        None,
+        "an anonymous link-holder never learns who else has access"
+    );
+    assert_eq!(
+        members_seen_by(&mut svc, world.stranger, world.project),
+        None,
+        "nor does a signed-in caller who is only holding the link — even \
+         though this Edit link lets them push"
+    );
+}
+
+/// A pending invitation shows up on the list as pending, which is what lets
+/// the share UI say "invited" rather than pretending they are in.
+#[test]
+fn a_pending_invitation_is_listed_as_pending() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::None);
+    svc.handle(
+        world.owner,
+        CloudRequest::AddMember(AddMember {
+            uid: world.project,
+            email: "later@example.com".into(),
+        }),
+    )
+    .unwrap();
+
+    let members = members_seen_by(&mut svc, world.owner, world.project).expect("the owner sees it");
+    let pending = members
+        .iter()
+        .find(|m| m.email == "later@example.com")
+        .expect("the invitation is listed");
+    assert!(pending.pending);
+    assert_eq!(pending.user, None);
+    assert_eq!(pending.role, MemberRole::Editor);
+}
+
+// ---- archive / restore -------------------------------------------
+
+/// Archiving stops the link resolving for everyone but the project's own
+/// members — and refuses writes even for them. Restoring puts it all back.
+#[test]
+fn archiving_closes_the_link_and_freezes_writes() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::View);
+    assert!(
+        svc.handle(Actor::Anonymous, get_project(world.project))
+            .is_ok()
+    );
+
+    let archived = svc
+        .handle(world.owner, archive(world.project))
+        .expect("the owner archives");
+    let CloudResponse::ProjectInfo(ProjectInfo { meta, .. }) = archived else {
+        panic!("expected ProjectInfo");
+    };
+    assert!(meta.archived);
+    assert_eq!(meta.access, Access::View, "the access level is remembered");
+
+    for actor in [Actor::Anonymous, world.stranger] {
+        assert_eq!(
+            svc.handle(actor, get_project(world.project)),
+            Err(CloudError::NotFound),
+            "an archived project stops resolving for visitors"
+        );
+    }
+    for actor in [world.owner, world.member] {
+        assert!(
+            svc.handle(actor, get_project(world.project)).is_ok(),
+            "its members can still read it"
+        );
+    }
+
+    // Every write, including a member's, and including the owner's own.
+    let writes = [
+        CloudRequest::SetAccess(SetAccess {
+            uid: world.project,
+            access: Access::Edit,
+        }),
+        CloudRequest::AddMember(AddMember {
+            uid: world.project,
+            email: "later@example.com".into(),
+        }),
+    ];
+    for actor in [world.owner, world.member] {
+        for request in writes.clone() {
+            assert!(
+                matches!(
+                    svc.handle(actor, request),
+                    Err(CloudError::InvalidRequest { .. })
+                ),
+                "an archived project refuses its members' writes too"
+            );
+        }
+    }
+    assert!(matches!(
+        try_push(
+            &mut svc,
+            world.owner,
+            world.project,
+            &[],
+            v(1),
+            origin_batch(1)
+        ),
+        Err(CloudError::InvalidRequest { .. })
+    ));
+
+    let restored = svc
+        .handle(world.owner, restore(world.project))
+        .expect("the owner restores");
+    let CloudResponse::ProjectInfo(ProjectInfo { meta, .. }) = restored else {
+        panic!("expected ProjectInfo");
+    };
+    assert!(!meta.archived);
+    assert!(
+        svc.handle(Actor::Anonymous, get_project(world.project))
+            .is_ok(),
+        "the link resolves again"
+    );
+    let pushed = push(
+        &mut svc,
+        world.owner,
+        world.project,
+        &[],
+        v(1),
+        origin_batch(1),
+    );
+    assert_eq!(outcome_of(&pushed), PushOutcome::Advanced);
+}
+
+/// Archive and restore are the owner's alone. An editor can see the project,
+/// so they are told `NotAuthorized`; nobody else learns anything.
+#[test]
+fn only_the_owner_archives_or_restores() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::View);
+
+    for request in [archive(world.project), restore(world.project)] {
+        assert_eq!(
+            svc.handle(world.member, request.clone()),
+            Err(CloudError::NotAuthorized),
+            "an editor is not the owner"
+        );
+        assert_eq!(
+            svc.handle(world.stranger, request.clone()),
+            Err(CloudError::NotAuthorized),
+            "a link-holder can see it exists, so the refusal may say so"
+        );
+        assert_eq!(
+            svc.handle(Actor::Anonymous, request),
+            Err(CloudError::NotAuthenticated)
+        );
+    }
+}
+
+/// An unpublished (or unreachable) project's archive verbs must not become
+/// an existence oracle.
+#[test]
+fn archiving_an_unreachable_project_answers_not_found() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::None);
+    assert_eq!(
+        svc.handle(world.stranger, archive(world.project)),
+        Err(CloudError::NotFound)
+    );
+    assert_eq!(
+        svc.handle(
+            world.owner,
+            archive(PrefixedUid::mint(UidPrefix::Project, &[8u8; 16]))
+        ),
+        Err(CloudError::NotFound)
+    );
+}
+
+/// Re-publishing restates slug and access, and deliberately does *not*
+/// bring an archived project back — that is `RestoreProject`'s job.
+#[test]
+fn publishing_does_not_un_archive() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::View);
+    svc.handle(world.owner, archive(world.project)).unwrap();
+
+    let answer = svc
+        .handle(
+            world.owner,
+            CloudRequest::PublishProject(PublishProject {
+                uid: world.project,
+                access: Access::Edit,
+                slug: "renamed".into(),
+            }),
+        )
+        .unwrap();
+    let CloudResponse::ProjectInfo(ProjectInfo { meta, .. }) = answer else {
+        panic!("expected ProjectInfo");
+    };
+    assert_eq!(meta.slug, "renamed");
+    assert_eq!(meta.access, Access::Edit);
+    assert!(meta.archived, "still archived");
+    assert_eq!(
+        svc.handle(Actor::Anonymous, get_project(world.project)),
+        Err(CloudError::NotFound)
+    );
 }
 
 /// The read rule applies to every read verb, not just `GetProject`.
 #[test]
 fn heads_and_events_follow_the_read_rule() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     for request in [
         CloudRequest::GetHeads(GetHeads { uid: world.project }),
         CloudRequest::GetEvents(GetEvents {
@@ -124,7 +411,7 @@ fn heads_and_events_follow_the_read_rule() {
 #[test]
 fn push_fast_forwards_the_line() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
 
     let first = push(
         &mut svc,
@@ -154,7 +441,7 @@ fn push_fast_forwards_the_line() {
 #[test]
 fn divergent_push_adds_a_second_head() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     push(
         &mut svc,
         world.owner,
@@ -194,7 +481,7 @@ fn divergent_push_adds_a_second_head() {
 #[test]
 fn join_push_collapses_the_frontier() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     push(
         &mut svc,
         world.owner,
@@ -243,7 +530,7 @@ fn join_push_collapses_the_frontier() {
 #[test]
 fn push_refuses_hashes_the_blob_index_lacks() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     // Deliberately does NOT record the blob first.
     let answer = svc.handle(
         world.owner,
@@ -261,7 +548,7 @@ fn push_refuses_hashes_the_blob_index_lacks() {
 #[test]
 fn push_refuses_a_batch_without_an_origin_on_an_empty_log() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     let answer = try_push(
         &mut svc,
         world.owner,
@@ -276,7 +563,7 @@ fn push_refuses_a_batch_without_an_origin_on_an_empty_log() {
 #[test]
 fn push_follows_the_write_rule() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Link);
+    let world = World::publish(&mut svc, Access::View);
     for (actor, expected) in [
         (Actor::Anonymous, CloudError::NotAuthenticated),
         (world.stranger, CloudError::NotAuthorized),
@@ -290,7 +577,7 @@ fn push_follows_the_write_rule() {
 #[test]
 fn push_replaces_the_sidecar_verbatim() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     push(
         &mut svc,
         world.owner,
@@ -312,7 +599,7 @@ fn push_replaces_the_sidecar_verbatim() {
 #[test]
 fn get_events_reads_forward_without_gap_or_overlap() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     push(
         &mut svc,
         world.owner,
@@ -382,12 +669,12 @@ fn get_events_reads_forward_without_gap_or_overlap() {
 #[test]
 fn publishing_someone_elses_uid_answers_not_found() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     let answer = svc.handle(
         world.stranger,
         CloudRequest::PublishProject(PublishProject {
             uid: world.project,
-            visibility: Visibility::Link,
+            access: Access::View,
             slug: "stolen".into(),
         }),
     );
@@ -395,15 +682,15 @@ fn publishing_someone_elses_uid_answers_not_found() {
 }
 
 #[test]
-fn republishing_restates_slug_and_visibility() {
+fn republishing_restates_slug_and_access() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     let answer = svc
         .handle(
             world.owner,
             CloudRequest::PublishProject(PublishProject {
                 uid: world.project,
-                visibility: Visibility::Link,
+                access: Access::View,
                 slug: "renamed".into(),
             }),
         )
@@ -412,7 +699,7 @@ fn republishing_restates_slug_and_visibility() {
         panic!("expected ProjectInfo");
     };
     assert_eq!(meta.slug, "renamed");
-    assert_eq!(meta.visibility, Visibility::Link);
+    assert_eq!(meta.access, Access::View);
 }
 
 #[test]
@@ -433,7 +720,7 @@ fn publish_validates_uid_prefix_and_slug() {
         actor,
         CloudRequest::PublishProject(PublishProject {
             uid: PrefixedUid::mint(UidPrefix::Device, &[7u8; 16]),
-            visibility: Visibility::Link,
+            access: Access::View,
             slug: "fine".into(),
         }),
     );
@@ -446,11 +733,41 @@ fn publish_validates_uid_prefix_and_slug() {
         actor,
         CloudRequest::PublishProject(PublishProject {
             uid: project_uid(),
-            visibility: Visibility::Link,
+            access: Access::View,
             slug: "not/a/slug".into(),
         }),
     );
     assert!(matches!(bad_slug, Err(CloudError::InvalidRequest { .. })));
+
+    // Tightened per P1 (2026-08-07): the slug alphabet is exactly what
+    // `share_link::slugify` ever produces — `[a-z0-9-]`, no leading or
+    // trailing `-`. Underscores and uppercase used to be accepted; they no
+    // longer are, since publishing never sends either.
+    for slug in ["under_score", "Uppercase", "-leading", "trailing-"] {
+        let result = svc.handle(
+            actor,
+            CloudRequest::PublishProject(PublishProject {
+                uid: project_uid(),
+                access: Access::View,
+                slug: slug.into(),
+            }),
+        );
+        assert!(
+            matches!(result, Err(CloudError::InvalidRequest { .. })),
+            "{slug:?} should be rejected"
+        );
+    }
+
+    // The empty slug is the bare-uid share path, not an invalid one.
+    let bare = svc.handle(
+        actor,
+        CloudRequest::PublishProject(PublishProject {
+            uid: project_uid(),
+            access: Access::View,
+            slug: "".into(),
+        }),
+    );
+    assert!(bare.is_ok(), "empty slug should be accepted: {bare:?}");
 }
 
 #[test]
@@ -460,7 +777,7 @@ fn anonymous_cannot_publish() {
         Actor::Anonymous,
         CloudRequest::PublishProject(PublishProject {
             uid: project_uid(),
-            visibility: Visibility::Link,
+            access: Access::View,
             slug: "mine".into(),
         }),
     );
@@ -472,7 +789,7 @@ fn anonymous_cannot_publish() {
 #[test]
 fn membership_invited_by_email_resolves_at_first_login() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
 
     svc.handle(
         world.owner,
@@ -508,7 +825,7 @@ fn membership_invited_by_email_resolves_at_first_login() {
 #[test]
 fn removing_a_member_revokes_their_access() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     svc.handle(
         world.owner,
         CloudRequest::RemoveMember(RemoveMember {
@@ -526,7 +843,7 @@ fn removing_a_member_revokes_their_access() {
 #[test]
 fn the_owner_cannot_be_removed() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     let answer = svc.handle(
         world.member,
         CloudRequest::RemoveMember(RemoveMember {
@@ -541,7 +858,7 @@ fn the_owner_cannot_be_removed() {
 #[test]
 fn add_member_validates_the_email() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     let answer = svc.handle(
         world.owner,
         CloudRequest::AddMember(AddMember {
@@ -609,7 +926,7 @@ fn minted_user_uids_are_usr_prefixed() {
 #[test]
 fn list_my_projects_covers_owner_and_member_and_nobody_else() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     for actor in [world.owner, world.member] {
         let CloudResponse::ProjectList(ProjectList { projects }) =
             svc.handle(actor, CloudRequest::ListMyProjects).unwrap()
@@ -632,7 +949,7 @@ fn list_my_projects_covers_owner_and_member_and_nobody_else() {
 #[test]
 fn have_blobs_reports_only_what_is_missing() {
     let mut svc = service();
-    let world = World::publish(&mut svc, Visibility::Private);
+    let world = World::publish(&mut svc, Access::None);
     svc.store_mut().record_blob(v(1), 10);
     let CloudResponse::MissingBlobs(MissingBlobs { hashes }) = svc
         .handle(
@@ -645,15 +962,7 @@ fn have_blobs_reports_only_what_is_missing() {
     else {
         panic!("expected MissingBlobs");
     };
-    assert_eq!(hashes, vec![v(2)]);
-
-    assert_eq!(
-        svc.handle(
-            Actor::Anonymous,
-            CloudRequest::HaveBlobs(HaveBlobs { hashes: vec![] })
-        ),
-        Err(CloudError::NotAuthenticated)
-    );
+    assert_eq!(hashes, vec![v(2)], "and the duplicate is asked about once");
 }
 
 #[test]
@@ -956,7 +1265,7 @@ struct World {
 }
 
 impl World {
-    fn publish(svc: &mut Service, visibility: Visibility) -> Self {
+    fn publish(svc: &mut Service, access: Access) -> Self {
         let owner = svc.upsert_user(
             "g-owner",
             "owner@example.com",
@@ -990,7 +1299,7 @@ impl World {
             Actor::User(owner.uid),
             CloudRequest::PublishProject(PublishProject {
                 uid: project,
-                visibility,
+                access,
                 slug: "zook-dome".into(),
             }),
         )
@@ -1058,6 +1367,30 @@ fn sidecar() -> SidecarMeta {
 
 fn get_project(uid: PrefixedUid) -> CloudRequest {
     CloudRequest::GetProject(GetProject { uid })
+}
+
+fn archive(uid: PrefixedUid) -> CloudRequest {
+    CloudRequest::ArchiveProject(ArchiveProject { uid })
+}
+
+fn restore(uid: PrefixedUid) -> CloudRequest {
+    CloudRequest::RestoreProject(RestoreProject { uid })
+}
+
+/// The member list `actor` is answered with when they read the project —
+/// `None` being a real answer ("you may not know"), not a failure.
+fn members_seen_by(
+    svc: &mut Service,
+    actor: Actor,
+    uid: PrefixedUid,
+) -> Option<Vec<lpc_cloud_api::MemberInfo>> {
+    let CloudResponse::ProjectInfo(ProjectInfo { members, .. }) = svc
+        .handle(actor, get_project(uid))
+        .expect("the caller can read the project")
+    else {
+        panic!("expected ProjectInfo");
+    };
+    members
 }
 
 /// Push, having first told the blob index the tree is stored (the edge's

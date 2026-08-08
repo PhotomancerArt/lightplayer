@@ -28,7 +28,7 @@ the two-client stories say what they mean.
 
 Local: `edit(note)` (writes the shader and saves), `fork()`.
 
-Cloud: `publish(visibility)`, `set_visibility(v)`, `add_member(email)`,
+Cloud: `publish(access)`, `set_access(a)`, `add_member(email)`,
 `collaborator()` (`add_member` plus the login that resolves it), `push()`,
 `pull()`, `fast_forward(&pulled)`, `resolve(&pulled, side)`.
 

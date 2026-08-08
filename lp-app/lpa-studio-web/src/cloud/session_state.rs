@@ -136,6 +136,11 @@ pub fn use_cloud_session_provider() {
             if let CloudSession::SignedIn { me, .. } = &next {
                 account_memory::remember(me, js_sys::Date::now());
             }
+            // The auto-publish driver's one input: whether there is an
+            // account to converge on. The false→true edge sweeps the library
+            // (D7); the other direction forgets the queue.
+            #[cfg(target_arch = "wasm32")]
+            crate::cloud::sync::sync_engine::set_signed_in(crate::cloud::sync::syncs(&next));
             session.set(next);
         });
     });

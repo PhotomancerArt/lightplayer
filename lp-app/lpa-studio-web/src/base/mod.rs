@@ -37,6 +37,7 @@ pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
 pub mod tabs;
+pub mod toast;
 
 pub use code_editor::{
     CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
@@ -61,3 +62,4 @@ pub use logo_mark::{LogoLockup, LogoMark, LogoStacked};
 pub use markdown_text::{MarkdownDocs, MarkdownText};
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};
+pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};
