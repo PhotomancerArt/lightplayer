@@ -1,6 +1,5 @@
 use alloc::format;
 use alloc::string::String;
-use alloc::vec::Vec;
 
 use lps_shared::LpsType;
 
@@ -99,27 +98,43 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
     }
 }
 
-pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
+/// Scalarized IR lane types of a value type.
+///
+/// Sixteen inline lanes covers every vector and matrix shape (up to `mat4`)
+/// plus small arrays and structs, so the per-call list stays off the heap on
+/// the lowering hot path — this is queried per user call, per return, per
+/// uniform/global load, per local declaration and per conditional.
+pub type IrTypes = crate::small::InlineVec<lpir::IrType, 16>;
+
+pub fn scalar_ir_types(ty: &LpsType) -> Result<IrTypes, Diagnostic> {
+    let mut tys = IrTypes::new();
+    push_scalar_ir_types(ty, &mut tys)?;
+    Ok(tys)
+}
+
+fn push_scalar_ir_types(ty: &LpsType, tys: &mut IrTypes) -> Result<(), Diagnostic> {
     if *ty == LpsType::Void {
-        return Ok(Vec::new());
+        return Ok(());
     }
     if *ty == LpsType::Texture2D {
-        return Ok(alloc::vec![lpir::IrType::I32; 4]);
+        for _ in 0..4 {
+            tys.push(lpir::IrType::I32);
+        }
+        return Ok(());
     }
     if let LpsType::Array { element, len } = ty {
-        let element_tys = scalar_ir_types(element)?;
-        let mut tys = Vec::new();
+        let mut element_tys = IrTypes::new();
+        push_scalar_ir_types(element, &mut element_tys)?;
         for _ in 0..*len {
             tys.extend(element_tys.iter().copied());
         }
-        return Ok(tys);
+        return Ok(());
     }
     if let LpsType::Struct { members, .. } = ty {
-        let mut tys = Vec::new();
         for member in members {
-            tys.extend(scalar_ir_types(&member.ty)?);
+            push_scalar_ir_types(&member.ty, tys)?;
         }
-        return Ok(tys);
+        return Ok(());
     }
     let Some(base) = scalar_base_type(ty) else {
         return Err(Diagnostic::error(
@@ -137,5 +152,8 @@ pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
             ));
         }
     };
-    Ok(alloc::vec![lane; scalar_lane_count(ty)])
+    for _ in 0..scalar_lane_count(ty) {
+        tys.push(lane);
+    }
+    Ok(())
 }

@@ -44,13 +44,13 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 }
 
-pub(super) fn token_is_type_name(
-    tok: Token,
-    source: &str,
-    struct_names: &[StructDecl],
-) -> bool {
+pub(super) fn token_is_type_name(tok: Token, source: &str, struct_names: &[StructDecl]) -> bool {
     match tok.kind {
-        TokenKind::Identifier if struct_names.iter().any(|decl| decl.name == tok.lexeme(source)) => {
+        TokenKind::Identifier
+            if struct_names
+                .iter()
+                .any(|decl| decl.name == tok.lexeme(source)) =>
+        {
             true
         }
         TokenKind::Keyword(

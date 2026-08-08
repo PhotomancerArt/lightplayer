@@ -14,9 +14,7 @@ use crate::syntax::{ParsedExpr, ParsedFunctionBody, ParsedStmt};
 /// that's asserted rather than filtered.
 fn token_subslice<'tok>(tokens: &'tok [Token], span: Span) -> &'tok [Token] {
     let lo = tokens.partition_point(|t| t.span.start < span.start);
-    let hi = tokens
-        .partition_point(|t| t.span.end <= span.end)
-        .max(lo);
+    let hi = tokens.partition_point(|t| t.span.end <= span.end).max(lo);
     let subslice = &tokens[lo..hi];
     debug_assert!(
         subslice.iter().all(|t| !matches!(t.kind, TokenKind::Eof)),
@@ -60,11 +58,7 @@ pub(super) struct BodyParser<'src, 'tok> {
 }
 
 impl<'src, 'tok> BodyParser<'src, 'tok> {
-    fn new(
-        source: &'src str,
-        tokens: &'tok [Token],
-        struct_names: &'tok [StructDecl],
-    ) -> Self {
+    fn new(source: &'src str, tokens: &'tok [Token], struct_names: &'tok [StructDecl]) -> Self {
         Self {
             source,
             tokens,

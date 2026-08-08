@@ -1,6 +1,5 @@
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
@@ -90,7 +89,7 @@ fn lower_function(
     let mut params = Vec::new();
     for param in &function.params {
         let lanes = if matches!(param.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
-            vec![fb.add_param(IrType::Pointer)]
+            Lanes::one(fb.add_param(IrType::Pointer))
         } else {
             scalar_ir_types(&param.ty)?
                 .into_iter()
@@ -141,10 +140,22 @@ struct LowerCtx<'a> {
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
+/// Lane list of a lowered value.
+///
+/// Four inline lanes covers every scalar, vec2, vec3, vec4 and mat2 — the
+/// overwhelming majority of lowered expressions — so those cost no
+/// allocation; mat3/mat4, arrays and structs spill to the heap. `VReg` is 4
+/// bytes, so the inline variant is 17 bytes, but the `Vec` variant makes
+/// `size_of::<Lanes>()` 32: a `Vec` is 24 bytes on its own and the tag only
+/// niche-packs into it when the inline buffer is at most 3 lanes. Eight bytes
+/// of stack per lowered value is a better trade than sending every `vec4` —
+/// the single most common shape in shader code — back to the allocator.
+type Lanes = crate::small::InlineVec<VReg, 4>;
+
 #[derive(Debug, Clone)]
 struct LowerValue {
     ty: LpsType,
-    lanes: Vec<VReg>,
+    lanes: Lanes,
 }
 
 fn lower_statements(ctx: &mut LowerCtx<'_>, statements: &[HirStmt]) -> Result<(), Diagnostic> {
@@ -262,10 +273,10 @@ fn return_lanes(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     expr: Option<ExprId>,
-) -> Result<Vec<VReg>, Diagnostic> {
+) -> Result<Lanes, Diagnostic> {
     let lanes = match expr {
         Some(expr) => lower_expr(ctx, expr)?.lanes,
-        None => Vec::new(),
+        None => Lanes::new(),
     };
     if lanes.is_empty() && expr.is_some() {
         return Err(Diagnostic::error(span, "return expression has no value"));
@@ -284,7 +295,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             });
             Ok(LowerValue {
                 ty: LpsType::Bool,
-                lanes: vec![dst],
+                lanes: Lanes::one(dst),
             })
         }
         HirExprKind::FloatLiteral(v) => {
@@ -292,7 +303,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             ctx.fb.push(LpirOp::FconstF32 { dst, value: *v });
             Ok(LowerValue {
                 ty: LpsType::Float,
-                lanes: vec![dst],
+                lanes: Lanes::one(dst),
             })
         }
         HirExprKind::IntLiteral(v) => {
@@ -300,7 +311,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             ctx.fb.push(LpirOp::IconstI32 { dst, value: *v });
             Ok(LowerValue {
                 ty: LpsType::Int,
-                lanes: vec![dst],
+                lanes: Lanes::one(dst),
             })
         }
         HirExprKind::UIntLiteral(v) => {
@@ -311,7 +322,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             });
             Ok(LowerValue {
                 ty: LpsType::UInt,
-                lanes: vec![dst],
+                lanes: Lanes::one(dst),
             })
         }
         HirExprKind::Param { index } => {
@@ -335,8 +346,11 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             lower_global_load(ctx, expr.span, *byte_offset, &expr.ty)
         }
         HirExprKind::Constructor { args } => {
-            let mut lanes = Vec::new();
-            let args = ctx.arena.expr_list(*args).to_vec();
+            let mut lanes = Lanes::new();
+            // `ExprList` ids are `Copy` and the arena outlives `ctx`, so the
+            // slice can be read straight out of the arena reference — copying
+            // it into a `Vec` only ever dodged a borrow that is not there.
+            let args = ctx.arena.expr_list(*args);
             if expr.ty.is_matrix() && args.len() == 1 && ctx.arena.expr_ty(args[0]).is_matrix() {
                 let value = lower_expr(ctx, args[0])?;
                 let Some((dst_cols, dst_rows)) = expr.ty.matrix_dims() else {
@@ -400,7 +414,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                 let lane = single_lane(ctx.arena.expr_span(args[0]), &value)?;
                 lanes.resize(scalar_lane_count(&expr.ty), lane);
             } else {
-                for arg in args {
+                for arg in args.iter().copied() {
                     lanes.extend(lower_expr(ctx, arg)?.lanes);
                 }
                 lanes.truncate(scalar_lane_count(&expr.ty));
@@ -416,7 +430,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
         }
         HirExprKind::Swizzle { base, lanes } => {
             let base = lower_expr(ctx, *base)?;
-            let out = lanes.iter().map(|i| base.lanes[*i]).collect::<Vec<_>>();
+            let out = lanes.iter().map(|i| base.lanes[*i]).collect::<Lanes>();
             Ok(LowerValue {
                 ty: expr.ty.clone(),
                 lanes: out,
@@ -445,7 +459,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             writebacks,
         } => {
             let mut writeback_slots = Vec::new();
-            let mut arg_lanes = vec![ctx.vmctx];
+            let mut arg_lanes = Lanes::one(ctx.vmctx);
             for (arg_index, arg) in ctx.arena.expr_list(*args).iter().copied().enumerate() {
                 if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
                     let (_slot, addr) =
@@ -463,7 +477,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             let results = scalar_ir_types(&expr.ty)?
                 .into_iter()
                 .map(|ty| ctx.fb.alloc_vreg(ty))
-                .collect::<Vec<_>>();
+                .collect::<Lanes>();
             ctx.fb.push_call(
                 CalleeRef::Local(FuncId(*function as u16)),
                 &arg_lanes,
@@ -492,12 +506,12 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                     .iter()
                     .map(|arg| lower_expr(ctx, *arg))
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut results = Vec::new();
+                let mut results = Lanes::new();
                 for i in 0..scalar_lane_count(&expr.ty) {
                     let call_args = args
                         .iter()
                         .map(|arg| ops::lane_at(arg, i))
-                        .collect::<Vec<_>>();
+                        .collect::<Lanes>();
                     let dst = ctx.fb.alloc_vreg(IrType::F32);
                     ctx.fb.push_call(callee, &call_args, &[dst]);
                     results.push(dst);
@@ -507,7 +521,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                     lanes: results,
                 });
             }
-            let mut arg_lanes = Vec::new();
+            let mut arg_lanes = Lanes::new();
             if matches!(import, ImportKey::Vm { .. }) {
                 arg_lanes.push(ctx.vmctx);
             }
@@ -517,7 +531,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             let results = scalar_ir_types(&expr.ty)?
                 .into_iter()
                 .map(|ty| ctx.fb.alloc_vreg(ty))
-                .collect::<Vec<_>>();
+                .collect::<Lanes>();
             ctx.fb.push_call(callee, &arg_lanes, &results);
             Ok(LowerValue {
                 ty: expr.ty.clone(),
@@ -546,7 +560,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                             ctx.fb.push(LpirOp::Fneg { dst, src: *src });
                             dst
                         })
-                        .collect::<Vec<_>>();
+                        .collect::<Lanes>();
                     Ok(LowerValue { ty, lanes })
                 }
                 (UnaryOp::Neg, ty) if scalar_base_type(&ty) == Some(LpsType::Int) => {
@@ -558,7 +572,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                             ctx.fb.push(LpirOp::Ineg { dst, src: *src });
                             dst
                         })
-                        .collect::<Vec<_>>();
+                        .collect::<Lanes>();
                     Ok(LowerValue { ty, lanes })
                 }
                 (UnaryOp::Not, LpsType::Bool) => {
@@ -573,7 +587,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                     });
                     Ok(LowerValue {
                         ty: LpsType::Bool,
-                        lanes: vec![dst],
+                        lanes: Lanes::one(dst),
                     })
                 }
                 _ => Err(Diagnostic::error(expr.span, "unsupported unary lowering")),
@@ -587,7 +601,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             } else {
                 let lhs = lower_expr(ctx, *lhs)?;
                 let rhs = lower_expr(ctx, *rhs)?;
-                lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
+                lower_binary(ctx, expr.span, *op, &lhs, &rhs, &expr.ty)
             }
         }
         HirExprKind::Sequence { first, second } => {
@@ -740,7 +754,7 @@ fn lower_short_circuit(
     ctx.fb.end_if();
     Ok(LowerValue {
         ty: LpsType::Bool,
-        lanes: vec![result],
+        lanes: Lanes::one(result),
     })
 }
 
@@ -760,7 +774,7 @@ fn lower_lazy_conditional(
     let lanes = scalar_ir_types(result_ty)?
         .into_iter()
         .map(|ty| ctx.fb.alloc_vreg(ty))
-        .collect::<Vec<_>>();
+        .collect::<Lanes>();
     ctx.fb.push_if(cond_lane);
     lower_conditional_arm(ctx, span, accept, &lanes)?;
     ctx.fb.push_else();
@@ -802,7 +816,7 @@ fn lower_import_call_with_out(
     let out_lanes = scalar_lane_count(&out.ty);
     let (_slot, addr) = alloc_slot_addr(ctx, out_lanes as u32 * 4, IrType::I32);
 
-    let mut arg_lanes = Vec::new();
+    let mut arg_lanes = Lanes::new();
     let mut value_arg = 0usize;
     let args = ctx.arena.expr_list(*args);
     for arg_index in 0..(args.len() + 1) {
@@ -820,10 +834,10 @@ fn lower_import_call_with_out(
     let results = scalar_ir_types(result_ty)?
         .into_iter()
         .map(|ty| ctx.fb.alloc_vreg(ty))
-        .collect::<Vec<_>>();
+        .collect::<Lanes>();
     ctx.fb.push_call(callee, &arg_lanes, &results);
 
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for i in 0..out_lanes {
         let tmp = ctx.fb.alloc_vreg(IrType::F32);
         ctx.fb.push(LpirOp::Load {

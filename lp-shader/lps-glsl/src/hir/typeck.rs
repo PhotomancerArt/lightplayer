@@ -889,7 +889,7 @@ impl<'a> TypeCtx<'a> {
             name,
             glsl_params_csv,
             param_types,
-            scalar_ir_types(&return_ty)?,
+            scalar_ir_types(&return_ty)?.to_vec(),
         );
         let args = self.arena.push_expr_list(import_args);
         Ok(self.arena.push_expr(
