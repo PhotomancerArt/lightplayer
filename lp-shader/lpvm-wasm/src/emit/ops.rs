@@ -845,15 +845,28 @@ pub(crate) fn emit_op(
                     .select()
                     .local_set(dst.0);
             }
+            // `floor(v * 65536)` clamped to `[0, 65535]` — the scale
+            // convention `docs/design/float.md` §7 fixes and
+            // `lps_builtins::builtins::lpir::unorm_conv_f32` implements. It is
+            // NOT the GPU `v * 65535` convention: this code is the frame
+            // boundary's channel-out lowering, and a 65535 scale reads one
+            // count low against every other tier on the same shader.
             FloatMode::F32 => {
                 sink.local_get(src.0)
                     .f32_const(Ieee32::new(0.0f32.to_bits()))
                     .f32_max()
                     .f32_const(Ieee32::new(1.0f32.to_bits()))
                     .f32_min()
-                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_const(Ieee32::new(65536.0f32.to_bits()))
                     .f32_mul()
                     .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(65535)
+                    .local_get(dst.0)
+                    .i32_const(65535)
+                    .i32_lt_s()
+                    .select()
                     .local_set(dst.0);
             }
         },
@@ -878,15 +891,23 @@ pub(crate) fn emit_op(
                     .select()
                     .local_set(dst.0);
             }
+            // `floor(v * 256)` clamped to `[0, 255]` — see `FtoUnorm16`.
             FloatMode::F32 => {
                 sink.local_get(src.0)
                     .f32_const(Ieee32::new(0.0f32.to_bits()))
                     .f32_max()
                     .f32_const(Ieee32::new(1.0f32.to_bits()))
                     .f32_min()
-                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_const(Ieee32::new(256.0f32.to_bits()))
                     .f32_mul()
                     .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(255)
+                    .local_get(dst.0)
+                    .i32_const(255)
+                    .i32_lt_s()
+                    .select()
                     .local_set(dst.0);
             }
         },
@@ -897,12 +918,14 @@ pub(crate) fn emit_op(
                     .i32_and()
                     .local_set(dst.0);
             }
+            // `code / 65536`, so the top code is `65535/65536` and not `1.0` —
+            // the inverse of `FtoUnorm16`'s scale, inherited from Q32.
             FloatMode::F32 => {
                 sink.local_get(src.0)
                     .i32_const(0xFFFF)
                     .i32_and()
                     .f32_convert_i32_u()
-                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_const(Ieee32::new(65536.0f32.to_bits()))
                     .f32_div()
                     .local_set(dst.0);
             }
@@ -916,12 +939,13 @@ pub(crate) fn emit_op(
                     .i32_shl()
                     .local_set(dst.0);
             }
+            // `code / 256` — see `Unorm16toF`.
             FloatMode::F32 => {
                 sink.local_get(src.0)
                     .i32_const(0xFF)
                     .i32_and()
                     .f32_convert_i32_u()
-                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_const(Ieee32::new(256.0f32.to_bits()))
                     .f32_div()
                     .local_set(dst.0);
             }

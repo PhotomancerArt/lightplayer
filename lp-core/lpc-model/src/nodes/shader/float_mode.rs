@@ -7,14 +7,28 @@ use crate::{
 };
 use alloc::string::ToString;
 
-/// How a shader's `float` arithmetic is represented.
+/// A **pin** forcing one execution representation for a shader's `float`
+/// arithmetic.
 ///
-/// This is the authored numeric contract for one shader node, and the only
-/// arithmetic knob the model exposes. It replaced `GlslOpts`, which carried
-/// three per-operator Q32 mode slots (`add_sub`, `mul`, `div`) whose
-/// non-default alternatives existed only as debug probes; the shipped
-/// configuration — wrapping add/sub/mul, reciprocal divide — is now hard-coded
-/// in the compiler.
+/// `float` is the authored semantics: a shader is written in floats, and the
+/// number the author reasons about is a real number. This type does not choose
+/// those semantics — it overrides how they are *executed*, which is otherwise
+/// the target's own answer.
+///
+/// The pin therefore lives in an `OptionSlot` on
+/// [`ShaderDef`](crate::ShaderDef) and
+/// [`ComputeShaderDef`](crate::ComputeShaderDef), and **absence is the
+/// interesting state**: an unpinned shader (no `float_mode` key in its JSON)
+/// runs the target's native representation — Q32 on every shipping CPU
+/// backend today, `F32Gpu` on the GPU tier. Auto is that absence, never a
+/// third variant here: the compiler must always receive a concrete mode, so a
+/// mode meaning "decide later" would leak an undecidable value into it.
+///
+/// This is the only arithmetic knob the model exposes. It replaced
+/// `GlslOpts`, which carried three per-operator Q32 mode slots (`add_sub`,
+/// `mul`, `div`) whose non-default alternatives existed only as debug probes;
+/// the shipped configuration — wrapping add/sub/mul, reciprocal divide — is
+/// now hard-coded in the compiler.
 ///
 /// [`FloatMode::Float`] is the authored surface for native `f32`. It reaches
 /// the compiler as a per-shader parameter
@@ -27,12 +41,32 @@ use alloc::string::ToString;
 /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FloatMode {
-    /// Q16.16 fixed point stored in a signed 32-bit integer. The shipped mode.
+    /// Q16.16 fixed point stored in a signed 32-bit integer. Today's native
+    /// representation on every CPU backend, so pinning it is a no-op there;
+    /// it exists as a pin for the day one is not.
     #[default]
     Fixed,
     /// Native IEEE-754 single precision.
     Float,
 }
+
+/// Row label for the pin in the advanced drawer.
+const FLOAT_MODE_LABEL: &str = "Float mode";
+
+/// Detail line the drawer shows beside the pin. It has to carry what the
+/// dropdown cannot: that leaving the row unset is the normal, recommended
+/// state, and what unset actually does.
+const FLOAT_MODE_DESCRIPTION: &str = concat!(
+    "Unset = Auto (target default): the target's native representation. ",
+    "Set this only to force one representation regardless of target."
+);
+
+/// Dropdown label for [`FloatMode::Fixed`]. Names the representation, not a
+/// preference — the author is picking how the floats are executed.
+const FIXED_LABEL: &str = "Fixed (Q32)";
+
+/// Dropdown label for [`FloatMode::Float`].
+const FLOAT_LABEL: &str = "Float (f32)";
 
 impl FloatMode {
     #[must_use]
@@ -77,16 +111,20 @@ impl SlotValue for FloatMode {
         Some(StaticSlotValueShape {
             id: Self::SHAPE_ID,
             ty: StaticLpType::String,
-            meta: StaticSlotMeta::EMPTY,
+            meta: StaticSlotMeta {
+                label: Some(FLOAT_MODE_LABEL),
+                description: Some(FLOAT_MODE_DESCRIPTION),
+                unit: None,
+            },
             editor: StaticValueEditorHint::Dropdown {
                 options: &[
                     StaticSlotEnumOption {
                         value: "float",
-                        label: "Float",
+                        label: FLOAT_LABEL,
                     },
                     StaticSlotEnumOption {
                         value: "fixed",
-                        label: "Fixed",
+                        label: FIXED_LABEL,
                     },
                 ],
             },
@@ -96,11 +134,15 @@ impl SlotValue for FloatMode {
         SlotValueShape {
             id: Self::SHAPE_ID,
             ty: LpType::String,
-            meta: SlotMeta::empty(),
+            meta: SlotMeta {
+                label: Some(FLOAT_MODE_LABEL.to_string()),
+                description: Some(FLOAT_MODE_DESCRIPTION.to_string()),
+                unit: None,
+            },
             editor: ValueEditorHint::Dropdown {
                 options: alloc::vec![
-                    SlotEnumOption::new("float", "Float"),
-                    SlotEnumOption::new("fixed", "Fixed"),
+                    SlotEnumOption::new("float", FLOAT_LABEL),
+                    SlotEnumOption::new("fixed", FIXED_LABEL),
                 ],
             },
         }

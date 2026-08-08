@@ -2,7 +2,6 @@
   "kind": "Shader",
   "source": "attract.glsl",
   "render_order": 0,
-  "float_mode": "fixed",
   "bindings": {
     "palette": {
       "source": "bus:palette"
