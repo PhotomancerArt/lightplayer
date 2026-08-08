@@ -15,10 +15,10 @@ use lpc_shared::backtrace;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
-    WireOverlayMutationResponse, WireOverlayReadResponse, WireProjectInventoryReadResponse,
-    WireRemoveNodeRequest, WireRemoveNodeResponse,
+    OutputFrameProbeRequest, OutputFrameProbeResult, WireCreateNodeRequest, WireCreateNodeResponse,
+    WireNodeCommand, WireNodeCommandResponse, WireOverlayCommitRequest, WireOverlayCommitResponse,
+    WireOverlayMutationRequest, WireOverlayMutationResponse, WireOverlayReadResponse,
+    WireProjectInventoryReadResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 use lpfs::{FsEvent, FsVersion, LpFs};
 
@@ -291,6 +291,36 @@ impl Project {
         engine
             .resolve_bus_visual_product(registry, channel)
             .map_err(|e| ServerError::Core(format!("resolve bus visual product: {e}")))
+    }
+
+    /// Resolve the control product handle currently carried by a bus channel.
+    ///
+    /// The control sibling of [`Self::resolve_bus_visual_product`]. Preview
+    /// surfaces ask once after load whether the root scope's `control.out`
+    /// resolves: a project that answers `Ok` is driving lamps and leads with
+    /// them. An `Err` is the honest "nothing publishes control here", not a
+    /// fault — shader-only projects live there.
+    pub fn resolve_bus_control_product(
+        &mut self,
+        channel: &str,
+    ) -> Result<lpc_model::ControlProduct, ServerError> {
+        let (engine, registry) = self.runtime_read_parts();
+        engine
+            .resolve_bus_control_product(registry, channel)
+            .map_err(|e| ServerError::Core(format!("resolve bus control product: {e}")))
+    }
+
+    /// Read the frames every output node has ALREADY published.
+    ///
+    /// The published-frame probe without the wire around it, for in-process
+    /// hosts (the browser preview worker) that draw lamps from the same
+    /// buffers a device card feed pulls. Nothing is rendered here.
+    pub fn read_output_frame(
+        &mut self,
+        request: OutputFrameProbeRequest,
+    ) -> OutputFrameProbeResult {
+        let (engine, registry) = self.runtime_read_parts();
+        engine.read_project_output_frame_probe(registry, request)
     }
 
     /// Materialize a visual product into a CPU texture (preview path).

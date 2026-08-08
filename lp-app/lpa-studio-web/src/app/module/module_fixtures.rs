@@ -17,12 +17,13 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
-    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    ExportFinding, LpValue, ModuleHeroProduct, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView,
+    UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace,
+    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
-    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
+    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -37,6 +38,12 @@ pub(crate) const ROOT_SCOPE: &str = "/aurora.module";
 /// why their controls are independent (R8).
 pub(crate) const PLASMA_1_SCOPE: &str = "/aurora.module/plasma_1.module";
 pub(crate) const PLASMA_2_SCOPE: &str = "/aurora.module/plasma_2.module";
+/// The pattern-project fixture's sub-module scopes: three folders this
+/// project EXPORTS, and one it keeps (module authoring unit, R-A).
+pub(crate) const FIRE_SCOPE: &str = "/aurora.module/fire.module";
+pub(crate) const NOISE_PARTY_SCOPE: &str = "/aurora.module/noise_party.module";
+pub(crate) const RIPPLE_SCOPE: &str = "/aurora.module/ripple_interference_cascade.module";
+pub(crate) const COMMON_SCOPE: &str = "/aurora.module/common.module";
 
 /// The structured scope behind each fixture scope path — what the real
 /// derivation carries on `UiPanelGroup::target` and every control's
@@ -56,6 +63,10 @@ pub(crate) fn scope_target(scope: &str) -> lpc_wire::WireScopeRef {
         ROOT_SCOPE => module(1),
         PLASMA_1_SCOPE => module(2),
         PLASMA_2_SCOPE => module(3),
+        FIRE_SCOPE => module(11),
+        NOISE_PARTY_SCOPE => module(12),
+        RIPPLE_SCOPE => module(13),
+        COMMON_SCOPE => module(14),
         "/aurora.module/set.playlist/drift.shader" => sink(0),
         "/aurora.module/set.playlist/whirl.shader" => sink(1),
         other => panic!("unknown fixture scope {other}"),
@@ -70,6 +81,10 @@ pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
             1 => ROOT_SCOPE,
             2 => PLASMA_1_SCOPE,
             3 => PLASMA_2_SCOPE,
+            11 => FIRE_SCOPE,
+            12 => NOISE_PARTY_SCOPE,
+            13 => RIPPLE_SCOPE,
+            14 => COMMON_SCOPE,
             other => panic!("unknown fixture scope owner {other}"),
         },
         lpc_wire::WireScopeRef::Sink { entry: 0, .. } => "/aurora.module/set.playlist/drift.shader",
@@ -115,6 +130,7 @@ fn knob(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -143,6 +159,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -167,6 +184,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -198,6 +216,7 @@ fn swatch(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -233,6 +252,98 @@ pub(crate) fn palette_panel() -> UiPanelGroup {
                 swatch(ROOT_SCOPE, "held", "engaged", &palette_cycle()),
                 "show \u{b7} palette",
             ),
+        ])
+}
+
+// ------------------------------------------------------- clock transport
+
+/// The clock's default wiring: each transport leaf on its own `clock.*`
+/// channel, promoted onto the panel by the record's `panel = "show"`.
+pub(crate) const TRANSPORT_CHANNELS: [(UiPanelWireRole, &str); 3] = [
+    (UiPanelWireRole::Rate, "clock.rate"),
+    (UiPanelWireRole::PlayState, "clock.play_state"),
+    (UiPanelWireRole::Scrub, "clock.scrub"),
+];
+
+/// The clock's GROUPED Transport control on a module panel (P8): one
+/// control, three wires, one faceplate.
+///
+/// `channels` is the per-dimension wiring in anchor order (rate first), so
+/// a story can retarget one leaf — an authored binding on `rate` — and see
+/// the group re-anchor without the faceplate changing shape.
+pub(crate) fn transport_control(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelControlView {
+    let target = |channel: &str| lpa_studio_core::UiPanelTarget {
+        scope: scope_target(ROOT_SCOPE),
+        channel: channel.to_string(),
+        engaged: false,
+    };
+    let slot = |role: UiPanelWireRole| match role {
+        UiPanelWireRole::Rate => "transport.rate",
+        UiPanelWireRole::PlayState => "transport.play_state",
+        UiPanelWireRole::Scrub => "transport.scrub_offset_seconds",
+    };
+    let wires: Vec<lpa_studio_core::UiPanelWire> = channels
+        .into_iter()
+        .map(|(role, channel)| lpa_studio_core::UiPanelWire {
+            role,
+            address: Some(walk_address(ROOT_SCOPE, slot(role))),
+            panel_target: Some(target(channel)),
+            live_value: None,
+        })
+        .collect();
+    // The anchor is the first wired dimension in the list (Q22).
+    let anchor = channels[0].1;
+    UiPanelControlView::new(
+        anchor,
+        UiPanelControl {
+            label: "Time".to_string(),
+            address: Some(walk_address(ROOT_SCOPE, "transport.rate")),
+            widget: UiPanelWidget::Transport {
+                transport: transport.clone(),
+            },
+            value: UiSlotValue::f32(transport.rate),
+            emit: UiPanelEmit::Value,
+            live_value: None,
+            live_gradient: None,
+            panel_target: Some(target(anchor)),
+            unit: None,
+            state: UiSlotFieldState::editable(),
+            aspects: Vec::new(),
+            wires,
+        },
+    )
+}
+
+/// A root panel with the clock's Transport in its own "Clock" child group
+/// (the production assembly shape — an instrument never sits in the flat
+/// strip; G2 feedback 2026-08-08), plus the scarf's brightness fader and a
+/// knob in the flat strip — the real shape of the panel a phone opens
+/// onto, so the instrument is judged in company rather than alone.
+pub(crate) fn transport_panel(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelGroup {
+    UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            ),
+            following(
+                knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
+                "0.41",
+                "lfo · hue",
+            ),
+        ])
+        .with_groups(vec![
+            UiPanelGroup::new("Clock", "/aurora.sign/clock").with_controls(vec![at_default(
+                transport_control(transport, channels),
+                "the clock's own transport",
+            )]),
         ])
 }
 
@@ -319,11 +430,15 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 5))
                 .with_preview(aurora_preview(48, 15, seed)),
         ),
+        // An embedded effect's scope carries a visual and nothing else, so
+        // its hero is not a choice.
+        hero_choice: None,
         panel,
         wiring: Some(plasma_wiring()),
         wiring_open: false,
         provenance: Some("PhotomancerArt · v1.2 · CC0-1.0".to_string()),
         auto_save: None,
+        export: None,
     }
 }
 
@@ -456,12 +571,16 @@ pub(crate) fn root_face() -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 7))
                 .with_preview(aurora_preview(48, 21, 0.0)),
         ),
+        // The sign's scope drives no lamps of its own (its wiring publishes
+        // `visual.out` and nothing else), so there is nothing to switch to.
+        hero_choice: None,
         panel: root_panel(),
         wiring: Some(root_wiring()),
         wiring_open: false,
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
         // The project root owns panel persistence (P11).
         auto_save: Some(true),
+        export: None,
     }
 }
 
@@ -476,6 +595,9 @@ pub(crate) fn control_root_face() -> UiModuleFace {
                 .with_detail("16 RGB lamps · mirrors control.out")
                 .with_tracking(UiProductTrackingState::Tracking),
         ),
+        // Control only: no channel here carries a visual, so the hero is
+        // forced rather than chosen and no toggle rides it.
+        hero_choice: None,
         panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
             .with_target(scope_target(ROOT_SCOPE))
             .with_controls(vec![at_default(
@@ -486,6 +608,7 @@ pub(crate) fn control_root_face() -> UiModuleFace {
         wiring_open: false,
         provenance: None,
         auto_save: Some(true),
+        export: None,
     }
 }
 
@@ -520,6 +643,69 @@ fn control_wiring() -> UiBusView {
             },
         ],
     }
+}
+
+/// The ordinary fixture-project shape: a shader paints `visual.out`, the
+/// fixture turns it into `control.out` lamps, so the scope resolves BOTH
+/// primaries and the hero is a **choice** — lamps by default, the raster one
+/// toggle away.
+///
+/// The face carries the hero already resolved, exactly as
+/// `ProjectController::module_face` hands it over: one preview plus the
+/// preference the toggle reflects, never both products at once.
+pub(crate) fn both_products_root_face(hero: ModuleHeroProduct) -> UiModuleFace {
+    let preview = match hero {
+        ModuleHeroProduct::Control => control_preview_product("output")
+            .with_detail("16 RGB lamps · mirrors control.out")
+            .with_tracking(UiProductTrackingState::Tracking),
+        ModuleHeroProduct::Visual => UiProducedProduct::visual("output")
+            .with_detail("256 x 256 · mirrors visual.out")
+            .with_tracking(UiProductTrackingState::Tracking)
+            .with_frame(UiProductPreviewFrame::new(16, 7))
+            .with_preview(aurora_preview(48, 21, 0.0)),
+    };
+    UiModuleFace {
+        preview: Some(preview),
+        hero_choice: Some(hero),
+        panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
+            .with_target(scope_target(ROOT_SCOPE))
+            .with_controls(vec![at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            )]),
+        wiring: Some(both_products_wiring()),
+        wiring_open: false,
+        provenance: None,
+        auto_save: Some(true),
+        // A root face: designation rows ride every card BUT the root.
+        export: None,
+    }
+}
+
+/// [`control_wiring`] with the shader's raster in front of it — the chain
+/// the toggle picks two points on.
+fn both_products_wiring() -> UiBusView {
+    let mut wiring = control_wiring();
+    wiring.channels.insert(
+        1,
+        UiBusChannelView {
+            primary_visual: true,
+            preview: Some(UiBusChannelPreview {
+                kind: UiProductKind::Visual,
+                preview: aurora_preview(48, 21, 0.0),
+                tracking: UiProductTrackingState::Tracking,
+                frame: UiProductPreviewFrame::new(16, 7),
+            }),
+            ..channel(
+                "visual.out",
+                "Color",
+                Some("visual product #4:0"),
+                vec![site("scanner", "visual")],
+                vec![site("Fixture", "input")],
+            )
+        },
+    );
+    wiring
 }
 
 /// The root module's children, as sibling cards BELOW its card: two leaves
@@ -741,6 +927,203 @@ pub(crate) fn module_node_view(
     let mut view = UiNodeView::new(header, Vec::new()).with_node_id(path);
     view.face = Some(UiNodeFace::Module(face));
     view
+}
+
+// --------------------------------------------------------------- exports
+
+/// The exports family (module authoring unit, P3; regrouped by G1's R-A):
+/// the fixture project is `yona-noise`, a pattern project shipping module
+/// folders. The three verdicts below are the three states the grouped
+/// column has to hold.
+pub(crate) const EXPORT_PROJECT: &str = "yona-noise";
+
+/// The sibling-feed warning (P2's graph half): an exported module reads a
+/// channel only scaffolding writes, so an imported copy runs on the
+/// authored default.
+pub(crate) fn scaffolding_warning() -> ExportFinding {
+    ExportFinding::warning(
+        "fire",
+        "fire reads bus:noise.field, whose only writer is common — not exported. \
+         Imported copies run on the authored default."
+            .to_string(),
+        None,
+    )
+}
+
+/// The escaping-ref error (P2's static half): a file inside the export
+/// folder points outside it, so the vendored copy would not load.
+pub(crate) fn escaping_ref_error() -> ExportFinding {
+    ExportFinding::error(
+        "ripple_interference_cascade",
+        "wave.glsl references ../common/simplex.glsl, which escapes the export \
+         folder. Move it inside ripple_interference_cascade/ before exporting."
+            .to_string(),
+        Some("/ripple_interference_cascade/wave.glsl".to_string()),
+    )
+}
+
+/// One exported module's own card: the same module face every depth wears,
+/// carrying a DESIGNATED export row so its header grows the export chip
+/// (tinted by this export's own findings).
+///
+/// The wiring drawer is dropped and the panel kept small deliberately —
+/// these stories are about the COLUMN, and three full-height effect cards
+/// plus the rig would push the grouping off the canvas.
+fn export_child(
+    name: &str,
+    scope: &'static str,
+    seed: f32,
+    findings: Vec<ExportFinding>,
+) -> UiNodeChild {
+    let mut face = plasma_face(plasma_read_panel(scope), seed);
+    face.wiring = None;
+    face.export = Some(designated_export(name, findings));
+    let mut child = plain_child(name, "Module", scope, "effect · exported");
+    child.face = Some(UiNodeFace::Module(face));
+    child
+}
+
+/// The scaffolding that stays home: the clock every effect reads, the
+/// shared `common` module that is NOT exported, and the fixture the
+/// project actually drives. This is the unlabeled half of the column —
+/// the nodes below the bare hairline.
+fn rig_children() -> Vec<UiNodeChild> {
+    let mut common = plasma_face(plasma_read_panel(COMMON_SCOPE), 5.7);
+    common.wiring = None;
+    common.preview = None;
+    let mut common_child = plain_child("common", "Module", COMMON_SCOPE, "shared noise field");
+    common_child.face = Some(UiNodeFace::Module(common));
+    vec![
+        plain_child("clock", "Clock", "clock.json", "seconds → bus:time"),
+        common_child,
+        controls_child(
+            "halo",
+            "Fixture",
+            "fixture.json",
+            "241 LEDs · input ← bus:visual.out",
+            UiPanelGroup::new("halo", ROOT_SCOPE)
+                .with_target(scope_target(ROOT_SCOPE))
+                .with_controls(vec![at_default(
+                    fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                    "authored 200",
+                )]),
+        ),
+    ]
+}
+
+/// A pattern project's whole workspace column, grouped (R-A): the named
+/// export folders' cards first, then the rig, with `findings` as the
+/// aggregate preamble under the `exports` header.
+fn exporting_root_view(
+    exports: &[(&str, &'static str)],
+    findings: Vec<ExportFinding>,
+) -> UiNodeView {
+    let mut children: Vec<UiNodeChild> = exports
+        .iter()
+        .enumerate()
+        .map(|(index, (name, scope))| {
+            let own: Vec<ExportFinding> = findings
+                .iter()
+                .filter(|finding| finding.export == *name)
+                .cloned()
+                .collect();
+            export_child(name, scope, 3.1 + index as f32 * 1.7, own)
+        })
+        .collect();
+    let keys: Vec<String> = children.iter().map(|child| child.detail.clone()).collect();
+    children.extend(rig_children());
+
+    let summary = format!("{} nodes · {} exports", children.len(), exports.len());
+    let mut view = module_node_view(EXPORT_PROJECT, ROOT_SCOPE, &summary, root_face());
+    view.children = children;
+    view.exports = Some(UiExportsGroup { keys, findings });
+    view
+}
+
+/// Two exports, both clean — the reassuring state.
+pub(crate) fn clean_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[("fire", FIRE_SCOPE), ("noise_party", NOISE_PARTY_SCOPE)],
+        Vec::new(),
+    )
+}
+
+/// One export carrying a warning: it would still ship, just poorer for it.
+pub(crate) fn warning_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[("fire", FIRE_SCOPE), ("noise_party", NOISE_PARTY_SCOPE)],
+        vec![scaffolding_warning()],
+    )
+}
+
+/// Both severities at once: the preamble has to rank them without letting
+/// the warning hide the error, and each card's chip has to carry its own.
+pub(crate) fn error_exports_view() -> UiNodeView {
+    exporting_root_view(
+        &[
+            ("fire", FIRE_SCOPE),
+            ("noise_party", NOISE_PARTY_SCOPE),
+            ("ripple_interference_cascade", RIPPLE_SCOPE),
+        ],
+        vec![scaffolding_warning(), escaping_ref_error()],
+    )
+}
+
+/// A DESIGNATED export's row, carrying whatever lint it has — the shape
+/// the header chip reads its tone from.
+pub(crate) fn designated_export(folder: &str, findings: Vec<ExportFinding>) -> UiModuleExport {
+    UiModuleExport {
+        folder: folder.to_string(),
+        project: EXPORT_PROJECT.to_string(),
+        designated: true,
+        disabled_reason: None,
+        upgrades_to_pattern: false,
+        findings,
+    }
+}
+
+/// `fire`'s designation row as its popup shows it: a live checkbox on a
+/// folder module directly under the root.
+pub(crate) fn fire_export(designated: bool) -> UiModuleExport {
+    UiModuleExport {
+        folder: "fire".to_string(),
+        project: EXPORT_PROJECT.to_string(),
+        designated,
+        disabled_reason: None,
+        upgrades_to_pattern: !designated,
+        findings: if designated {
+            vec![scaffolding_warning(), escaping_ref_error()]
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+/// The disabled row: a module with no folder of its own has nothing to
+/// vendor, and says so instead of vanishing.
+pub(crate) fn inline_module_export() -> UiModuleExport {
+    UiModuleExport {
+        folder: String::new(),
+        project: EXPORT_PROJECT.to_string(),
+        designated: false,
+        disabled_reason: Some(
+            "An export ships a folder. This module is a single file — move it into a \
+             folder of its own to export it."
+                .to_string(),
+        ),
+        upgrades_to_pattern: false,
+        findings: Vec::new(),
+    }
+}
+
+/// One module card wearing a designation row (and, when designated, the
+/// header's display-only export chip).
+pub(crate) fn module_card_with_export(name: &str, export: UiModuleExport) -> UiNodeView {
+    let mut face = plasma_face(plasma_read_panel(PLASMA_1_SCOPE), 0.2);
+    face.preview = None;
+    face.wiring = None;
+    face.export = Some(export);
+    module_node_view(name, PLASMA_1_SCOPE, "3 nodes · 1 shader", face)
 }
 
 // -------------------------------------------------------------- playlist

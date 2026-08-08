@@ -71,6 +71,12 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
+    /// Every pattern export the local library offers, for the add-node
+    /// picker's import source (module authoring unit, P5). Pushed down from
+    /// the studio controller at each library settle — a view build must
+    /// never reach for a store, and the gallery snapshot it is derived
+    /// from is already being read there.
+    import_patterns: Vec<crate::UiImportablePattern>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -180,6 +186,143 @@ pub struct ProjectController {
     /// collected yet — today, "Upgraded project from format 4 to 5". Drained
     /// by [`Self::take_open_notices`].
     open_notices: Vec<UiNotice>,
+    /// Memoized export-lint verdict for the active library project (P2 of
+    /// the module authoring unit), read through
+    /// [`Self::export_lint_report`].
+    ///
+    /// Interior-mutable so the read path can stay `&self` for view builders
+    /// while the two halves still recompute only when their own inputs
+    /// move: the STATIC half ([`lpc_model::check_exports`]) on the saved
+    /// package bytes, the GRAPH half
+    /// ([`crate::app::project::check_export_graph`]) on the binding-graph
+    /// revision. The static half reads files; the graph half does not, so
+    /// the common case (a new probe snapshot every refresh) never touches
+    /// the filesystem.
+    export_lint: std::cell::RefCell<Option<ExportLintCache>>,
+    /// Forces the STATIC half to re-run when the package bytes changed
+    /// without `last_synced` moving — a manifest patch
+    /// (`package_manifest::set_kind_and_exports`) is exactly that case, so
+    /// P3's designation editor bumps this via
+    /// [`Self::invalidate_export_lint`].
+    export_lint_epoch: std::cell::Cell<u64>,
+}
+
+/// Memoized export-lint state (see [`ProjectController::export_lint`]).
+struct ExportLintCache {
+    /// Static-half inputs: project uid, the runtime fs version the library
+    /// copy is synced to, and the manual epoch.
+    static_key: (String, lpc_model::FsVersion, u64),
+    /// Export folder names the static half read out of `project.json`.
+    /// Empty for a non-library project, which short-circuits both halves.
+    exports: Vec<String>,
+    /// Findings the static half produced for `static_key`.
+    static_findings: Vec<lpc_model::ExportFinding>,
+    /// Binding-graph revision the assembled `report` was built at; `None`
+    /// when no graph snapshot had arrived yet.
+    graph_revision: Option<lpc_model::Revision>,
+    /// Both halves joined. `Rc` so the read path hands out a cheap clone
+    /// rather than copying the findings per view build.
+    report: Rc<lpc_model::ExportLintReport>,
+}
+
+/// What every module card on one view build needs to know about the open
+/// library project's exports (module authoring unit, P3).
+///
+/// Built once by [`ProjectController::export_designation_context`] — the
+/// alternative is re-parsing `project.json` per module card.
+struct ExportDesignationContext {
+    /// The project's display name, for the checkbox copy ("Export from
+    /// yona-noise"). Falls back to the library slug.
+    project: String,
+    /// The project's authored kind, which decides whether ticking a box is
+    /// also an upgrade (`General` ⇒ `Pattern`).
+    kind: lpc_model::ProjectKind,
+    /// The manifest's `exports` list, in manifest order.
+    exports: Vec<String>,
+    /// P2's lint verdict for those exports.
+    report: Rc<lpc_model::ExportLintReport>,
+    /// The lens is a DEVICE: the manifest being edited would be the
+    /// library's, not the one in front of you, so designation disables with
+    /// a reason (planning Q4).
+    device_session: bool,
+}
+
+impl ExportDesignationContext {
+    /// Whether the popup offers designation at all. `Show` and `Rig`
+    /// projects keep the section hidden this round (P3 scope).
+    fn offers_designation(&self) -> bool {
+        matches!(
+            self.kind,
+            lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. }
+        )
+    }
+}
+
+/// What a module's def-artifact path says about its exportability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExportFolder<'a> {
+    /// `/fire/module.json` — a folder directly inside the project. The one
+    /// exportable shape.
+    Direct(&'a str),
+    /// `/effects/fire/module.json` — a folder, but not a direct child.
+    Nested,
+    /// `/fire.module.json` — no folder of its own.
+    Inline,
+    /// The def artifact is not in the connect-time map at all.
+    Unknown,
+}
+
+/// Classify a module def-artifact path for export purposes.
+///
+/// An export vendors `<folder>/` wholesale, so the only exportable shape is
+/// a module whose def IS a folder's `module.json` one level down from the
+/// project root. `/module.json` (the root module) classifies as `Nested`'s
+/// opposite — it never reaches here, because the root is excluded before
+/// the call (vision Q3: an export must not point at the root).
+fn export_folder_shape(def_path: &str) -> ExportFolder<'_> {
+    let segments: Vec<&str> = def_path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    match segments.as_slice() {
+        [folder, "module.json"] => ExportFolder::Direct(folder),
+        [.., "module.json"] if segments.len() > 2 => ExportFolder::Nested,
+        _ => ExportFolder::Inline,
+    }
+}
+
+/// The kind the manifest takes after one designation edit.
+///
+/// The first export on a `General` project makes it a `Pattern` (vision
+/// D14's upgrade gesture); removing the last one puts it back. A `Rig`
+/// keeps being a rig — its exports are its own list — and a `Show` has no
+/// list to edit, so it is left alone.
+fn next_project_kind(
+    current: &lpc_model::ProjectKind,
+    exports: &[String],
+    folder: &str,
+    export: bool,
+) -> lpc_model::ProjectKind {
+    let mut next: Vec<String> = exports
+        .iter()
+        .filter(|name| name.as_str() != folder)
+        .cloned()
+        .collect();
+    if export {
+        next.push(folder.to_string());
+        next.sort();
+    }
+    if next.is_empty() {
+        return lpc_model::ProjectKind::General;
+    }
+    match current {
+        lpc_model::ProjectKind::Rig { .. } => lpc_model::ProjectKind::Rig { exports: next },
+        lpc_model::ProjectKind::Show => lpc_model::ProjectKind::Show,
+        lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. } => {
+            lpc_model::ProjectKind::Pattern { exports: next }
+        }
+    }
 }
 
 /// One staged node removal (see `ProjectController::staged_removals`).
@@ -233,6 +376,7 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             lens_runtime_kind: None,
             lens_device_features: None,
+            import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -256,6 +400,8 @@ impl ProjectController {
             library: None,
             classified_open_issue: None,
             open_notices: Vec::new(),
+            export_lint: std::cell::RefCell::new(None),
+            export_lint_epoch: std::cell::Cell::new(0),
         }
     }
 
@@ -429,9 +575,11 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
-        // Hoisted out of the per-channel pass: the always-live set is a
-        // graph scan, and every value box asks the same question of it.
-        let always_live = self.always_live_products();
+        // Hoisted out of the per-channel pass: the subscription set is a
+        // walk of the node tree, and every value box asks the same question
+        // of it (R-C — a borrowed surface is tracking exactly while its
+        // product is still being pulled).
+        let subscribed = self.subscribed_products();
         // Sites carry their binding's priority out so the per-channel pass
         // below can mark shadowed writers and top-priority ties (E3).
         let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
@@ -549,7 +697,7 @@ impl ProjectController {
                     Some(crate::UiBusChannelPreview {
                         kind: ui_product_kind(product),
                         preview: bytes,
-                        tracking: borrowed_tracking(&always_live, product),
+                        tracking: borrowed_tracking(&subscribed, product),
                         frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
                     })
                 });
@@ -642,6 +790,118 @@ impl ProjectController {
             walk(root, &mut stack, target, &mut out);
         }
         out
+    }
+
+    /// The active project's export-lint verdict (module authoring unit, P2):
+    /// both halves of the check, joined, cached per input.
+    ///
+    /// Empty — and free — for anything that is not a library project with a
+    /// non-empty `exports` list: no active library project, a `General` or
+    /// `Show` kind, or a `Pattern`/`Rig` that exports nothing yet. Only when
+    /// there is something to check does this read package bytes, and then
+    /// only when those bytes could have moved (see [`Self::export_lint`]).
+    ///
+    /// P3 renders this; nothing here decides presentation.
+    pub fn export_lint_report(&self) -> Rc<lpc_model::ExportLintReport> {
+        let Some(active) = self
+            .library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+        else {
+            return Rc::new(lpc_model::ExportLintReport::default());
+        };
+        let static_key = (
+            active.handle.uid.to_string(),
+            active.last_synced,
+            self.export_lint_epoch.get(),
+        );
+        let graph_revision = self.binding_graph().map(|graph| graph.revision);
+
+        let mut cache = self.export_lint.borrow_mut();
+        let static_stale = cache
+            .as_ref()
+            .is_none_or(|entry| entry.static_key != static_key);
+        if static_stale {
+            let (exports, static_findings) = static_export_findings(&active.handle);
+            *cache = Some(ExportLintCache {
+                static_key,
+                exports,
+                static_findings,
+                graph_revision: None,
+                report: Rc::new(lpc_model::ExportLintReport::default()),
+            });
+        }
+        let entry = cache.as_mut().expect("filled above");
+        if static_stale || entry.graph_revision != graph_revision {
+            let mut findings = entry.static_findings.clone();
+            if !entry.exports.is_empty()
+                && let Some(graph) = self.binding_graph()
+            {
+                findings.extend(super::export_lint::check_export_graph(
+                    graph,
+                    &entry.exports,
+                    &self.export_graph_context(),
+                ));
+            }
+            entry.graph_revision = graph_revision;
+            entry.report = Rc::new(lpc_model::ExportLintReport::new(findings));
+        }
+        Rc::clone(&entry.report)
+    }
+
+    /// Force the export lint's STATIC half to re-run on the next read.
+    ///
+    /// Needed only for package writes that do not advance the library's
+    /// synced fs version — today just a `project.json` patch (the kind /
+    /// exports designation, P3). Ordinary saves already move
+    /// `last_synced` and invalidate on their own.
+    pub fn invalidate_export_lint(&self) {
+        self.export_lint_epoch
+            .set(self.export_lint_epoch.get().wrapping_add(1));
+    }
+
+    /// Node identity and placement for the export lint's graph half, from
+    /// the synced controller tree plus the connect-time def-artifact map.
+    ///
+    /// `enclosing_scopes` is the chain of MODULE nodes above each node,
+    /// outermost first — the outward walk R5 resolution follows. Playlists
+    /// are not in it: an entry's sink scope is named by the playlist node
+    /// itself, and the graph half hops from that sink straight to the
+    /// playlist's own enclosing modules.
+    fn export_graph_context(&self) -> super::export_lint::ExportGraphContext {
+        fn walk(
+            node: &NodeController,
+            stack: &mut Vec<NodeId>,
+            def_artifacts: &BTreeMap<NodeId, ArtifactLocation>,
+            out: &mut Vec<super::export_lint::ExportGraphNode>,
+        ) {
+            let id = node.target().node_id;
+            out.push(super::export_lint::ExportGraphNode {
+                id,
+                label: node.label().to_string(),
+                def_path: def_artifacts
+                    .get(&id)
+                    .map(|artifact| artifact.file_path().as_str().to_string()),
+                enclosing_scopes: stack.clone(),
+            });
+            let is_module = node.kind() == MODULE_KIND_LABEL;
+            if is_module {
+                stack.push(id);
+            }
+            for child in node.children() {
+                walk(child, stack, def_artifacts, out);
+            }
+            if is_module {
+                stack.pop();
+            }
+        }
+
+        let mut nodes = Vec::new();
+        let mut stack = Vec::new();
+        for root in &self.root_nodes {
+            walk(root, &mut stack, &self.def_artifacts, &mut nodes);
+        }
+        super::export_lint::ExportGraphContext::new(nodes)
     }
 
     /// The project's **primary visual product**: the resolved value of
@@ -1769,7 +2029,9 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // Dotted, so a transport leaf's reading decorates the LEAF row
+            // rather than the `transport` record it hangs under (P8).
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let live = self.live_channel_display(graph, scope.as_ref(), channel, binding.kind);
@@ -1782,7 +2044,7 @@ impl ProjectController {
             if live.is_none() && gradient.is_none() {
                 continue;
             }
-            updates.push((binding.node, name.as_str().to_string(), live, gradient));
+            updates.push((binding.node, name, live, gradient));
         }
         for (node_id, slot, live, gradient) in updates {
             if let Some(node) = self
@@ -1854,7 +2116,12 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // DOTTED (P8): a `default_bind` declared on a leaf inside a
+            // promoted record — the clock's three transport leaves — must
+            // decorate that leaf's own row. Keyed by first segment alone,
+            // all three collapsed onto the single `transport` row and the
+            // grouped control could not tell which dimension was wired.
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let mut endpoint = self
@@ -1889,13 +2156,7 @@ impl ProjectController {
                 lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
                 lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
             };
-            facts.push((
-                binding.node,
-                SlotBindingFact {
-                    slot: name.as_str().to_string(),
-                    kind,
-                },
-            ));
+            facts.push((binding.node, SlotBindingFact { slot: name, kind }));
         }
         for (node_id, fact) in facts {
             if let Some(node) = self
@@ -2040,6 +2301,14 @@ impl ProjectController {
         // already be built (and card-UI-overlaid) before it can be read.
         self.apply_module_faces(&mut nodes);
         let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        // The import source (P5) is attached before the device gate, so a
+        // board with no module runtime disables the vendoring rows too
+        // rather than offering a create it cannot run.
+        crate::app::project::node::set_import_source(
+            &mut root_add_node_menu,
+            &self.import_patterns,
+            self.active_library_uid().as_deref(),
+        );
         gate_add_node_menu(
             &mut root_add_node_menu,
             self.lens_device_features.as_deref(),
@@ -2792,8 +3061,18 @@ impl ProjectController {
         let Some(graph) = self.binding_graph() else {
             return;
         };
+        // Read once per view build, not once per module card: it costs a
+        // `project.json` parse and the lint verdict, and every module card
+        // in the workspace is asking the same question about the same
+        // project (P3).
+        let exports = self.export_designation_context();
+        // The CURRENT subscription set, read once per view build: every
+        // borrowed surface (a module hero re-homed onto its scope's
+        // product, a wiring value box) asks the same question of it, and
+        // the answer costs a walk of the whole node tree (R-C).
+        let subscribed = self.subscribed_products();
         for node in nodes {
-            self.apply_child_module_faces(&mut node.children, graph);
+            self.apply_child_module_faces(&mut node.children, graph, exports.as_ref(), &subscribed);
             if node.header.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2804,9 +3083,18 @@ impl ProjectController {
                 view_sections(node),
                 &node.children,
                 node.card_ui.wiring_open,
+                exports.as_ref(),
+                &subscribed,
+                node.card_ui.hero_product,
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
+            // The child column's exports/rig split (R-A) — computed after
+            // the child faces exist, because it partitions the finished
+            // child cards rather than the manifest's name list.
+            node.exports = exports
+                .as_ref()
+                .and_then(|context| self.root_exports_group(node, context));
         }
     }
 
@@ -2814,9 +3102,11 @@ impl ProjectController {
         &self,
         children: &mut [crate::UiNodeChild],
         graph: &lpc_wire::WireBindingGraph,
+        exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
     ) {
         for child in children {
-            self.apply_child_module_faces(&mut child.children, graph);
+            self.apply_child_module_faces(&mut child.children, graph, exports, subscribed);
             if child.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2827,6 +3117,9 @@ impl ProjectController {
                 &child.sections,
                 &child.children,
                 child.card_ui.wiring_open,
+                exports,
+                subscribed,
+                child.card_ui.hero_product,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2865,6 +3158,16 @@ impl ProjectController {
                     // one place that can fill in the real number (P2).
                     if let Some(transport) = clock.transport.as_mut() {
                         transport.seconds = *seconds;
+                    }
+                    // The grouped panel control carries its own copy of the
+                    // block (it travels onto the module panel without the
+                    // face), so the probe's anchor has to reach it too —
+                    // otherwise the panel's tape would render from 0:00
+                    // while the card's showed the real time (P8 item 4).
+                    for control in &mut clock.controls {
+                        if let crate::UiPanelWidget::Transport { transport } = &mut control.widget {
+                            transport.seconds = *seconds;
+                        }
                     }
                     (
                         crate::UiTimebaseState::Live,
@@ -2982,6 +3285,9 @@ impl ProjectController {
         sections: &[crate::UiNodeSection],
         children: &[crate::UiNodeChild],
         wiring_open: bool,
+        exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
+        hero_product: crate::ModuleHeroProduct,
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
         let node = self.node(&address)?;
@@ -2990,16 +3296,36 @@ impl ProjectController {
 
         let controls = self.scoped_panel_controls(graph, scope, children);
 
+        // An INSTRUMENT control (the clock's Transport) gets its own child
+        // group wearing the owning node's name, not a slot in the module's
+        // flat strip — a tape deck between a brightness fader and a hue
+        // knob read as clutter (G2 feedback 2026-08-08). The group carries
+        // NO reset target: a group reset clears a whole scope's writers,
+        // which here is the module's, and the instrument already has
+        // per-dimension clears.
+        let (instruments, controls): (Vec<_>, Vec<_>) = controls.into_iter().partition(|view| {
+            matches!(view.control.widget, crate::UiPanelWidget::Transport { .. })
+        });
+        let mut groups: Vec<crate::UiPanelGroup> = instruments
+            .into_iter()
+            .map(|view| {
+                let node_path = view
+                    .control
+                    .address
+                    .as_ref()
+                    .map(|address| address.node.to_string())
+                    .unwrap_or_default();
+                let label = child_label(children, &node_path).unwrap_or_else(|| "Clock".into());
+                crate::UiPanelGroup::new(label, node_path).with_controls(vec![view])
+            })
+            .collect();
         // Presentation recursion (R8): each direct child module's finished
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
-        let mut groups: Vec<crate::UiPanelGroup> = children
-            .iter()
-            .filter_map(|child| match &child.face {
-                Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
-                _ => None,
-            })
-            .collect();
+        groups.extend(children.iter().filter_map(|child| match &child.face {
+            Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+            _ => None,
+        }));
         // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
         // scope is a SINK, not a module, so its controls match no module
         // panel by scope and would otherwise be visible only on the entry's
@@ -3007,56 +3333,100 @@ impl ProjectController {
         // while its idle shader carried two knobs. The group is the entry's,
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
+        // A group with nothing in it says nothing (R-E): an invocation whose
+        // scope publishes no channel used to render as a bordered box with a
+        // name and no controls. Child faces are finished before this runs,
+        // so one pass per level clears the whole tree.
+        groups.retain(|group| !group.is_empty());
 
-        // The module's own visual mirror (R7); a module with no output
-        // simply has no hero (E6). The mirror ROW supplies identity and
-        // meta, but its bytes ride the scope's resolved `visual.out`
-        // product: the mirror's own product ref is outside the preview
-        // stream (only always-live products and the focused node's are
-        // tracked), so without this rehoming the root hero renders
-        // black while the shader card below it is live.
-        let mut preview =
-            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
+        // The hero: whichever of the scope's two primary products the card's
+        // preference names, defaulting to `control.out` — a fixture
+        // project's output IS the lamps, and the raster behind them is the
+        // intermediate (Yona's ruling 2026-08-07, reversing R7's
+        // visual-first reading). The named kind not resolving falls back to
+        // the other, so a single-product module renders the same either way,
+        // and a scope resolving neither keeps the cleared R7 mirror (E6).
         let scope_visual = self
             .scope_channel_product(graph, scope, lpc_model::PRIMARY_VISUAL_CHANNEL)
             .filter(|product| matches!(product, UiProductRef::Visual { .. }));
+        let scope_control = self
+            .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .filter(|product| matches!(product, UiProductRef::Control { .. }));
+        // Only a scope resolving BOTH offers a choice; anything else has one
+        // hero and no toggle to draw.
+        let hero_choice =
+            (scope_visual.is_some() && scope_control.is_some()).then_some(hero_product);
+        let chosen = match hero_product {
+            crate::ModuleHeroProduct::Control => scope_control.or(scope_visual),
+            crate::ModuleHeroProduct::Visual => scope_visual.or(scope_control),
+        };
+
+        // The R7 mirror ROW supplies identity and meta, but its bytes ride
+        // the scope's resolved product: the mirror's own product ref is
+        // outside the preview stream (only always-live products and the
+        // focused node's are tracked), so without this rehoming the root
+        // hero renders black while the shader card below it is live.
+        let mut preview =
+            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
+        if preview.is_none() && matches!(chosen, Some(UiProductRef::Control { .. })) {
+            // The asymmetry control-first exposes: the R7 mirror is a
+            // VISUAL row, so a module publishing no mirror at all would get
+            // NO hero even though its scope drives lamps — "control-first"
+            // with nothing to show. Synthesize the row from the module's
+            // own control product when it has one, else from the kind
+            // alone; the rehoming below fills it exactly as it fills the
+            // mirror. The visual side keeps its old rule (no mirror row, no
+            // hero): R7 guarantees the row for every module, so a
+            // synthesized visual hero would only paper over a broken walk.
+            preview = super::node::node_face_builder::product_of_kind(
+                sections,
+                crate::UiProductKind::Control,
+            )
+            .or_else(|| {
+                Some(crate::UiProducedProduct::new(
+                    MODULE_OUTPUT_SLOT,
+                    crate::UiProductKind::Control,
+                ))
+            });
+        }
         if let Some(hero) = preview.as_mut() {
-            if let Some(product) = scope_visual {
-                if let Some(bytes) = self
-                    .sync
-                    .as_ref()
-                    .and_then(|sync| sync.product_preview(&product))
-                {
-                    hero.preview = bytes.clone();
-                    hero.tracking = borrowed_tracking(&self.always_live_products(), product);
-                    hero.product = Some(product);
+            match chosen {
+                Some(product @ UiProductRef::Visual { .. }) => {
+                    if let Some(bytes) = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))
+                    {
+                        hero.preview = bytes.clone();
+                        hero.tracking = borrowed_tracking(subscribed, product);
+                        hero.product = Some(product);
+                    }
                 }
-            } else if let Some(product) = self
-                .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
-                .filter(|product| matches!(product, UiProductRef::Control { .. }))
-            {
-                // A control-first module: nothing writes the scope's
-                // visual, so the mirror node renders CLEARED — a black
-                // square is not this module's output, its fixtures' lamps
-                // are. The hero becomes the control product outright
-                // (kind included, so the shared preview draws the lamp
-                // layout), and says "not tracked" honestly when the bytes
-                // are not in the stream instead of showing the cleared
-                // mirror.
-                hero.kind = ui_product_kind(product);
-                hero.tracking = borrowed_tracking(&self.always_live_products(), product);
-                hero.product = Some(product);
-                hero.preview = self
-                    .sync
-                    .as_ref()
-                    .and_then(|sync| sync.product_preview(&product))
-                    .cloned()
-                    .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
+                Some(product) => {
+                    // A control hero: the visual mirror would render CLEARED
+                    // (or stale) here — a black square is not this module's
+                    // output, its fixtures' lamps are. The hero becomes the
+                    // control product outright (kind included, so the shared
+                    // preview draws the lamp layout), and says "not tracked"
+                    // honestly when the bytes are not in the stream instead
+                    // of showing the mirror.
+                    hero.kind = ui_product_kind(product);
+                    hero.tracking = borrowed_tracking(subscribed, product);
+                    hero.product = Some(product);
+                    hero.preview = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))
+                        .cloned()
+                        .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
+                }
+                None => {}
             }
         }
 
         Some(crate::UiModuleFace {
             preview,
+            hero_choice,
             panel: crate::UiPanelGroup::new(label, path)
                 .with_target(scope)
                 .with_controls(controls)
@@ -3075,6 +3445,267 @@ impl ProjectController {
                 .is_root_module(owner)
                 .then(|| self.panel_auto_save())
                 .flatten(),
+            // Designation is a property of one module, so the popup row
+            // rides every card but the root (an export must never point at
+            // the root — vision Q3). The CONTAINER's own exports are not on
+            // this face at all any more: they group the child column
+            // instead (R-A, [`crate::UiNodeView::exports`]).
+            export: if self.is_root_module(owner) {
+                None
+            } else {
+                exports.and_then(|context| self.module_export_row(context, owner))
+            },
+        })
+    }
+
+    /// Everything the export UI needs about the OPEN library project, read
+    /// once per view build (module authoring unit, P3).
+    ///
+    /// `None` when no library package backs the running project — the demo
+    /// path and a device-hosted project this library does not know have no
+    /// manifest to designate against, so neither the rail nor the popup row
+    /// appears at all (the `ProjectShareSection` precedent).
+    fn export_designation_context(&self) -> Option<ExportDesignationContext> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let fields = {
+            let view = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::read_manifest(&*view).ok()?
+        };
+        Some(ExportDesignationContext {
+            project: fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone()),
+            kind: fields.kind,
+            exports: fields.exports,
+            report: self.export_lint_report(),
+            // The manifest is library-owned. Looking at a project through a
+            // device lens, the bytes you would be editing are not the ones
+            // in front of you, so the row disables and says so (planning
+            // Q4).
+            device_session: matches!(self.lens_runtime_kind, Some(crate::RuntimeKind::Device)),
+        })
+    }
+
+    /// How the ROOT card's child column splits into exports and rig (R-A).
+    ///
+    /// `None` for any card but the root, for a project that exports
+    /// nothing, and for a manifest whose export names match no child card
+    /// — in all three the column renders exactly as it always did.
+    ///
+    /// Membership is read from each child's DEF ARTIFACT, not from its
+    /// designation row: the row is hidden on `Show`/`Rig` projects, and a
+    /// rig's exports are still exports.
+    fn root_exports_group(
+        &self,
+        node: &UiNodeView,
+        context: &ExportDesignationContext,
+    ) -> Option<crate::UiExportsGroup> {
+        if context.exports.is_empty() {
+            return None;
+        }
+        let address = ProjectNodeAddress::parse(&node.header.path).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        if !self.is_root_module(owner) {
+            return None;
+        }
+        let keys: Vec<String> = node
+            .children
+            .iter()
+            .filter(|child| {
+                self.child_export_folder(child)
+                    .is_some_and(|folder| context.exports.iter().any(|name| name == folder))
+            })
+            .map(|child| child.detail.clone())
+            .collect();
+        if keys.is_empty() {
+            return None;
+        }
+        Some(crate::UiExportsGroup {
+            keys,
+            findings: context.report.findings.clone(),
+        })
+    }
+
+    /// The export folder one child card would ship, when it is a module
+    /// whose def IS a direct sub-folder's `module.json` — the one
+    /// exportable shape ([`export_folder_shape`]).
+    fn child_export_folder(&self, child: &crate::UiNodeChild) -> Option<&str> {
+        let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let def_path = self.def_artifacts.get(&owner)?.file_path().as_str();
+        match export_folder_shape(def_path) {
+            ExportFolder::Direct(folder) => Some(folder),
+            ExportFolder::Nested | ExportFolder::Inline | ExportFolder::Unknown => None,
+        }
+    }
+
+    /// The export designation row for ONE module card's detail popup.
+    ///
+    /// `None` hides the section entirely — a `Show` or `Rig` project, which
+    /// this round does not offer designation for. Otherwise the row always
+    /// renders: when the module cannot be exported the row carries the
+    /// reason instead of vanishing, the add-node picker's disabled-row
+    /// precedent.
+    fn module_export_row(
+        &self,
+        context: &ExportDesignationContext,
+        owner: NodeId,
+    ) -> Option<crate::UiModuleExport> {
+        if !context.offers_designation() {
+            return None;
+        }
+        let def_path = self
+            .def_artifacts
+            .get(&owner)
+            .map(|artifact| artifact.file_path().as_str().to_string());
+        let shape = def_path
+            .as_deref()
+            .map_or(ExportFolder::Unknown, |path| export_folder_shape(path));
+        let (folder, mut disabled_reason) = match shape {
+            ExportFolder::Direct(folder) => (folder.to_string(), None),
+            ExportFolder::Nested => (
+                String::new(),
+                Some(
+                    "Only a folder directly inside this project can be exported; \
+                     this module sits deeper in the tree."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Inline => (
+                String::new(),
+                Some(
+                    "An export ships a folder. This module is a single file — \
+                     move it into a folder of its own to export it."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Unknown => (
+                String::new(),
+                Some(
+                    "This module's definition file is unknown, so its folder \
+                     cannot be identified."
+                        .to_string(),
+                ),
+            ),
+        };
+        if disabled_reason.is_none() && context.device_session {
+            disabled_reason = Some(
+                "Exports live in the project's own file, which is edited in your \
+                 library — not from a device session."
+                    .to_string(),
+            );
+        }
+        let designated = !folder.is_empty() && context.exports.iter().any(|name| *name == folder);
+        Some(crate::UiModuleExport {
+            findings: context
+                .report
+                .for_export(&folder)
+                .cloned()
+                .collect::<Vec<_>>(),
+            upgrades_to_pattern: !designated
+                && matches!(context.kind, lpc_model::ProjectKind::General),
+            folder,
+            project: context.project.clone(),
+            designated,
+            disabled_reason,
+        })
+    }
+
+    /// Add or remove one module folder from the open project's `exports`
+    /// list (module authoring unit, P3; [`crate::ModuleExportOp`]).
+    ///
+    /// The write goes through the OPEN project's own exclusive-locked
+    /// `package_fs` — not a [`crate::app::library::CatalogOp`], which would
+    /// refuse `OpenInThisTab` for the very project being edited — and is
+    /// then mirrored into the runtime copy so the save path's
+    /// library/runtime hash tripwire stays quiet. The canonical writer keeps
+    /// `project.json` byte-stable either way (P1).
+    pub async fn set_module_export(
+        &mut self,
+        server: &mut StudioServerClient,
+        folder: &str,
+        export: bool,
+    ) -> Result<ProjectEditRun, UiError> {
+        let folder = folder.trim();
+        if folder.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an export names a module folder".to_string(),
+            ));
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot change exports"
+                    .to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, project, upgraded, downgraded) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so it has no exports to change"
+                        .to_string(),
+                )
+            })?;
+            let fs = active.handle.package_fs.borrow();
+            let fields = crate::app::library::package_manifest::read_manifest(&*fs)
+                .map_err(library_ui_error)?;
+            let kind = next_project_kind(&fields.kind, &fields.exports, folder, export);
+            let upgraded = matches!(fields.kind, lpc_model::ProjectKind::General)
+                && !matches!(kind, lpc_model::ProjectKind::General);
+            let downgraded = !matches!(fields.kind, lpc_model::ProjectKind::General)
+                && matches!(kind, lpc_model::ProjectKind::General);
+            crate::app::library::package_manifest::set_kind_and_exports(&*fs, kind)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            let project = fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone());
+            (bytes, project, upgraded, downgraded)
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        // Without this the next save's tripwire would report the library
+        // copy as diverged from the running project — it hashes
+        // `project.json` too.
+        let logs = server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                // The bytes on disk moved without a runtime commit, so the
+                // history head is stale until this snapshot lands.
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+        }
+        // The package bytes changed without `last_synced` moving, which is
+        // exactly the case P2's manual epoch exists for.
+        self.invalidate_export_lint();
+
+        let notice = match (export, upgraded, downgraded) {
+            (true, true, _) => UiNotice::info(format!(
+                "{folder} is exported — {project} is now a pattern project"
+            )),
+            (true, false, _) => UiNotice::info(format!("{folder} is exported from {project}")),
+            (false, _, true) => UiNotice::info(format!(
+                "{folder} is no longer exported — {project} is a general project again"
+            )),
+            (false, _, false) => UiNotice::info(format!("{folder} is no longer exported")),
+        };
+        Ok(ProjectEditRun {
+            notices: UiNotices::new().with_notice(notice),
+            logs,
         })
     }
 
@@ -3601,6 +4232,14 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
+    /// Record what the library can be imported FROM (module authoring
+    /// unit, P5): every pattern export the gallery snapshot listed. Pushed
+    /// from the studio controller's library settle, the same chokepoint
+    /// the gallery cards are hydrated at.
+    pub fn set_import_patterns(&mut self, patterns: Vec<crate::UiImportablePattern>) {
+        self.import_patterns = patterns;
+    }
+
     /// The runtime-tiered visual probe resolution for the current lens.
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
         match self.lens_runtime_kind {
@@ -3660,10 +4299,12 @@ impl ProjectController {
         let active = self.library.as_ref()?.active.as_ref()?;
         let view = active.handle.package_fs.borrow();
         let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        let kind = crate::app::library::package_manifest::kind_label(&fields.kind).to_string();
         Some(crate::UiProjectManifest {
             format: fields.format,
             uid: fields.uid,
             name: fields.name,
+            kind,
         })
     }
 
@@ -4630,6 +5271,90 @@ impl ProjectController {
         );
 
         self.run_create_request(server, request, parent, expected_name, name)
+            .await
+    }
+
+    /// Vendor one library pattern export into this project
+    /// ([`crate::NodeImportOp`], module authoring unit, P5).
+    ///
+    /// Copy-to-own: the source package is read through a fresh read-only
+    /// catalog snapshot (no lock, no write — the source project may well be
+    /// open in another tab), its `<export>/**` files are re-rooted under
+    /// `modules/<key>/`, and the whole folder goes out as ONE `CreateNode`
+    /// — the def plus every other file as assets. The folder's internal
+    /// refs are relative, so re-rooting preserves them untouched; nothing
+    /// here rewrites a path inside the copy.
+    ///
+    /// `key` is the export's own name, deduped against the project's taken
+    /// names (`fire`, then `fire_2`) exactly as the create and paste paths
+    /// do — so importing the same pattern twice lands two independent
+    /// copies rather than a rejection.
+    pub async fn import_pattern(
+        &mut self,
+        server: &mut StudioServerClient,
+        package_uid: &str,
+        export: &str,
+    ) -> Result<ProjectEditRun, UiError> {
+        use crate::app::project::node::import_pattern::{
+            VendoredExport, collect_export_folder, source_manifest, stamp_module_provenance,
+        };
+
+        let export = export.trim();
+        if export.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an import names an export folder".to_string(),
+            ));
+        }
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        // Read-only snapshot: the SOURCE is somebody else's project, and a
+        // read must never take its lock (the `package_export` precedent).
+        let snapshot = host.catalog_snapshot().await?;
+        let source_files = {
+            let store = crate::app::library::LibraryStore::read_only(snapshot);
+            let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
+            store
+                .open(uid)
+                .map_err(library_ui_error)?
+                .read_all_files()
+                .map_err(library_ui_error)?
+        };
+
+        let vendored = collect_export_folder(&source_files, export)?;
+        // R14 on the way out: an export with no attribution of its own
+        // inherits the source project's, so the copy can still say who
+        // wrote it. Written through the canonical writer, never spliced.
+        let body = stamp_module_provenance(
+            &vendored.body,
+            source_manifest(&source_files).as_ref(),
+            &self.slot_shapes,
+        )?;
+
+        let key = self.unique_node_name_from(export);
+        let (site, parent, expected_name) =
+            match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
+                Some(resolved) => resolved,
+                None => {
+                    return Ok(ProjectEditRun::notice(attach_unavailable_notice(
+                        &UiAttachTarget::ProjectRoot,
+                    )));
+                }
+            };
+
+        let request = WireCreateNodeRequest::new(
+            lpc_model::LpPathBuf::from(VendoredExport::def_path(&key).as_str()),
+            body,
+            vendored
+                .asset_paths(&key)
+                .into_iter()
+                .map(|(path, bytes)| (lpc_model::LpPathBuf::from(path.as_str()), bytes))
+                .collect(),
+            site,
+        );
+
+        self.run_create_request(server, request, parent, expected_name, key)
             .await
     }
 
@@ -6106,6 +6831,10 @@ fn count_nodes(node: &NodeController) -> usize {
 /// `project`, and `show` all read as one kind).
 const MODULE_KIND_LABEL: &str = "Module";
 
+/// The name every module's output row wears — the R7 mirror's slot name,
+/// reused when a control-first hero has to be synthesized without one.
+const MODULE_OUTPUT_SLOT: &str = "output";
+
 /// The main tab's anatomy sections for a built card, empty for a card whose
 /// body is text.
 fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
@@ -6167,17 +6896,18 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             Some(crate::UiNodeFace::Controls(group)) => {
                 out.extend(group.controls.iter().map(|view| &view.control));
             }
+            // The clock contributes at most ONE control: the grouped
+            // Transport (P8). Its phasor listing stays read-only (D10) —
+            // the one editable period lives on the consuming shader's knob,
+            // never here.
+            Some(crate::UiNodeFace::Clock(clock)) => out.extend(clock.controls.iter()),
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls; an output face carries wires, not panel widgets;
-            // a clock face carries a READ-ONLY phasor listing (D10) — the one
-            // editable period lives on the consuming shader's knob, never
-            // here.
+            // not controls; an output face carries wires, not panel widgets.
             Some(
                 crate::UiNodeFace::Module(_)
                 | crate::UiNodeFace::Playlist(_)
-                | crate::UiNodeFace::Output(_)
-                | crate::UiNodeFace::Clock(_),
+                | crate::UiNodeFace::Output(_),
             )
             | None => {}
         }
@@ -6191,6 +6921,22 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     let mut out = Vec::new();
     walk(children, &mut out);
     out
+}
+
+/// The display label of the subtree card at `node_path` (`UiNodeChild::
+/// detail` is the node's path string). Same walk shape as
+/// [`subtree_panel_controls`] — an instrument control found by that walk
+/// always has its owning card in the same subtree.
+fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<String> {
+    for child in children {
+        if child.detail == node_path {
+            return Some(child.label.clone());
+        }
+        if let Some(label) = child_label(&child.children, node_path) {
+            return Some(label);
+        }
+    }
+    None
 }
 
 /// The product a channel's resolved value carries, when it carries one.
@@ -6212,14 +6958,21 @@ fn ui_product_kind(product: UiProductRef) -> crate::UiProductKind {
 }
 
 /// How a product presents on a surface that BORROWS it (a channel's value
-/// box, a module's output hero) rather than owning it: always-live products
-/// read as tracking, anything else as paused — Studio has bytes for it, but
-/// this surface is not what keeps them coming.
+/// box, a module's output hero) rather than owning it.
+///
+/// The honest question is whether the bytes are still coming, so the
+/// predicate is the CURRENT subscription set
+/// ([`ProjectController::subscribed_products`]) — not the always-live pair
+/// (R-C). Keying on always-live said "paused" over a child module hero that
+/// was visibly animating, because under a sim lens every expanded node is
+/// subscribed and only the root's `visual.out`/`control.out` are always
+/// live. Under a device lens the set really is small (the focused node plus
+/// the always-live pair), so Paused stays truthful there.
 fn borrowed_tracking(
-    always_live: &[UiProductRef],
+    subscribed: &[UiProductRef],
     product: UiProductRef,
 ) -> crate::UiProductTrackingState {
-    if always_live.contains(&product) {
+    if subscribed.contains(&product) {
         crate::UiProductTrackingState::Tracking
     } else {
         crate::UiProductTrackingState::Paused
@@ -6969,12 +7722,267 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Run the export lint's STATIC half against a library package's **saved**
+/// bytes, returning the manifest's export list beside the findings.
+///
+/// The library snapshot is what is on disk (`package_export.rs` says the
+/// same about export): unsaved overlay edits are not in it, so the static
+/// half describes the project as it would actually be vendored — which is
+/// the question the lint asks. A non-library project (`exports` empty)
+/// short-circuits before any file walk.
+///
+/// Read failures degrade to "nothing to say" rather than a finding: a
+/// manifest that will not parse is already surfaced loudly by the open
+/// path's `PackageHealth`, and inventing a second, vaguer complaint here
+/// would only bury it.
+fn static_export_findings(
+    handle: &crate::app::library::PackageHandle,
+) -> (Vec<String>, Vec<lpc_model::ExportFinding>) {
+    let exports = {
+        let fs = handle.package_fs.borrow();
+        match crate::app::library::package_manifest::read_manifest(&*fs) {
+            Ok(fields) => fields.exports,
+            Err(error) => {
+                log::debug!("export lint: cannot read project.json: {error}");
+                return (Vec::new(), Vec::new());
+            }
+        }
+    };
+    if exports.is_empty() {
+        return (exports, Vec::new());
+    }
+    let files = match handle.read_all_files() {
+        Ok(files) => files,
+        Err(error) => {
+            log::debug!("export lint: cannot read package files: {error}");
+            return (exports, Vec::new());
+        }
+    };
+    let set: lpc_model::ExportFileSet<'_> = files
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
+    let findings = lpc_model::check_exports(&exports, &set).findings;
+    (exports, findings)
+}
+
 fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
     UiError::MissingSession(format!("library: {e}"))
 }
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+/// The pure halves of export DESIGNATION (P3): which def-artifact shapes
+/// can be exported at all, and what one toggle does to the project kind.
+/// The wired path is `studio_export_e2e_tests`.
+#[cfg(test)]
+mod export_designation_tests {
+    use lpc_model::ProjectKind;
+
+    use super::{ExportFolder, export_folder_shape, next_project_kind};
+
+    /// Only a folder ONE level down from the project root is exportable —
+    /// an export vendors `<folder>/` wholesale, so a single-file module has
+    /// nothing to vendor and a nested one is not the project's to hand out.
+    #[test]
+    fn only_a_direct_folder_module_is_exportable() {
+        assert_eq!(
+            export_folder_shape("/fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        // the map is built from project-relative paths either way
+        assert_eq!(
+            export_folder_shape("fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        assert_eq!(
+            export_folder_shape("/effects/fire/module.json"),
+            ExportFolder::Nested
+        );
+        assert_eq!(
+            export_folder_shape("/fire.module.json"),
+            ExportFolder::Inline
+        );
+        assert_eq!(export_folder_shape("/module.json"), ExportFolder::Inline);
+    }
+
+    /// The upgrade gesture (vision D14): the first export makes a General
+    /// project a Pattern project, and removing the last one puts it back —
+    /// including clearing the `exports` key rather than leaving `[]`.
+    #[test]
+    fn the_first_export_upgrades_and_the_last_one_reverts() {
+        let upgraded = next_project_kind(&ProjectKind::General, &[], "fire", true);
+        assert_eq!(
+            upgraded,
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string()]
+            }
+        );
+        let reverted = next_project_kind(&upgraded, &["fire".to_string()], "fire", false);
+        assert_eq!(reverted, ProjectKind::General);
+    }
+
+    /// A pattern project with other exports just edits its list, in a
+    /// stable (sorted) order so the manifest does not churn.
+    #[test]
+    fn additional_exports_are_a_sorted_list_edit() {
+        let current = ProjectKind::Pattern {
+            exports: vec!["ripple".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "fire", true),
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string(), "ripple".to_string()]
+            }
+        );
+        // re-designating an already-listed folder is idempotent, never a
+        // duplicate entry
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "ripple", true),
+            ProjectKind::Pattern {
+                exports: vec!["ripple".to_string()]
+            }
+        );
+    }
+
+    /// A rig stays a rig: its exports are its own list, and designation
+    /// must never silently retype the project.
+    #[test]
+    fn a_rig_keeps_its_kind() {
+        let current = ProjectKind::Rig {
+            exports: vec!["stage".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["stage".to_string()], "wash", true),
+            ProjectKind::Rig {
+                exports: vec!["stage".to_string(), "wash".to_string()]
+            }
+        );
+    }
+}
+
+/// The controller's half of the export lint (P2): reaching a library
+/// package's SAVED bytes and feeding them to the static half. The two pure
+/// halves have their own unit tests (`lpc_model::project::export_check`,
+/// `crate::app::project::export_lint`); what these pin is the seam — path
+/// shapes, the non-library short circuit, and the empty verdict when no
+/// library is attached at all.
+#[cfg(test)]
+mod export_lint_derivation_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use lpfs::{LpFs, LpFsMemory};
+
+    use super::{ProjectController, static_export_findings};
+    use crate::app::library::{LibraryStore, PackageHandle, PackageProvenance};
+
+    const MODULE: &str = r#"{
+  "kind": "Module",
+  "nodes": { "shader": { "ref": "./shader.json" } },
+  "provenance": { "author": "Yona", "license": "CC0-1.0" }
+}"#;
+
+    fn handle_for(files: &[(&str, &str)]) -> PackageHandle {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = LibraryStore::new(
+            fs,
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| String::from("2026-08-07-1017")),
+        );
+        let files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(path, text)| ((*path).to_string(), text.as_bytes().to_vec()))
+            .collect();
+        let summary = store
+            .install_package("pack", &files, PackageProvenance::Created, 1.0)
+            .expect("install");
+        store.open(summary.uid).expect("open")
+    }
+
+    /// The seam works end to end: a `pattern` manifest's `exports` list
+    /// reaches the static half, and the escaping ref inside the export
+    /// folder comes back as an error naming the file.
+    #[test]
+    fn export_lint_static_half_reads_a_library_package() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "../common/simplex.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].severity, lpc_model::ExportSeverity::Error);
+        assert_eq!(findings[0].path.as_deref(), Some("/chase/shader.json"));
+    }
+
+    /// `read_all_files` yields slash-less relative paths; the file set must
+    /// still line up with the `/chase/...` refs resolve to (a clean folder
+    /// reads clean, not "everything escapes").
+    #[test]
+    fn export_lint_static_half_agrees_with_read_all_files_path_shape() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"rig\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+            ("chase/shader.glsl", "void main() {}"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    /// A general project exports nothing, so the lint never walks a file.
+    #[test]
+    fn export_lint_short_circuits_a_non_library_project() {
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\"\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert!(exports.is_empty());
+        assert!(findings.is_empty());
+    }
+
+    /// No library attached (host tests, the demo project) is a clean, empty
+    /// verdict — never a complaint about a project the controller cannot
+    /// see the bytes of.
+    #[test]
+    fn export_lint_report_is_empty_without_a_library() {
+        let controller = ProjectController::new();
+        let report = controller.export_lint_report();
+        assert!(report.is_empty());
+        assert_eq!(report.worst(), None);
+        // idempotent, and invalidation on an empty controller is harmless
+        controller.invalidate_export_lint();
+        assert!(controller.export_lint_report().is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -8859,10 +9867,11 @@ mod tests {
     }
 
     #[test]
-    fn a_control_first_module_heroes_its_control_output() {
+    fn a_control_only_module_heroes_its_control_output_with_no_toggle() {
         // No visual writer anywhere in the scope: the module's own mirror
         // renders CLEARED, so the hero is the scope's control product —
-        // family included, since that is what picks the lamp layout.
+        // family included, since that is what picks the lamp layout. One
+        // product means no choice, so no toggle rides the face.
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -8887,12 +9896,17 @@ mod tests {
             Some(UiProductRef::from_control_product(fixture_control_product()))
         );
         assert_eq!(hero.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(
+            face.hero_choice, None,
+            "one product is not a choice — the face offers no toggle"
+        );
     }
 
     #[test]
-    fn a_module_with_a_visual_keeps_its_visual_hero() {
-        // The control fallback is exactly that: a scope that resolves a
-        // visual still heroes the visual, control channel or not.
+    fn a_module_resolving_both_products_heroes_the_control_and_offers_the_toggle() {
+        // Yona's ruling (2026-08-07): the lamps ARE the project's output,
+        // so a scope resolving both leads with `control.out` and keeps the
+        // R7 raster one gesture away.
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -8915,7 +9929,181 @@ mod tests {
             panic!("the root module card wears a module face");
         };
         let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Control);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_control_product(fixture_control_product()))
+        );
+        assert_eq!(
+            face.hero_choice,
+            Some(crate::ModuleHeroProduct::Control),
+            "both products resolve, so the hero is a choice and the card's \
+             current one rides the face"
+        );
+    }
+
+    #[test]
+    fn a_visual_only_module_falls_back_to_its_visual_hero() {
+        // The control-first preference names a kind this scope does not
+        // resolve, so the hero falls back to the R7 mirror — today's rule,
+        // mirrored.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        let visual = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(2),
+            0,
+        ));
+        let mut graph = control_out_graph(scope, Some(visual));
+        graph
+            .channels
+            .retain(|channel| channel.name != lpc_model::PRIMARY_CONTROL_CHANNEL);
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
         assert_eq!(hero.kind, crate::UiProductKind::Visual);
+        assert_eq!(face.hero_choice, None);
+    }
+
+    /// R-C: a borrowed hero reads Tracking exactly while its product is
+    /// still being pulled.
+    ///
+    /// The bug this pins: a CHILD module's hero said "Visual output paused"
+    /// over pixels that were visibly moving, because the predicate was the
+    /// always-live pair (root `visual.out` + `control.out`) while the bytes
+    /// rode the subscription set (sim lens = every expanded node). Same
+    /// fixture, both lenses — sim is honest about live, device is honest
+    /// about paused.
+    #[test]
+    fn a_child_module_hero_is_tracking_while_its_product_is_subscribed() {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.module/inner.module",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        // The inner module owns the produced visual the hero mirrors.
+        install_ui_projection_slots(&mut view, 2, Revision::new(4));
+
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        let product = VisualProduct::new(NodeId::new(2), 0);
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(2),
+        };
+        // The INNER scope's own `visual.out` — deliberately not flagged
+        // `primary_visual`, because the project's primary visual is the
+        // root's and always-live products are exactly what this predicate
+        // stopped keying on.
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: Vec::new(),
+                channels: vec![lpc_wire::WireBusChannel {
+                    scope: Some(scope),
+                    name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::Product(lpc_model::ProductRef::visual(product))),
+                        error: None,
+                    }),
+                    primary_visual: false,
+                }],
+            });
+        // Fresh bytes in the stream — the re-home branch the old predicate
+        // stamped Paused inside.
+        let bytes = vec![10, 20, 30, 40, 50, 60];
+        let _ = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(8),
+                },
+                ProjectReadEvent::Probe {
+                    index: 0,
+                    event: ProjectReadProbeEvent::Result(ProjectProbeResult::RenderProduct(
+                        RenderProductProbeResult::Texture {
+                            product,
+                            revision: Revision::new(8),
+                            width: 1,
+                            height: 2,
+                            format: WireTextureFormat::Srgb8,
+                            bytes: bytes.clone(),
+                        },
+                    )),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(8),
+                },
+            ])
+            .unwrap();
+
+        let child_hero = |project: &ProjectController| {
+            let editor =
+                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let child = editor.nodes[0].children[0].clone();
+            let Some(crate::UiNodeFace::Module(face)) = child.face else {
+                panic!("the inner module card wears a module face");
+            };
+            face.preview.expect("the inner module's output hero")
+        };
+
+        // Sim lens: an expanded child node is subscribed, so its hero is
+        // live and must say so.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        let hero = child_hero(&project);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_visual_product(product))
+        );
+        assert_eq!(
+            hero.tracking,
+            UiProductTrackingState::Tracking,
+            "the bytes behind this hero are still being pulled"
+        );
+
+        // Device lens, nothing focused: the product genuinely stopped
+        // streaming, and Paused is the honest word for the cached frame.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert!(
+            !project
+                .subscribed_products()
+                .contains(&UiProductRef::from_visual_product(product)),
+            "the fixture's premise: nothing subscribes this product"
+        );
+        assert_eq!(
+            child_hero(&project).tracking,
+            UiProductTrackingState::Paused
+        );
     }
 
     #[test]
@@ -10241,13 +11429,13 @@ mod tests {
             );
             face.transport = Some(crate::UiClockTransport {
                 seconds: 0.0,
-                running: true,
+                play_state: lpc_model::PlayState::Playing,
                 rate: 1.0,
                 scrub_offset_seconds: 0.0,
-                running_address: Some(transport_address("running")),
+                play_state_address: Some(transport_address("play_state")),
                 rate_address: Some(transport_address("rate")),
                 scrub_address: Some(transport_address("scrub_offset_seconds")),
-                running_override: None,
+                play_state_override: None,
                 rate_override: None,
                 scrub_override: None,
             });
@@ -10284,7 +11472,7 @@ mod tests {
         assert_eq!(after.seconds, 42.35, "the probe's seconds lands in the DTO");
         // Everything else the builder set stays untouched — this pass only
         // ever writes `seconds`.
-        assert!(after.running);
+        assert_eq!(after.play_state, lpc_model::PlayState::Playing);
         assert_eq!(after.rate, 1.0);
         assert_eq!(after.scrub_offset_seconds, 0.0);
     }

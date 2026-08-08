@@ -480,7 +480,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -743,6 +743,42 @@ impl Engine {
         registry: &ProjectRegistry,
         channel: &str,
     ) -> Result<VisualProduct, SessionResolveError> {
+        match self.resolve_bus_product(registry, channel)? {
+            lpc_model::ProductRef::Visual(product) => Ok(product),
+            other => Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} does not carry a visual product (got {other:?})"
+            ))),
+        }
+    }
+
+    /// Resolve a bus channel to the control product handle it currently
+    /// carries — the control sibling of [`Self::resolve_bus_visual_product`].
+    ///
+    /// This is the engine-side answer to "is this project control-first?": a
+    /// root scope whose `control.out` resolves to a control product is
+    /// driving lamps, whatever its visual side does. Callers ask once after a
+    /// project loads and cache the answer (the resolve may re-run producer
+    /// nodes); an `Err` is the honest "nothing publishes control here",
+    /// not a fault.
+    pub fn resolve_bus_control_product(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &str,
+    ) -> Result<ControlProduct, SessionResolveError> {
+        match self.resolve_bus_product(registry, channel)? {
+            lpc_model::ProductRef::Control(product) => Ok(product),
+            other => Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} does not carry a control product (got {other:?})"
+            ))),
+        }
+    }
+
+    /// Resolve the root scope's `channel` to whatever product it carries.
+    fn resolve_bus_product(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &str,
+    ) -> Result<lpc_model::ProductRef, SessionResolveError> {
         let key = QueryKey::Bus {
             scope: self.tree.node_scope(self.tree.root()),
             channel: lpc_model::ChannelName(channel.to_string()),
@@ -788,9 +824,9 @@ impl Engine {
             )));
         };
         match leaf.value() {
-            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => Ok(*product),
+            lpc_model::LpValue::Product(product) => Ok(*product),
             other => Err(SessionResolveError::other(format!(
-                "bus channel {channel:?} does not carry a visual product (got {other:?})"
+                "bus channel {channel:?} does not carry a product (got {other:?})"
             ))),
         }
     }

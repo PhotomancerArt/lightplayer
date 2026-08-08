@@ -36,7 +36,7 @@ composite-effects spike, is recorded in
 |---|---|---|
 | **Project** | The *container*: a folder with identity, provenance, history, and format. Not a node. What you open in Studio. | A node kind; a scope; anything the engine resolves against |
 | **Module** | The container *node kind* (replaces the `project` node kind). Owns a bus scope, a panel, and child nodes. The root module is an ordinary module that happens to be at the root. | Special at the root; a separate "composite"/"effect" structure |
-| **Effect** | A *category* of module (gallery/UI copy): a module authored to be dropped into other projects. | A distinct node kind or schema |
+| **Pattern** | A *category* of module (gallery/UI copy, amended 2026-08-07): a module authored to be dropped into other projects — the exported unit a pattern *project* designates (§6, `docs/adr/2026-08-07-project-kinds-and-pattern-exports.md`). "Effect" is reserved for a future modifier-of-patterns concept, not this category. | A distinct node kind or schema |
 | **Scope** | The bus namespace a module introduces around its children. | Global; a display prefix |
 | **Channel** | A named value stream within a scope. Exists iff some binding names it. | A declared registry entry; a place values are stored |
 | **Public slot** | A slot with a bus binding. Its channel appears in its scope. | A slot copied, aliased, or mirrored anywhere |
@@ -188,6 +188,17 @@ feed a module's inner consumers with zero authoring (see E6).
 > (root included), automatic publish + authored exports, and the
 > engine-reported primary-visual role. See
 > `docs/adr/2026-08-01-scoped-bus-engine-architecture.md`.
+
+> **Presentation amendment (2026-08-07, PR #387).** The R7 mirror still
+> defines the module's *output interface*, but Studio's module-face
+> **hero no longer leads with it**: when the module's scope resolves
+> both primaries, the hero shows `control.out` — the lamps the project
+> actually drives — with an icon-only toggle back to the visual
+> (per-card `NodeCardUiState` preference, default control). The visual
+> mirror is the fallback, not the lead; a fixture project's output IS
+> its lamps. Project/Explore card thumbnails follow the same default
+> with no toggle. See the amendment note on
+> `docs/adr/2026-07-16-primary-visual-product.md`.
 
 ### R8 — The panel: one concept, every node, derived from publicity
 
@@ -477,7 +488,8 @@ Two ownership tiers, and only two: everything in the project folder is
 ```text
 my-project/
 ├─ project.json          # container manifest — NOT a node:
-│                        #   format, uid, name, provenance (§8), created
+│                        #   format, uid, name, provenance (§8), created,
+│                        #   optional kind + exports (pattern designation, below)
 ├─ module.json           # root module node: nodes{}, bindings, exports,
 │                        #   per-channel meta overrides (R9), optional provenance
 ├─ shader.json …         # child nodes, one file per node (unchanged)
@@ -514,11 +526,22 @@ my-project/
 - Relative `node:` refs and file-relative artifact refs survive vendoring
   by construction — a module folder's internal wiring is
   location-independent.
+- **`project.json`'s optional `kind`/`exports` designate a project's
+  publishable module folders** (a *pattern* or *rig* project names them
+  in `exports`; `kind` absent = an ordinary project). The designation is
+  a workspace-level fact — the engine never reads it — and is what makes
+  a sub-module folder like `effect/` above importable elsewhere rather
+  than merely local: `docs/adr/2026-08-07-project-kinds-and-pattern-exports.md`
+  has the full model (designation UX, export lint, vendoring mechanics).
+  Existing flat examples are not migrated to this shape as part of that
+  work; each restructures opportunistically as it enters a pack, not in
+  one big-bang pass.
 
 > Status: the project.json/module.json split, the container-manifest
 > format gate (missing manifest = hard refuse, format bumped to 3), and
 > the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
-> panel phases.
+> panel phases. `kind`/`exports` and the vendoring/import flow landed
+> 2026-08-07 (module authoring unit, P1–P5).
 
 ## 7. Bus vocabulary — under discovery
 
@@ -553,7 +576,9 @@ Copy-on-extract per R14.
 
 > Status: landed 2026-08-01 as `ProvenanceDef` (module defs carry it;
 > the container manifest carries the same four keys at its top level).
-> Copy-on-extract mechanics arrive with the vendoring flows.
+> Copy-on-extract mechanics landed 2026-08-07 with the import flow
+> (module authoring unit, P5): an export with no provenance of its own
+> inherits the source project's attribution as it is vendored out.
 
 ## 9. Open questions (G1 redline register)
 
@@ -625,11 +650,15 @@ somebody owes. Recorded 2026-08-03 at the close of
 - **What a module's canonical self-portrait is.** The hero draws the
   scope's resolved `visual.out` (live beats black). Yona leans
   `control.out` — the fixture view — with 3D mapping renders later.
-- **Driving time from a panel.** With `default_bind` wiring no longer
-  publicity (Q13 refinement), `bus:time` has no panel presence at all.
-  The sanctioned answer should be the CLOCK's own transport/scrub
-  controls published to the panel, not a knob materialized from a
-  default binding. See `docs/debt/clock-transport-has-no-transport-ui.md`.
+- **Driving time from a panel.** DONE 2026-08-07 — with `default_bind`
+  wiring no longer publicity (Q13 refinement), `bus:time` still has no
+  panel presence, and the sanctioned answer landed as proposed: the
+  clock's own transport, not a knob materialized from a default binding.
+  It publishes as ONE grouped Transport control (`panel = "show"` on the
+  `transport` record, three `clock.*` leaf wires) — plan
+  `2026-08-04-2355-clock-tape-hero` P6/P8,
+  `docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md`. Closes
+  `docs/debt/clock-transport-has-no-transport-ui.md`.
 - **Playlist edit-vs-play, and entry progress.** A playlist card is both
   an authoring surface and a live transport; the two readings collide,
   and an entry's progress has no presentation. Spun off at GV2.

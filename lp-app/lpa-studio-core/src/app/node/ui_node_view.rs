@@ -39,6 +39,14 @@ pub struct UiNodeView {
     /// The add-node picker for container nodes (playlists): entries create
     /// into THIS node's `entries` map. `None` for every other kind.
     pub add_node_menu: Option<UiAddNodeMenu>,
+    /// How this card's [`Self::children`] column splits into the project's
+    /// **exports** and its **rig** (module authoring unit, R-A).
+    ///
+    /// Carried by the ROOT module card only — exports are a property of the
+    /// project container — and only while the project actually exports
+    /// something. `None` everywhere else, which is the plain ungrouped
+    /// column every project had before.
+    pub exports: Option<crate::UiExportsGroup>,
 }
 
 impl UiNodeView {
@@ -58,6 +66,7 @@ impl UiNodeView {
             collapsed: false,
             issues: Vec::new(),
             add_node_menu: None,
+            exports: None,
         }
     }
 

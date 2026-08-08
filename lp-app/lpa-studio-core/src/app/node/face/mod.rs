@@ -36,12 +36,14 @@ pub use ui_clock_face::{
 };
 pub use ui_fixture_face::UiFixtureFace;
 pub use ui_fixture_power::UiFixturePower;
-pub use ui_module_face::UiModuleFace;
+pub use ui_module_face::{UiExportsGroup, UiModuleExport, UiModuleFace};
 pub use ui_node_face::UiNodeFace;
 pub use ui_output_face::{
     UiLedBudget, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiWireStatus,
 };
-pub use ui_panel_control::{UiPanelControl, UiPanelEmit, UiPanelTarget};
+pub use ui_panel_control::{
+    UiPanelControl, UiPanelEmit, UiPanelTarget, UiPanelWire, UiPanelWireRole,
+};
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
 pub use ui_panel_group::UiPanelGroup;
 pub use ui_panel_widget::UiPanelWidget;

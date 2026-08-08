@@ -149,6 +149,49 @@ mod tests {
         );
     }
 
+    /// The state that motivated the v5→v6 step: a v5 package whose
+    /// manifest carries an old-style `prj_…` uid (it arrived via sync, not
+    /// install, so nothing re-minted it) reads as "current format but
+    /// unreadable" under a v6 Studio until the upgrader transcodes it.
+    #[test]
+    fn a_v5_package_with_an_old_uid_migrates_to_a_readable_manifest() {
+        let fs: Rc<RefCell<dyn lpfs::LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = LibraryStore::new(
+            fs.clone(),
+            Rc::new(|| [9u8; 16]),
+            Rc::new(|| "2026-08-07-2300".to_string()),
+        );
+        {
+            let view = fs.borrow();
+            view.write_file(
+                "/packages/sad-sign/project.json".as_path(),
+                br#"{"format":5,"uid":"prj_h7Kq9xY2mQ4tB8Wz","name":"Sad prod project"}"#,
+            )
+            .unwrap();
+            view.write_file(
+                "/packages/sad-sign/module.json".as_path(),
+                br#"{"kind":"Module","nodes":{}}"#,
+            )
+            .unwrap();
+        }
+
+        let uid = store.resolve_key("sad-sign").unwrap();
+        let mut handle = store.open(uid).unwrap();
+        migrate_handle_to_current(&mut handle, 2.0)
+            .unwrap()
+            .expect("a v5 package migrates");
+
+        let manifest = {
+            let package_fs = handle.package_fs.borrow();
+            package_fs.read_file("/project.json".as_path()).unwrap()
+        };
+        let text = String::from_utf8(manifest).unwrap();
+        assert!(text.contains("\"prjdnsz24w3cczmz31n\""), "{text}");
+        // The transcoded uid parses strictly — the package is readable.
+        let parsed: lpc_history::PrefixedUid = "prjdnsz24w3cczmz31n".parse().unwrap();
+        assert_eq!(parsed.prefix(), lpc_history::UidPrefix::Project);
+    }
+
     #[test]
     fn a_below_floor_package_is_refused_with_the_classifiers_sentence() {
         let store = store();

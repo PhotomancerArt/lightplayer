@@ -13,13 +13,15 @@
 //! stays device/roster health.
 
 use dioxus::prelude::*;
+use lpa_studio_core::PlayState;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, palette_panel, root_module_node_view,
-    three_state_panel,
+    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, TRANSPORT_CHANNELS, held_root_face, palette_panel,
+    root_module_node_view, three_state_panel, transport_panel,
 };
 use super::{ModulePanel, PanelGesture};
+use crate::app::node::face_story_fixtures::clock_transport;
 
 /// Panel stories render on a card surface so the states are judged against
 /// the background they will actually sit on.
@@ -155,6 +157,82 @@ fn palette_swatches() -> Element {
         PanelCanvas {
             ModulePanel {
                 panel: palette_panel(),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+// -- the grouped Transport control (P8) -----------------------------------
+
+#[story(
+    description = "The clock's Transport as ONE grouped control on the module panel — the panel a phone opens onto, and the expected primary speed control. The whole tape instrument is the faceplate (streaming strip, digits, run/pause, log ׼–×8 fader with octave detents), taking the panel row's full width so the narrow controls wrap below it rather than squeezing it. It is one control with THREE wires: the fader writes clock.rate, run/pause writes clock.play_state, a strip drag writes clock.scrub. Judge it at sm first — that is the phone."
+)]
+fn transport() -> Element {
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: transport_panel(
+                    clock_transport(447.0, PlayState::Playing, 1.0, 0.0),
+                    TRANSPORT_CHANNELS,
+                ),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Paused on the panel: the strip and digits hold still, the run button shows ▶ unlit, and nothing else about the control moves — pausing is calm, not a mode change. The setpoint went out as a state NOUN on clock.play_state (\"paused\"), so a consumer that reads it late still lands where the user asked."
+)]
+fn transport_paused() -> Element {
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: transport_panel(
+                    clock_transport(447.0, PlayState::Paused, 1.0, 0.0),
+                    TRANSPORT_CHANNELS,
+                ),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Scrubbed off-live at ×2: the tape box border goes amber and the offset reads on the amber line under the digits, tap-to-return. The three dimensions moved independently — the fader is seated on the ×2 detent while the scrub sits −12.4 s back — because they are three channels, not one packed record."
+)]
+fn transport_off_live() -> Element {
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: transport_panel(
+                    clock_transport(447.0, PlayState::Playing, 2.0, -12.4),
+                    TRANSPORT_CHANNELS,
+                ),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "PARTIAL wiring: the rate leaf has an authored binding onto a custom `speed` channel, which suppresses only its own default — its siblings keep clock.play_state and clock.scrub. Two things to check: the faceplate still renders WHOLE (rendering is a shape fact; wiring never subtracts a dimension from it), and the group re-anchors onto `speed`, since the group's identity is the rate leaf's EFFECTIVE channel."
+)]
+fn transport_partial_wiring() -> Element {
+    let mut channels = TRANSPORT_CHANNELS;
+    channels[0].1 = "speed";
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: transport_panel(
+                    clock_transport(447.0, PlayState::Playing, 1.5, 0.0),
+                    channels,
+                ),
                 on_panel: move |_| {},
                 on_action: move |_| {},
             }
