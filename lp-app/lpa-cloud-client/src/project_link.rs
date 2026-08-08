@@ -68,8 +68,8 @@ impl fmt::Display for ProjectLinkParseError {
 }
 
 /// Accepts anything that *contains* the canonical tail: a full URL, a path,
-/// `slug-prj_…`, or a bare `prj_…`. The last `-` separates slug from uid,
-/// which is unambiguous because a uid body is base-62 and its prefix has no
+/// `slug-prj…`, or a bare `prj…`. The last `-` separates slug from uid,
+/// which is unambiguous because a uid body is base-32 and its prefix has no
 /// hyphen.
 impl FromStr for ProjectLink {
     type Err = ProjectLinkParseError;

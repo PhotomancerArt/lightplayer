@@ -2,7 +2,7 @@
 //!
 //! # The share URL answers 200 either way
 //!
-//! `GET /p/<slug>-prj_…` looks the project up **as an anonymous caller**,
+//! `GET /p/<slug>-prj…` looks the project up **as an anonymous caller**,
 //! which is exactly what an unfurler is, and injects OG tags only if the
 //! answer came back. A private project, a uid that never existed, and a
 //! malformed path all produce the *same* response: the plain document, status
@@ -151,6 +151,6 @@ mod tests {
         assert!(looks_like_a_file("/favicon.ico"));
         assert!(!looks_like_a_file("/"));
         assert!(!looks_like_a_file("/sim/zook-dome"));
-        assert!(!looks_like_a_file("/p/zook-dome-prj_0000000000000000"));
+        assert!(!looks_like_a_file("/p/zook-dome-prj0000000000000000"));
     }
 }

@@ -23,7 +23,7 @@ pub struct UiHomeView {
     /// Whether the local library mounted; when `false` the projects section
     /// explains instead of listing (the store banner carries the details).
     pub library_available: bool,
-    /// The card key (`prj_…` uid or example id) whose open is in flight, so
+    /// The card key (`prj…` uid or example id) whose open is in flight, so
     /// the renderer can show it busy.
     pub opening: Option<String>,
     /// A provider-selection or library problem to surface on the home page.

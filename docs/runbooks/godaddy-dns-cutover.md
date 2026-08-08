@@ -229,7 +229,7 @@ Expect: `ok`
 ### 4e. Deep links return real 200s
 
 ```sh
-curl -sI https://lightplayer.app/p/anything-prj_test
+curl -sI https://lightplayer.app/p/anything-prjtest
 ```
 
 Expect `HTTP/2 200`. A share URL answers 200 whether or not the project

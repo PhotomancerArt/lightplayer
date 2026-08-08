@@ -192,7 +192,7 @@ mod tests {
     const C6: &str = "seeed/xiao-esp32-c6";
 
     fn context() -> SetupExecutorContext {
-        SetupExecutorContext::new(1_754_000_000.0).with_card_key("dev_000000029EVDlKLX")
+        SetupExecutorContext::new(1_754_000_000.0).with_card_key("dev000000daqf6dvvqz")
     }
 
     fn device_op(command: &SetupCommand) -> DeviceOp {
@@ -210,7 +210,7 @@ mod tests {
     }
 
     fn card() -> DeviceTarget {
-        DeviceTarget::card("dev_000000029EVDlKLX")
+        DeviceTarget::card("dev000000daqf6dvvqz")
     }
 
     #[test]
@@ -262,11 +262,11 @@ mod tests {
 
     #[test]
     fn the_registry_write_carries_name_board_and_origin_under_the_probed_uid() {
-        let op = catalog_op(&write_registry(Some("dev_000000029EVDlKLX")));
+        let op = catalog_op(&write_registry(Some("dev000000daqf6dvvqz")));
         let CatalogOp::UpsertRegisteredDevice(row) = op else {
             panic!("the registry write is a catalog op")
         };
-        assert_eq!(row.uid, "dev_000000029EVDlKLX");
+        assert_eq!(row.uid, "dev000000daqf6dvvqz");
         assert_eq!(row.name, "Porch sign");
         assert_eq!(row.board_id.as_deref(), Some(C6));
         assert_eq!(row.hardware_id.as_deref(), Some("efuse:aa:bb:cc:dd:ee:ff"));
@@ -280,13 +280,13 @@ mod tests {
         // the identity arrives with the post-flash hello. The write is
         // addressed with THAT uid, or the typed name lands nowhere and
         // the push refuses a board with no name.
-        let context = context().with_resolved_uid(Some("dev_fromthehello".to_string()));
+        let context = context().with_resolved_uid(Some("devfromthehello".to_string()));
         let SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(row)) =
             dispatch_for(&write_registry(None), &context)
         else {
             panic!("an un-probed uid still writes a row")
         };
-        assert_eq!(row.uid, "dev_fromthehello");
+        assert_eq!(row.uid, "devfromthehello");
         assert_eq!(row.name, "Porch sign");
     }
 
@@ -295,13 +295,13 @@ mod tests {
         // They are the same board, and the session's is the one the push
         // gate will read — a probe uid that somehow disagreed would write
         // the name onto a row nothing looks at.
-        let context = context().with_resolved_uid(Some("dev_fromthehello".to_string()));
+        let context = context().with_resolved_uid(Some("devfromthehello".to_string()));
         let SetupDispatch::Catalog(CatalogOp::UpsertRegisteredDevice(row)) =
-            dispatch_for(&write_registry(Some("dev_fromtheprobe")), &context)
+            dispatch_for(&write_registry(Some("devfromtheprobe")), &context)
         else {
             panic!("a catalog op")
         };
-        assert_eq!(row.uid, "dev_fromthehello");
+        assert_eq!(row.uid, "devfromthehello");
     }
 
     #[test]
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn adopt_records_a_sighting_that_overwrites_nothing() {
         let op = catalog_op(&SetupCommand::RecordSighting {
-            hardware_uid: "dev_000000029EVDlKLX".to_string(),
+            hardware_uid: "dev000000daqf6dvvqz".to_string(),
         });
         let CatalogOp::UpsertRegisteredDevice(row) = op else {
             panic!("a sighting is a catalog op")
@@ -334,7 +334,7 @@ mod tests {
     fn push_uses_the_direct_push_lane() {
         let dispatch = dispatch_for(
             &SetupCommand::PushProject {
-                project_uid: "prj_1".to_string(),
+                project_uid: "prj1".to_string(),
             },
             &context(),
         );
@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(
             op,
             DeployOp::PushProject {
-                key: "prj_1".to_string(),
+                key: "prj1".to_string(),
                 target: card(),
             }
         );

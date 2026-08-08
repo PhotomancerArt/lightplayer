@@ -12,8 +12,8 @@ optional location, and "behind vs diverged" is answered mechanically.
 
 ## The model
 
-- **Identity** — `PrefixedUid`: prefixed base-62 identifiers
-  (`prj_h7Kq9xY2mQ4tB8Wz`, `mod_…`, `dev_…`), 16-char body minted from 128
+- **Identity** — `PrefixedUid`: prefixed base-32 identifiers
+  (`prjhk7q9xy2mq4tb8wz`, `mod…`, `dev…`), 16-char base-32 body minted from 128
   caller-supplied random bits.
 - **Canonical content hash** — SHA-256. A package's hash is the hash of its
   `TreeManifest`: the sorted `(path, file-hash)` listing, under a preimage

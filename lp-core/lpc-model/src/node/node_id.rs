@@ -4,7 +4,7 @@ use core::fmt;
 /// string in authored TOML.
 ///
 /// v0 uses `u32` for embedded *performance* (Copy, no heap, cheap compare/hash)
-/// instead of a base-62 string, per
+/// instead of a base-32 string, per
 /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (Uid
 /// decision). **Authored** identity uses [`NodePath`](crate::TreePath) and
 /// [`NodePropSpec`](crate::NodePropSpec), not
