@@ -63,15 +63,18 @@ pub fn generate_compute_shader_header(
                 match mapping.kind.value() {
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
-                        writeln!(&mut out, "// consumed: {name}").expect("write string");
-                        writeln!(
-                            &mut out,
-                            "layout(binding = {binding}) uniform {ty} {name}[{}];",
-                            mapping.len.value()
-                        )
-                        .expect("write string");
+                    }
+                    ShaderSlotMappingKind::Dense => {
+                        validate_dense_element(slot.value.value())?;
                     }
                 }
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(
+                    &mut out,
+                    "layout(binding = {binding}) uniform {ty} {name}[{}];",
+                    mapping.len.value()
+                )
+                .expect("write string");
             }
         }
     }
@@ -104,11 +107,13 @@ pub fn generate_compute_shader_header(
                 match mapping.kind.value() {
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
-                        writeln!(&mut out, "// produced: {name}").expect("write string");
-                        writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value())
-                            .expect("write string");
+                    }
+                    ShaderSlotMappingKind::Dense => {
+                        validate_dense_element(slot.value.value())?;
                     }
                 }
+                writeln!(&mut out, "// produced: {name}").expect("write string");
+                writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value()).expect("write string");
             }
         }
     }
@@ -172,6 +177,20 @@ fn emit_native_struct_if_needed(
 
     emitted.push(String::from(value_ref.as_str()));
     Ok(())
+}
+
+/// A dense mapping's element must be a builtin scalar/vector: the element
+/// index IS the map key, so there is no struct field to carry one — and a
+/// struct element would silently lose runtime indexability (struct arrays
+/// are constant-index-only on `Frontend::Lp`; scalar/vector uniform arrays
+/// index dynamically, `lps-filetests filetests/uniform/array.glsl`).
+fn validate_dense_element(value_ref: &ShaderValueShapeRef) -> Result<(), ShaderHeaderGenError> {
+    if value_ref.as_lp_type().is_some() {
+        return Ok(());
+    }
+    Err(ShaderHeaderGenError::Unsupported(
+        "dense mappings require builtin scalar/vector values",
+    ))
 }
 
 fn validate_key_field(
@@ -343,6 +362,65 @@ mod tests {
             "{header}"
         );
         assert!(!header.contains("PhasorConfig"), "{header}");
+    }
+
+    /// A dense mapping declares a plain builtin array on both sides — no
+    /// struct emission, no key field anywhere.
+    #[test]
+    fn dense_mapping_declares_builtin_arrays() {
+        let mut consumed = VecMap::new();
+        consumed.insert(
+            String::from("heat_in"),
+            ShaderSlotDef::map_dense_builtin("f32", 8),
+        );
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef::map_dense_builtin("f32", 8),
+        );
+        let def = ComputeShaderDef {
+            source: AssetSlot::path("heat.glsl"),
+            bindings: crate::BindingDefs::default(),
+            float_mode: crate::OptionSlot::none(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        let header =
+            generate_compute_shader_header(&def, &SlotShapeRegistry::default()).expect("header");
+
+        assert!(
+            header.contains("layout(binding = 0) uniform float heat_in[8];"),
+            "{header}"
+        );
+        assert!(header.contains("float heat[8];"), "{header}");
+        assert!(!header.contains("struct"), "{header}");
+    }
+
+    /// The element index is the key, so a struct element has nowhere to
+    /// carry one — and struct arrays are constant-index-only on
+    /// `Frontend::Lp`, which would defeat the point of a dense slot.
+    #[test]
+    fn dense_mapping_rejects_struct_values() {
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef::map_u32_native("lp::fluid::Emitter", ShaderSlotMappingDef::dense(8)),
+        );
+        let def = ComputeShaderDef {
+            source: AssetSlot::path("heat.glsl"),
+            bindings: crate::BindingDefs::default(),
+            float_mode: crate::OptionSlot::none(),
+            consumed_slots: MapSlot::default(),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        assert!(matches!(
+            generate_compute_shader_header(&def, &SlotShapeRegistry::default()),
+            Err(ShaderHeaderGenError::Unsupported(
+                "dense mappings require builtin scalar/vector values"
+            ))
+        ));
     }
 
     #[test]
