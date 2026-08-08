@@ -88,6 +88,14 @@ pub fn classify(error: &SyncError) -> TripResult {
         // The push pre-flight uploads what the service says it is missing,
         // so this means the two disagreed mid-flight — worth one more go.
         SyncError::Cloud(CloudError::MissingBlobs { .. }) => TripResult::Retry,
+        // "Not yours to write" (P6): a visitor pushing a tracking copy —
+        // NotAuthorized signed in, NotAuthenticated anonymous or with a
+        // session that expired mid-trip. Latched, not merely dropped: the
+        // server will keep saying no until access or membership changes,
+        // and only an observed change (a later pull, a sign-in) lifts it.
+        SyncError::Cloud(CloudError::NotAuthorized | CloudError::NotAuthenticated) => {
+            TripResult::Denied
+        }
         _ => TripResult::Refused,
     }
 }
@@ -275,9 +283,10 @@ mod tests {
         ));
     }
 
-    /// A signed-out client is refused, not retried: the driver does not even
+    /// A signed-out client is denied, not retried: the driver does not even
     /// get here (it no-ops signed out), but a session that expires mid-trip
-    /// must not turn into a minute-by-minute retry loop.
+    /// must not turn into a minute-by-minute retry loop — the latch holds
+    /// until the sign-in edge resets it.
     #[test]
     fn a_signed_out_refusal_is_terminal() {
         let world = World::new();
@@ -296,7 +305,37 @@ mod tests {
             error,
             SyncError::Cloud(CloudError::NotAuthenticated)
         ));
-        assert_eq!(classify(&error), TripResult::Refused);
+        assert_eq!(classify(&error), TripResult::Denied);
+    }
+
+    /// The P6 refusal: a signed-in visitor pushing somebody else's `View`
+    /// project is denied — latched, so the queue stops asking.
+    #[test]
+    fn a_visitors_push_against_a_view_link_is_denied() {
+        let world = World::new();
+        let dome = world.project(1, b"{\"n\":1}");
+        world.trip(&dome, "zook-dome", false).unwrap();
+        block_on(lpa_cloud_client::call(
+            &world.client,
+            SetAccess {
+                uid: dome.uid,
+                access: Access::View,
+            },
+        ))
+        .unwrap();
+
+        let (visitor, _) = InProcessCloud::sign_in(
+            world.server.clone(),
+            "sub-oliver",
+            "oliver@example.com",
+            "O",
+        );
+        dome.write(b"{\"n\":2}");
+        dome.save(4.0);
+        let error =
+            block_on(run_trip(&visitor, &dome.local(), &sidecar(), "dome", false)).unwrap_err();
+        assert!(matches!(error, SyncError::Cloud(CloudError::NotAuthorized)));
+        assert_eq!(classify(&error), TripResult::Denied);
     }
 
     // helpers ---------------------------------------------------------------

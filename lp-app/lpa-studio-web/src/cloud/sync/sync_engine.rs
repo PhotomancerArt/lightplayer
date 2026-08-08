@@ -66,6 +66,18 @@ pub fn note(uid: &str, trigger: SyncTrigger) {
     engine.pump_after(delay as u32);
 }
 
+/// Lift a uid's denied-push latch (P6): a pull observed an access or
+/// membership change that could make the server answer differently, so the
+/// project is offered again — as a save, which is what the latch swallowed.
+/// A uid that was never latched is a no-op.
+pub fn clear_denied(uid: &str) {
+    let engine = engine();
+    if !engine.queue.borrow_mut().clear_denied(uid) {
+        return;
+    }
+    note(uid, SyncTrigger::Saved);
+}
+
 /// Tell the driver whether there is an account to sync with.
 ///
 /// The false→true edge is the sign-in sweep (D7): every project in the

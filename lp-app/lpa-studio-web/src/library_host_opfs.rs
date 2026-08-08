@@ -280,6 +280,7 @@ impl LibraryHost for OpfsLibraryHost {
             // every lock.
             if let Ok(outcome) = &result
                 && let Some(summary) = &outcome.summary
+                && let Some(trigger) = trigger
             {
                 crate::cloud::sync::sync_engine::note(&summary.uid.to_string(), trigger);
             }
@@ -404,11 +405,20 @@ impl LibraryHost for OpfsLibraryHost {
 /// Only [`CatalogOp::Rename`] restates the project's identity — it is the
 /// one op that changes the display name, and therefore the slug half of the
 /// share address. Everything else that produces a package changed its
-/// content, which is a push.
-fn sync_trigger_for(op: &CatalogOp) -> SyncTrigger {
+/// content, which is a push — except a **tracking copy** landing from
+/// `open_shared` (P6): that is the *service's* copy arriving here, and
+/// offering it straight back would be a pointless push (and, for a
+/// view-only visitor, an instant denial). A fork installed through the
+/// same op IS new local work and publishes normally.
+fn sync_trigger_for(op: &CatalogOp) -> Option<SyncTrigger> {
+    use lpa_studio_core::app::library::PackageProvenance;
     match op {
-        CatalogOp::Rename { .. } => SyncTrigger::Renamed,
-        _ => SyncTrigger::Installed,
+        CatalogOp::Rename { .. } => Some(SyncTrigger::Renamed),
+        CatalogOp::InstallSyncedProject {
+            provenance: PackageProvenance::OpenedFromLink,
+            ..
+        } => None,
+        _ => Some(SyncTrigger::Installed),
     }
 }
 
@@ -523,7 +533,10 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::RenameRegisteredDevice { .. }
         | CatalogOp::RekeyRegisteredDevice { .. }
         | CatalogOp::ForgetRegisteredDevice { .. }
-        | CatalogOp::AdoptDevicePackage { .. } => None,
+        | CatalogOp::AdoptDevicePackage { .. }
+        // Creation-shaped: the synced install refuses a uid the library
+        // already holds, so there is no existing project to lock.
+        | CatalogOp::InstallSyncedProject { .. } => None,
     }
 }
 

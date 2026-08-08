@@ -5209,6 +5209,7 @@ impl StudioController {
                 self.open_docs_example(&example_id, updates).await
             }
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
+            ProjectOp::ReloadActiveProject => self.reload_active_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
             ProjectOp::OpenDeviceProject { uid } => self.open_device_project(uid, updates).await,
@@ -6444,6 +6445,41 @@ impl StudioController {
             "Project refreshed",
             "Project refresh needs attention",
         )))
+    }
+
+    /// The P6 pull loop's apply step: re-push the active library project's
+    /// on-disk content (already fast-forwarded by the platform edge) to the
+    /// running runtime, so the open editor shows what the library now
+    /// holds. Quiet on success — the edge raises its own "Updated to the
+    /// latest version" toast; a second notice here would double-speak.
+    async fn reload_active_project(&mut self, updates: UxUpdateSink) -> UiResult {
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Updating project",
+            "Updating",
+            "Reloading the project from its library copy",
+        );
+        let result = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.reload_active_from_library(server).await
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                self.note_sim_loaded_project();
+                updates.emit(UxUpdate::View(self.view()));
+                Ok(UiNotices::new())
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    format!("project reload failed: {error}"),
+                ));
+                Err(error)
+            }
+        }
     }
 
     async fn sync_project_after_attach(
