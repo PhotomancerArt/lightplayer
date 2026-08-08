@@ -114,7 +114,8 @@
 //! seam, frozen so `scripts/studio-story-pngs.mjs` keeps working.
 
 use lpa_studio_core::{UiLensRuntime, UiStudioView};
-use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
+use lpc_cloud_api::share_link;
+use lpc_history::PrefixedUid;
 
 /// Where the user is (or is headed) in the Studio shell.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -416,12 +417,10 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
 
 /// The project uid inside one share-path segment, if there is one.
 ///
-/// The slug may itself contain `-` — and `prj` can even occur inside a
-/// base-32 uid body — but the uid's length is FIXED, so the split point is
-/// simply the last `"prj".len() + UID_BODY_LEN` characters; strict parsing
-/// of that tail is what makes trailing junk a miss rather than a
-/// truncation. Same rule as the server's `page::share_path` — the two
-/// halves must agree about what a link means.
+/// Thin wrapper over the one shared grammar, [`lpc_cloud_api::share_link`];
+/// the server's `page::share_path` and `lpa-cloud-client`'s `ProjectLink`
+/// delegate to the same module so all three parsers agree about what a
+/// link means.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(
@@ -430,23 +429,34 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
     )
 )]
 fn share_uid_from_segment(segment: &str) -> Option<String> {
-    let start = segment.len().checked_sub("prj".len() + UID_BODY_LEN)?;
-    let uid: PrefixedUid = segment.get(start..)?.parse().ok()?;
-    (uid.prefix() == UidPrefix::Project).then(|| uid.to_string())
+    share_link::parse_segment(segment).map(|uid| uid.to_string())
 }
 
 /// The canonical share path for a project: cosmetic slug, load-bearing uid.
 /// Callers hand it the slug once the project's meta is known (the pending
 /// shared-project intent starts life with the uid alone).
+///
+/// `uid` is a `String` here (not a [`PrefixedUid`]) because the route it
+/// serves — [`StudioRoute::SharedProject`] — carries the uid untyped; every
+/// caller only ever hands this an already-valid project uid string (either
+/// minted client-side or round-tripped through [`share_uid_from_segment`]),
+/// so this delegates to [`share_link::canonical_path`] and falls back to
+/// the bare shape only for a malformed uid, which never happens in
+/// practice.
 #[allow(
     dead_code,
     reason = "the share UI that writes canonical links is the post-chrome round; the rule and its tests land with the parser they mirror"
 )]
 pub(crate) fn canonical_share_path(slug: &str, uid: &str) -> String {
-    if slug.is_empty() {
-        format!("/p/{uid}")
-    } else {
-        format!("/p/{slug}-{uid}")
+    match uid.parse::<PrefixedUid>() {
+        Ok(uid) => share_link::canonical_path(slug, uid),
+        Err(_) => {
+            if slug.is_empty() {
+                format!("/p/{uid}")
+            } else {
+                format!("/p/{slug}-{uid}")
+            }
+        }
     }
 }
 
@@ -1073,6 +1083,12 @@ mod tests {
             format!("/p/some/nested/thing-{SHARE_UID}"),
             // and the legacy dialect, for a link shared before the cutover
             format!("#/p/zook-dome-{SHARE_UID}"),
+            // D10: the share segment survives case mangling (route
+            // keywords like `/p/` are a separate, case-sensitive concern —
+            // routing structure is P3, not this grammar)
+            format!("/p/{}", format!("zook-dome-{SHARE_UID}").to_uppercase()),
+            // trailing sentence punctuation is junk, not part of the link
+            format!("/p/zook-dome-{SHARE_UID})."),
         ] {
             assert_eq!(StudioRoute::parse(&path), shared, "{path:?}");
         }

@@ -4,7 +4,8 @@ use alloc::string::{String, ToString};
 use core::fmt;
 use core::str::FromStr;
 
-use lpc_history::{PrefixedUid, UidParseError, UidPrefix};
+use lpc_cloud_api::share_link;
+use lpc_history::PrefixedUid;
 
 /// A project's canonical share address, `/p/<slug>-<uid>`.
 ///
@@ -39,61 +40,42 @@ impl ProjectLink {
 
 impl fmt::Display for ProjectLink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.slug.is_empty() {
-            write!(f, "/p/{}", self.uid)
-        } else {
-            write!(f, "/p/{}-{}", self.slug, self.uid)
-        }
+        f.write_str(&share_link::canonical_path(&self.slug, self.uid))
     }
 }
 
-/// Why a string is not a share link.
+/// Why a string is not a share link: the shared grammar
+/// ([`lpc_cloud_api::share_link`]) found no project uid in it, whether
+/// because nothing parsed as a uid at all or because a uid parsed but
+/// named something other than a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectLinkParseError {
-    /// Nothing in the string parses as a uid.
-    MissingUid(UidParseError),
-    /// A uid parsed, but it names something other than a project.
-    NotAProject(UidPrefix),
-}
+pub struct ProjectLinkParseError;
 
 impl fmt::Display for ProjectLinkParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ProjectLinkParseError::MissingUid(e) => write!(f, "no project uid in link: {e}"),
-            ProjectLinkParseError::NotAProject(prefix) => {
-                write!(f, "link names a {prefix} uid, not a project")
-            }
-        }
+        f.write_str("no project uid in link")
     }
 }
 
 /// Accepts anything that *contains* the canonical tail: a full URL, a path,
-/// `slug-prj…`, or a bare `prj…`. The last `-` separates slug from uid,
-/// which is unambiguous because a uid body is base-32 and its prefix has no
-/// hyphen.
+/// `slug-prj…`, or a bare `prj…`, case-folded and junk-trimmed per the
+/// shared grammar (D10) — delegates entirely to
+/// [`lpc_cloud_api::share_link::split_segment`] rather than re-deriving the
+/// fold/trim/split rule.
 impl FromStr for ProjectLink {
     type Err = ProjectLinkParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let tail = s.trim_end_matches('/').rsplit('/').next().unwrap_or(s);
-        let (slug, uid) = match tail.rsplit_once('-') {
-            Some((slug, uid)) => (slug, uid),
-            None => ("", tail),
-        };
-        let uid: PrefixedUid = uid.parse().map_err(ProjectLinkParseError::MissingUid)?;
-        if uid.prefix() != UidPrefix::Project {
-            return Err(ProjectLinkParseError::NotAProject(uid.prefix()));
-        }
-        Ok(Self {
-            slug: slug.to_string(),
-            uid,
-        })
+        let segment = s.trim_end_matches('/').rsplit('/').next().unwrap_or(s);
+        let (slug, uid) = share_link::split_segment(segment).ok_or(ProjectLinkParseError)?;
+        Ok(Self { slug, uid })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpc_history::UidPrefix;
 
     #[test]
     fn round_trips_through_the_canonical_path() {
@@ -126,12 +108,25 @@ mod tests {
         let device = PrefixedUid::mint(UidPrefix::Device, &[1u8; 16]);
         assert_eq!(
             device.to_string().parse::<ProjectLink>(),
-            Err(ProjectLinkParseError::NotAProject(UidPrefix::Device))
+            Err(ProjectLinkParseError)
         );
-        assert!(matches!(
+        assert_eq!(
             "/p/not-a-link".parse::<ProjectLink>(),
-            Err(ProjectLinkParseError::MissingUid(_))
-        ));
+            Err(ProjectLinkParseError)
+        );
+    }
+
+    /// D10: the whole URL survives case mangling, and trailing sentence
+    /// punctuation is junk, not part of the link — same rule as
+    /// `lp-cloud-server`'s `page::share_path` and the Studio router.
+    #[test]
+    fn survives_case_mangling_and_trailing_punctuation() {
+        let uid = project();
+        let mangled = alloc::format!("https://lightplayer.app/p/zook-dome-{uid}").to_uppercase();
+        assert_eq!(mangled.parse::<ProjectLink>().unwrap().uid, uid);
+
+        let decorated = alloc::format!("see /p/zook-dome-{uid}).");
+        assert_eq!(decorated.parse::<ProjectLink>().unwrap().uid, uid);
     }
 
     fn project() -> PrefixedUid {

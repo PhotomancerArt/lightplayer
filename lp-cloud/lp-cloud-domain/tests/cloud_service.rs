@@ -451,6 +451,36 @@ fn publish_validates_uid_prefix_and_slug() {
         }),
     );
     assert!(matches!(bad_slug, Err(CloudError::InvalidRequest { .. })));
+
+    // Tightened per P1 (2026-08-07): the slug alphabet is exactly what
+    // `share_link::slugify` ever produces — `[a-z0-9-]`, no leading or
+    // trailing `-`. Underscores and uppercase used to be accepted; they no
+    // longer are, since publishing never sends either.
+    for slug in ["under_score", "Uppercase", "-leading", "trailing-"] {
+        let result = svc.handle(
+            actor,
+            CloudRequest::PublishProject(PublishProject {
+                uid: project_uid(),
+                visibility: Visibility::Link,
+                slug: slug.into(),
+            }),
+        );
+        assert!(
+            matches!(result, Err(CloudError::InvalidRequest { .. })),
+            "{slug:?} should be rejected"
+        );
+    }
+
+    // The empty slug is the bare-uid share path, not an invalid one.
+    let bare = svc.handle(
+        actor,
+        CloudRequest::PublishProject(PublishProject {
+            uid: project_uid(),
+            visibility: Visibility::Link,
+            slug: "".into(),
+        }),
+    );
+    assert!(bare.is_ok(), "empty slug should be accepted: {bare:?}");
 }
 
 #[test]

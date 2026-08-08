@@ -28,14 +28,9 @@ use crate::ports::id_mint::IdMint;
 use crate::ports::meta_store::{MetaStore, normalize_email};
 use crate::push_validation::validate_push_events;
 
-/// Longest slug the service will store. Slugs are cosmetic URL decoration;
-/// the uid is what identifies a project.
-const MAX_SLUG_LEN: usize = 100;
-
-/// Longest given/family name `UpdateMe` will store. Cosmetic, like
-/// `MAX_SLUG_LEN` — long enough for any real name, short enough that a
-/// client cannot use the field to smuggle a document into the account
-/// table.
+/// Longest given/family name `UpdateMe` will store. Cosmetic — long enough
+/// for any real name, short enough that a client cannot use the field to
+/// smuggle a document into the account table.
 const MAX_NAME_LEN: usize = 200;
 
 /// How many accounts the dev picker offers at once (`MetaStore::users`'s
@@ -718,21 +713,31 @@ fn placeholder_sidecar(slug: &str) -> SidecarMeta {
     }
 }
 
-/// Slugs decorate URLs, so they are kept to characters that survive one
-/// unescaped.
+/// Slugs decorate share URLs, so they are kept to exactly the alphabet
+/// [`share_link::slugify`](lpc_cloud_api::share_link::slugify) ever
+/// produces — `[a-z0-9-]`, no leading or trailing `-`, capped at
+/// [`share_link::MAX_SLUG_CHARS`](lpc_cloud_api::share_link::MAX_SLUG_CHARS)
+/// — plus the empty slug, which falls back to the bare-uid path. Publishing
+/// always sends `slugify(name)` output, so nothing legitimate ever fails
+/// this; it exists to keep a hand-crafted `PublishProject` request from
+/// writing a slug that would round-trip differently than it parses.
 fn validate_slug(slug: &str) -> Result<(), CloudError> {
-    if slug.is_empty() || slug.len() > MAX_SLUG_LEN {
-        return Err(invalid("slug must be between 1 and 100 characters"));
+    if slug.is_empty() {
+        return Ok(());
     }
-    if !slug
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(invalid(
-            "slug may contain only ASCII letters, digits, '-' and '_'",
-        ));
+    let well_formed = slug.len() <= lpc_cloud_api::share_link::MAX_SLUG_CHARS
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if well_formed {
+        Ok(())
+    } else {
+        Err(invalid(
+            "slug must be empty, or lowercase letters/digits/'-' up to 48 characters with no leading or trailing '-'",
+        ))
     }
-    Ok(())
 }
 
 /// Membership is keyed by email, so the email has to be storable and
