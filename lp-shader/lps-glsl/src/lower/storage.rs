@@ -1,5 +1,4 @@
 use alloc::format;
-use alloc::vec::Vec;
 
 use lpir::{FunctionBuilder, IrType, LpirOp, SlotId, VReg};
 use lps_shared::{LpsType, ParamQualifier};
@@ -7,7 +6,7 @@ use lps_shared::{LpsType, ParamQualifier};
 use crate::hir::{scalar_ir_types, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::{LowerCtx, LowerValue};
+use super::{Lanes, LowerCtx, LowerValue};
 
 #[derive(Debug, Clone)]
 pub(super) enum LocalStorage {
@@ -28,7 +27,7 @@ pub(super) fn local_storage(
         return Ok(LocalStorage::Slot { ty, addr });
     }
 
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for ir_ty in scalar_ir_types(&ty)? {
         lanes.push(fb.alloc_vreg(ir_ty));
     }
@@ -40,13 +39,16 @@ pub(super) fn local_value(
     span: Span,
     local: usize,
 ) -> Result<LowerValue, Diagnostic> {
-    let storage =
-        ctx.locals.get(local).cloned().ok_or_else(|| {
-            Diagnostic::error(span, format!("local index {local} is out of range"))
-        })?;
+    // Split the context borrow instead of cloning the storage: the slot arm
+    // only reads the stored type while it writes loads through the builder,
+    // and those are disjoint fields.
+    let LowerCtx { fb, locals, .. } = ctx;
+    let storage = locals
+        .get(local)
+        .ok_or_else(|| Diagnostic::error(span, format!("local index {local} is out of range")))?;
     match storage {
-        LocalStorage::Flat(value) => Ok(value),
-        LocalStorage::Slot { ty, addr, .. } => load_value_from_addr(ctx, span, addr, &ty),
+        LocalStorage::Flat(value) => Ok(value.clone()),
+        LocalStorage::Slot { ty, addr, .. } => load_addr_value(fb, span, *addr, ty),
     }
 }
 
@@ -56,13 +58,13 @@ pub(super) fn store_local(
     local: usize,
     value: &LowerValue,
 ) -> Result<(), Diagnostic> {
-    let storage =
-        ctx.locals.get(local).cloned().ok_or_else(|| {
-            Diagnostic::error(span, format!("local index {local} is out of range"))
-        })?;
+    let LowerCtx { fb, locals, .. } = ctx;
+    let storage = locals
+        .get(local)
+        .ok_or_else(|| Diagnostic::error(span, format!("local index {local} is out of range")))?;
     match storage {
-        LocalStorage::Flat(dst) => copy_lanes_to_value(ctx, span, &dst, value),
-        LocalStorage::Slot { addr, .. } => store_value_to_addr(ctx, span, addr, value),
+        LocalStorage::Flat(dst) => copy_lanes(fb, span, dst, value),
+        LocalStorage::Slot { addr, .. } => store_addr_value(fb, span, *addr, value),
     }
 }
 
@@ -96,7 +98,7 @@ pub(super) fn lower_uniform_load(
     ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let ir_types = scalar_ir_types(ty)?;
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for (i, ir_ty) in ir_types.iter().enumerate() {
         let dst = ctx.fb.alloc_vreg(*ir_ty);
         ctx.fb.push(LpirOp::Load {
@@ -170,11 +172,22 @@ pub(super) fn load_value_from_addr(
     addr: VReg,
     ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
+    load_addr_value(&mut ctx.fb, span, addr, ty)
+}
+
+/// Builder-only half of [`load_value_from_addr`], so callers holding a
+/// borrow of another `LowerCtx` field can lower loads without cloning.
+fn load_addr_value(
+    fb: &mut FunctionBuilder,
+    span: Span,
+    addr: VReg,
+    ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
     let ir_types = scalar_ir_types(ty)?;
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for (i, ir_ty) in ir_types.iter().enumerate() {
-        let dst = ctx.fb.alloc_vreg(*ir_ty);
-        ctx.fb.push(LpirOp::Load {
+        let dst = fb.alloc_vreg(*ir_ty);
+        fb.push(LpirOp::Load {
             dst,
             base: addr,
             offset: i as u32 * 4,
@@ -196,11 +209,21 @@ pub(super) fn store_value_to_addr(
     addr: VReg,
     value: &LowerValue,
 ) -> Result<(), Diagnostic> {
+    store_addr_value(&mut ctx.fb, span, addr, value)
+}
+
+/// Builder-only half of [`store_value_to_addr`].
+fn store_addr_value(
+    fb: &mut FunctionBuilder,
+    span: Span,
+    addr: VReg,
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
     if value.lanes.len() != scalar_lane_count(&value.ty) {
         return Err(Diagnostic::error(span, "store lane count mismatch"));
     }
     for (i, lane) in value.lanes.iter().enumerate() {
-        ctx.fb.push(LpirOp::Store {
+        fb.push(LpirOp::Store {
             base: addr,
             offset: i as u32 * 4,
             value: *lane,
@@ -209,8 +232,8 @@ pub(super) fn store_value_to_addr(
     Ok(())
 }
 
-fn copy_lanes_to_value(
-    ctx: &mut LowerCtx<'_>,
+fn copy_lanes(
+    fb: &mut FunctionBuilder,
     span: Span,
     dst: &LowerValue,
     src: &LowerValue,
@@ -219,7 +242,7 @@ fn copy_lanes_to_value(
         return Err(Diagnostic::error(span, "copy lane count mismatch"));
     }
     for (dst, src) in dst.lanes.iter().zip(src.lanes.iter()) {
-        ctx.fb.push(LpirOp::Copy {
+        fb.push(LpirOp::Copy {
             dst: *dst,
             src: *src,
         });

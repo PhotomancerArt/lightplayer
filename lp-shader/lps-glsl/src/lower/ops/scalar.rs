@@ -1,6 +1,3 @@
-use alloc::vec;
-use alloc::vec::Vec;
-
 use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
@@ -8,7 +5,7 @@ use crate::body::BinaryOp;
 use crate::hir::{scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 use super::matrix::{lower_matrix_multiply, lower_matrix_vector_multiply};
 use super::numeric::{lane_at, single_lane};
 
@@ -16,13 +13,13 @@ pub(in crate::lower) fn lower_binary(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     op: BinaryOp,
-    lhs: LowerValue,
-    rhs: LowerValue,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     if is_logical(op) {
-        let lhs_lane = single_lane(span, &lhs)?;
-        let rhs_lane = single_lane(span, &rhs)?;
+        let lhs_lane = single_lane(span, lhs)?;
+        let rhs_lane = single_lane(span, rhs)?;
         let dst = ctx.fb.alloc_vreg(IrType::I32);
         let op = match op {
             BinaryOp::LogicalAnd => LpirOp::Iand {
@@ -45,7 +42,7 @@ pub(in crate::lower) fn lower_binary(
         ctx.fb.push(op);
         return Ok(LowerValue {
             ty: LpsType::Bool,
-            lanes: vec![dst],
+            lanes: Lanes::one(dst),
         });
     }
     if is_comparison(op) {
@@ -53,14 +50,14 @@ pub(in crate::lower) fn lower_binary(
             && *result_ty == LpsType::Bool
             && lhs.lanes.len() > 1
         {
-            let Some(mut reduced) = lower_comparison_lane(ctx, span, op, &lhs, &rhs, 0)? else {
+            let Some(mut reduced) = lower_comparison_lane(ctx, span, op, lhs, rhs, 0)? else {
                 return Err(Diagnostic::error(
                     span,
                     "unsupported aggregate comparison width",
                 ));
             };
             for i in 1..lhs.lanes.len() {
-                let Some(component) = lower_comparison_lane(ctx, span, op, &lhs, &rhs, i)? else {
+                let Some(component) = lower_comparison_lane(ctx, span, op, lhs, rhs, i)? else {
                     return Err(Diagnostic::error(
                         span,
                         "unsupported aggregate comparison width",
@@ -84,14 +81,14 @@ pub(in crate::lower) fn lower_binary(
             }
             return Ok(LowerValue {
                 ty: LpsType::Bool,
-                lanes: vec![reduced],
+                lanes: Lanes::one(reduced),
             });
         }
         let width = scalar_lane_count(result_ty);
-        let mut lanes = Vec::new();
+        let mut lanes = Lanes::new();
         for i in 0..width {
-            let lhs_lane = lane_at(&lhs, i);
-            let rhs_lane = lane_at(&rhs, i);
+            let lhs_lane = lane_at(lhs, i);
+            let rhs_lane = lane_at(rhs, i);
             let dst = ctx.fb.alloc_vreg(IrType::I32);
             let base_ty = scalar_base_type(&lhs.ty).unwrap_or_else(|| lhs.ty.clone());
             let op = match base_ty {
@@ -215,10 +212,10 @@ pub(in crate::lower) fn lower_binary(
         return lower_matrix_vector_multiply(ctx, span, lhs, rhs, result_ty);
     }
     let width = scalar_lane_count(result_ty);
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for i in 0..width {
-        let l = lane_at(&lhs, i);
-        let r = lane_at(&rhs, i);
+        let l = lane_at(lhs, i);
+        let r = lane_at(rhs, i);
         let base_ty = scalar_base_type(result_ty).unwrap_or_else(|| result_ty.clone());
         let dst = match base_ty {
             LpsType::Float => {
