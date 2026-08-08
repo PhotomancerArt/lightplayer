@@ -307,8 +307,7 @@ mod tests {
 
         // The same library against a service that has forgotten everything.
         let fresh = InProcessServer::new(2_000.0);
-        let (client, _) =
-            InProcessCloud::sign_in(fresh, "sub-yona", "yona@example.com", "Yona");
+        let (client, _) = InProcessCloud::sign_in(fresh, "sub-yona", "yona@example.com", "Yona");
         let report = block_on(run_trip(
             &client,
             &dome.local(),
