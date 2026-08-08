@@ -27,12 +27,17 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
-/// - `6` — `float_mode` became an optional **pin** rather than a required
+/// - `7` — `float_mode` became an optional **pin** rather than a required
 ///   choice: `ShaderDef.float_mode` and `ComputeShaderDef.float_mode` are
 ///   `OptionSlot`s whose absence means Auto (the target's native
-///   representation). An explicit `"float_mode": "fixed"` from format 5 was
+///   representation). An explicit `"float_mode": "fixed"` from format 6 was
 ///   the pre-posture default spelled out — a meaningless pin — so the
 ///   upgrade drops it; `"float"` is a real pin and survives unchanged.
+///   See `docs/adr/2026-08-08-float-semantics-per-target-representation.md`.
+/// - `6` — project/device uids became one token: prefix plus a lowercase
+///   Crockford base-32 body with no separator (`prj_…` → `prj…`). The
+///   upgrader transcodes every uid it finds; see
+///   `docs/adr/2026-08-07-uid-format-single-token-base32.md`.
 /// - `5` — `bus:time` carries a **time product**, not raw seconds:
 ///   `ClockState` publishes a new `product` output on the channel (its
 ///   `seconds`/`delta_seconds` stay produced-but-unbound), `FluidDef.time`
@@ -66,7 +71,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 6;
+pub const PROJECT_FORMAT_VERSION: u32 = 7;
 
 /// Parsed `project.json` container manifest.
 ///

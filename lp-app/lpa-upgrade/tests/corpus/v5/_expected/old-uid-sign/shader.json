@@ -1,0 +1,55 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "consumed": {
+    "palettePhase01": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 25.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Palette",
+      "description": "Palette cycle position (0-1)"
+    },
+    "panPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 20.9439516,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Pan",
+      "description": "Pan oscillation cycle position (0-1)"
+    },
+    "scalePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 8.9759793,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Zoom",
+      "description": "Zoom oscillation cycle position (0-1)"
+    },
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Seconds from the scope's time product (noise advance)"
+    }
+  }
+}
