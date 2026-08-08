@@ -22,18 +22,18 @@
 //!                       account, sessions); signed out it asks you in
 //! /sim/<project-key>    the editor as a lens on THE sim session running
 //!                       that project (slug — the user-facing identifier —
-//!                       or a `prj_…` uid as fallback). A sim runtime's
+//!                       or a `prj…` uid as fallback). A sim runtime's
 //!                       identity is its project (D37).
 //! /sim/<key>/play       the SAME session, rendered as play mode (panel.md
 //!                       P12: the root module's panel, nothing else).
 //! /device/<dev-uid>     the editor as a lens on that device's session;
 //!                       the project comes from the device.
 //! /device/<uid>/play    likewise.
-//! /p/<slug>-prj_<uid>   a SHARED project link (D24): the uid is the whole
-//!                       of the identity (95 bits of it — the link IS the
+//! /p/<slug>-prj<uid>    a SHARED project link (D24): the uid is the whole
+//!                       of the identity (80 bits of it — the link IS the
 //!                       token) and the slug in front is cosmetic, so
 //!                       renaming never breaks a link already in somebody's
-//!                       chat history. A bare `/p/prj_<uid>` resolves too.
+//!                       chat history. A bare `/p/prj<uid>` resolves too.
 //! /stories[/<story-id>] the story book (dev)
 //! /mapping              the standalone 2D mapping editor
 //! /boards[/<vendor>/<product>], /boards/edit
@@ -114,7 +114,7 @@
 //! seam, frozen so `scripts/studio-story-pngs.mjs` keeps working.
 
 use lpa_studio_core::{UiLensRuntime, UiStudioView};
-use lpc_history::{PrefixedUid, UidPrefix};
+use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
 
 /// Where the user is (or is headed) in the Studio shell.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -151,15 +151,15 @@ pub(crate) enum StudioRoute {
     /// an invitation to sign in rather than a 404 when nobody is.
     Account,
     /// The editor as a lens on THE sim session running this project. The
-    /// key is the slug (preferred) or a `prj_…` uid (machine-stable
+    /// key is the slug (preferred) or a `prj…` uid (machine-stable
     /// fallback). Reload respawns the sim and loads the project.
     /// `play` renders that same session as play mode (`/play` suffix).
     Sim { key: String, play: bool },
-    /// The editor as a lens on this device's runtime session (`dev_…`
+    /// The editor as a lens on this device's runtime session (`dev…`
     /// uid). Reload connects the granted port (M1) and attaches.
     /// `play` renders that same session as play mode (`/play` suffix).
     Device { uid: String, play: bool },
-    /// A shared-project link (`/p/<slug>-prj_…`, D24). The uid is the
+    /// A shared-project link (`/p/<slug>-prj…`, D24). The uid is the
     /// identity AND the link token; the slug that decorates it is cosmetic
     /// and is dropped at parse. Round one lands the app on `Home` with this
     /// uid held as a pending intent — the open/pull flow is a later round.
@@ -240,7 +240,7 @@ impl StudioRoute {
                 _ => StudioRoute::Home,
             },
             // A share link: only the LAST segment is examined, so
-            // `/p/<slug>-prj_x` and `/p/anything/else/prj_x` both resolve
+            // `/p/<slug>-prjx` and `/p/anything/else/prjx` both resolve
             // and a path with no uid in it resolves to the landing rather
             // than to a guess. Mirrors `lp-cloud-server`'s
             // `page::share_path`.
@@ -403,7 +403,7 @@ impl StudioRoute {
     }
 }
 
-/// A shared project the user arrived on (`/p/<slug>-prj_x`), held as an
+/// A shared project the user arrived on (`/p/<slug>-prjx`), held as an
 /// intent until something can act on it. Provided as a context by
 /// `web_app.rs` and, this round, deliberately consumed by nobody: the route
 /// lands the app on `Home` and the open/pull flow (fetch it, offer it, copy
@@ -416,11 +416,12 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
 
 /// The project uid inside one share-path segment, if there is one.
 ///
-/// The slug may itself contain `-` and a base-62 uid body may contain
-/// anything alphanumeric, so the split point is the LAST `prj_`; parsing is
-/// strict about the 16-character body, which is what makes trailing junk a
-/// miss rather than a truncation. Same rule as the server's
-/// `page::share_path` — the two halves must agree about what a link means.
+/// The slug may itself contain `-` — and `prj` can even occur inside a
+/// base-32 uid body — but the uid's length is FIXED, so the split point is
+/// simply the last `"prj".len() + UID_BODY_LEN` characters; strict parsing
+/// of that tail is what makes trailing junk a miss rather than a
+/// truncation. Same rule as the server's `page::share_path` — the two
+/// halves must agree about what a link means.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(
@@ -429,8 +430,8 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
     )
 )]
 fn share_uid_from_segment(segment: &str) -> Option<String> {
-    let start = segment.rfind("prj_")?;
-    let uid: PrefixedUid = segment[start..].parse().ok()?;
+    let start = segment.len().checked_sub("prj".len() + UID_BODY_LEN)?;
+    let uid: PrefixedUid = segment.get(start..)?.parse().ok()?;
     (uid.prefix() == UidPrefix::Project).then(|| uid.to_string())
 }
 
@@ -871,15 +872,15 @@ mod tests {
                 play: true,
             },
             StudioRoute::Sim {
-                key: "prj_abc123".to_string(),
+                key: "prjabc123".to_string(),
                 play: false,
             },
             StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: false,
             },
             StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: true,
             },
             StudioRoute::SharedProject {
@@ -910,8 +911,8 @@ mod tests {
         ]
     }
 
-    /// A minted project uid's shape: `prj_` + 16 base-62 characters.
-    const SHARE_UID: &str = "prj_h7Kq9xY2mQ4tB8Wz";
+    /// A minted project uid’s shape: `prj` + 16 base-32 characters.
+    const SHARE_UID: &str = "prjh7kq9xy2mq4tb8wz";
 
     #[test]
     fn routes_round_trip_through_their_path() {
@@ -978,19 +979,19 @@ mod tests {
             "/",
             "/nope",
             "/sim",
-            "/sim/prj_x/extra",
-            "/sim/prj_x/play/extra",
+            "/sim/prjx/extra",
+            "/sim/prjx/play/extra",
             "/device",
-            "/device/dev_x/extra",
-            "/device/dev_x/play/extra",
+            "/device/devx/extra",
+            "/device/devx/play/extra",
             "/mapping/extra",
             // the same, in the legacy dialect
             "#",
             "#/",
             "#/nope",
             "#/sim",
-            "#/device/dev_x/extra",
-            "#/device/dev_x/play/extra",
+            "#/device/devx/extra",
+            "#/device/devx/play/extra",
             "#/mapping/extra",
             "#/home/extra",
             "#/explore/extra",
@@ -1033,9 +1034,9 @@ mod tests {
             }
         );
         assert_eq!(
-            StudioRoute::parse("/device/dev_a/play"),
+            StudioRoute::parse("/device/deva/play"),
             StudioRoute::Device {
-                uid: "dev_a".to_string(),
+                uid: "deva".to_string(),
                 play: true
             }
         );
@@ -1085,12 +1086,12 @@ mod tests {
             "/p",
             "/p/",
             "/p/zook-dome",
-            "/p/prj_tooshort",
-            "/p/prj_h7Kq9xY2mQ4tB8Wzextra",
-            "/p/prj_h7Kq9xY2mQ4tB8W-",
+            "/p/prjtooshort",
+            "/p/prjh7kq9xy2mq4tb8wzextra",
+            "/p/prjh7kq9xy2mq4tb8w-",
             // right shape, wrong kind of thing
-            "/p/dev_h7Kq9xY2mQ4tB8Wz",
-            "/p/usr_h7Kq9xY2mQ4tB8Wz",
+            "/p/devh7kq9xy2mq4tb8wz",
+            "/p/usrh7Kq9xY2mQ4tB8Wz",
         ] {
             assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
@@ -1169,7 +1170,7 @@ mod tests {
         let view = editor_view(Some(UiLensRuntime::Sim {
             project_key: Some("basic".to_string()),
         }))
-        .with_open_project(Some("prj_abc".to_string()), Some("basic".to_string()));
+        .with_open_project(Some("prjabc".to_string()), Some("basic".to_string()));
         assert!(
             StudioRoute::Sim {
                 key: "basic".to_string(),
@@ -1187,7 +1188,7 @@ mod tests {
             StudioRoute::parse("/project/2026-07-09-1421-basic"),
             StudioRoute::Home
         );
-        assert_eq!(StudioRoute::parse("/project/prj_abc"), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse("/project/prjabc"), StudioRoute::Home);
     }
 
     #[test]
@@ -1279,7 +1280,7 @@ mod tests {
     #[test]
     fn legacy_params_strip_and_harness_params_pass() {
         assert_eq!(
-            strip_legacy_params("?project=prj_abc&connect=simulator&story-png=1"),
+            strip_legacy_params("?project=prjabc&connect=simulator&story-png=1"),
             "?story-png=1"
         );
         assert_eq!(strip_legacy_params("?connect=usb"), "");
@@ -1332,12 +1333,12 @@ mod tests {
     #[test]
     fn lens_on_a_device_binds_the_device_route_by_uid() {
         let view = editor_view(Some(UiLensRuntime::Device {
-            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
         }));
         assert_eq!(
             lens_route(&view),
             Some(StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: false
             })
         );
@@ -1365,10 +1366,10 @@ mod tests {
             project_key: Some("2026-07-09-1421-basic".to_string()),
         }))
         .with_open_project(
-            Some("prj_abc".to_string()),
+            Some("prjabc".to_string()),
             Some("2026-07-09-1421-basic".to_string()),
         );
-        for key in ["2026-07-09-1421-basic", "prj_abc"] {
+        for key in ["2026-07-09-1421-basic", "prjabc"] {
             assert!(
                 StudioRoute::Sim {
                     key: key.to_string(),
@@ -1389,7 +1390,7 @@ mod tests {
         // frame — sim_matches_view is deliberately false for them
         assert!(
             !StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: false
             }
             .sim_matches_view(&view)

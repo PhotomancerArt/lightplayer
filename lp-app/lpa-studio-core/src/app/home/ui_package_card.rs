@@ -7,7 +7,7 @@ use crate::app::library::PackageHealth;
 /// frame later) and lives entirely in the renderer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPackageCard {
-    /// `prj_…` uid string — the identity every card action carries.
+    /// `prj…` uid string — the identity every card action carries.
     pub uid: String,
     /// Manifest kind (`"Module"`; pre-rename packages said `"Project"`).
     pub kind: String,

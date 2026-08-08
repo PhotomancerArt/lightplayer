@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn every_gallery_open_replaces_the_loaded_project() {
         assert!(action_replaces_loaded_project(&home(HomeOp::OpenPackage {
-            key: "prj_abc".to_string(),
+            key: "prjabc".to_string(),
         })));
         assert!(action_replaces_loaded_project(&home(HomeOp::OpenExample {
             id: "basic".to_string(),
@@ -143,13 +143,13 @@ mod tests {
         // loaded, so these must not prompt either.
         assert!(!action_replaces_loaded_project(&home(
             HomeOp::RenamePackage {
-                uid: "prj_abc".to_string(),
+                uid: "prjabc".to_string(),
                 name: "Renamed".to_string(),
             }
         )));
         assert!(!action_replaces_loaded_project(&home(
             HomeOp::DuplicatePackage {
-                uid: "prj_abc".to_string(),
+                uid: "prjabc".to_string(),
             }
         )));
     }
