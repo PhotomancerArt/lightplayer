@@ -2220,6 +2220,7 @@ mod binding_kind_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::products::visual::{ConsumerPolicy, VisualSpace};
     extern crate std;
 
     use core::cell::Cell;
@@ -4092,6 +4093,8 @@ mod tests {
                     height: 16,
                     format: TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("fluid texture");
@@ -4720,6 +4723,8 @@ mod tests {
                 height: 64,
                 format: TextureStorageFormat::Rgba16Unorm,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             },
         )
         .expect("texture")

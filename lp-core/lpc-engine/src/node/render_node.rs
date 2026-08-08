@@ -3,14 +3,30 @@
 use lp_gfx::TextureHandle;
 
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
-    VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSampleBufferRequest, VisualSampleTarget,
 };
 
 use super::{NodeError, RenderContext, err_ctx};
 
 /// Node capability for materializing graph-level [`VisualProduct`] values.
 pub trait RenderNode {
+    /// The space this product lives in, and its own projection opinion —
+    /// the metadata query a consumer asks before it picks which
+    /// coordinates to send (plan D17).
+    ///
+    /// The default answer is 2D-with-no-opinion, which is what a producer
+    /// that has never declared a space means. Nodes that only forward a
+    /// product (playlist, module) must forward this too, or a 1D effect
+    /// behind them would look 2D at the fixture.
+    fn visual_space(
+        &mut self,
+        _product: VisualProduct,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        Ok(ProductSpaceInfo::two_d())
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
