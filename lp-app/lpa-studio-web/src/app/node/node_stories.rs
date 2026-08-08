@@ -281,7 +281,7 @@ fn export_popup(name: &str, export: lpa_studio_core::UiModuleExport) -> Element 
     };
 
     rsx! {
-        div { class: "tw:flex tw:min-h-[420px] tw:justify-end",
+        div { class: "tw:flex tw:min-h-[760px] tw:items-start tw:justify-end",
             NodeDetailPopover {
                 header: view.header,
                 pending_edits: vec![],

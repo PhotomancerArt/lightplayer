@@ -294,7 +294,7 @@ pub(crate) fn change_list_overflow() -> Element {
 )]
 pub(crate) fn add_node_picker() -> Element {
     rsx! {
-        div { class: "tw:min-h-[520px]",
+        div { class: "tw:min-h-[900px]",
             StoryPane {
                 dirty: DirtySummary::default(),
                 edits_in_flight: 0,
@@ -342,7 +342,7 @@ fn picker_with_imports(patterns: &[(&str, &str, &str, bool)]) -> Element {
     view.add_node_menu = Some(menu);
 
     rsx! {
-        div { class: "tw:min-h-[640px] tw:max-w-[320px]",
+        div { class: "tw:min-h-[1050px] tw:max-w-[320px]",
             ProjectPane {
                 view,
                 status: UiStatus::good("Ready"),
@@ -378,7 +378,7 @@ pub(crate) fn add_node_picker_device_gaps() -> Element {
     view.add_node_menu = Some(menu);
 
     rsx! {
-        div { class: "tw:min-h-[520px] tw:max-w-[320px]",
+        div { class: "tw:min-h-[900px] tw:max-w-[320px]",
             ProjectPane {
                 view,
                 status: UiStatus::good("Ready"),

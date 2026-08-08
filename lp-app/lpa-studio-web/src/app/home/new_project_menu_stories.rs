@@ -14,7 +14,7 @@ use crate::base::{StudioIcon, StudioIconName};
 use crate::core::quiet_action_class;
 
 #[story(
-    description = "The New menu open on the Projects header: three template rows, each a title over a dim one-liner. Blank is what `New` has always meant and stays first; the two pattern rows say what rig they build AND that they publish `effect/`, so the export boundary is legible before the project exists. Text-first by design — the spike's visual template cards fight the 320px detail-card cap, and the picker's flat-list grammar is what the rest of Studio's menus use."
+    description = "The New menu open on the Projects header: three template rows, each a title over a dim one-liner. Blank is what `New` has always meant and stays first; the two pattern rows say what rig they build AND that they export `effect/`, so the export boundary is legible before the project exists. Text-first by design — the spike's visual template cards fight the 320px detail-card cap, and the picker's flat-list grammar is what the rest of Studio's menus use."
 )]
 pub(crate) fn menu_open() -> Element {
     header(true)
