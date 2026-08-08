@@ -79,15 +79,15 @@ fn real_source_defs_sync_as_slot_roots() {
         ),
         LpValue::String(String::from("bus:visual.out")),
     );
-    assert_value(
-        select(
-            &shader_data,
-            ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
-            &shape_registry,
-            "float_mode",
-        ),
-        LpValue::String(String::from("fixed")),
-    );
+    // `examples/basic` authors no representation pin, so the wire carries the
+    // option in its absent (Auto) state rather than a value. An option that
+    // synced as a bare value would be a shape the client cannot round-trip.
+    assert_option_none(select(
+        &shader_data,
+        ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
+        &shape_registry,
+        "float_mode",
+    ));
 
     let shader_with_params = match NodeDef::from_json_str(
         r#"{
@@ -219,6 +219,16 @@ fn root_data(
     let root = sync.roots.iter().find(|root| root.name == name).unwrap();
     lpc_model::slot_sync_codec::read_slot_snapshot_json(registry, root.shape, root.data.get())
         .unwrap()
+}
+
+fn assert_option_none(data: &SlotData) {
+    let SlotData::Option(option) = data else {
+        panic!("expected option, got {data:?}");
+    };
+    assert!(
+        option.data.is_none(),
+        "expected an absent option, got {option:?}"
+    );
 }
 
 fn assert_value(data: &SlotData, expected: LpValue) {

@@ -9,13 +9,15 @@
 //! the author what to change. What it must never be is a quiet Q32 compile —
 //! `docs/adr/2026-07-09-preview-fidelity-tiers.md` §4.
 //!
-//! The host build links the wasmtime engine, whose numeric mode is fixed at
-//! construction and whose `WasmOptions::default()` is Q32; the refusal path is
-//! therefore the one that runs here. On an ESP32-S3 the same request reaches
-//! `lpvm-native` with `float-f32` linked and compiles. That arm is proved on
-//! silicon, not here.
+//! **Which arm runs here is a property of the build, not of the contract.**
+//! The host links the wasmtime engine, which since 2026-08-07 honours float
+//! mode per compile and so takes the *compiling* arm; an Xtensa build without
+//! `float-f32` takes the refusing one. Both are asserted below by one test
+//! that accepts either outcome and pins what each must satisfy — so this file
+//! keeps working on whichever build runs it, and neither arm can quietly
+//! become a Fixed compile.
 
-use lp_gfx::{GfxError, LpGraphics, ShaderCompileOptions, ShaderSemantics};
+use lp_gfx::{GfxError, LpGraphics, ShaderCompileOptions, ShaderFloatImpl, ShaderSemantics};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lp_shader::ShaderFrontend;
 
@@ -42,18 +44,41 @@ fn the_fixed_tier_still_compiles() {
         .expect("Q32 is the shipped tier on every CPU backend");
 }
 
-/// An engine that cannot compile Float refuses, and the refusal is legible.
+/// Float either compiles as Float, or is refused legibly. Never in between.
 ///
-/// The message has a job beyond being an error: it has to tell an author who
-/// set the dropdown to Float what to do about it. So it names the backend
-/// (which build refused) and the slot (what to change) rather than the Cargo
-/// feature the lowering would otherwise have named.
+/// The two arms are different builds, so this asserts both rather than
+/// picking one:
+///
+/// - **Compiled** (host wasmtime, and any board with `float-f32`): the module
+///   must *disclose* that it really emitted float. A backend that widened
+///   `supports_float_mode` without threading the mode through would land here
+///   with `float_impl == Fixed` — a quiet Q32 compile wearing a Float label,
+///   which is exactly what `preview-fidelity-tiers` §4 forbids and what
+///   nothing caught before `compile_with_params` started honouring
+///   `params.float_mode`.
+/// - **Refused** (e.g. Xtensa without `float-f32`): the message has a job
+///   beyond being an error — it has to tell an author who set the dropdown to
+///   Float what to do about it. So it names the backend (which build refused)
+///   and the slot (what to change), not the Cargo feature the lowering would
+///   otherwise have named.
 #[test]
-fn an_engine_without_float_refuses_and_says_which_and_why() {
+fn float_either_compiles_as_float_or_is_refused_legibly() {
     let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
     let options = ShaderCompileOptions::new(ShaderSemantics::F32Cpu, ShaderFrontend::LpsGlsl);
 
     match graphics.compile_shader(SHADER, &options) {
+        Ok(shader) => {
+            let stats = shader
+                .compile_stats()
+                .expect("a compiled shader must report its compile stats");
+            assert_ne!(
+                stats.float_impl,
+                ShaderFloatImpl::Fixed,
+                "backend {} accepted F32Cpu and then compiled Fixed — a silent \
+                 downgrade, not a Float shader",
+                graphics.backend_name()
+            );
+        }
         Err(GfxError::Backend(message)) => {
             assert!(
                 message.contains(graphics.backend_name()),
@@ -65,13 +90,6 @@ fn an_engine_without_float_refuses_and_says_which_and_why() {
             );
         }
         Err(other) => panic!("expected a Backend refusal, got {other:?}"),
-        // The device arm. Reaching it here would mean the host linked an
-        // engine that compiles native f32 — fine, but then the assertion
-        // above no longer describes this build.
-        Ok(_) => panic!(
-            "this build's engine compiled F32Cpu; the refusal path needs a \
-             Q32-only engine to exercise"
-        ),
     }
 }
 
