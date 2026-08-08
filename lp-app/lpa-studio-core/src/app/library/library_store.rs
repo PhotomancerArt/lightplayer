@@ -790,6 +790,38 @@ mod tests {
         assert_eq!(source_files.len(), 5); // 4 demo files + sidecar
     }
 
+    /// P1: `install_files_with_fresh_uid` (the primitive behind `duplicate`
+    /// and import) rewrites the manifest via a generic `serde_json::Value`
+    /// map, not the canonical writer — it should pass `kind`/`exports`
+    /// through untouched, the same as any other key it does not itself
+    /// know about.
+    #[test]
+    fn install_files_with_fresh_uid_preserves_kind_and_exports() {
+        let store = store();
+        let files = vec![
+            (
+                "project.json".to_string(),
+                br#"{"format":5,"name":"demo","kind":"pattern","exports":["chase"]}"#.to_vec(),
+            ),
+            (
+                "module.json".to_string(),
+                br#"{"kind":"Module","nodes":{}}"#.to_vec(),
+            ),
+        ];
+        let summary = store
+            .install_files_with_fresh_uid("fresh", &files, PackageProvenance::Created, 1.0)
+            .unwrap();
+        let handle = store.open(summary.uid).unwrap();
+        let fields = package_manifest::read_manifest(&*handle.package_fs.borrow()).unwrap();
+        assert_eq!(
+            fields.kind,
+            lpc_model::ProjectKind::Pattern {
+                exports: vec!["chase".to_string()]
+            }
+        );
+        assert_eq!(fields.exports, vec!["chase".to_string()]);
+    }
+
     #[test]
     fn rename_moves_the_directory_and_keeps_identity() {
         let store = store();

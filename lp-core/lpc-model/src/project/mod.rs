@@ -18,6 +18,7 @@
 
 pub mod change_summary;
 pub mod config;
+pub mod export_check;
 pub mod inventory;
 pub mod manifest;
 pub mod node_attach_site;
@@ -30,11 +31,14 @@ pub use crate::sync::current_revision::{advance_revision, current_revision, set_
 pub use crate::sync::revision::Revision;
 pub use change_summary::ChangeSummary;
 pub use config::ProjectConfig;
+pub use export_check::{
+    ExportFileSet, ExportFinding, ExportLintReport, ExportSeverity, check_export, check_exports,
+};
 pub use inventory::project_inventory::ProjectInventory;
 pub use inventory::project_node::{ProjectNode, ProjectNodeOrigin};
 pub use inventory::project_node_placement::ProjectNodePlacement;
 pub use inventory::project_tree::ProjectTree;
-pub use manifest::{ManifestParseError, PROJECT_FORMAT_VERSION, ProjectManifest};
+pub use manifest::{ManifestParseError, PROJECT_FORMAT_VERSION, ProjectKind, ProjectManifest};
 pub use node_attach_site::NodeAttachSite;
 pub use overlay_commit::commit_result::CommitResult;
 pub use overlay_mutation::mutation_result::{MutationBatchResults, MutationResult};

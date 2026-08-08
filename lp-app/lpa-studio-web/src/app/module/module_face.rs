@@ -24,6 +24,14 @@
 //! 4. provenance — a quiet footer line (§8), derived from the module def's
 //!    authored `ProvenanceDef` fields.
 //!
+//! P3 briefly put a fifth `exports` section here — the project's manifest
+//! list as a sage rail. G1's R-A took it back off: what a project hands out
+//! is a property of the child CARDS, so the workspace column below this one
+//! groups them under an `exports` header instead
+//! ([`crate::app::node::NodeChildren`]). Designation itself never lived on
+//! the face — it is a gesture on each module's detail popup (D12) — and
+//! that has not moved.
+//!
 //! **Children are NOT here.** They expand under the card as full sibling
 //! cards, via [`crate::app::node::NodeChildren`] — the grammar the playlist
 //! face and the old project node already use. All of them render, with no
@@ -45,7 +53,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ModuleHeroProduct, NodeCardDrawer, NodeUiOp, UiAction, UiModuleFace as UiModuleFaceData,
+    ExportFinding, ExportSeverity, ModuleHeroProduct, NodeCardDrawer, NodeUiOp, UiAction,
+    UiModuleFace as UiModuleFaceData,
 };
 
 use crate::app::WiringDrawerBody;
@@ -147,6 +156,31 @@ pub fn ModuleFace(
             div { class: "tw:border-t tw:border-border-strong tw:px-4 tw:py-2 tw:text-xs tw:text-dim-foreground",
                 "{provenance}"
             }
+        }
+    }
+}
+
+/// One lint line, in the severity's own tone. Shared by the workspace
+/// column's exports preamble and the module detail popup so a finding reads
+/// the same in both places.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn ExportFindingRow(finding: ExportFinding) -> Element {
+    let (class, glyph) = match finding.severity {
+        ExportSeverity::Warning => (
+            "tw:flex tw:min-w-0 tw:items-start tw:gap-1.5 tw:text-[0.68rem] tw:leading-snug tw:text-status-warning-foreground",
+            "⚠",
+        ),
+        ExportSeverity::Error => (
+            "tw:flex tw:min-w-0 tw:items-start tw:gap-1.5 tw:text-[0.68rem] tw:leading-snug tw:text-status-error-foreground",
+            "✕",
+        ),
+    };
+
+    rsx! {
+        p { class,
+            span { class: "tw:flex-none", aria_hidden: "true", "{glyph}" }
+            span { class: "tw:min-w-0 tw:break-words", "{finding.message}" }
         }
     }
 }
