@@ -227,11 +227,17 @@ body {
     var(--studio-color-bg);
 }
 
-button,
-input,
-textarea,
-select {
-    font: inherit;
+/* In `base` so Tailwind utilities (`tw:text-*`, `tw:font-*`) on the element
+   itself still win — an unlayered reset beats every layered rule and silently
+   killed them. Still overrides UA form-control fonts: UA styles lose to any
+   author layer. */
+@layer base {
+    button,
+    input,
+    textarea,
+    select {
+        font: inherit;
+    }
 }
 
 /* Tailwind v4 preflight no longer sets a pointer cursor on buttons, which left
