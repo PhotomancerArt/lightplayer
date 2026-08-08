@@ -1,5 +1,5 @@
 ---
-status: actions-open
+status: closed
 date: 2026-08-08
 severity: severe
 duration: 5h 10m (fix availability; per-project recovery = one Upgrade click)
@@ -97,6 +97,7 @@ already scheduled for a wipe.
   (convert to draft or comment "DO NOT MERGE: <what's in flight>") the
   moment the gap is found — enforcement: AGENTS.md, alongside the
   persisted-format drill (shipped with this entry).
-- [ ] Establish this registry and its process — enforcement: this
-  directory's README; optionally a `yona-postmortem` skill wrapping the
-  "Running a post-mortem" steps.
+- [x] Establish this registry and its process — enforcement: this
+  directory's README + the `yona-postmortem` skill
+  (2026-agentic-coding PR #6) wrapping the "Running a post-mortem"
+  steps.

@@ -116,4 +116,4 @@ surface; done-during-response items stay listed, checked.
 
 | Date | Incident | Severity | Status |
 |---|---|---|---|
-| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.md) | severe | actions-open |
+| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.md) | severe | closed |
