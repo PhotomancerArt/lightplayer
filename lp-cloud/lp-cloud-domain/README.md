@@ -25,7 +25,7 @@ other direction.
 | `MetaStore` | All service state: users, sessions, projects, membership, head refs, sidecars, the per-project event log, the blob index |
 | `BlobStore` | Content-addressed bytes. Defined here, *not* held by `CloudService` — blob transfer is edge-level |
 | `Clock` | `now() -> f64` epoch seconds |
-| `IdMint` | Random bytes for `usr_` uids and session tokens |
+| `IdMint` | Random bytes for `usr` uids and session tokens |
 
 `MetaStore` is deliberately **one** trait. Those tables are one consistency
 domain — a push appends events, moves the frontier, and replaces the sidecar
@@ -87,7 +87,7 @@ preview hash are the client's word, and the service does not audit them.
 **The client owns project uids** (D21). `PublishProject` records the uid it
 was given; publishing a uid someone else owns answers `NotFound`, so the
 endpoint cannot be walked to discover which uids exist. The service mints
-only `usr_` uids and session tokens, both from `IdMint` bytes.
+only `usr` uids and session tokens, both from `IdMint` bytes.
 
 ## Beyond `handle`
 

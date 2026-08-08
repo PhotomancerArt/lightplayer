@@ -2251,7 +2251,7 @@ impl ProjectController {
         Ok(loaded.logs)
     }
 
-    /// Load-as-push (D19): open a library package by key (slug or `prj_…`
+    /// Load-as-push (D19): open a library package by key (slug or `prj…`
     /// uid) — the host acquires the project lock, then the head is pushed
     /// to the runtime, replacing whatever project is loaded. A page
     /// refresh re-pushes the head.
@@ -3646,7 +3646,7 @@ impl ProjectController {
             .target
     }
 
-    /// The `prj_…` uid of the open library package, when the running
+    /// The `prj…` uid of the open library package, when the running
     /// project is backed by one.
     pub fn active_library_uid(&self) -> Option<String> {
         Some(
@@ -7166,15 +7166,12 @@ mod tests {
         // No package behind the project (device projects, fixture servers):
         // the tree label is still the best thing there is.
         assert_eq!(
-            project_display_title(None, Some("Aurora"), "prj_x"),
+            project_display_title(None, Some("Aurora"), "prjx"),
             "Aurora"
         );
         // Blank candidates never win — an empty title is worse than an id.
-        assert_eq!(
-            project_display_title(Some("   "), Some(""), "prj_x"),
-            "prj_x"
-        );
-        assert_eq!(project_display_title(None, None, "prj_x"), "prj_x");
+        assert_eq!(project_display_title(Some("   "), Some(""), "prjx"), "prjx");
+        assert_eq!(project_display_title(None, None, "prjx"), "prjx");
     }
 
     #[test]

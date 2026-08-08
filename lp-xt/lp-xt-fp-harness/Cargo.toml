@@ -1,0 +1,32 @@
+[package]
+name = "lp-xt-fp-harness"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Xtensa FP conformance rig: runs the lp-xt-fp-vectors corpus on real silicon and prints the answers."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+# A DEVICE-target crate, deliberately absent from the workspace `members` list
+# for the same reason the firmware crates are: `esp-println` resolves against a
+# chip and a bare-metal target, so `cargo check` for the host cannot build it.
+#
+# It is still covered, and better than a host check would cover it: both
+# firmwares compile it for their real target in their clippy harness loops
+# (`just clippy-fw-esp32s3`, `just clippy-fw-esp32v3`). That loop exists because
+# 13 harnesses once rotted uncompiled in this repo; adding a `test_*` feature
+# without adding it there is how that happens.
+[dependencies]
+# The corpus generator. The whole point of sharing it is that the host
+# predictions and the device run generate byte-identical vectors — the
+# fingerprint printed on both sides is what proves it, and the diff tool aborts
+# when they disagree.
+lp-xt-fp-vectors = { path = "../lp-xt-fp-vectors" }
+
+# Output only. No chip feature is named here on purpose: the firmware that
+# depends on this crate names its own (`esp32s3` / `esp32`), and cargo unifies.
+# Naming one here would make this crate pick a board.
+esp-println = { version = "0.17.0", default-features = false }

@@ -346,13 +346,13 @@ mod tests {
 
     fn card(state: RosterCardState) -> UiDeviceCard {
         UiDeviceCard {
-            uid: Some("dev_7pQr5St89uVwXy2C".to_string()),
+            uid: Some("dev7pQr5St89uVwXy2C".to_string()),
             session_key: None,
             name: "DOM-Z-102".to_string(),
             transport: "USB".to_string(),
             state,
             project: Some(UiDeviceProjectChip {
-                uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+                uid: "prj3fKq8Zr21bTxYw0A".to_string(),
                 name: "zook-dome".to_string(),
             }),
             fw: None,

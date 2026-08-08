@@ -17,11 +17,23 @@ lpc-history = { path = "../../lp-core/lpc-history" }
 lpfs = { path = "../../lp-base/lpfs" }
 # The in-process transport is the real service, not a mock of it (D13): the
 # same domain logic and the same in-memory adapters the server edge runs.
-lp-cloud-domain = { path = "../../lp-cloud/lp-cloud-domain" }
-lp-cloud-store-mem = { path = "../../lp-cloud/lp-cloud-store-mem" }
+# Optional, behind `in-process`: the browser edge speaks HTTP and has no use
+# for the server halves — see [features] below.
+lp-cloud-domain = { path = "../../lp-cloud/lp-cloud-domain", optional = true }
+lp-cloud-store-mem = { path = "../../lp-cloud/lp-cloud-store-mem", optional = true }
 log = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+
+[features]
+default = ["in-process"]
+# The transport that *is* the service (`InProcessCloud`), and with it the
+# server-side domain + in-memory adapters. On by default because every
+# current consumer — the crate's own tests, the scenario suite — wants it.
+# The Studio web edge turns it off: it talks to a deployed service over
+# HTTP, and pulling `lp-cloud-domain` into a wasm bundle would ship the
+# server into the browser for nothing.
+in-process = ["dep:lp-cloud-domain", "dep:lp-cloud-store-mem"]
 
 [lints]
 workspace = true

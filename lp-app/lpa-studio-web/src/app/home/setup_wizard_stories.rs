@@ -38,7 +38,7 @@ const SESSION: &str = "runtime-1";
 /// A remembered board — the "was Porch sign" recognition corpus.
 fn remembered() -> RegisteredDevice {
     RegisteredDevice {
-        uid: "dev_000000029EVDlKLX".to_string(),
+        uid: "dev000000daqf6dvvqz".to_string(),
         name: "Porch sign".to_string(),
         transport: "USB".to_string(),
         last_seen_at: 1_800_000_000.0,
@@ -53,7 +53,7 @@ fn probe(verdict: BoardVerdict) -> BoardProbe {
     BoardProbe {
         verdict,
         detected_chip: Some(CHIP.to_string()),
-        hardware_uid: Some("dev_000000029EVDlKLX".to_string()),
+        hardware_uid: Some("dev000000daqf6dvvqz".to_string()),
         hardware_origin: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
     }
 }
@@ -142,7 +142,7 @@ fn bound_card() -> UiDeviceCard {
 /// real facts as they are learned; it never becomes a different card.
 fn named_card() -> UiDeviceCard {
     UiDeviceCard {
-        uid: Some("dev_000000029EVDlKLX".to_string()),
+        uid: Some("dev000000daqf6dvvqz".to_string()),
         name: "Porch sign".to_string(),
         ..bound_card()
     }
@@ -431,7 +431,7 @@ fn provision_working() -> Element {
         probe: Some(probe(BoardVerdict::Blank { known: None })),
         name: "ESP32-C6 DevKitC-1 · Aug 5".to_string(),
         phase: ProvisionPhase::Pushing,
-        project_uid: Some("prj_3fKq8Zr21bTxYw0AhVmDpe".to_string()),
+        project_uid: Some("prj3fKq8Zr21bTxYw0AhVmDpe".to_string()),
     }));
     wizard.project = UiSetupProject::for_board(C6);
     takeover(named_card(), wizard)
@@ -461,7 +461,7 @@ fn provision_failed() -> Element {
         probe: Some(probe(BoardVerdict::Blank { known: None })),
         name: "ESP32-C6 DevKitC-1 · Aug 5".to_string(),
         phase: ProvisionPhase::Pushing,
-        project_uid: Some("prj_3fKq8Zr21bTxYw0AhVmDpe".to_string()),
+        project_uid: Some("prj3fKq8Zr21bTxYw0AhVmDpe".to_string()),
     }));
     wizard.project = UiSetupProject::for_board(C6);
     wizard.error = Some("the device disconnected while the project was being written".to_string());
@@ -473,7 +473,7 @@ fn provision_failed() -> Element {
 )]
 fn device_home() -> Element {
     frame(hardware(SetupState::DeviceHome {
-        project_uid: Some("prj_3fKq8Zr21bTxYw0AhVmDpe".to_string()),
+        project_uid: Some("prj3fKq8Zr21bTxYw0AhVmDpe".to_string()),
         adopted: false,
     }))
 }
@@ -493,7 +493,7 @@ fn device_home_adopted() -> Element {
 )]
 fn device_home_simulator() -> Element {
     frame(simulated(SetupState::DeviceHome {
-        project_uid: Some("prj_3fKq8Zr21bTxYw0AhVmDpe".to_string()),
+        project_uid: Some("prj3fKq8Zr21bTxYw0AhVmDpe".to_string()),
         adopted: false,
     }))
 }

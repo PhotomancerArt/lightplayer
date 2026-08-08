@@ -291,7 +291,7 @@ mod tests {
         };
         use crate::server::file_chunk::{FileChangeKind, FileChunk, FileCursor};
         let long_path =
-            "/modules/plasma-mod_h7Kq9xY2mQ4tB8Wz/deeply/nested/dir/fixture-mapping-large.svg";
+            "/modules/plasma-modh7kq9xy2mq4tb8wz/deeply/nested/dir/fixture-mapping-large.svg";
         // worst case A: max entries, raw budget spread across them, long paths
         let per_entry = FILE_SYNC_PAGE_RAW_BYTES / FILE_SYNC_PAGE_MAX_ENTRIES;
         let resp = FsResponse::Changes {

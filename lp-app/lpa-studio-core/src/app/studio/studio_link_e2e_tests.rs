@@ -64,7 +64,7 @@ fn known_device_connects_and_classifies_at_head_through_the_link() {
             .with_boot_delay(Duration::from_millis(20))
             .with_project_files(library_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -124,7 +124,7 @@ fn attaching_a_device_with_a_loaded_project_never_opens_the_editor() {
             .with_project_files(library_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -175,7 +175,7 @@ fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
             .with_project_dir("bench")
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -222,7 +222,7 @@ fn lens_attach_targets_the_devices_real_storage_dir() {
             .with_project_dir("bench")
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -912,7 +912,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     let registry = DeviceRegistry::new(store.fs_handle());
     registry
         .upsert(RegisteredDevice {
-            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            uid: "devaaaaaaaaaaaaaaaa".to_string(),
             name: "Bench board".to_string(),
             transport: "USB".to_string(),
             last_seen_at: 1.0,
@@ -923,13 +923,13 @@ fn device_rename_reconciles_registry_name_over_the_link() {
         })
         .unwrap();
     registry
-        .rename("dev_aaaaaaaaaaaaaaaa", "Luna's sign")
+        .rename("devaaaaaaaaaaaaaaaa", "Luna's sign")
         .unwrap();
 
     // the device still reports the STALE stamped name
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
-            "dev_aaaaaaaaaaaaaaaa",
+            "devaaaaaaaaaaaaaaaa",
             "Bench board",
         )),
     ));
@@ -952,7 +952,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     let outcome = drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::app::home::HOME_NODE_ID),
         crate::HomeOp::RenameDevice {
-            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            uid: "devaaaaaaaaaaaaaaaa".to_string(),
             name: "Porch sign".to_string(),
         },
     )))
@@ -998,7 +998,7 @@ fn forgetting_a_live_device_revokes_its_port_grant_and_its_registry_row() {
     seed_registry(
         &store,
         RegisteredDevice {
-            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            uid: "devbbbbbbbbbbbbbbbb".to_string(),
             name: "Shed board".to_string(),
             transport: "USB".to_string(),
             last_seen_at: 1.0,
@@ -1064,7 +1064,7 @@ fn forgetting_a_live_device_revokes_its_port_grant_and_its_registry_row() {
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
         crate::HomeOp::ForgetDevice {
-            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            uid: "devbbbbbbbbbbbbbbbb".to_string(),
         },
     )))
     .expect("forgetting an offline device succeeds");
@@ -1152,7 +1152,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
         FakeLightPlayerState::new()
             .with_project_files(porch_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -1311,7 +1311,7 @@ fn push_replaces_the_running_project_with_a_different_one() {
         FakeLightPlayerState::new()
             .with_project_files(porch_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -1986,7 +1986,7 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
             .with_project_files(sign_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2070,7 +2070,7 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
             .with_project_files(sign_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2137,7 +2137,7 @@ fn card_tab_and_sheet_drive_through_core_ops() {
 
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
-            "dev_aaaaaaaaaaaaaaaa",
+            "devaaaaaaaaaaaaaaaa",
             "Bench board",
         )),
     ));
@@ -2232,7 +2232,7 @@ fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
 
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
-            "dev_aaaaaaaaaaaaaaaa",
+            "devaaaaaaaaaaaaaaaa",
             "Bench board",
         )),
     ));
@@ -2304,7 +2304,7 @@ fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
             .with_project_files(sign_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_bbbbbbbbbbbbbbbb",
+                "devbbbbbbbbbbbbbbbb",
                 "Bench board",
             )),
     ));
@@ -2403,7 +2403,7 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
         FakeLightPlayerState::new()
             .with_project_files(porch_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2476,7 +2476,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         ProjectOp::OpenDeviceProject {
-            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
         },
     )))
     .expect("the route op attaches the existing session");
@@ -2492,7 +2492,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
     assert_eq!(
         view.lens,
         Some(UiLensRuntime::Device {
-            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
         }),
         "the view binds the device lens for the URL"
     );
@@ -2501,7 +2501,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         ProjectOp::OpenDeviceProject {
-            uid: Some("dev_bbbbbbbbbbbbbbbb".to_string()),
+            uid: Some("devbbbbbbbbbbbbbbbb".to_string()),
         },
     )))
     .expect_err("a mismatched uid refuses");
@@ -2625,7 +2625,7 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
             .with_project_files(v1_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2748,7 +2748,7 @@ fn an_old_format_board_classifies_honestly_and_upgrades_in_one_verb() {
         FakeLightPlayerState::new()
             .with_project_files(stale_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2891,7 +2891,7 @@ fn a_stale_board_whose_library_copy_is_current_is_simply_pushed() {
         FakeLightPlayerState::new()
             .with_project_files(stale_files)
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -2955,7 +2955,7 @@ fn a_board_below_the_upgrade_floor_is_named_but_not_offered_an_upgrade() {
         FakeLightPlayerState::new()
             .with_project_files(project_files_at_format(2, "ancient"))
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -3042,7 +3042,7 @@ fn push_progress_stays_on_the_live_card() {
     let registry = DeviceRegistry::new(store.fs_handle());
     registry
         .upsert(RegisteredDevice {
-            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            uid: "devbbbbbbbbbbbbbbbb".to_string(),
             name: "First board".to_string(),
             transport: "USB".to_string(),
             last_seen_at: 1.0,
@@ -3059,7 +3059,7 @@ fn push_progress_stays_on_the_live_card() {
             .with_project_files(v1_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -3094,13 +3094,13 @@ fn push_progress_stays_on_the_live_card() {
     let seen = seen.borrow();
     assert!(
         seen.iter()
-            .any(|(uid, has_op)| uid.as_deref() == Some("dev_aaaaaaaaaaaaaaaa") && *has_op),
+            .any(|(uid, has_op)| uid.as_deref() == Some("devaaaaaaaaaaaaaaaa") && *has_op),
         "the live card narrates its own push: {seen:?}"
     );
     assert!(
         !seen
             .iter()
-            .any(|(uid, has_op)| uid.as_deref() == Some("dev_bbbbbbbbbbbbbbbb") && *has_op),
+            .any(|(uid, has_op)| uid.as_deref() == Some("devbbbbbbbbbbbbbbbb") && *has_op),
         "the remembered offline card must never wear the live push op: {seen:?}"
     );
 }
@@ -3141,12 +3141,12 @@ fn diverged_board_fixture(
     // the push marker: what WE last pushed to this board is v1
     DeviceRegistry::new(store.fs_handle())
         .upsert(RegisteredDevice {
-            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            uid: "devaaaaaaaaaaaaaaaa".to_string(),
             name: "Bench board".to_string(),
             transport: "USB".to_string(),
             last_seen_at: 1.0,
             association: Some(lpc_history::DeviceAssociation {
-                device: "dev_aaaaaaaaaaaaaaaa".parse().unwrap(),
+                device: "devaaaaaaaaaaaaaaaa".parse().unwrap(),
                 project: summary.uid,
                 version: pushed_head,
                 at: 1.0,
@@ -3170,7 +3170,7 @@ fn diverged_board_fixture(
             .with_project_files(board_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -3306,7 +3306,7 @@ fn coexisting_fixture_with_sim_server(
     let mut device_state = FakeLightPlayerState::new()
         .with_project_files(porch_files)
         .with_identity(FakeDeviceIdentity::new(
-            "dev_aaaaaaaaaaaaaaaa",
+            "devaaaaaaaaaaaaaaaa",
             "Bench board",
         ));
     if device_project_loaded {
@@ -3368,7 +3368,7 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
                 ("shader.glsl".to_string(), b"void main() {}".to_vec()),
             ])
             .with_identity(FakeDeviceIdentity::new(
-                "dev_bbbbbbbbbbbbbbbb",
+                "devbbbbbbbbbbbbbbbb",
                 "Bench board",
             )),
     ));
@@ -3427,7 +3427,7 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
         .expect("manifest bytes");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("the manifest parses");
-    assert_eq!(manifest["deviceUid"], "dev_bbbbbbbbbbbbbbbb");
+    assert_eq!(manifest["deviceUid"], "devbbbbbbbbbbbbbbbb");
     assert_eq!(manifest["formatVersion"], 1);
     assert_eq!(manifest["partitionOffset"], 0x0031_0000);
 }
@@ -3683,14 +3683,14 @@ fn an_op_aimed_at_no_live_board_refuses_instead_of_picking_one() {
     let before = card_state(&studio);
 
     let outcome = drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
-        target: crate::DeviceTarget::card("dev_never_attached"),
+        target: crate::DeviceTarget::card("devneverattached"),
         setup_name: None,
         board_id: None,
     })));
 
     assert!(
         matches!(outcome, Err(crate::UiError::MissingSession(ref message))
-            if message.contains("dev_never_attached")),
+            if message.contains("devneverattached")),
         "the refusal names the card that could not be resolved: {outcome:?}"
     );
     assert_eq!(
@@ -4155,7 +4155,7 @@ fn a_second_board_with_the_same_mac_stays_anonymous_and_warns() {
 /// Design §6: card UI state survives the anonymous → identified key flip.
 ///
 /// A card keys by its session while the board is anonymous and by its
-/// `dev_…` uid the moment identity resolves, so state built on the
+/// `dev…` uid the moment identity resolves, so state built on the
 /// anonymous card orphans at the flip — the same 2026-08-02 wart
 /// `migrate_card_op` carries op flows across. Naming an anonymous board
 /// is the flip that is easiest to drive; a blank board's first hello
@@ -4197,7 +4197,7 @@ fn card_ui_state_survives_the_identity_key_flip() {
 
     let flipped = device_card_key(&studio);
     assert!(
-        flipped.starts_with("dev_"),
+        flipped.starts_with("dev"),
         "identity arrived and the key flipped: {flipped}"
     );
     let view = studio.view();
@@ -4220,8 +4220,8 @@ fn card_ui_state_survives_the_identity_key_flip() {
 /// the canonical lowercase spelling the hello uses.
 const BENCH_MAC: &str = "60:55:f9:0a:0b:0c";
 
-/// The `dev_` uid a legacy stamp gave the same board.
-const STAMPED_UID: &str = "dev_aaaaaaaaaaaaaaaa";
+/// The `dev` uid a legacy stamp gave the same board.
+const STAMPED_UID: &str = "devaaaaaaaaaaaaaaaa";
 
 /// The uid `mac` derives to — computed through the production derivation
 /// so the tests assert the RELATIONSHIP, never a hand-copied string (the
@@ -4572,7 +4572,7 @@ fn studio_with_loaded_device_at(
             .with_project_files(library_files)
             .with_loaded_project()
             .with_identity(FakeDeviceIdentity::new(
-                "dev_aaaaaaaaaaaaaaaa",
+                "devaaaaaaaaaaaaaaaa",
                 "Bench board",
             )),
     ));
@@ -4722,7 +4722,7 @@ fn deploy_action(op: DeployOp) -> UiAction {
 
 fn library() -> (LibraryStore, Rc<MemoryLibraryHost>) {
     // Counter-based uid bytes: rows installing MORE than one package need
-    // distinct `prj_` uids (a fixed byte pattern would collide them).
+    // distinct `prj` uids (a fixed byte pattern would collide them).
     let counter = Rc::new(RefCell::new(6u8));
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),

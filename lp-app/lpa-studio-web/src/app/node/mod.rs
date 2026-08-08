@@ -108,7 +108,7 @@ pub use panel::{
     PanelControl, PanelEmit, ToggleField, project_palette_choices,
 };
 pub use produced_product_view::ProducedProductView;
-pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};
+pub(crate) use produced_product_view::{ProductIdentity, ProductPreview, ProductPreviewCanvas};
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;

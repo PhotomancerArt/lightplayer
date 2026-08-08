@@ -10,18 +10,23 @@
 //!
 //! # Why hand-written and not a macro
 //!
-//! Eleven requests, one impl each, all in this file: the pairing table is
+//! Sixteen requests, one impl each, all in this file: the pairing table is
 //! greppable, and a reader who wants to know what `PushCommit` answers with
 //! reads it here rather than expanding a macro in their head. Revisit if the
 //! vocabulary grows several times over.
 
+use crate::ack::Ack;
+use crate::login_options::LoginOptionsInfo;
+use crate::me_info::MeInfo;
 use crate::request::{
-    AddMember, CloudRequest, GetEvents, GetHeads, GetProject, HaveBlobs, ListMyProjects,
-    PublishProject, PushCommit, RemoveMember, SetVisibility, WhoAmI,
+    AddMember, CloudRequest, GetEvents, GetHeads, GetMe, GetProject, HaveBlobs, ListMyProjects,
+    ListSessions, LoginOptions, PublishProject, PushCommit, RemoveMember, RevokeSession,
+    SetVisibility, UpdateMe, WhoAmI,
 };
 use crate::response::{
     CloudResponse, Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
+use crate::session_info::SessionList;
 
 /// One request type and the one response type that answers it.
 ///
@@ -158,6 +163,61 @@ impl CloudCallSpec for GetEvents {
     fn extract(response: CloudResponse) -> Option<Events> {
         match response {
             CloudResponse::Events(events) => Some(events),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for GetMe {
+    type Response = MeInfo;
+
+    fn extract(response: CloudResponse) -> Option<MeInfo> {
+        match response {
+            CloudResponse::MeInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for UpdateMe {
+    type Response = MeInfo;
+
+    fn extract(response: CloudResponse) -> Option<MeInfo> {
+        match response {
+            CloudResponse::MeInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for ListSessions {
+    type Response = SessionList;
+
+    fn extract(response: CloudResponse) -> Option<SessionList> {
+        match response {
+            CloudResponse::SessionList(list) => Some(list),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for RevokeSession {
+    type Response = Ack;
+
+    fn extract(response: CloudResponse) -> Option<Ack> {
+        match response {
+            CloudResponse::Ack(ack) => Some(ack),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for LoginOptions {
+    type Response = LoginOptionsInfo;
+
+    fn extract(response: CloudResponse) -> Option<LoginOptionsInfo> {
+        match response {
+            CloudResponse::LoginOptionsInfo(info) => Some(info),
             _ => None,
         }
     }

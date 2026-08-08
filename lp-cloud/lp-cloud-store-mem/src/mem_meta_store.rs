@@ -76,6 +76,18 @@ impl MetaStore for MemMetaStore {
             .cloned()
     }
 
+    fn users(&self, limit: usize) -> Vec<CloudUser> {
+        let mut users: Vec<CloudUser> = self.users.values().cloned().collect();
+        users.sort_by(|a, b| {
+            a.created_at
+                .partial_cmp(&b.created_at)
+                .unwrap_or(core::cmp::Ordering::Equal)
+                .then_with(|| a.uid.cmp(&b.uid))
+        });
+        users.truncate(limit);
+        users
+    }
+
     // ---- sessions ----------------------------------------------------
 
     fn put_session(&mut self, session: SessionRecord) {
@@ -88,6 +100,14 @@ impl MetaStore for MemMetaStore {
 
     fn delete_session(&mut self, token_hash: ContentHash) {
         self.sessions.remove(&token_hash);
+    }
+
+    fn sessions_for_user(&self, user: PrefixedUid) -> Vec<SessionRecord> {
+        self.sessions
+            .values()
+            .filter(|session| session.user == user)
+            .cloned()
+            .collect()
     }
 
     // ---- projects ----------------------------------------------------
@@ -367,15 +387,60 @@ mod tests {
     fn sessions_round_trip_by_token_hash() {
         let mut store = MemMetaStore::new();
         let token_hash = ContentHash::of(b"token");
-        let record = SessionRecord {
-            token_hash,
-            user: user_uid(1),
-            expires_at: 100.0,
-        };
+        let record = sample_session(user_uid(1), b"token", 100.0);
         store.put_session(record.clone());
         assert_eq!(store.session(token_hash), Some(record));
         store.delete_session(token_hash);
         assert_eq!(store.session(token_hash), None);
+    }
+
+    /// `sessions_for_user` lists every one of an account's own sessions and
+    /// nothing belonging to anyone else.
+    #[test]
+    fn sessions_for_user_isolates_by_account() {
+        let mut store = MemMetaStore::new();
+        let alice = user_uid(1);
+        let bob = user_uid(2);
+        store.put_session(sample_session(alice, b"a1", 100.0));
+        store.put_session(sample_session(alice, b"a2", 100.0));
+        store.put_session(sample_session(bob, b"b1", 100.0));
+
+        let mut alice_hashes: Vec<ContentHash> = store
+            .sessions_for_user(alice)
+            .into_iter()
+            .map(|session| session.token_hash)
+            .collect();
+        alice_hashes.sort();
+        let mut expected = vec![ContentHash::of(b"a1"), ContentHash::of(b"a2")];
+        expected.sort();
+        assert_eq!(alice_hashes, expected);
+
+        assert_eq!(store.sessions_for_user(bob).len(), 1);
+        assert!(store.sessions_for_user(user_uid(9)).is_empty());
+    }
+
+    /// `users(limit)` is oldest-`created_at`-first, capped at the limit —
+    /// the dev picker's candidate order.
+    #[test]
+    fn users_are_ordered_oldest_first_and_capped() {
+        let mut store = MemMetaStore::new();
+        let first = sample_user(user_uid(1), "a@example.com");
+        let second = CloudUser {
+            created_at: 2.0,
+            ..sample_user(user_uid(2), "b@example.com")
+        };
+        let third = CloudUser {
+            created_at: 3.0,
+            ..sample_user(user_uid(3), "c@example.com")
+        };
+        // Inserted out of order to prove the store sorts rather than
+        // echoing insertion order.
+        store.put_user(third.clone());
+        store.put_user(first.clone());
+        store.put_user(second.clone());
+
+        assert_eq!(store.users(2), vec![first.clone(), second.clone()]);
+        assert_eq!(store.users(10), vec![first, second, third]);
     }
 
     // ---- helpers ------------------------------------------------------
@@ -394,7 +459,21 @@ mod tests {
             google_sub: "g-1".to_string(),
             email: email.to_string(),
             display_name: "Sample".to_string(),
+            given_name: None,
+            family_name: None,
+            picture_url: None,
+            provider: "google".to_string(),
             created_at: 1.0,
+        }
+    }
+
+    fn sample_session(user: PrefixedUid, token: &[u8], expires_at: f64) -> SessionRecord {
+        SessionRecord {
+            token_hash: ContentHash::of(token),
+            user,
+            created_at: 1.0,
+            expires_at,
+            user_agent: None,
         }
     }
 

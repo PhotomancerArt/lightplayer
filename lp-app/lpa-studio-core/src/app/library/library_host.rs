@@ -265,7 +265,7 @@ pub trait LibraryHost {
         op: CatalogOp,
     ) -> LocalBoxFuture<'_, Result<CatalogOutcome, LibraryHostError>>;
 
-    /// Open a project for writing. `key` is a slug or `prj_…` uid; the
+    /// Open a project for writing. `key` is a slug or `prj…` uid; the
     /// host resolves it, acquires the project lock, and re-verifies the
     /// mapping under the lock.
     fn open_project<'a>(
@@ -277,7 +277,7 @@ pub trait LibraryHost {
     /// project this tab does not hold open is a no-op.
     fn close_project<'a>(&'a self, uid: &'a str) -> LocalBoxFuture<'a, ()>;
 
-    /// `prj_…` uids locked by OTHER tabs (own holds filtered out) — the
+    /// `prj…` uids locked by OTHER tabs (own holds filtered out) — the
     /// gallery's "open in another tab" badges.
     fn open_elsewhere_uids(&self) -> LocalBoxFuture<'_, Vec<String>>;
 

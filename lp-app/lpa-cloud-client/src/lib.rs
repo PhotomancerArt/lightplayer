@@ -30,6 +30,15 @@
 //! README for the rules (clean copies fast-forward; nothing is ever applied
 //! over uncommitted edits) and for what each operation banks before it
 //! adopts anything.
+//!
+//! # Features
+//!
+//! - `in-process` (default) — layer 2 above: [`InProcessCloud`] and the
+//!   `lp-cloud-domain` / `lp-cloud-store-mem` halves it is built from. A
+//!   browser edge that speaks HTTP turns this off
+//!   (`default-features = false`) so the server does not ride along into the
+//!   wasm bundle. Layers 1 and 3 — the port and the whole sync engine — do
+//!   not depend on it.
 
 #![no_std]
 
@@ -38,18 +47,20 @@ extern crate alloc;
 pub mod block_on;
 pub mod cloud_binding;
 pub mod cloud_port;
+#[cfg(feature = "in-process")]
 pub mod in_process_cloud;
 pub mod local_project;
 pub mod project_link;
 pub mod sync;
 pub mod sync_error;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-process"))]
 pub(crate) mod test_support;
 
 pub use block_on::block_on;
 pub use cloud_binding::{CLOUD_BINDING_PATH, CloudBinding};
 pub use cloud_port::{CloudPort, TransportError, call, request};
+#[cfg(feature = "in-process")]
 pub use in_process_cloud::{InProcessCloud, InProcessServer, SignedIn};
 pub use local_project::LocalProject;
 pub use project_link::{ProjectLink, ProjectLinkParseError};

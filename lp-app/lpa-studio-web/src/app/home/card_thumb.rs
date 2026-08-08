@@ -170,9 +170,9 @@ mod tests {
 
     #[test]
     fn hues_are_stable_and_seed_dependent() {
-        assert_eq!(thumb_hues("prj_a"), thumb_hues("prj_a"));
-        assert_ne!(thumb_hues("prj_a"), thumb_hues("prj_b"));
-        let (a, b) = thumb_hues("prj_a");
+        assert_eq!(thumb_hues("prja"), thumb_hues("prja"));
+        assert_ne!(thumb_hues("prja"), thumb_hues("prjb"));
+        let (a, b) = thumb_hues("prja");
         assert!(a < 360 && b < 360);
     }
 }

@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloud login &amp; account — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via gallery-rework spike) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 860px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- shared chrome bones (gallery-rework spike, shipped chrome C) ---- */
+  .barwrap { max-width: 1400px; margin-bottom: 26px; }
+  .barwrap .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .barwrap .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .barwrap .cap .cnote { font-size: 11.5px; color: var(--dim); }
+  .appframe {
+    border: 1px solid var(--border); border-radius: 10px; position: relative;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 140px), var(--bg);
+  }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 9px 20px; min-height: 44px;
+    border-bottom: 1px solid var(--border-subtle); }
+  .brand { display: inline-flex; align-items: center; gap: 8px; flex: none;
+    appearance: none; border: 0; background: transparent; padding: 4px 6px; margin: -4px 0 -4px -6px;
+    border-radius: 8px; }
+  .brand svg { color: var(--accent); }
+  .brand .word { font-size: 12.5px; font-weight: 700; color: var(--strong); letter-spacing: .01em; white-space: nowrap; }
+  .navrow { display: inline-flex; align-items: center; gap: 2px; }
+  .navlink {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--subtle);
+    padding: 8px 10px 9px; border-radius: 6px; position: relative; white-space: nowrap;
+  }
+  .navlink:hover { color: var(--text); background: var(--bg-wash); }
+  .navlink.active { color: var(--heading); }
+  .navlink.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+    height: 2px; border-radius: 2px; background: var(--accent);
+  }
+  .navlink.secondary { color: color-mix(in srgb, var(--subtle) 72%, transparent); font-weight: 500; }
+  .navlink.secondary:hover { color: var(--text); }
+  .rside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .vchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 600 10.5px/1 var(--mono); color: var(--subtle);
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    border-radius: 999px; padding: 4px 10px; max-width: 180px; min-width: 0;
+  }
+  .vchip .vtxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    color: var(--neutral-text); padding: 0;
+  }
+  .iconbtn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .morebtn { border-color: transparent; background: transparent; color: var(--subtle); font-weight: 800; }
+  .morebtn:hover { background: var(--bg-wash); }
+
+  /* dimmed page-behind, so open menus float over something honest */
+  .peek { display: flex; gap: 14px; padding: 14px 20px 18px; opacity: .5; pointer-events: none;
+    mask-image: linear-gradient(180deg, #000 30%, transparent 96%); }
+  .pcard { flex: 1; height: 74px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
+  .pcard .strip { height: 40px; }
+  .pcard .meta { padding: 6px 10px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .g1 { background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); }
+  .g2 { background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); }
+  .g3 { background: linear-gradient(90deg, #241a33, #5f4a85, #c9b1f5, #5f4a85, #241a33); }
+
+  /* ---- avatars ---- */
+  .av {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    border-radius: 50%; overflow: hidden; color: #0d1210; font-weight: 800;
+    background: var(--surface-raised); user-select: none;
+  }
+  .av.photo { color: transparent; }
+  .av.initials { border: 1px solid color-mix(in srgb, var(--avc, var(--accent)) 55%, transparent);
+    background: color-mix(in srgb, var(--avc, var(--accent)) 22%, var(--surface-subtle));
+    color: color-mix(in srgb, var(--avc, var(--accent)) 88%, white 6%); }
+  .avbtn {
+    appearance: none; padding: 0; border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .avbtn:hover { border-color: var(--border-strong); }
+  .avbtn .av { width: 100%; height: 100%; border-radius: 50%; font-size: 11px; }
+  .avbtn.ghost { border-style: dashed; background: transparent; color: var(--dim); }
+  .avbtn.ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-wash); }
+  .avbtn.pending { border-style: solid; pointer-events: none; }
+  .avbtn.pending .shimmer {
+    width: 100%; height: 100%; border-radius: 50%;
+    background: linear-gradient(100deg, var(--surface-subtle) 35%, var(--surface-raised) 50%, var(--surface-subtle) 65%);
+    background-size: 250% 100%; animation: shim 1.4s linear infinite;
+  }
+  @keyframes shim { to { background-position: -150% 0; } }
+
+  /* ---- popover menus ---- */
+  .popmenu {
+    position: absolute; right: 16px; top: 50px; z-index: 20;
+    width: 236px; padding: 6px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: 0 14px 38px rgba(0,0,0,.5);
+    font-size: 12px; color: var(--muted);
+  }
+  .popmenu.wide { width: 280px; }
+  .popmenu .idrow { display: flex; align-items: center; gap: 10px; padding: 8px 8px 9px; min-width: 0; }
+  .popmenu .idrow .av { width: 34px; height: 34px; font-size: 12.5px; }
+  .popmenu .idrow .who { min-width: 0; display: grid; gap: 1px; }
+  .popmenu .idrow .nm { font-size: 12.5px; font-weight: 700; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .popmenu .idrow .em { font-size: 11px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .popmenu hr { border: 0; border-top: 1px solid var(--border-muted); margin: 4px 2px; }
+  .mrow {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1.2 var(--sans); color: var(--muted);
+    padding: 7px 9px; border-radius: 5px; min-width: 0;
+  }
+  .mrow:hover { background: var(--surface-raised); color: var(--strong); }
+  .mrow svg { color: var(--dim); flex: none; }
+  .mrow:hover svg { color: var(--text); }
+  .mrow .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow.quiet { color: var(--subtle); font-weight: 500; }
+  .ghead { display: block; padding: 8px 9px 3px; font-size: 10px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .acctrow { display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-radius: 5px;
+    cursor: pointer; min-width: 0; }
+  .acctrow:hover { background: var(--surface-raised); }
+  .acctrow .av { width: 26px; height: 26px; font-size: 10px; }
+  .acctrow .who { min-width: 0; display: grid; }
+  .acctrow .nm { font-size: 11.5px; font-weight: 650; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acctrow:hover .nm { color: var(--strong); }
+  .acctrow .em { font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acctrow .mark { margin-left: auto; color: var(--accent); flex: none; }
+
+  /* 2B identity-card variant */
+  .popcard { text-align: center; padding: 16px 14px 12px; }
+  .popcard .av { width: 56px; height: 56px; font-size: 19px; margin: 0 auto 10px; }
+  .popcard .nm { font-size: 14px; font-weight: 800; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .popcard .em { font-size: 11.5px; color: var(--dim); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .popcard .actions { display: flex; gap: 8px; justify-content: center; margin-top: 13px; }
+  .pillbtn {
+    appearance: none; cursor: pointer; border-radius: 999px; padding: 6px 14px;
+    font: 700 11.5px/1 var(--sans); color: var(--neutral-text);
+    background: var(--neutral-bg); border: 1px solid var(--neutral-border);
+  }
+  .pillbtn:hover { color: var(--strong); border-color: var(--border-strong); }
+
+  /* sign-in popover (1B) + google button */
+  .signinpop { padding: 12px; }
+  .signinpop .lead { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 2px; }
+  .signinpop .why { font-size: 11px; color: var(--dim); margin: 0 0 11px; line-height: 1.45; }
+  .gbtn {
+    display: inline-flex; align-items: center; gap: 9px; cursor: pointer; width: 100%;
+    justify-content: center;
+    border: 1px solid var(--border-strong); background: var(--surface-raised);
+    border-radius: 6px; padding: 8px 14px; font: 700 12px/1 var(--sans); color: var(--strong);
+  }
+  .gbtn:hover { border-color: var(--dim); }
+  .gbtn svg { flex: none; }
+  .fineprint { font-size: 10.5px; color: var(--dim); margin: 9px 0 0; line-height: 1.45; }
+  .fineprint b { color: var(--heading); font-weight: 650; }
+
+  /* signed-out text link */
+  .signin-link { color: var(--subtle); font-weight: 600; }
+
+  /* ---- 1C share panel mock ---- */
+  .sharewrap { display: flex; gap: 18px; padding: 16px 20px 20px; align-items: flex-start; }
+  .sharecard {
+    width: 330px; flex: none; border: 1px solid var(--border-strong); border-radius: 10px;
+    background: var(--surface-subtle); box-shadow: 0 16px 44px rgba(0,0,0,.45); overflow: hidden;
+  }
+  .sharecard .shead { display: flex; align-items: center; gap: 9px; padding: 10px 14px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .sharecard .shead .t { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .sharecard .shead .close { margin-left: auto; color: var(--dim); font-size: 14px; }
+  .sharecard .sbody { padding: 12px 14px 14px; display: grid; gap: 10px; }
+  .srow { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border);
+    background: var(--surface); border-radius: 8px; padding: 9px 11px; }
+  .srow svg { color: var(--dim); flex: none; }
+  .srow .st { font-size: 12px; font-weight: 700; color: var(--text); }
+  .srow .sd { font-size: 10.5px; color: var(--dim); line-height: 1.35; }
+  .pubrow { border: 1px dashed var(--accent-border); border-radius: 8px; padding: 11px 12px;
+    background: rgba(123,224,178,.04); }
+  .pubrow .st { font-size: 12px; font-weight: 700; color: var(--text); display: flex; gap: 7px; align-items: center; }
+  .pubrow .st svg { color: var(--accent); }
+  .pubrow .sd { font-size: 10.5px; color: var(--dim); margin: 3px 0 9px; line-height: 1.4; }
+
+  /* ---- section 3 · profile pages ---- */
+  .pagegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 1400px; align-items: start; }
+  @media (max-width: 1180px) { .pagegrid { grid-template-columns: 1fr; } }
+  .pagegrid .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .pagegrid .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .pagegrid .cap .cnote { font-size: 11.5px; color: var(--dim); }
+  .pagebody { padding: 20px 24px 26px; }
+  .profnarrow { max-width: 430px; margin: 0 auto; }
+  .ptitle { font-size: 15px; font-weight: 800; color: var(--strong); margin: 0 0 2px; }
+  .psub { font-size: 11.5px; color: var(--dim); margin: 0 0 18px; }
+  .avblock { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+  .avblock .av { width: 64px; height: 64px; font-size: 22px; }
+  .avblock .note { font-size: 11px; color: var(--dim); line-height: 1.45; max-width: 240px; }
+  .avblock .note b { color: var(--muted); }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field label { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  .field input {
+    font: 600 12.5px/1.3 var(--sans); color: var(--text);
+    background: var(--surface-muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; min-width: 0; width: 100%;
+  }
+  .field input:focus { outline: none; border-color: var(--accent-border); }
+  .field .ro {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    font: 600 12.5px/1.3 var(--sans); color: var(--subtle);
+    background: transparent; border: 1px dashed var(--border);
+    border-radius: 6px; padding: 8px 10px;
+  }
+  .field .ro .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .field .ro svg { flex: none; }
+  .savebar { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .savebtn {
+    appearance: none; cursor: pointer; border-radius: 6px; padding: 7px 16px;
+    font: 700 12px/1 var(--sans); color: #0d1512;
+    background: var(--accent); border: 1px solid var(--accent-border);
+  }
+  .savebtn:hover { background: var(--accent-hover); }
+  .savebtn[disabled] { opacity: .35; cursor: default; }
+  .savenote { font-size: 11px; color: var(--dim); }
+  .uidline { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border-muted);
+    font: 500 10.5px/1.5 var(--mono); color: var(--dim); display: flex; gap: 8px; flex-wrap: wrap; }
+  .uidline b { color: var(--subtle); font-weight: 650; }
+
+  /* 3B settings rows */
+  .setgroup { max-width: 620px; margin: 0 auto 22px; }
+  .setgroup .gt { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); margin: 0 0 8px; }
+  .setrows { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .setrow { display: flex; align-items: center; gap: 14px; padding: 11px 14px; min-height: 46px;
+    border-bottom: 1px solid var(--border-muted); }
+  .setrow:last-child { border-bottom: 0; }
+  .setrow .k { width: 130px; flex: none; font-size: 11.5px; font-weight: 700; color: var(--subtle); }
+  .setrow .v { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .setrow .v.dim { color: var(--subtle); font-weight: 500; }
+  .setrow .v input { font: 600 12.5px/1.3 var(--sans); color: var(--text); width: 100%;
+    background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; }
+  .setrow .v input:focus { outline: none; border-color: var(--accent-border); }
+  .setrow .act { flex: none; }
+  .linkbtn { appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 650 11.5px/1 var(--sans); color: var(--heading); padding: 4px 6px; border-radius: 5px; }
+  .linkbtn:hover { background: var(--bg-wash); color: var(--accent); }
+  .linkbtn.danger { color: var(--err-text); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font: 700 9.5px/1 var(--mono);
+    letter-spacing: .07em; text-transform: uppercase; border-radius: 999px; padding: 3px 9px;
+    color: var(--neutral-text); background: var(--neutral-bg); border: 1px solid var(--neutral-border); }
+  .badge.live { color: var(--live-text); background: var(--live-bg); border-color: var(--live-border); }
+  .badge.good { color: var(--good-text); background: var(--good-bg); border-color: var(--good-border); }
+  .sessrow .v { display: flex; align-items: center; gap: 9px; }
+  .sessrow .devico { color: var(--dim); flex: none; display: inline-flex; }
+
+  /* ---- section 4 · architecture notes ---- */
+  .archgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 1400px; margin-top: 16px; }
+  @media (max-width: 1080px) { .archgrid { grid-template-columns: 1fr; } }
+  .archcard { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle);
+    padding: 13px 15px 15px; display: grid; gap: 7px; align-content: start; }
+  .archcard.lean { border-color: var(--accent-border); background: rgba(123,224,178,.04); }
+  .archcard .at { font-size: 12px; font-weight: 800; color: var(--strong); display: flex; gap: 8px; align-items: center; }
+  .archcard .at .tag { font: 700 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    border-radius: 999px; padding: 3px 8px; }
+  .archcard.lean .at .tag { color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border); }
+  .archcard .at .tag.later { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
+  .archcard .at .tag.no { color: var(--err-text); background: var(--err-bg); border: 1px solid var(--err-border); }
+  .archcard p { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .archcard p.d { color: var(--dim); font-size: 11px; }
+  .archcard code { font: 600 10.5px/1.4 var(--mono); color: var(--heading); }
+
+  /* ---- convergence: ruling tags + rejected strips ---- */
+  .ctag { display: inline-flex; font: 700 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border);
+    border-radius: 999px; padding: 3px 9px; align-self: center; }
+  .rej { max-width: 1400px; margin: -12px 0 26px; padding: 8px 12px;
+    border: 1px solid var(--border-muted); border-left: 3px solid var(--err-border);
+    border-radius: 7px; background: var(--surface-muted);
+    font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .rej b { color: var(--muted); }
+
+  /* ---- section 4 · provider-defined sign-in ---- */
+  .provgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 1400px; }
+  @media (max-width: 1080px) { .provgrid { grid-template-columns: 1fr; } }
+  .provcard { border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden;
+    background: var(--surface-subtle); box-shadow: 0 12px 30px rgba(0,0,0,.35);
+    display: flex; flex-direction: column; }
+  .provcard header { display: flex; align-items: center; gap: 9px; padding: 9px 13px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .provcard header .t { font: 600 11.5px/1 var(--mono); color: var(--strong); }
+  .provcard header .badge { margin-left: auto; }
+  .provcard .pdesc { padding: 8px 13px; font: 500 10px/1.5 var(--mono); color: var(--dim);
+    border-bottom: 1px dashed var(--border-muted); }
+  .provcard .pdesc b { color: var(--heading); font-weight: 650; }
+  .provcard .pbody { padding: 13px; display: grid; gap: 8px; align-content: start; flex: 1; }
+  .pickrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    appearance: none; cursor: pointer; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 8px; padding: 7px 11px; min-width: 0; }
+  .pickrow:hover { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .pickrow .av { width: 28px; height: 28px; font-size: 10.5px; }
+  .pickrow .who { display: grid; min-width: 0; }
+  .pickrow .nm { font-size: 12px; font-weight: 700; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pickrow .em { font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pickrow.newp { border-style: dashed; color: var(--subtle); font: 600 11.5px/1 var(--sans);
+    justify-content: flex-start; gap: 8px; }
+  .pickrow.newp:hover { color: var(--text); }
+  .orline { display: flex; align-items: center; gap: 10px; color: var(--dim);
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+  .orline::before, .orline::after { content: ""; flex: 1; height: 1px; background: var(--border-muted); }
+
+  /* boot shimmer on the chosen text link */
+  .signin-link.booting { color: transparent !important; pointer-events: none; border-radius: 999px;
+    background: linear-gradient(100deg, var(--surface-subtle) 35%, var(--surface-raised) 50%, var(--surface-subtle) 65%);
+    background-size: 250% 100%; animation: shim 1.4s linear infinite; }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px);
+    background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: 8px;
+    color: var(--text); font-size: 12px; font-weight: 600; padding: 9px 16px;
+    box-shadow: 0 14px 38px rgba(0,0,0,.5); opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease; z-index: 60;
+    display: flex; gap: 9px; align-items: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .av { width: 20px; height: 20px; font-size: 8px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="mark-e" viewBox="0 0 32 32">
+    <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke="currentColor" stroke-width="1.7" fill="none"/>
+    <g fill="currentColor" opacity=".75">
+      <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/><rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+      <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/><rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+    </g>
+    <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="4.5" cy="3.5" r="1.7"/><circle cx="4.5" cy="12.5" r="1.7"/><circle cx="11.5" cy="6" r="1.7"/>
+      <path d="M4.5 5.2v5.6M11.5 7.7c0 2.6-3 3-5 3.4"/></g>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="8" r="2.2"/>
+      <path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></g>
+  </symbol>
+  <symbol id="i-person" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="5.4" r="2.6"/><path d="M2.9 13.6c.7-2.6 2.7-3.9 5.1-3.9s4.4 1.3 5.1 3.9"/></g>
+  </symbol>
+  <symbol id="i-signout" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.2 2.5H3.6a1.1 1.1 0 0 0-1.1 1.1v8.8a1.1 1.1 0 0 0 1.1 1.1h2.6M10.4 11l3-3-3-3M13.2 8H6.4"/></g>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></g>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16">
+    <path d="M3 8.6 6.4 12 13 4.6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-switch" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.8 5.4h9l-2.4-2.4M13.2 10.6h-9l2.4 2.4"/></g>
+  </symbol>
+  <symbol id="i-zip" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="2.8" y="2.5" width="10.4" height="11" rx="1.4"/><path d="M8 2.5v2M8 6v1.4M8 9v1.4"/></g>
+  </symbol>
+  <symbol id="i-link" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <path d="M6.5 9.5 9.5 6.5M7.6 4.6l1.2-1.2a2.4 2.4 0 0 1 3.4 0l.4.4a2.4 2.4 0 0 1 0 3.4L11.4 8.4M8.4 11.4l-1.2 1.2a2.4 2.4 0 0 1-3.4 0l-.4-.4a2.4 2.4 0 0 1 0-3.4l1.2-1.2"/></g>
+  </symbol>
+  <symbol id="i-cloudup" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.4 12.5a3 3 0 0 1-.3-6A3.8 3.8 0 0 1 11.5 7a2.8 2.8 0 0 1 .3 5.5"/><path d="M8 13.5V8.8M6 10.6l2-2 2 2"/></g>
+  </symbol>
+  <symbol id="i-laptop" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="3.4" y="3.4" width="9.2" height="6.4" rx="1"/><path d="M1.8 12.4h12.4"/></g>
+  </symbol>
+  <symbol id="i-phone" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="5" y="2.2" width="6" height="11.6" rx="1.4"/><path d="M7.2 11.8h1.6"/></g>
+  </symbol>
+  <symbol id="i-google" viewBox="0 0 18 18">
+    <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92a8.78 8.78 0 0 0 2.68-6.62z"/>
+    <path fill="#34A853" d="M9 18a8.6 8.6 0 0 0 5.96-2.18l-2.92-2.26a5.4 5.4 0 0 1-8.09-2.85H.96v2.33A9 9 0 0 0 9 18z"/>
+    <path fill="#FBBC05" d="M3.95 10.71a5.4 5.4 0 0 1 0-3.42V4.96H.96a9 9 0 0 0 0 8.08l2.99-2.33z"/>
+    <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59A9 9 0 0 0 .96 4.96l2.99 2.33A5.36 5.36 0 0 1 9 3.58z"/>
+  </symbol>
+</defs></svg>
+
+<h1>Cloud login &amp; account — design spike</h1>
+<p class="hint">
+  The lp-cloud service is live and already speaks auth (<b>/auth/google</b>, hashed-token
+  sessions, logout); the Studio frontend has <b>no login UI at all</b>. This spike explores the
+  whole account surface: the signed-out affordance in the chrome, the signed-in identity
+  dropdown, a minimal profile page (avatar + given/family names — nothing more), and a
+  multi-account variant to pressure-test the architecture. Ambient constraint from the cloud
+  vision (D20): <b>viewers never need an account</b> — a share link opens running with zero
+  login, so the chrome must never nag the anonymous 95%. Avatars here are generated stand-ins;
+  the real one is Google's profile photo (currently discarded at the OAuth callback).
+  <br><br>
+  <b>Converged 2026-08-07</b> — gate rulings: §1 <b>A</b> (quiet text link; C's inline ask
+  composes), §2 <b>A growing into C</b>, §3 <b>B structure with A's content</b>, §5 lean
+  switch model, bones only. New ruling folded in: <b>auth stays provider-based</b> — Google is
+  prod config, not the architecture; §4 shows the same "Sign in" on three deployments (shape
+  borrowed from skybridge's auth-connections model). Rejected concepts shrink to strips.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Identity</b>
+    <button class="chip" data-set="data:typical" aria-pressed="true">typical</button>
+    <button class="chip" data-set="data:awkward">awkward (long · CJK · mononym)</button>
+  </span>
+  <span class="group"><b>Avatar</b>
+    <button class="chip" data-set="photo:on" aria-pressed="true">Google photo</button>
+    <button class="chip" data-set="photo:off">none → initials</button>
+  </span>
+  <span class="group"><b>Accounts</b>
+    <button class="chip" data-set="accounts:1">one</button>
+    <button class="chip" data-set="accounts:3" aria-pressed="true">three</button>
+  </span>
+  <span class="group"><b>Boot</b>
+    <button class="chip" data-set="boot:ready" aria-pressed="true">whoami resolved</button>
+    <button class="chip" data-set="boot:pending">pending</button>
+  </span>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="n">1 ·</span> Signed-out chrome — where does “Sign in” live?</h2>
+<p class="sub">
+  Baseline first: today’s chrome has no account affordance at all. The right cluster is the
+  natural home (version chip · settings · ⋯). The tension: a <b>standard, findable</b> entry
+  point vs. the D20 rule that anonymous share-link viewers must never be nagged.
+</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">1·0 · Today (baseline)</span>
+    <span class="cnote">shipped chrome C — no account anything</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">A · Quiet text link</span><span class="ctag">chosen</span>
+    <span class="cnote">“Sign in” rides the secondary family’s treatment, last before ⋯ — one word, zero chrome weight</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="navlink secondary signin-link" data-boot-hide>Sign in</button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<p class="rej"><b>B · Ghost avatar — rejected:</b> a dashed silhouette reserving the avatar slot
+  draws more chrome attention than an unused feature deserves, and it needed its own why-popover
+  to explain itself. Its sign-in copy (“publish and share by URL; viewers never need an
+  account”) lives on in §4’s provider cards.</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">C · Nothing until it matters</span><span class="ctag">composes with A</span>
+    <span class="cnote">chrome stays quiet; the ask appears inline at the point of need — here, the Share panel’s publish row. Ships regardless of A.</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="sharewrap">
+      <div class="sharecard">
+        <div class="shead"><span class="t">Share “zook-dome”</span><span class="close">×</span></div>
+        <div class="sbody">
+          <div class="srow"><svg width="15" height="15"><use href="#i-zip"/></svg>
+            <span><span class="st">Download .lpshare</span><br><span class="sd">A file you can send any way you like.</span></span></div>
+          <div class="pubrow">
+            <span class="st"><svg width="15" height="15"><use href="#i-cloudup"/></svg> Publish to lightplayer.app</span>
+            <p class="sd">Get a link that opens the project <b>running</b> — recipients need nothing installed and no account.</p>
+            <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Sign in with Google to publish</button>
+          </div>
+        </div>
+      </div>
+      <p class="sub" style="max-width:340px; padding-top:6px">
+        An anonymous share-link viewer sees zero account UI beyond A’s one quiet word.
+        <b>These compose (ruled):</b> C’s inline ask ships in the publish flow, and the
+        chrome carries A for the returning user on a new browser. What this button leads
+        to depends on the deployment’s providers — §4.
+      </p>
+    </div>
+  </div>
+</div>
+
+<p class="sub" style="margin-top:-8px">
+  <b>Boot behavior</b> (flip the Boot chip above): while the app’s <code>whoami</code> is in
+  flight, A’s slot holds a shimmer pill — never a “Sign in” that pops into an avatar a
+  beat later.
+</p>
+
+<!-- ================================================================ -->
+<h2><span class="n">2 ·</span> Signed in — the identity dropdown</h2>
+<p class="sub">
+  The avatar replaces the ghost/link in the same slot. Menus shown pinned open (click the
+  avatar to toggle). Three anatomies: <b>A</b> a plain menu in the ⋯-menu’s grammar,
+  <b>B</b> a Google-style identity card, <b>C</b> the multi-account anatomy — A with a
+  switch group grown in, which is the pressure-test: if A can’t grow into C, A is wrong.
+</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">A · Plain menu</span><span class="ctag">chosen · ship first</span>
+    <span class="cnote">identity header row + rows; same grammar as the shipped ⋯ menu — smallest possible thing</span></p>
+  <div class="appframe" style="min-height:238px">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="avbtn" data-toggles="pop-2a" data-boot-slot><span data-av="active"></span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="popmenu" id="pop-2a">
+      <div class="idrow"><span data-av="active" data-av-size="34"></span>
+        <span class="who"><span class="nm" data-name="active"></span><span class="em" data-email="active"></span></span></div>
+      <hr>
+      <button class="mrow"><svg width="14" height="14"><use href="#i-person"/></svg><span class="grow">Profile</span></button>
+      <button class="mrow"><svg width="14" height="14"><use href="#i-cloudup"/></svg><span class="grow">Your published projects</span></button>
+      <hr>
+      <button class="mrow quiet"><svg width="14" height="14"><use href="#i-signout"/></svg><span class="grow">Sign out</span></button>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<p class="rej"><b>B · Identity card — rejected:</b> the big-avatar centered card is a second
+  visual grammar the app has nowhere else, and it fails the growth test — a centered card has
+  no honest place for a switch-account list. A’s header row carries the same warmth at menu
+  scale.</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">C · A, grown multi-account</span><span class="ctag">chosen · growth path</span>
+    <span class="cnote">the switch group slots between profile rows and sign-out; “add” re-runs the provider’s picker (Google already forces <code style="font-family:var(--mono)">prompt=select_account</code>; the dev picker just shows itself)</span></p>
+  <div class="appframe" style="min-height:392px">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="avbtn" data-toggles="pop-2c" data-boot-slot><span data-av="active"></span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="popmenu" id="pop-2c">
+      <div class="idrow"><span data-av="active" data-av-size="34"></span>
+        <span class="who"><span class="nm" data-name="active"></span><span class="em" data-email="active"></span></span></div>
+      <hr>
+      <button class="mrow"><svg width="14" height="14"><use href="#i-person"/></svg><span class="grow">Profile</span></button>
+      <button class="mrow"><svg width="14" height="14"><use href="#i-cloudup"/></svg><span class="grow">Your published projects</span></button>
+      <hr>
+      <span class="ghead" data-switch-head>Switch account</span>
+      <div data-acct-list></div>
+      <button class="mrow quiet"><svg width="14" height="14"><use href="#i-plus"/></svg><span class="grow">Add another account…</span></button>
+      <hr>
+      <button class="mrow quiet"><svg width="14" height="14"><use href="#i-signout"/></svg><span class="grow" data-signout-label>Sign out</span></button>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="n">3 ·</span> The profile page — <span style="text-transform:none">/account</span></h2>
+<p class="sub">
+  Ruling: <b>B’s structure, A’s content</b> — settings rows holding only what exists (identity,
+  account, sessions); the AI-token balance gets a group later without a redesign. Minimal
+  identity on purpose: photo (Google’s, never stored), given + family name. Flip
+  <b>Identity → awkward</b>: the CJK name is family-first, which is the argument for two
+  neutral boxes over a single “full name” field with assumptions.
+</p>
+
+<div class="barwrap" style="max-width:860px">
+  <p class="cap"><span class="cname">Converged page</span><span class="ctag">B structure · A content</span>
+    <span class="cnote">save appears when dirty (A’s behavior); the sign-in row wears the provider badge, not a hardcoded Google</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink">Projects</button></span>
+      <span class="rside">
+        <button class="avbtn" style="border-color:var(--accent-border)"><span data-av="active"></span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="pagebody">
+      <div class="setgroup">
+        <p class="ptitle" style="margin-bottom:2px">Your profile</p>
+        <p class="psub">How you appear on projects you publish.</p>
+      </div>
+      <div class="setgroup">
+        <p class="gt">Identity</p>
+        <div class="setrows">
+          <div class="setrow"><span class="k">Photo</span>
+            <span class="v" style="display:flex;align-items:center;gap:10px">
+              <span data-av="active" data-av-size="34"></span>
+              <span class="v dim" style="font-size:11px">from your sign-in provider — updates when it does; not stored here</span></span></div>
+          <div class="setrow"><span class="k">Given name</span><span class="v"><input data-given-input value=""></span></div>
+          <div class="setrow"><span class="k">Family name</span><span class="v"><input data-family-input value=""></span></div>
+          <div class="setrow"><span class="k">&nbsp;</span>
+            <span class="v"><span class="savebar" style="margin:0">
+              <button class="savebtn" disabled data-savebtn>Save</button>
+              <span class="savenote" data-savenote>Names start from your provider; edits stay on LightPlayer.</span>
+            </span></span></div>
+        </div>
+      </div>
+      <div class="setgroup">
+        <p class="gt">Account</p>
+        <div class="setrows">
+          <div class="setrow"><span class="k">Email</span><span class="v dim" data-email="active"></span>
+            <span class="act badge">Google</span></div>
+          <div class="setrow"><span class="k">Account id</span>
+            <span class="v dim" style="font-family:var(--mono); font-size:11px">usr_qY7LqRfrX26CGe8m · since Aug 6, 2026</span></div>
+        </div>
+      </div>
+      <div class="setgroup">
+        <p class="gt">Sessions</p>
+        <div class="setrows">
+          <div class="setrow sessrow"><span class="k">This browser</span>
+            <span class="v"><span class="devico"><svg width="14" height="14"><use href="#i-laptop"/></svg></span>
+              Safari · macOS · signed in Aug 6</span>
+            <span class="act badge good">current</span></div>
+          <div class="setrow sessrow"><span class="k">&nbsp;</span>
+            <span class="v dim"><span class="devico"><svg width="14" height="14"><use href="#i-phone"/></svg></span>
+              Chrome · Android · signed in Aug 2</span>
+            <span class="act"><button class="linkbtn">Sign out</button></span></div>
+          <div class="setrow"><span class="k">&nbsp;</span><span class="v dim">30-day sessions, renewed on use</span>
+            <span class="act"><button class="linkbtn danger">Sign out everywhere</button></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="rej"><b>A · narrow identity-card page — rejected as a layout</b> (its content and
+  save-on-dirty behavior won): same fields, but no honest room for sessions or a token balance
+  without becoming this page anyway. The session list needs one new store method
+  (<code style="font-family:var(--mono)">sessions_for_user</code>) — bones worth building since
+  it is what makes “sign out everywhere” possible.</p>
+
+<!-- ================================================================ -->
+<h2><span class="n">4 ·</span> One “Sign in”, many providers — the surface is server-defined</h2>
+<p class="sub">
+  Ruling: <b>don’t lock into Google.</b> The shape (after skybridge’s auth-connections model):
+  the server exposes a public <b>login-options</b> call — which connections this deployment has
+  (<b>oidc</b> rows like Google, or a <b>local</b> connection whose <i>methods</i> are
+  pick-a-profile, password, …) — and the client renders sign-in from that answer. Google is a
+  config row, not a code path; password is a <i>method of local</i>, not a provider sibling.
+  Below: the same “Sign in” click on three deployments. The dev picker is LightPlayer’s
+  existing <b style="font-family:var(--mono)">/auth/dev</b> grown up — and it stays triple-gated
+  (build config + server config + route re-check), never compiled into prod.
+</p>
+
+<div class="provgrid" style="margin-bottom:26px">
+  <div class="provcard">
+    <header><span class="t">lightplayer.app</span><span class="badge live">prod</span></header>
+    <div class="pdesc">options: oidc <b>google</b> · local <b>off</b></div>
+    <div class="pbody">
+      <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Continue with Google</button>
+      <p class="fineprint"><b>One active provider → no chooser at all:</b> the chrome’s “Sign in”
+        links straight to <span style="font-family:var(--mono)">/auth/google?next=…</span>.
+        This card only exists once a second provider does.</p>
+      <p class="fineprint" style="margin-top:2px"><b>Viewers of your links never need an
+        account.</b> Signing in is only for publishing your own work.</p>
+    </div>
+  </div>
+  <div class="provcard">
+    <header><span class="t">localhost:8080</span><span class="badge good">local dev</span></header>
+    <div class="pdesc">options: local <b>pick-a-profile</b> (passwordless) · oidc <b>none</b></div>
+    <div class="pbody">
+      <div data-pick-list></div>
+      <p class="fineprint">Click a profile → instant session, no password. Rows are the
+        deployment’s existing users; testing a two-account sync flow is two clicks.</p>
+    </div>
+  </div>
+  <div class="provcard">
+    <header><span class="t">studio.my-camp.net</span><span class="badge">self-host</span></header>
+    <div class="pdesc">options: local <b>password</b> · oidc <b>optional</b></div>
+    <div class="pbody">
+      <div class="field"><label>Email</label><input value="crew@zookdome.org"></div>
+      <div class="field"><label>Password</label><input type="password" value="••••••••••"></div>
+      <button class="savebtn" style="justify-self:start">Sign in</button>
+      <div class="orline">or</div>
+      <button class="gbtn"><svg width="15" height="15"><use href="#i-google"/></svg> Continue with Google</button>
+      <p class="fineprint">Keeps data separate on a shared local server with zero Google
+        dependency; the oidc row appears only if the host configured one.</p>
+    </div>
+  </div>
+</div>
+
+<p class="sub">
+  <b>Bones underneath</b> (plan inputs, not UI): connection kinds <b>local | oidc</b>; a
+  provider-agnostic session mint — every door converges on the same
+  <b style="font-family:var(--mono)">open_session</b>, and the cookie never knows which door
+  you came through (already true of <b style="font-family:var(--mono)">dev_auth</b> vs
+  <b style="font-family:var(--mono)">google_auth</b> today); and room for an identities link
+  table (<b style="font-family:var(--mono)">connection, subject → user</b>) so one account can
+  later be reachable through several providers without a rebuild.
+</p>
+
+<!-- ================================================================ -->
+<h2><span class="n">5 ·</span> Multi-account — try it, and what it costs</h2>
+<p class="sub">
+  Live demo: click the avatar, switch accounts, watch the chrome follow. Below it, the three
+  ways to build switching — the spike’s architectural point is that the <b>cheap one is
+  genuinely good</b>, because the provider’s own picker (Google already forces
+  <b style="font-family:var(--mono)">prompt=select_account</b>; the dev picker <i>is</i> one)
+  does the heavy lifting, and the dropdown’s account list is just <i>local memory of past
+  sign-ins</i>, not server state. Ruling: bones only — ship the shape, don’t smooth the edges.
+</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">Live switch demo</span>
+    <span class="cnote">dropdown closed by default — click the avatar; switching swaps the whole signed-in surface</span></p>
+  <div class="appframe" style="min-height:150px">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary">Explore</button>
+          <button class="navlink secondary">Boards</button>
+          <button class="navlink secondary">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">cloud-login-b953d5</span></button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="avbtn" data-toggles="pop-demo" data-boot-slot><span data-av="active"></span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="popmenu" id="pop-demo" hidden>
+      <div class="idrow"><span data-av="active" data-av-size="34"></span>
+        <span class="who"><span class="nm" data-name="active"></span><span class="em" data-email="active"></span></span></div>
+      <hr>
+      <button class="mrow"><svg width="14" height="14"><use href="#i-person"/></svg><span class="grow">Profile</span></button>
+      <hr>
+      <span class="ghead" data-switch-head>Switch account</span>
+      <div data-acct-list data-live></div>
+      <button class="mrow quiet"><svg width="14" height="14"><use href="#i-plus"/></svg><span class="grow">Add another account…</span></button>
+      <hr>
+      <button class="mrow quiet"><svg width="14" height="14"><use href="#i-signout"/></svg><span class="grow">Sign out</span></button>
+    </div>
+    <div class="peek" style="mask-image:none; opacity:.35; height:60px; overflow:hidden">
+      <div class="pcard"><div class="strip g1"></div></div>
+      <div class="pcard"><div class="strip g2"></div></div>
+      <div class="pcard"><div class="strip g3"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="archgrid">
+  <div class="archcard lean">
+    <span class="at">Switch = re-auth through the provider <span class="tag">lean · ship this</span></span>
+    <p>One active session, exactly today’s server. “Switch” and “Add account” re-enter the
+      sign-in flow (<code>/auth/google?next=…</code> in prod — Google’s picker, no password
+      re-entry; the profile picker in dev) and the new session <i>replaces</i> the cookie. The
+      dropdown’s account rows are a <b>client-side memory of past sign-ins</b> (name, email,
+      avatar, provider in localStorage) — sugar, not server state.</p>
+    <p class="d">Cost: a page round-trip per switch (~1–2 s). Zero new server surface, zero new
+      security model. Multi-account UX exists from day one; the architecture stays one-cookie simple.</p>
+  </div>
+  <div class="archcard">
+    <span class="at">Server session-set <span class="tag later">later · if switching is hot</span></span>
+    <p>The cookie names a <i>set</i> of sessions plus an active index; switch = one API call,
+      instant, all tabs follow together. This is Google’s own model minus the
+      <code>/u/0</code> path hack.</p>
+    <p class="d">Cost: new session-set store + vocabulary (switch, drop), CSRF thinking on the
+      switch call, and “which account did tab 2 just act as?” questions. Only worth it if
+      switching turns out to be frequent.</p>
+  </div>
+  <div class="archcard">
+    <span class="at">Client token vault <span class="tag no">avoid</span></span>
+    <p>Browser holds N bearer tokens (localStorage), sends <code>Authorization</code> headers;
+      per-tab identities become possible.</p>
+    <p class="d">Cost: tokens leave HttpOnly cookies for script-readable storage (XSS blast
+      radius), the not-yet-built fetch CloudPort grows an auth header path the cookie plane
+      already solves, and OG/share pages can’t see auth. Per-tab identity isn’t worth this.</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span data-toast-av></span><span id="toast-msg"></span></div>
+
+<script>
+  // ---- data ----------------------------------------------------------
+  const SETS = {
+    typical: [
+      { given:"Yona", family:"Appletree", email:"lightatplay@gmail.com", hue:152, photo:true },
+      { given:"Photomancer", family:"Art", email:"photomancer.art@gmail.com", hue:262, photo:true },
+      { given:"Zook", family:"Dome-Crew", email:"crew@zookdome.org", hue:38, photo:false },
+    ],
+    awkward: [
+      { given:"María-Guadalupe Fernanda", family:"de los Ángeles Rodríguez-Vásquez",
+        email:"maria.guadalupe.fernanda.rodriguez.vasquez@extremely-long-domain.example.org", hue:12, photo:true },
+      { given:"山田", family:"太郎", email:"yamada.taro@gmail.com", hue:205, photo:false },
+      { given:"Cher", family:"", email:"cher@gmail.com", hue:322, photo:false },
+    ],
+  };
+  const state = { data:"typical", photo:"on", accounts:3, boot:"ready", active:0 };
+  // deep-linkable state: #data=awkward&photo=off&accounts=1&boot=pending
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => {
+    if (k in state) state[k] = k === "accounts" || k === "active" ? +v : v;
+    const chip = document.querySelector(`.chip[data-set="${k}:${v}"]`);
+    if (chip) document.querySelectorAll(`.chip[data-set^="${k}:"]`)
+      .forEach(c => c.setAttribute("aria-pressed", c === chip ? "true" : "false"));
+  });
+
+  const people   = () => SETS[state.data].slice(0, state.accounts);
+  const activeP  = () => people()[Math.min(state.active, people().length - 1)];
+  const fullName = p => [p.given, p.family].filter(Boolean).join(" ");
+  const initials = p => ((p.given[0] || "") + (p.family[0] || "")).toUpperCase();
+
+  function avatarHTML(p, size) {
+    const s = size ? `width:${size}px;height:${size}px;font-size:${Math.round(size * .36)}px;` : "width:100%;height:100%;";
+    if (state.photo === "on" && p.photo) {
+      const bg = `background:
+        radial-gradient(circle at 32% 30%, hsl(${p.hue} 65% 68%), transparent 62%),
+        radial-gradient(circle at 72% 68%, hsl(${(p.hue + 40) % 360} 55% 42%), transparent 58%),
+        linear-gradient(160deg, hsl(${p.hue} 42% 34%), hsl(${p.hue} 46% 15%));`;
+      return `<span class="av photo" style="${s}${bg}"></span>`;
+    }
+    return `<span class="av initials" style="${s}--avc:hsl(${p.hue} 60% 62%)">${initials(p)}</span>`;
+  }
+
+  // ---- render --------------------------------------------------------
+  // Every [data-av] span is a stable holder; renderAll() fills it.
+  document.querySelectorAll("[data-av]").forEach(el => {
+    el.setAttribute("data-av-holder", "");
+  });
+
+  function renderAll() {
+    const p = activeP();
+    document.querySelectorAll("[data-av-holder]").forEach(el => {
+      const size = el.getAttribute("data-av-size");
+      el.innerHTML = avatarHTML(p, size ? +size : null);
+      el.style.display = "contents";
+    });
+    document.querySelectorAll("[data-name=active]").forEach(el => el.textContent = fullName(p));
+    document.querySelectorAll("[data-email=active]").forEach(el => el.textContent = p.email);
+    document.querySelectorAll("[data-given-input]").forEach(el => el.value = p.given);
+    document.querySelectorAll("[data-family-input]").forEach(el => el.value = p.family);
+
+    // account lists (2C + demo)
+    const others = people().map((q, i) => ({ q, i })).filter(x => x.i !== Math.min(state.active, people().length - 1));
+    document.querySelectorAll("[data-acct-list]").forEach(list => {
+      list.innerHTML = others.map(({ q, i }) => `
+        <div class="acctrow" data-switch-to="${i}">
+          ${avatarHTML(q, 26)}
+          <span class="who"><span class="nm">${fullName(q)}</span><span class="em">${q.email}</span></span>
+        </div>`).join("");
+    });
+    document.querySelectorAll("[data-switch-head]").forEach(el => {
+      el.style.display = others.length ? "" : "none";
+    });
+    document.querySelectorAll("[data-signout-label]").forEach(el => {
+      el.textContent = others.length ? `Sign out of ${p.email.split("@")[0]}@…` : "Sign out";
+    });
+
+    // §4 dev picker: every profile on this deployment, current first
+    document.querySelectorAll("[data-pick-list]").forEach(list => {
+      list.innerHTML = people().map((q, i) => `
+        <button class="pickrow" data-pick-to="${i}" style="margin-bottom:8px">
+          ${avatarHTML(q, 28)}
+          <span class="who"><span class="nm">${fullName(q)}</span><span class="em">${q.email}</span></span>
+        </button>`).join("")
+        + `<button class="pickrow newp"><svg width="13" height="13"><use href="#i-plus"/></svg> New profile…</button>`;
+    });
+
+    // boot state: account slots shimmer, text link hides
+    document.querySelectorAll("[data-boot-slot]").forEach(btn => {
+      if (state.boot === "pending") {
+        if (!btn.dataset.savedHtml) btn.dataset.savedHtml = btn.innerHTML;
+        btn.classList.add("pending");
+        btn.classList.remove("ghost");
+        btn.innerHTML = `<span class="shimmer"></span>`;
+      } else if (btn.dataset.savedHtml) {
+        btn.innerHTML = btn.dataset.savedHtml;
+        delete btn.dataset.savedHtml;
+        btn.classList.remove("pending");
+        // re-render avatars inside restored nodes
+        btn.querySelectorAll("[data-av-holder]").forEach(el => {
+          el.innerHTML = avatarHTML(p, null); el.style.display = "contents";
+        });
+      }
+    });
+    document.querySelectorAll("[data-boot-hide]").forEach(el => {
+      el.classList.toggle("booting", state.boot === "pending");
+    });
+  }
+
+  // ---- controls ------------------------------------------------------
+  document.querySelectorAll(".chip[data-set]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const [key, val] = chip.getAttribute("data-set").split(":");
+      state[key] = key === "accounts" ? +val : val;
+      if (key === "accounts" || key === "data") state.active = 0;
+      document.querySelectorAll(`.chip[data-set^="${key}:"]`)
+        .forEach(c => c.setAttribute("aria-pressed", c === chip ? "true" : "false"));
+      renderAll();
+    });
+  });
+
+  // popover toggles
+  document.querySelectorAll("[data-toggles]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const pop = document.getElementById(btn.getAttribute("data-toggles"));
+      if (pop) pop.hidden = !pop.hidden;
+    });
+  });
+  document.addEventListener("click", e => {
+    if (e.target.closest(".popmenu")) return;
+    // close only the demo popover on outside click; pinned ones stay
+    const demo = document.getElementById("pop-demo");
+    if (demo && !e.target.closest("[data-toggles=pop-demo]")) demo.hidden = true;
+  });
+
+  // account switching + dev picker (delegated: lists re-render)
+  function showToast(msg) {
+    const p = activeP();
+    const toast = document.getElementById("toast");
+    document.querySelector("[data-toast-av]").innerHTML = avatarHTML(p, 20);
+    document.getElementById("toast-msg").textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toast.classList.remove("show"), 3200);
+  }
+  document.addEventListener("click", e => {
+    const sw = e.target.closest("[data-switch-to]");
+    if (sw) {
+      state.active = +sw.getAttribute("data-switch-to");
+      renderAll();
+      showToast(`Signed in as ${activeP().email} — via the provider's picker, ~1s round-trip in the lean model`);
+      return;
+    }
+    const pick = e.target.closest("[data-pick-to]");
+    if (pick) {
+      state.active = +pick.getAttribute("data-pick-to");
+      renderAll();
+      showToast(`Dev session as ${activeP().email} — self-asserted, passwordless, never compiled into prod`);
+    }
+  });
+
+  // dirty-save demo on profile pages
+  document.querySelectorAll("[data-given-input],[data-family-input]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      document.querySelectorAll("[data-savebtn]").forEach(b => b.disabled = false);
+      document.querySelectorAll("[data-savenote]").forEach(n => n.textContent = "Unsaved changes.");
+    });
+  });
+  document.querySelectorAll("[data-savebtn]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      document.querySelectorAll("[data-savenote]").forEach(n => n.textContent = "Saved.");
+    });
+  });
+
+  renderAll();
+</script>
+</body>
+</html>

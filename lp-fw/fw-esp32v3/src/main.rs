@@ -52,7 +52,7 @@
 // idle loop is one `waiti 0` (`output::rmt::shared_driver::app_core_main`) —
 // the same feature xtensa-lx-rt itself builds with.
 #![cfg_attr(
-    all(feature = "server", not(feature = "radio_ram_probe")),
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
     feature(alloc_error_handler, asm_experimental_arch)
 )]
 #![allow(
@@ -63,7 +63,7 @@
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
 // `unused_extern_crates` is deny-by-default in this workspace's lint table.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 extern crate alloc;
 
 // The build's self-description, embedded as a scannable blob (extracted by
@@ -87,22 +87,33 @@ lpc_model::lp_embed_manifest_core! {
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
 }
 
+// Hardware harnesses, selected by `test_*` features (build.rs's `fw_harness`
+// cfg). Each replaces the app entrypoint rather than extending it — the same
+// shape `radio_ram_probe` above already uses, deliberately not a second
+// mechanism.
+//
+// Unlike fw-esp32s3's `test_loopback` / `test_button`, no harness here needs an
+// app module: the FP rig touches no driver, so nothing is un-gated for it. Do
+// not copy the S3's exceptions without a harness that earns one.
+#[cfg(fw_harness)]
+mod tests;
+
 // `board::esp32v3::init` is the server path's sole `esp_hal::init` call site.
 // The hello/probe entrypoint at the bottom of this file keeps its own inline
 // init on purpose: it needs the `WIFI` peripheral that `init_board` does not
 // hand back, and it is M2-P3's measured code, worth preserving byte for byte.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod board;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod flash_storage;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod output;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod recovery;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32v3::init::{init_board, start_runtime},
@@ -158,7 +169,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// competition with `.stack`; the second region costs `.stack` nothing,
 /// which is exactly why it was worth reclaiming. Total heap is
 /// `HEAP_SIZE + 73,728`.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
@@ -182,7 +193,7 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// handler controls, and once the record is already committed to RTC RAM,
 /// spending 40 ms per line to protect the *serial copy* of information the next
 /// boot will print anyway buys nothing.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
@@ -194,7 +205,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// then the request size is only a formatted string and the free/used numbers
 /// are gone. On a chip whose whole difficulty is a 110 KB arena, "how much was
 /// left" is the question, so it gets its own path.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[alloc_error_handler]
 fn on_alloc_error(layout: core::alloc::Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
@@ -284,7 +295,7 @@ unsafe impl core::alloc::GlobalAlloc for RetryingHeap {
 /// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
 /// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
 /// cost is paid only on a boot that is already dead.
-#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"))))]
+#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness))))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     /// Give the TX FIFO time to clock out before the next print or the reset.
@@ -348,7 +359,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 ///
 /// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
 /// to a frame.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
@@ -412,7 +423,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// The span is `'static` (a fixed hardware address), exclusively the
 /// allocator's (the code region is the only other claimant on SRAM1, and the
 /// const-asserts prove they abut without overlap), and non-empty.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn add_sram1_heap_region() -> usize {
     let (base, len) = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
     unsafe {
@@ -425,14 +436,14 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
@@ -671,7 +682,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
@@ -697,7 +708,7 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
     }
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     let app = boot_firmware(spawner);
@@ -725,11 +736,51 @@ async fn main(spawner: embassy_executor::Spawner) {
     .await;
 }
 
+/// Harness entrypoint. Replaces the app entirely — a `test_*` build is a rig,
+/// not the firmware plus a rig.
+///
+/// It takes `esp_hal::init` and the UART0 construction below for one reason
+/// each: the clock, and legibility. Everything else the app boots (filesystem,
+/// server, RMT, recovery ledger) is dead weight to a harness that executes FP
+/// instructions and prints, and is gated off.
+#[cfg(fw_harness)]
+#[esp_hal::main]
+fn main() -> ! {
+    let peripherals =
+        esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
+
+    // ⚠️ Load-bearing, and the baudrate is half of what makes it work.
+    // `esp-println`'s `uart` feature writes UART0's FIFO but never programs the
+    // divisor, and `esp_hal::init` has just moved the clock — so constructing
+    // this `Uart` is what makes the `[FPCONF]` lines legible at all, and on this
+    // chip the capture IS the result.
+    //
+    // 921600 to match `board::esp32v3::init::init_board`
+    // (`lpc_model::DEFAULT_SERIAL_BAUD_RATE`) and the `--monitor-baud` in
+    // `just fwtest-xt-fp-esp32v3`. Measured the hard way: with the 115200
+    // default here against a 921600 monitor, the capture is 18 lines of binary
+    // noise — which reads exactly like a dead board rather than a wrong divisor.
+    // It must stay bound, not dropped.
+    let _uart0 = esp_hal::uart::Uart::new(
+        peripherals.UART0,
+        esp_hal::uart::Config::default().with_baudrate(921_600),
+    )
+    .expect("uart0 config")
+    .with_tx(peripherals.GPIO1)
+    .with_rx(peripherals.GPIO3);
+
+    #[cfg(feature = "test_xt_fp_conformance")]
+    tests::xt_fp_conformance::run_all()
+}
+
 /// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3
 /// radio RAM probe. Both replace the server app rather than extending it.
-#[cfg(any(
-    feature = "radio_ram_probe",
-    all(not(feature = "server"), not(feature = "radio_ram_probe"))
+#[cfg(all(
+    not(fw_harness),
+    any(
+        feature = "radio_ram_probe",
+        all(not(feature = "server"), not(feature = "radio_ram_probe"))
+    )
 ))]
 #[esp_hal::main]
 fn main() -> ! {
@@ -816,15 +867,15 @@ fn main() -> ! {
     }
 }
 
-// Gated on `server` unlike the c6/s3 twins' `not(fw_harness)`: this
-// crate has no harness cfg (build.rs deliberately emits none), and its
-// wire deps (`lpc_wire`, the common chip_identity module) are optional
-// behind `server` — the no-server build must not touch them.
 /// Collect per-wire output telemetry for the heartbeat, from the pusher's
 /// mailboxes. Empty (→ absent heartbeat field) until a wire posts, and in
 /// the single-core fallback (whose inline path keeps no per-wire
 /// attribution).
-#[cfg(feature = "server")]
+///
+/// `not(fw_harness)` alongside `server`: this reads `output::rmt`'s mailboxes
+/// and returns a `Vec`, and a harness build has neither — the app modules and
+/// `extern crate alloc` are both gated out under it.
+#[cfg(all(feature = "server", not(fw_harness)))]
 fn collect_wire_stats() -> alloc::vec::Vec<lpc_wire::server::OutputWireStatus> {
     let mut out = alloc::vec::Vec::new();
     if !output::rmt::shared_driver::isr_on_app_core() {
@@ -849,6 +900,12 @@ fn collect_wire_stats() -> alloc::vec::Vec<lpc_wire::server::OutputWireStatus> {
     out
 }
 
+// Now gated like the c6/s3 twins. This used to read `server` alone, with a
+// comment explaining that the divergence was because this crate had no harness
+// cfg; it has one as of the FP conformance rig, so the exception expired. The
+// `server` half stays: the wire deps (`lpc_wire`, the common chip_identity
+// module) are optional behind it, and the no-server build must not touch them.
+#[cfg(all(feature = "server", not(fw_harness)))]
 /// This chip's permanent identity, read from efuse.
 ///
 /// Injected rather than derived: the server cannot read silicon, and the
