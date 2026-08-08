@@ -294,7 +294,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
-            float_mode: crate::ValueSlot::default(),
+            float_mode: crate::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
@@ -326,7 +326,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: AssetSlot::path("wave.glsl"),
             bindings: crate::BindingDefs::default(),
-            float_mode: crate::ValueSlot::default(),
+            float_mode: crate::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::default(),
         };
@@ -358,7 +358,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
-            float_mode: crate::ValueSlot::default(),
+            float_mode: crate::OptionSlot::none(),
             consumed_slots: MapSlot::default(),
             produced_slots: MapSlot::new(produced),
         };

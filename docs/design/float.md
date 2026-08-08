@@ -1,10 +1,17 @@
 # Float — f32 (IEEE-754 binary32) Semantics
 
 This document is the single source of truth for **f32 numeric semantics** in
-LightPlayer — the sibling of [`q32.md`](./q32.md) for the Float side of the
-`float_mode` slot. All f32 execution tiers (LPIR interpreter, `lpvm-wasm`,
+LightPlayer — the sibling of [`q32.md`](./q32.md), which is normative for the
+Fixed representation. All f32 execution tiers (LPIR interpreter, `lpvm-wasm`,
 `lpvm-native` hardware and soft float, and — within its already-documented
 latitude — the GPU tier) conform to it.
+
+> **Standing.** Float is the product's one *authored* semantics; Q32 and f32
+> are execution **representations** a target chooses between, and the
+> `float_mode` slot is an optional pin that overrides that choice for one
+> shader (`docs/adr/2026-08-08-float-semantics-per-target-representation.md`).
+> This document defines what an f32 representation must do — not when a target
+> picks it.
 
 > **Posture.** Every choice below errs toward **performance and ease of
 > implementation**: we guarantee exactly what every target's native f32 path
@@ -79,14 +86,40 @@ row, not two, because the silicon gave one answer — see the amendment in
 `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` §10.
 
 ⚠️ **Identical numerics, different speed.** Agreement to the bit is not a
-performance claim. On the classic, an f32 shader renders **~17 % slower** than
-the same shader in Q32 — 20 fps vs 24 fps at 1500 LEDs, tick 46 ms vs 40 ms —
-while emitting marginally *less* code and using marginally *less* heap. The S3
-showed no such penalty on a much smaller fixture. The likely cost is the frame
-boundary: it stays Q16.16-in / RGBA16-out in both modes by design, so an f32
-shader pays two conversions per coordinate per sample, which at 1500 LEDs is
-3 000 decodes per frame. Choose `float_mode: float` on the classic for the
-numerics it gives you, not for speed.
+performance claim. **Measured 2026-08-07** (dig2go classic ESP32 rev v3.1 and
+an S3 dev board; `projects/test/zook-dome-1500`, 5×300 LEDs; a band-chase
+shader against a trivial-interior control shader that isolates the frame
+boundary from the shader interior), steady-state tick:
+
+| target | shader | fixed | float | Δ |
+|---|---|---|---|---|
+| classic/LX6 | band-chase | 31–32 ms | 37–38 ms | +6 ms |
+| classic/LX6 | trivial | 28–29 ms | 30–31 ms | +2 ms |
+| S3/LX7 | band-chase | 17–18 ms | 21 ms | +3.5 ms |
+| S3/LX7 | trivial | 15 ms | 17 ms | +2 ms |
+
+The penalty is **dominated by the shader interior**, not the frame boundary.
+An earlier note here attributed it to boundary conversions ("3,000 decodes per
+frame at 1500 LEDs") — **that attribution is falsified**: the trivial control
+pays the same boundary cost as band-chase but has almost no interior, and it
+keeps only ~2 of the classic's 6 ms (and ~2 of the S3's 3.5 ms). The boundary's
+actual cost is ~2 ms/1500 samples on both chips (coordinate decode in +
+unorm16 conversion out + FP register traffic); only the input half is even
+theoretically ABI-recoverable, since output conversion is intrinsic to an
+integer LED pipeline. The remainder is FPU dependent-chain latency inside the
+shader itself: band-chase's interior alone runs 3→7 ms on the classic (≈2.3×)
+and 2.5→4 ms on the S3 (≈1.6×) — extreme-interior costs are hypothetical
+beyond this, since the heavier `examples/basic/shader.glsl` (psrdnoise) cannot
+even GLSL-compile at 1500 LEDs on the classic (OOM).
+
+**The S3 is not fps-neutral at dome scale.** An earlier neutral S3 datapoint
+(quad-strips, a much smaller fixture) was a scale artifact, not evidence the
+LX7 is exempt: at dome scale the S3 shows the same ~20% penalty ratio as the
+classic. (§4's one-Xtensa-row framing is about bit-exactness and is
+unaffected — LX6 and LX7 still agree on *what* they compute, just not on how
+fast.) This measurement is why Xtensa images default to the Q32
+representation; pin `float_mode: float` there for the numerics it gives you,
+not for speed.
 
 - **Denormal (subnormal) handling.** A target may flush denormal inputs
   and/or outputs to zero. wasm and RV32F preserve denormals (their specs
@@ -153,14 +186,32 @@ Inside builtin implementations, the §3–§5 classes still apply to the
 individual operations; a builtin's overall tolerance band is what conformance
 asserts.
 
-## 7. The frame boundary is fixed-point in both modes
+## 7. The frame boundary is fixed-point on every current image
 
-`float_mode` describes the shader's *interior*. The frame boundary — the
+**The representation is the target's, not the shader's.** Float is the
+authored semantics; which representation executes it is a per-target execution
+detail (`docs/adr/2026-08-08-float-semantics-per-target-representation.md`).
+The `float_mode` slot is an optional **pin** on the shader node, and its
+absence — Auto, the normal state — means "the target's native
+representation": Q32 on every shipping CPU backend today, `F32Gpu` on the GPU
+tier. A pin forces one representation for that shader's interior regardless of
+target. So the mode a compile runs in comes from the image first and the pin
+only if there is one.
+
+**The frame boundary is a property of the image, not of the shader.** The
 buffers the host hands the synthesised `__render_texture_<format>` /
-`__render_samples_rgba16` entries — is **Q16.16 in, RGBA16 out, in both
-modes**, because those buffers are an interchange format shared with fixtures
-and outputs. Widening them for Float would be a far larger change than making
-the interior f32, and would leave the product with two frame ABIs.
+`__render_samples_rgba16` entries are **Q16.16 in, RGBA16 out, in both
+modes, on every firmware image shipping today** — those buffers are an
+interchange format shared with fixtures and outputs, and every current image
+carries both representations with Q32 as its native default.
+
+An earlier version of this section defended that with "widening them for Float
+… would leave the product with two frame ABIs". That objection was made under
+mode *coexistence* inside one image and does not generalize: with the native
+representation a build-time property, an image has exactly one boundary ABI
+whatever it chooses. The boundary nonetheless does not move for any current
+image, and the reason is now arithmetic rather than architectural — see the
+S31-era note at the end of this section.
 
 The wrappers therefore convert at the boundary (`lp-shader`'s
 `Q16CoordDecoder`):
@@ -172,14 +223,43 @@ The wrappers therefore convert at the boundary (`lp-shader`'s
 
 Both Float conversions are **Guaranteed** (§3): int→float is correctly
 rounded, `2^-16` is exactly representable so the scale is exact for any
-coordinate below `2^24` in Q16.16 units, and the two `FtoUnorm16` lowerings
-share one convention by construction (`lps-builtins`' `unorm_conv_f32` /
+coordinate below `2^24` in Q16.16 units, and the `FtoUnorm16` lowerings share
+one convention — `floor(v × 2^bits)` clamped out, `code / 2^bits` back, the
+scale Q32 fixed and Float inherits (`lps-builtins`' `unorm_conv_f32` /
 `unorm_conv_q32`). So a shader whose interior is exact in both modes renders
 the same codes in both — which is what
-`lps-filetests/tests/f32_render_entry.rs` asserts against one shared table.
+`lps-filetests/tests/f32_render_entry.rs` (rv32) and
+`f32_render_entry_wasm.rs` (wasm) assert against one shared table.
+
+⚠️ **They share it by discipline, not by construction.** An earlier version of
+this paragraph said "by construction", counting the two `lps-builtins`
+functions and forgetting that backends may *inline* the conversion instead of
+calling them. `lpvm-wasm` does, and its f32 inline pair used the GPU
+`v × 65535` scale for months behind a fully green corpus, because no filetest
+reaches `LpirOp::FtoUnorm16` at all — it is emitted only by the synthesised
+frame wrappers. Every backend that inlines a boundary conversion is a fresh
+copy of this row and needs its own frame-path assertion; corpus green does not
+imply it. See
+`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`.
 
 The cost is two conversions per coordinate per sample, paid in the frame hot
 path in Float mode only.
+
+**An f32-native points-in ABI is an S31-era option, not a current one.** On an
+image whose native representation *is* f32, handing the entries an f32 points
+buffer costs nothing to define and deletes the Float arm of `Q16CoordDecoder`
+outright. §4's decomposition prices it: the whole seam is ~2 ms per 1500
+samples on Xtensa, and the input half — the coordinate decodes — is the
+recoverable ~1 ms. Worth taking when the first f32-native image lands; not
+worth a firmware ABI churn on the classic or the S3, where it is ~3% of a
+frame on boards that default to Q32 anyway.
+
+**The output side stays integer in every design.** `RGBA16` is not a
+concession to Q32: the LED pipeline downstream of the shader is integer end to
+end — gamma table, brightness scaling, white point, dither
+(`brightness-gamma-dithering.md`) — so a float→unorm conversion has to happen
+somewhere, and the frame boundary is the cheapest place for it. Only the input
+half of the seam is ever on the table.
 
 ## 8. Authoring guidance
 

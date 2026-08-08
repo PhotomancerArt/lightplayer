@@ -13,7 +13,6 @@
       "target": "bus:visual.out"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "decay": {
       "kind": "value",
