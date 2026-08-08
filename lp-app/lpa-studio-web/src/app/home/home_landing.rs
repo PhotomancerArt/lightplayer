@@ -17,7 +17,7 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
         section { class: "tw:flex tw:min-h-[60vh] tw:flex-col tw:items-center tw:justify-center tw:gap-8 tw:text-center",
             LogoStacked { size: 96 }
             p { class: "tw:m-0 tw:max-w-md tw:text-sm tw:text-muted-foreground",
-                "Shader-driven light, from first LED to full installation."
+                "Friendly shaders, everywhere"
             }
             nav { class: "tw:grid tw:w-[min(680px,100%)] tw:grid-cols-3 tw:gap-3 tw:max-[640px]:grid-cols-1",
                 DiveInCard {

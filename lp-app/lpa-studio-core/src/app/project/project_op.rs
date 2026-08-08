@@ -45,7 +45,7 @@ pub enum ProjectOp {
     /// session stays in the pool.
     ///
     /// `uid: None` (the card click) targets the ≤1 attached device
-    /// session. `uid: Some(dev_…)` (route reload/navigation) attaches the
+    /// session. `uid: Some(dev…)` (route reload/navigation) attaches the
     /// existing session when its identity matches; otherwise it runs the
     /// M1 granted-port connect first — connecting/failed states render
     /// honestly on the gallery's device card (its connect evidence), never
@@ -236,7 +236,7 @@ mod tests {
             },
             ProjectOp::OpenDeviceProject { uid: None },
             ProjectOp::OpenDeviceProject {
-                uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+                uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
             },
         ] {
             assert_eq!(

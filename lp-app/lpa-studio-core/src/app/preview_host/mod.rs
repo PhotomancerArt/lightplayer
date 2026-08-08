@@ -22,6 +22,7 @@
 
 pub mod frame_schedule;
 mod preview_content;
+mod preview_output_feed;
 mod preview_types;
 pub mod slot_policy;
 
@@ -36,6 +37,7 @@ mod preview_worker;
 
 pub use frame_schedule::{FrameDecision, FrameSchedule, MAX_TICK_DELTA_MS};
 pub use preview_content::{catalog_deploy_files, example_deploy_files};
+pub use preview_output_feed::PreviewOutputFeed;
 pub use preview_types::{
     PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
     PreviewTier, is_teardown_abort_reason,

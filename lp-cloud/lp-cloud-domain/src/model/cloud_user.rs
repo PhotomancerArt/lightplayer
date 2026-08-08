@@ -7,7 +7,7 @@ use lpc_history::PrefixedUid;
 /// A user account, identified by their Google `sub` (identity) rather than
 /// their email (which can change).
 ///
-/// The uid is minted with [`lpc_history::UidPrefix::User`] (`usr_…`) from
+/// The uid is minted with [`lpc_history::UidPrefix::User`] (`usr…`) from
 /// random bytes supplied by the [`crate::ports::id_mint::IdMint`] port — the
 /// domain never generates randomness itself.
 ///
@@ -27,7 +27,7 @@ use lpc_history::PrefixedUid;
 ///   see that method for the exact fallback order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloudUser {
-    /// The account's uid (`usr_…`).
+    /// The account's uid (`usr…`).
     pub uid: PrefixedUid,
     /// Google's stable subject identifier. Identity lives here, not in
     /// `email`, because a Google account can change its address.

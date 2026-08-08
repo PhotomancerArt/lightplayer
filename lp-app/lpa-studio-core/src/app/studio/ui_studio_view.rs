@@ -19,7 +19,7 @@ pub enum UiLensRuntime {
     /// nothing library-backed is loaded (the storeless demo path).
     Sim { project_key: Option<String> },
     /// The lens is on the hardware device session. `uid` is the stamped
-    /// `dev_…` identity (the D37 route key) once the hello or the
+    /// `dev…` identity (the D37 route key) once the hello or the
     /// connect-as-pull carried it; `None` for a not-yet-identified device
     /// (no honest address exists — the URL stays put).
     Device { uid: Option<String> },
@@ -75,11 +75,11 @@ pub enum UiChromeSessionStatus {
 /// route keys so a chip click and the URL agree on identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiChromeSessionTarget {
-    /// THE sim session; `project_key` is the loaded project's `prj_…`
+    /// THE sim session; `project_key` is the loaded project's `prj…`
     /// uid (a valid `#/sim/<key>` route key), `None` while nothing
     /// library-backed is loaded.
     Sim { project_key: Option<String> },
-    /// A device session; `uid` is the stamped `dev_…` identity, `None`
+    /// A device session; `uid` is the stamped `dev…` identity, `None`
     /// before identity lands.
     Device { uid: Option<String> },
 }
@@ -96,7 +96,7 @@ pub struct UiStudioView {
     /// The editor lens's runtime binding, when a session holds the lens
     /// (see [`UiLensRuntime`]); `None` while the editor is detached.
     pub lens: Option<UiLensRuntime>,
-    /// The `prj_…` uid of the open library package, when one backs the
+    /// The `prj…` uid of the open library package, when one backs the
     /// running project (identity for route↔view comparisons).
     pub open_project_uid: Option<String>,
     /// The open package's slug — the user-facing identifier the web shell
@@ -370,8 +370,8 @@ mod tests {
     #[test]
     fn an_op_lands_on_its_own_session_card_only() {
         let mut view = view_with(vec![
-            live_card("runtime-1", Some("dev_a"), RosterCardState::RunningUpToDate),
-            live_card("runtime-2", Some("dev_b"), RosterCardState::RunningUpToDate),
+            live_card("runtime-1", Some("deva"), RosterCardState::RunningUpToDate),
+            live_card("runtime-2", Some("devb"), RosterCardState::RunningUpToDate),
         ]);
 
         view.apply_card_op("runtime-1", CardOp::new("Writing…", Some(42)));
@@ -407,7 +407,7 @@ mod tests {
             UiDeviceCard {
                 session_key: None,
                 ..card(
-                    Some("dev_offline"),
+                    Some("devoffline"),
                     RosterCardState::Offline { last_seen_at: None },
                 )
             },
@@ -424,10 +424,10 @@ mod tests {
     #[test]
     fn op_console_lines_reach_the_card_mid_op_and_stay_bounded() {
         let mut view = view_with(vec![
-            card(Some("dev_a"), RosterCardState::RunningUpToDate),
-            card(Some("dev_b"), RosterCardState::RunningUpToDate),
+            card(Some("deva"), RosterCardState::RunningUpToDate),
+            card(Some("devb"), RosterCardState::RunningUpToDate),
         ]);
-        view.apply_card_op("runtime-dev_a", CardOp::new("Writing…", None));
+        view.apply_card_op("runtime-deva", CardOp::new("Writing…", None));
 
         for index in 0..CONSOLE_TAIL_LEN + 5 {
             view.push_card_op_console(line(&format!("Writing at {index:#x}")));
@@ -453,9 +453,9 @@ mod tests {
     #[test]
     fn the_lens_card_tracks_the_op_it_is_the_same_card_grown() {
         let mut view = view_with(Vec::new())
-            .with_lens_card(Some(card(Some("dev_a"), RosterCardState::RunningUpToDate)));
+            .with_lens_card(Some(card(Some("deva"), RosterCardState::RunningUpToDate)));
 
-        view.apply_card_op("runtime-dev_a", CardOp::new("Writing…", Some(7)));
+        view.apply_card_op("runtime-deva", CardOp::new("Writing…", Some(7)));
         view.push_card_op_console(line("Writing at 0x0"));
 
         let lens = view.lens_card.as_ref().unwrap();
