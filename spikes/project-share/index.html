@@ -146,12 +146,23 @@
   .morebtn:hover { background: var(--bg-wash); }
   .sharebtn {
     display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-    appearance: none; border-radius: 999px; padding: 6px 14px;
-    font: 700 11.5px/1 var(--sans); color: #0d1512;
-    background: var(--accent); border: 1px solid var(--accent-border);
+    appearance: none; border-radius: 999px; padding: 6px 13px;
+    font: 700 11.5px/1 var(--sans); color: var(--neutral-text);
+    background: var(--neutral-bg); border: 1px solid var(--neutral-border);
   }
-  .sharebtn:hover { background: var(--accent-hover); }
-  .sharebtn svg { color: #0d1512; }
+  .sharebtn:hover { color: var(--strong); border-color: var(--accent-border); }
+  .sharebtn svg { color: var(--accent); }
+  .sharebtn.open { color: var(--strong); border-color: var(--accent-border);
+    background: rgba(123,224,178,.07); }
+  .sharecard.anchored { position: absolute; right: 14px; top: 90px; z-index: 20; }
+  .ctag { display: inline-flex; font: 700 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border);
+    border-radius: 999px; padding: 3px 9px; align-self: center; white-space: nowrap; flex: none; }
+  .rej { max-width: 1400px; margin: -12px 0 26px; padding: 8px 12px;
+    border: 1px solid var(--border-muted); border-left: 3px solid var(--err-border);
+    border-radius: 7px; background: var(--surface-muted);
+    font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .rej b { color: var(--muted); }
   .avbtn {
     appearance: none; padding: 0; border: 1px solid var(--neutral-border); background: var(--neutral-bg);
     width: 28px; height: 28px; border-radius: 50%; cursor: pointer; flex: none;
@@ -280,7 +291,7 @@
   .seg button:last-child { border-right: 0; }
   .seg button:hover { color: var(--text); background: var(--bg-wash); }
   .seg button[aria-pressed=true] { color: var(--accent); background: rgba(123,224,178,.09); }
-  .seg button[aria-pressed=true].warnseg { color: var(--warn-text); background: rgba(240,220,122,.08); }
+  .seg button[aria-pressed=true].warnseg { color: var(--warn-text); background: rgba(240,220,122,.14); }
   .segdesc { font-size: 10.5px; color: var(--dim); line-height: 1.45; margin: -2px 2px 0; min-height: 28px; }
   .segdesc b { color: var(--muted); }
   .segdesc.warn { color: var(--warn-text); }
@@ -518,6 +529,11 @@
   <b>prj</b> + 16-char lowercase base-32, case-insensitive. Everything here reacts to the
   controls strip — flip access, people, and the visitor's divergence state. Append
   <b>?only=N</b> to isolate a section.
+  <br><br>
+  <b>Converged 2026-08-07</b> — gate rulings: §1 <b>A</b>, lightened (neutral pill, accent icon)
+  and opening the settings as an <b>anchored detail popup</b> for a cohesive look; §2 <b>B</b>
+  link-first is that popup's anatomy; §3 <b>A</b> the strip; §5 archive-in-⋯ confirmed.
+  Rejected concepts shrink to strips.
 </p>
 
 <div class="controls">
@@ -573,8 +589,8 @@
 </div>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Share button in the right cluster</span>
-    <span class="cnote">accent pill before the avatar — the one loud thing in the chrome, and the door to §2's popover. The address bar shows the same identity the button serves.</span></p>
+  <p class="cap"><span class="cname">A · Quiet Share button → anchored panel</span><span class="ctag">chosen · converged</span>
+    <span class="cnote">G1 ruling: lighter touch — neutral pill, accent only in the icon; clicking opens the settings <b>in place</b> as a detail popup (the winning B anatomy from §2), cohesive with the account dropdown.</span></p>
   <div class="bframe">
     <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
       <span class="abar" data-abar="a"><svg width="11" height="11"><use href="#i-lock"/></svg>
@@ -585,86 +601,58 @@
       <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
       <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span></span>
       <span class="rside">
-        <button class="sharebtn" data-copy2><svg width="13" height="13"><use href="#i-person"/></svg> Share</button>
+        <button class="sharebtn open"><svg width="13" height="13"><use href="#i-person"/></svg> Share</button>
         <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
         <button class="avbtn"><span class="av" style="--avc:#7be0b2">YA</span></button>
         <button class="iconbtn morebtn">⋯</button>
       </span>
     </div>
-    <div class="simpeek"><div class="glow"></div><div class="leds"></div>
+    <div class="sharecard anchored">
+      <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
+      <div class="sbody">
+        <div class="urlhero">
+          <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span>
+          <button class="cbtn" data-copy2><svg width="12" height="12"><use href="#i-link"/></svg> Copy</button>
+        </div>
+        <p class="urlcap">Same link as the address bar — copying either works.</p>
+        <div class="seg" data-seg>
+          <button data-acc="none">Restricted</button>
+          <button data-acc="view" aria-pressed="true">Anyone can view</button>
+          <button data-acc="edit" class="warnseg">Anyone can edit</button>
+        </div>
+        <p class="segdesc" data-segdesc></p>
+        <span class="ghead">People</span>
+        <div data-people="anchor"></div>
+        <button class="addrow"><svg width="13" height="13"><use href="#i-plus"/></svg> Add people by email…</button>
+      </div>
+    </div>
+    <div class="simpeek" style="height:440px"><div class="glow"></div><div class="leds"></div>
       <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
   </div>
 </div>
 
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · No button — the URL is the whole story</span>
-    <span class="cnote">chrome stays exactly as shipped; access control hides in ⋯ → "Sharing…". Honest weakness: permissions become invisible, and nothing signals "people can see this."</span></p>
-  <div class="bframe">
-    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
-      <span class="abar"><svg width="11" height="11"><use href="#i-lock"/></svg>
-        <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span></span></div>
-    <div class="bar">
-      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
-      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span></span>
-      <span class="rside">
-        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
-        <button class="avbtn"><span class="av" style="--avc:#7be0b2">YA</span></button>
-        <button class="iconbtn morebtn">⋯</button>
-      </span>
-    </div>
-    <div class="simpeek"><div class="glow"></div><div class="leds"></div>
-      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
-  </div>
-</div>
+<p class="rej"><b>B · No button — rejected:</b> chrome-as-shipped with access control hidden in
+  ⋯ → "Sharing…" kept the bar pure, but permissions became invisible and nothing signaled
+  "people can see this." The URL alone shares; it doesn't <i>administer</i>.</p>
 </section>
 
 <!-- ================================================================ -->
 <section data-sec="2">
-<h2><span class="n">2 ·</span> The Share popover — three anatomies</h2>
+<h2><span class="n">2 ·</span> The Share popover — link-first, converged</h2>
 <p class="sub">
-  All three carry the same model (D4: general access <code>none|view|edit</code> ⊥ people) and
-  all react to the controls strip. <b>A</b> is Docs-faithful — people first, general access as a
-  row, copy-link in the footer. <b>B</b> is link-first — the URL is the hero because the address
-  bar is the product. <b>C</b> speaks LightPlayer's stateful-row dialect — access states as
-  selectable cards. Flip <b>People → crew</b> for the long-name and CJK rows; flip
-  <b>anyone: edit</b> for the capability warning.
+  G2 ruling: <b>B · link-first</b> — the URL is the hero because the address bar is the product;
+  access is a one-glance segment; add-person sits at the list's bottom. The model underneath is
+  D4: general access <code>none|view|edit</code> ⊥ people. Flip <b>People → crew</b> for the
+  long-name and CJK rows; flip <b>anyone: edit</b> for the capability warning (the segment
+  itself goes warning-gold). <b>D</b> is what the same door shows a visitor.
 </p>
 
 <div class="barwrap">
   <div class="popwrap" style="padding:0; align-items:stretch">
 
     <div>
-      <p class="cap"><span class="cname">A · Docs-faithful</span>
-        <span class="cnote">people first</span></p>
-      <div class="sharecard">
-        <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
-        <div class="sbody">
-          <div class="addinput"><svg width="14" height="14"><use href="#i-person"/></svg>
-            <input placeholder="Add people by email…"></div>
-          <div data-people="a"></div>
-          <span class="ghead">General access</span>
-          <div class="garow" data-garow>
-            <span class="gico" data-gico><svg width="15" height="15"><use href="#i-globe"/></svg></span>
-            <span class="gwho">
-              <button class="gasel"><span data-galabel>Anyone with the link</span>
-                <svg width="12" height="12"><use href="#i-chev"/></svg></button>
-              <span class="gadesc" data-gadesc></span>
-            </span>
-            <button class="rolebtn" data-garole style="align-self:center">can view
-              <svg width="12" height="12"><use href="#i-chev"/></svg></button>
-          </div>
-          <div class="sfoot">
-            <button class="copybtn" data-copy2><svg width="13" height="13"><use href="#i-link"/></svg> Copy link</button>
-            <button class="donebtn">Done</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <p class="cap"><span class="cname">B · Link-first</span>
-        <span class="cnote">the URL is the hero; add-person at the list's bottom</span></p>
+      <p class="cap"><span class="cname">B · Link-first</span><span class="ctag">chosen</span>
+        <span class="cnote">reference copy of §1's anchored panel</span></p>
       <div class="sharecard">
         <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
         <div class="sbody">
@@ -682,34 +670,6 @@
           <span class="ghead">People</span>
           <div data-people="b"></div>
           <button class="addrow"><svg width="13" height="13"><use href="#i-plus"/></svg> Add people by email…</button>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <p class="cap"><span class="cname">C · Stateful rows</span>
-        <span class="cnote">LightPlayer's card dialect — access as selectable rows</span></p>
-      <div class="sharecard">
-        <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
-        <div class="sbody">
-          <button class="arow" data-crow="none"><span class="radio"></span>
-            <span><span class="at">Restricted</span>
-              <div class="ad">Only you and the people below can open the link.</div></span></button>
-          <button class="arow" data-crow="view"><span class="radio"></span>
-            <span><span class="at">Anyone with the link can view</span>
-              <div class="ad">Opens running for anyone — no account needed. Only people below can save.</div></span></button>
-          <button class="arow warnrow" data-crow="edit"><span class="radio"></span>
-            <span><span class="at">Anyone with the link can edit</span>
-              <div class="ad">The link is the only key — anyone holding it can save changes.</div></span></button>
-          <div class="peoplerow">
-            <span class="avstack" data-avstack></span>
-            <span class="lbl" data-peoplecount>2 people</span>
-            <button class="go">Manage →</button>
-          </div>
-          <div class="urlhero" style="padding:7px 9px">
-            <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9…</span></span>
-            <button class="cbtn" data-copy2><svg width="12" height="12"><use href="#i-link"/></svg> Copy</button>
-          </div>
         </div>
       </div>
     </div>
@@ -737,22 +697,29 @@
 
   </div>
 </div>
+
+<p class="rej"><b>A · Docs-faithful — rejected:</b> people-first buried the URL in the footer,
+  and general-access-as-a-row needed two nested dropdowns to say what B's segment says in one
+  glance. Its add-people <i>input</i> (vs B's add-row) can still be lifted later if invites grow
+  autocomplete.</p>
+<p class="rej"><b>C · Stateful rows — rejected:</b> the most self-explanatory access picker, but
+  it spent the whole card on one dimension and demoted people to a "Manage →" hop. Its per-state
+  descriptions live on inside B's segment description line.</p>
 </section>
 
 <!-- ================================================================ -->
 <section data-sec="3">
-<h2><span class="n">3 ·</span> The visitor banner — two states, three homes</h2>
+<h2><span class="n">3 ·</span> The visitor banner — the strip, converged</h2>
 <p class="sub">
-  D5: visitors edit a real tracking copy; read-only means the server refuses the push, so the UI's
-  whole job is honesty about state. <b>Pristine</b>: "you'll get updates." <b>Edited</b>: "updates
-  paused — fork to keep." Flip <b>Visitor copy</b> in the strip. <b>A</b> a strip under the
-  chrome; <b>B</b> a floating pill over the sim; <b>C</b> a chrome badge (weakness: the actions
-  need a second click). The "Save" button below fakes a refused push — the moment the fork offer
-  earns its keep.
+  G3 ruling: <b>A · the strip</b>. D5: visitors edit a real tracking copy; read-only means the
+  server refuses the push, so the UI's whole job is honesty about state. <b>Pristine</b>:
+  "you'll get updates." <b>Edited</b>: "updates paused — fork to keep." Flip <b>Visitor copy</b>
+  in the strip. The "Save" button fakes a refused push — the moment the fork offer earns its
+  keep.
 </p>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Strip under the chrome</span>
+  <p class="cap"><span class="cname">A · Strip under the chrome</span><span class="ctag">chosen</span>
     <span class="cnote">full-width, tinted by state, actions in place — the banner is the fork's home</span></p>
   <div class="bframe">
     <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
@@ -777,48 +744,9 @@
   </div>
 </div>
 
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · Floating pill</span>
-    <span class="cnote">chrome untouched, sim stays edge-to-edge; the pill floats where toasts live</span></p>
-  <div class="bframe">
-    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
-      <span class="abar"><svg width="11" height="11"><use href="#i-lock"/></svg>
-        <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span></span></div>
-    <div class="bar">
-      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
-      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span></span>
-      <span class="rside"><button class="iconbtn morebtn">⋯</button></span>
-    </div>
-    <div class="simpeek" style="height:150px"><div class="glow"></div><div class="leds"></div>
-      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
-    <div class="vpill live" data-pill>
-      <svg width="13" height="13" data-pico><use href="#i-live"/></svg>
-      <span data-ptext></span>
-      <span data-pacts style="display:inline-flex; gap:6px"></span>
-    </div>
-  </div>
-</div>
-
-<div class="barwrap">
-  <p class="cap"><span class="cname">C · Chrome badge</span>
-    <span class="cnote">quietest — a status chip beside the title; tapping it would open a popover for the fork. Two clicks to the one action that matters.</span></p>
-  <div class="bframe">
-    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
-      <span class="abar"><svg width="11" height="11"><use href="#i-lock"/></svg>
-        <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span></span></div>
-    <div class="bar">
-      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
-      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
-      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span>
-        <span class="vchipbadge live" data-chipbadge><svg width="10" height="10" data-cico><use href="#i-live"/></svg>
-          <span data-ctext>viewing</span></span></span>
-      <span class="rside"><button class="iconbtn morebtn">⋯</button></span>
-    </div>
-    <div class="simpeek"><div class="glow"></div><div class="leds"></div>
-      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
-  </div>
-</div>
+<p class="rej"><b>B · Floating pill — rejected:</b> prettiest over the sim, but it floats where
+  toasts live and covers content the visitor came to watch. <b>C · Chrome badge — rejected:</b>
+  quietest, but it put the one action that matters (fork) two clicks away behind a popover.</p>
 </section>
 
 <!-- ================================================================ -->
@@ -971,33 +899,16 @@
         <span class="em">${p.em}</span></span>${role}</div>`;
     }).join('');
     $$('[data-people]').forEach(el => { el.innerHTML = rows; });
-
-    const others = SETS[state.people];
-    $('[data-avstack]').innerHTML = others.map(k => av(PEOPLE[k])).join('');
-    $('[data-peoplecount]').textContent =
-      others.length === 1 ? 'just you' : `${others.length} people`;
   }
 
-  /* ---------- access (concepts A, B, C, D) ---------- */
+  /* ---------- access (anchored panel, B reference, D visitor card) ---------- */
   function renderAccess() {
     const a = ACCESS[state.access];
-    // A
-    const garow = $('[data-garow]');
-    garow.className = 'garow ' + a.tone;
-    $('[data-gico]', garow).innerHTML = `<svg width="15" height="15"><use href="#${a.ico}"/></svg>`;
-    $('[data-galabel]').textContent = a.label + (state.access === 'none' ? '' : '');
-    $('[data-gadesc]').innerHTML = a.desc;
-    const garole = $('[data-garole]');
-    if (a.role) { garole.hidden = false; garole.innerHTML = `${a.role} <svg width="12" height="12"><use href="#i-chev"/></svg>`; }
-    else garole.hidden = true;
-    // B
     $$('[data-seg] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.acc === state.access));
-    const sd = $('[data-segdesc]');
-    sd.innerHTML = a.seg;
-    sd.classList.toggle('warn', state.access === 'edit');
-    // C
-    $$('[data-crow]').forEach(b => b.setAttribute('aria-pressed', b.dataset.crow === state.access));
-    // D
+    $$('[data-segdesc]').forEach(sd => {
+      sd.innerHTML = a.seg;
+      sd.classList.toggle('warn', state.access === 'edit');
+    });
     $('[data-visdesc]').textContent = a.vis;
   }
 
@@ -1030,15 +941,6 @@
     $('[data-bico]').innerHTML = `<use href="#${b.ico}"/>`;
     $('[data-btext]').innerHTML = b.text;
     $('[data-bacts]').innerHTML = b.acts;
-    const pill = $('[data-pill]');
-    pill.className = 'vpill ' + b.cls;
-    $('[data-pico]').innerHTML = `<use href="#${b.ico}"/>`;
-    $('[data-ptext]').innerHTML = b.pill;
-    $('[data-pacts]').innerHTML = b.pacts;
-    const chip = $('[data-chipbadge]');
-    chip.className = 'vchipbadge ' + b.cls;
-    $('[data-cico]').innerHTML = `<use href="#${b.ico}"/>`;
-    $('[data-ctext]').textContent = b.chip;
     wireCopies();
   }
 
@@ -1132,7 +1034,6 @@
     setControl(k, v);
   }));
   $$('[data-seg] button').forEach(b => b.addEventListener('click', () => setControl('access', b.dataset.acc)));
-  $$('[data-crow]').forEach(b => b.addEventListener('click', () => setControl('access', b.dataset.crow)));
 
   function renderAll() { renderPeople(); renderAccess(); renderVisitor(); renderSlug(); wireCopies(); }
   renderAll();
