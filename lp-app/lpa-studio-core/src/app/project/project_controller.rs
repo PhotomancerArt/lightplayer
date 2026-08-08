@@ -1769,7 +1769,9 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // Dotted, so a transport leaf's reading decorates the LEAF row
+            // rather than the `transport` record it hangs under (P8).
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let live = self.live_channel_display(graph, scope.as_ref(), channel, binding.kind);
@@ -1782,7 +1784,7 @@ impl ProjectController {
             if live.is_none() && gradient.is_none() {
                 continue;
             }
-            updates.push((binding.node, name.as_str().to_string(), live, gradient));
+            updates.push((binding.node, name, live, gradient));
         }
         for (node_id, slot, live, gradient) in updates {
             if let Some(node) = self
@@ -1854,7 +1856,12 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // DOTTED (P8): a `default_bind` declared on a leaf inside a
+            // promoted record — the clock's three transport leaves — must
+            // decorate that leaf's own row. Keyed by first segment alone,
+            // all three collapsed onto the single `transport` row and the
+            // grouped control could not tell which dimension was wired.
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let mut endpoint = self
@@ -1889,13 +1896,7 @@ impl ProjectController {
                 lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
                 lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
             };
-            facts.push((
-                binding.node,
-                SlotBindingFact {
-                    slot: name.as_str().to_string(),
-                    kind,
-                },
-            ));
+            facts.push((binding.node, SlotBindingFact { slot: name, kind }));
         }
         for (node_id, fact) in facts {
             if let Some(node) = self
@@ -2821,6 +2822,16 @@ impl ProjectController {
                     if let Some(transport) = clock.transport.as_mut() {
                         transport.seconds = *seconds;
                     }
+                    // The grouped panel control carries its own copy of the
+                    // block (it travels onto the module panel without the
+                    // face), so the probe's anchor has to reach it too —
+                    // otherwise the panel's tape would render from 0:00
+                    // while the card's showed the real time (P8 item 4).
+                    for control in &mut clock.controls {
+                        if let crate::UiPanelWidget::Transport { transport } = &mut control.widget {
+                            transport.seconds = *seconds;
+                        }
+                    }
                     (
                         crate::UiTimebaseState::Live,
                         phasors
@@ -2946,16 +2957,36 @@ impl ProjectController {
 
         let controls = self.scoped_panel_controls(graph, scope, children);
 
+        // An INSTRUMENT control (the clock's Transport) gets its own child
+        // group wearing the owning node's name, not a slot in the module's
+        // flat strip — a tape deck between a brightness fader and a hue
+        // knob read as clutter (G2 feedback 2026-08-08). The group carries
+        // NO reset target: a group reset clears a whole scope's writers,
+        // which here is the module's, and the instrument already has
+        // per-dimension clears.
+        let (instruments, controls): (Vec<_>, Vec<_>) = controls.into_iter().partition(|view| {
+            matches!(view.control.widget, crate::UiPanelWidget::Transport { .. })
+        });
+        let mut groups: Vec<crate::UiPanelGroup> = instruments
+            .into_iter()
+            .map(|view| {
+                let node_path = view
+                    .control
+                    .address
+                    .as_ref()
+                    .map(|address| address.node.to_string())
+                    .unwrap_or_default();
+                let label = child_label(children, &node_path).unwrap_or_else(|| "Clock".into());
+                crate::UiPanelGroup::new(label, node_path).with_controls(vec![view])
+            })
+            .collect();
         // Presentation recursion (R8): each direct child module's finished
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
-        let mut groups: Vec<crate::UiPanelGroup> = children
-            .iter()
-            .filter_map(|child| match &child.face {
-                Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
-                _ => None,
-            })
-            .collect();
+        groups.extend(children.iter().filter_map(|child| match &child.face {
+            Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+            _ => None,
+        }));
         // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
         // scope is a SINK, not a module, so its controls match no module
         // panel by scope and would otherwise be visible only on the entry's
@@ -6152,17 +6183,18 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             Some(crate::UiNodeFace::Controls(group)) => {
                 out.extend(group.controls.iter().map(|view| &view.control));
             }
+            // The clock contributes at most ONE control: the grouped
+            // Transport (P8). Its phasor listing stays read-only (D10) —
+            // the one editable period lives on the consuming shader's knob,
+            // never here.
+            Some(crate::UiNodeFace::Clock(clock)) => out.extend(clock.controls.iter()),
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls; an output face carries wires, not panel widgets;
-            // a clock face carries a READ-ONLY phasor listing (D10) — the one
-            // editable period lives on the consuming shader's knob, never
-            // here.
+            // not controls; an output face carries wires, not panel widgets.
             Some(
                 crate::UiNodeFace::Module(_)
                 | crate::UiNodeFace::Playlist(_)
-                | crate::UiNodeFace::Output(_)
-                | crate::UiNodeFace::Clock(_),
+                | crate::UiNodeFace::Output(_),
             )
             | None => {}
         }
@@ -6176,6 +6208,22 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     let mut out = Vec::new();
     walk(children, &mut out);
     out
+}
+
+/// The display label of the subtree card at `node_path` (`UiNodeChild::
+/// detail` is the node's path string). Same walk shape as
+/// [`subtree_panel_controls`] — an instrument control found by that walk
+/// always has its owning card in the same subtree.
+fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<String> {
+    for child in children {
+        if child.detail == node_path {
+            return Some(child.label.clone());
+        }
+        if let Some(label) = child_label(&child.children, node_path) {
+            return Some(label);
+        }
+    }
+    None
 }
 
 /// The product a channel's resolved value carries, when it carries one.
@@ -10277,13 +10325,13 @@ mod tests {
             );
             face.transport = Some(crate::UiClockTransport {
                 seconds: 0.0,
-                running: true,
+                play_state: lpc_model::PlayState::Playing,
                 rate: 1.0,
                 scrub_offset_seconds: 0.0,
-                running_address: Some(transport_address("running")),
+                play_state_address: Some(transport_address("play_state")),
                 rate_address: Some(transport_address("rate")),
                 scrub_address: Some(transport_address("scrub_offset_seconds")),
-                running_override: None,
+                play_state_override: None,
                 rate_override: None,
                 scrub_override: None,
             });
@@ -10320,7 +10368,7 @@ mod tests {
         assert_eq!(after.seconds, 42.35, "the probe's seconds lands in the DTO");
         // Everything else the builder set stays untouched — this pass only
         // ever writes `seconds`.
-        assert!(after.running);
+        assert_eq!(after.play_state, lpc_model::PlayState::Playing);
         assert_eq!(after.rate, 1.0);
         assert_eq!(after.scrub_offset_seconds, 0.0);
     }

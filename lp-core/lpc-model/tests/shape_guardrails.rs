@@ -197,3 +197,76 @@ fn default_binds_require_a_declared_direction() {
         "default_bind requires #[slot(produced)] or #[slot(consumed)]: {offenders:?}"
     );
 }
+
+/// A `panel = "show"` hint promotes a **default binding** to a panel
+/// control, so a field carrying one must have at least one leaf declaring a
+/// `default_bind` — itself for a scalar (`FixtureDef.brightness`), or a
+/// descendant for a promoted RECORD (`ClockDef.transport`, whose three
+/// transport leaves are the wires behind one grouped control).
+///
+/// A `Show` that promotes nothing would silently never appear on any panel.
+/// That is a declaration bug, and declarations are compile-time facts, so it
+/// fails CI here rather than becoming a runtime load error. This is also the
+/// rule the `#[slot]` macro used to spell lexically: it could only see the
+/// annotated field's own `default_bind`, never through a record-typed field.
+#[test]
+fn panel_show_must_promote_a_default_bind() {
+    let mut offenders = Vec::new();
+    let mut promoted = 0usize;
+    for &id in static_slot_shape_ids() {
+        let Some(shape) = static_slot_shape(id) else {
+            continue;
+        };
+        let name = static_slot_shape_name(id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{id:?}"));
+        let mut visited = HashSet::new();
+        walk(shape, &name, &mut visited, &mut |context, field| {
+            if field.panel.is_none() {
+                return;
+            }
+            promoted += 1;
+            if field.default_bind.is_some()
+                || declares_a_default_bind(field.shape, &mut HashSet::new())
+            {
+                return;
+            }
+            offenders.push(format!("{context}.{}", field.name));
+        });
+    }
+    assert!(
+        offenders.is_empty(),
+        "panel = \"show\" must promote at least one leaf default_bind: {offenders:?}"
+    );
+    // Non-vacuity: a catalog walk that stopped finding panel hints at all
+    // would pass this test while checking nothing.
+    assert!(
+        promoted >= 2,
+        "expected the catalog to carry panel hints (fixture brightness, clock transport), saw {promoted}"
+    );
+}
+
+/// Whether anything beneath this shape declares a `default_bind`. Follows
+/// `Ref` through the catalog once each (cycle-safe) and descends every
+/// composite, since a promoted record's wires may sit at any depth.
+fn declares_a_default_bind(
+    shape: &'static StaticSlotShapeDescriptor,
+    seen: &mut HashSet<SlotShapeId>,
+) -> bool {
+    match shape {
+        StaticSlotShapeDescriptor::Record { fields, .. } => fields.iter().any(|field| {
+            field.default_bind.is_some() || declares_a_default_bind(field.shape, seen)
+        }),
+        StaticSlotShapeDescriptor::Map { value, .. } => declares_a_default_bind(value, seen),
+        StaticSlotShapeDescriptor::Option { some, .. } => declares_a_default_bind(some, seen),
+        StaticSlotShapeDescriptor::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| declares_a_default_bind(variant.shape, seen)),
+        StaticSlotShapeDescriptor::Custom { shape, .. } => declares_a_default_bind(shape, seen),
+        StaticSlotShapeDescriptor::Ref { id } => {
+            seen.insert(*id)
+                && static_slot_shape(*id).is_some_and(|inner| declares_a_default_bind(inner, seen))
+        }
+        StaticSlotShapeDescriptor::Unit { .. } | StaticSlotShapeDescriptor::Value { .. } => false,
+    }
+}

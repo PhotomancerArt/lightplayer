@@ -22,6 +22,58 @@ pub struct UiPanelTarget {
     pub engaged: bool,
 }
 
+/// Which dimension of a grouped control one wire drives.
+///
+/// Deliberately a small closed set rather than an open registry: the clock's
+/// Transport is the one grouped control there is (plan
+/// 2026-08-04-2355-clock-tape-hero, P8), and a match arm that has to be
+/// widened is a better signal than a lookup that silently accepts anything.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum UiPanelWireRole {
+    /// The transport's speed multiplier (the fader) — `clock.rate`.
+    Rate,
+    /// The transport's run/pause setpoint — `clock.play_state`.
+    PlayState,
+    /// The transport's scrub offset in signed seconds — `clock.scrub`.
+    Scrub,
+}
+
+/// One DIMENSION of a grouped control's wiring.
+///
+/// Most controls drive exactly one channel, and the control's own
+/// [`UiPanelControl::panel_target`] / [`UiPanelControl::address`] pair says
+/// everything there is to say. A GROUPED control drives several — the
+/// clock's Transport puts a fader, a run/pause button, and a scrub strip on
+/// one faceplate — and the settled grouping contract wires them
+/// independently:
+///
+/// - the faceplate always renders whole (rendering is a shape fact);
+/// - the group is on the panel at all iff ≥1 wire is panel-public
+///   (membership is a wiring fact);
+/// - a gesture on a wire carrying a [`Self::panel_target`] is a
+///   `PanelWriteOp` on THAT channel, and one without falls back to a slot
+///   edit at THAT wire's [`Self::address`] (dispatch is a per-leaf fact).
+///
+/// The ANCHOR wire's facts are mirrored onto the control's own
+/// `panel_target` / `address` / `live_value`, because that single pair is
+/// what the generic panel machinery reads: per-channel dedup, the reset
+/// gesture, and the Read/Following/Engaged state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiPanelWire {
+    /// Which dimension of the group this wire drives.
+    pub role: UiPanelWireRole,
+    /// Slot-edit fallback address for this dimension; `None` when its row
+    /// is not writable.
+    pub address: Option<ProjectSlotAddress>,
+    /// The `(scope, channel)` a gesture on this dimension writes, present
+    /// exactly when this leaf's wiring is panel-public.
+    pub panel_target: Option<UiPanelTarget>,
+    /// This dimension's channel reading, already quantized — the per-wire
+    /// twin of [`UiPanelControl::live_value`], and the echo a panel write
+    /// on this channel comes back through.
+    pub live_value: Option<String>,
+}
+
 /// How a numeric gesture's `f32` is TYPED on its way out of a control.
 ///
 /// Every control until the M2 time break emitted the number itself, so the
@@ -104,7 +156,17 @@ pub struct UiPanelControl {
     pub live_gradient: Option<lpc_model::GradientConfig>,
     /// The `(scope, channel)` a gesture writes down the panel command
     /// channel, present when the backing slot consumes a bus channel.
+    ///
+    /// For a GROUPED control this is the ANCHOR dimension's target — see
+    /// [`Self::wires`], which carries all of them.
     pub panel_target: Option<UiPanelTarget>,
+    /// Per-dimension wiring for a GROUPED control (the clock's Transport);
+    /// EMPTY for every ordinary one-channel control, which says everything
+    /// it needs to through the three fields above.
+    ///
+    /// See [`UiPanelWire`] for the contract: whole faceplate, wiring-derived
+    /// membership, per-dimension dispatch.
+    pub wires: Vec<UiPanelWire>,
     /// Optional display unit rendered near the value (e.g. "Hz", "%").
     pub unit: Option<UiSlotUnit>,
     /// Interaction, dirty, bound/live, and validation state (violet when
@@ -222,6 +284,13 @@ impl UiPanelControl {
         aspects
     }
 
+    /// One dimension of a grouped control's wiring, by role. `None` for an
+    /// ordinary control (which carries no wires) and for a role this group
+    /// does not have.
+    pub fn wire(&self, role: UiPanelWireRole) -> Option<&UiPanelWire> {
+        self.wires.iter().find(|wire| wire.role == role)
+    }
+
     /// Whether the backing slot is bound (bus/producer wiring) — the violet
     /// treatment on the widget itself. Checked directly (not via the
     /// affordance merge) so a bound control that is ALSO edited keeps its
@@ -257,6 +326,7 @@ mod tests {
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects,
+            wires: Vec::new(),
         }
     }
 
@@ -314,6 +384,39 @@ mod tests {
             control.aspects.len(),
             1,
             "and the control's own aspect list is untouched"
+        );
+    }
+
+    /// A GROUPED control resolves one dimension at a time, and an ordinary
+    /// control has no dimensions to resolve — which is what keeps every
+    /// existing widget's dispatch reading the control's own single target.
+    #[test]
+    fn a_grouped_control_resolves_one_dimension_at_a_time() {
+        use crate::{UiPanelWire, UiPanelWireRole};
+
+        let plain = control(Vec::new());
+        assert!(plain.wires.is_empty());
+        assert_eq!(plain.wire(UiPanelWireRole::Rate), None);
+
+        let wire = |role| UiPanelWire {
+            role,
+            address: None,
+            panel_target: None,
+            live_value: None,
+        };
+        let grouped = UiPanelControl {
+            wires: vec![wire(UiPanelWireRole::Rate), wire(UiPanelWireRole::Scrub)],
+            ..control(Vec::new())
+        };
+        assert_eq!(
+            grouped.wire(UiPanelWireRole::Scrub).map(|wire| wire.role),
+            Some(UiPanelWireRole::Scrub)
+        );
+        assert_eq!(
+            grouped.wire(UiPanelWireRole::PlayState),
+            None,
+            "a role the group does not carry resolves to nothing, not to a \
+             sibling's wire"
         );
     }
 

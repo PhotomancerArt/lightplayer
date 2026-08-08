@@ -114,8 +114,12 @@ product-wide principle (unit-awareness), first shipped here.
   probe streams per-integrator rows (wire proto 10), growing
   per-reading shaping en route to trace cards
   (`planning/2026-08-04-1440-clock-face-v2`, PR #335, proto 11).
-- The transport UI is still owed
-  (`docs/debt/clock-transport-has-no-transport-ui.md`) — the engine
-  half (this log) exists; the Debug scrub slider remains the driver.
+- The transport UI was still owed at the time this ADR was written — the
+  engine half (this log) existed; the Debug scrub slider was the only
+  driver. **Closed 2026-08-07**: `docs/debt/clock-transport-has-no
+  -transport-ui.md`'s exit criteria are met — a tape transport instrument
+  on the clock card (plan `2026-08-04-2355-clock-tape-hero` P3–P5) and on
+  the module panel (P6/P8), per
+  `docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md`.
 - Wanting waveform/offset on a panel is answered by a future **LFO
   node**, not by widening the panel contract (modules.md §10).
