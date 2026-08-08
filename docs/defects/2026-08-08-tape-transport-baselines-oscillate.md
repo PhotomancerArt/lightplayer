@@ -89,6 +89,30 @@ blob hash returning to an EARLIER value with no merge in between. A
 return that straddles a merge from main is main's stale baseline coming
 back, not the app rendering two ways.
 
+**Convergence, measured.** Refresh sizes over four consecutive CI runs
+on the fix branch: 61 → 43 → 83 → **2** PNGs. (The 83 is not a relapse:
+the run before it WEDGED at ~700/1628 captures, so that pass was the
+whole missed remainder catching up in one go — a wedged capture reports
+"Story check failed and was not auto-resolved", which reads like a drift
+verdict and is not one.)
+
+The final two files are the mechanism above caught in the act, and they
+are the proof rather than the exception:
+
+| | `clock-face__crowd__md` | `clock-face__unknown__md` |
+|---|---|---|
+| branch, pre-merge | `6102ab620d` | `288bf5cb15` |
+| main | `8d22e5245a` | `0f477d8d33` |
+| after merging main | `8d22e5245a` | `0f477d8d33` |
+| next CI capture | **`6102ab620d`** | **`288bf5cb15`** |
+
+Two independent CI runs of the fixed code produced the SAME bytes for
+each file; the only thing that moved them in between was the merge
+importing main's pre-fix copy. Main will keep re-supplying those stale
+baselines — and keep colliding with this branch on add/add PNG
+conflicts — until this lands, which is the argument for merging it
+promptly rather than letting it sit.
+
 **Lesson** — A defect fixed in one component recurs when the mechanism is
 re-implemented elsewhere; the class guard (`ux-box-sized-canvas` + gate)
 only protects canvases that opt in. Any NEW imperatively-painted canvas
