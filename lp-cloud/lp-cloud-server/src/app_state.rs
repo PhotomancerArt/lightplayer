@@ -125,11 +125,15 @@ impl AppState {
     /// somebody sets `LP_CLOUD_BLOBS=s3`, which is the worst possible place
     /// to find out.
     ///
-    /// A panic inside `work` — the stores' fail-fast policy for a dead disk
-    /// — is resumed on the handler's thread rather than swallowed: the
-    /// request fails, the mutex is poisoned, and every subsequent request
-    /// fails too. That is the intended shape of "this node is dead, restart
-    /// it", and it is why nothing here tries to recover a poisoned lock.
+    /// The stores' fail-fast policy (`store_fatal`) aborts the process, so
+    /// a fatal backend failure never returns here at all — the supervisor
+    /// restarts us onto a Litestream restore. A poisoned lock can therefore
+    /// only mean some *other* panic unwound inside `work` while holding the
+    /// guard; treating that as survivable produced a zombie in production
+    /// (every request 502 behind a green `/healthz` — see
+    /// `docs/defects/2026-08-08-fatal-store-panic-poisons-not-restarts.md`),
+    /// so a poisoned lock aborts too. "This node is dead, restart it" is
+    /// only true if something actually restarts it.
     pub async fn with_service<T, F>(&self, work: F) -> T
     where
         F: FnOnce(&mut ServiceCore) -> T + Send + 'static,
@@ -137,9 +141,12 @@ impl AppState {
     {
         let core = Arc::clone(&self.core);
         match tokio::task::spawn_blocking(move || {
-            let mut guard = core
-                .lock()
-                .expect("the store lock was poisoned by a fatal store failure");
+            let mut guard = core.lock().unwrap_or_else(|_poisoned| {
+                eprintln!(
+                    "lp-cloud-server: FATAL: the store lock was poisoned by an earlier panic — aborting so the supervisor restarts us"
+                );
+                std::process::abort();
+            });
             work(&mut guard)
         })
         .await
