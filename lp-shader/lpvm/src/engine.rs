@@ -109,15 +109,24 @@ pub trait LpvmEngine {
 
     /// Start a resumable compile job when the backend supports incremental compilation.
     ///
-    /// Default implementation returns `None`, allowing callers to fall back to synchronous
-    /// [`Self::compile_with_params`].
+    /// Takes the module **by value** so a supporting backend owns the only
+    /// copy: the caller can move its LPIR in rather than keeping a second one
+    /// alive for the whole backend window. An engine that cannot start a job
+    /// therefore has to hand the inputs back, which is what the `Err` arm is —
+    /// the caller then falls back to synchronous
+    /// [`Self::compile_with_params`] with the returned module. Returning them
+    /// is not optional: this is the only reason the fallback can still see the
+    /// LPIR at all.
+    ///
+    /// Default implementation starts no job and returns the inputs untouched.
     fn start_compile_job<'a>(
         &'a self,
-        _ir: LpirModule,
-        _meta: LpsModuleSig,
+        ir: LpirModule,
+        meta: LpsModuleSig,
         _params: LpvmCompileParams,
-    ) -> Option<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>> {
-        None
+    ) -> Result<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>, (LpirModule, LpsModuleSig)>
+    {
+        Err((ir, meta))
     }
 
     /// Shared memory allocator for this engine (textures, cross-shader data).

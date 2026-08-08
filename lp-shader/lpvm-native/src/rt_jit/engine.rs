@@ -110,8 +110,9 @@ impl LpvmEngine for NativeJitEngine {
         ir: LpirModule,
         meta: LpsModuleSig,
         params: lpvm::LpvmCompileParams,
-    ) -> Option<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>> {
-        Some(Box::new(NativeJitCompileJob::new(
+    ) -> Result<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>, (LpirModule, LpsModuleSig)>
+    {
+        Ok(Box::new(NativeJitCompileJob::new(
             ir,
             meta,
             Arc::clone(&self.builtin_table),
