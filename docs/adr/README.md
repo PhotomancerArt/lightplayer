@@ -162,6 +162,13 @@ holds the full context.
 | Transport UI over the breakpoint log (play/pause/scrub as a first-class surface) | `2026-08-04-time-is-a-product` | `docs/debt/clock-transport-has-no-transport-ui.md` exit criteria |
 | v1–v3 project-format migration (below `lpa-upgrade`'s floor; types are deleted, corpus is `schemas/history/` snapshots only) | `2026-08-04-project-format-migration-architecture` | A real holder of pre-v4 project data appears |
 | Safe-mode board rescue hole (upload cannot reach a safe-mode board, so pull→migrate→push cannot run on one) | `2026-08-04-project-format-migration-architecture` | `docs/debt/safe-mode-board-rescue-hole.md` — first field occurrence |
+| The Xtensa native default flips to f32 (the flip condition, written as a threshold: the synth-loop software-pipelining spike, or frame-floor headroom work) | `2026-08-08-float-semantics-per-target-representation` | Either lever measurably closes the ~19–20% dome-scale gap |
+| Build-time mode sets per image (a runtime-matched `FloatMode` keeps LTO from dropping the arm a board never enters — +63 KB on classic and S3 today) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-as-a-compiler-parameter` | Flash headroom tightens, or the first single-mode image is built |
+| Single-mode f32 image + whether it carries Q32 at all (lean: no) | `2026-08-08-float-semantics-per-target-representation` | ESP32-S31 silicon and toolchain arrive |
+| f32-native points-in frame ABI (~1 ms/1500 LEDs per `float.md` §4; deletes the Float arm of `Q16CoordDecoder`; output side stays integer in every design) | `2026-08-08-float-semantics-per-target-representation` | The first f32-native image lands — not worth a classic/S3 ABI churn on its own |
+| What a pinned `Fixed` means on an f32-native image (it aliases native on every shipping backend today) | `2026-08-08-float-semantics-per-target-representation` | An image exists where native is not Q32 |
+| Per-device preview representation selection in a multi-device Studio | `2026-08-08-float-semantics-per-target-representation` | Two attached devices disagree on native representation |
+| Gate the `float_mode` pin on the firmware manifest so it is not offered where one representation exists (the compile-error backstop stays regardless) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-reaches-the-device` | The manifest can report a board's representation set |
 
 ## Relationship To Shared Planning
 

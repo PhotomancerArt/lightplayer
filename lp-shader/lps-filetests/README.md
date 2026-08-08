@@ -453,10 +453,10 @@ A file whose directives do not parse **fails**. There is no "skip the line I
 could not read" path — that is how a malformed selector stays visible.
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
-`rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `xtn.f32`,
-`xtlpn.f32`, `wasm.f32`, `rv32n.f32` and `rv32lpn.f32` are explicit-only (see
-Targets above).
+`rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`, `wasm.f32`. CI runs this
+list via `just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `xtn.f32`,
+`xtlpn.f32`, `rv32n.f32` and `rv32lpn.f32` are explicit-only (see Targets
+above).
 
 ### Error tests (`// test error`) cover **both** frontends
 
