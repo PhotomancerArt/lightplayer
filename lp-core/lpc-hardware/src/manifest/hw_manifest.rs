@@ -321,7 +321,12 @@ impl HwPowerGate {
         self.off_debounce_ms
     }
 
-    /// Wire addresses this gate feeds. Empty means all outputs.
+    /// Addresses of the outputs this gate feeds. Empty means all outputs.
+    ///
+    /// Entries name **endpoint** addresses (the `/gpio/N` a wire's endpoint
+    /// resolves to), not `/rmt/ws281xK` timing slots: on the classic a slot
+    /// is acquired per transmission, so it is not a stable identity to scope
+    /// a rail by. A single-rail board should simply leave this empty.
     pub fn feeds(&self) -> &[HwAddress] {
         &self.feeds
     }

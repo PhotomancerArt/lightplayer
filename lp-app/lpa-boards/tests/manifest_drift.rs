@@ -314,7 +314,12 @@ fn the_dig2go_gates_gpio12_and_reserves_it() {
         ),
     };
     assert_eq!(gate.gpio, "/gpio/12");
-    assert_eq!(gate.feeds, ["/rmt/ws281x0"]);
+    // Empty on purpose, and load-bearing: `feeds` names ENDPOINT addresses
+    // (the classic's RMT slots are per-transmission, not identities), and an
+    // entry that matched nothing would leave the rail permanently down — a
+    // dark board that reads as a driver bug. The board's one gate switches
+    // its only LED supply, so "all outputs" is also simply true.
+    assert_eq!(gate.feeds, Vec::<String>::new());
     let pin = runtime
         .gpio
         .iter()
