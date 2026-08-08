@@ -53,20 +53,21 @@ pub use app::home::{
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot,
-    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiExportsGroup,
+    UiBindingEndpoint, UiCellProjection, UiChannelChoice, UiClockFace, UiClockTransport,
+    UiConfigSlot, UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiExportsGroup,
     UiFixtureFace, UiFixturePower, UiLedBudget, UiModuleExport, UiModuleFace, UiNodeChild,
     UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
     UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget,
     UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
     UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
-    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
-    UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
+    UiProjectionOrigin, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind, UiTimebaseState, UiVisualProductSpace, UiVisualSpace,
+    UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};

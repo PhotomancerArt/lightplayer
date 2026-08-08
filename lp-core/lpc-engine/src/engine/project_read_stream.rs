@@ -522,6 +522,10 @@ mod tests {
             height: 4,
             format: lpc_wire::WireTextureFormat::Rgba16,
             bytes: vec![7u8; byte_len],
+            space: lpc_wire::WireVisualSpace::TwoD,
+            projection: None,
+            origin: None,
+            primary: lpc_wire::WireVisualSpace::TwoD,
         })
     }
 
