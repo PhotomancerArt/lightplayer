@@ -56,14 +56,15 @@ pub use app::node::{
     UiFixturePower, UiLedBudget, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
     UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
-    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPhasorReading,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
-    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
-    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
-    UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire,
+    UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding,
+    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
+    UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform,
+    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
+    UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
+    UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus,
+    phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};

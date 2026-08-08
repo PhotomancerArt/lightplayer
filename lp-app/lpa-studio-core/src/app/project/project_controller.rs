@@ -1769,7 +1769,9 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // Dotted, so a transport leaf's reading decorates the LEAF row
+            // rather than the `transport` record it hangs under (P8).
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let live = self.live_channel_display(graph, scope.as_ref(), channel, binding.kind);
@@ -1782,7 +1784,7 @@ impl ProjectController {
             if live.is_none() && gradient.is_none() {
                 continue;
             }
-            updates.push((binding.node, name.as_str().to_string(), live, gradient));
+            updates.push((binding.node, name, live, gradient));
         }
         for (node_id, slot, live, gradient) in updates {
             if let Some(node) = self
@@ -1854,7 +1856,12 @@ impl ProjectController {
             let Some(slot) = binding.slot.as_ref() else {
                 continue;
             };
-            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+            // DOTTED (P8): a `default_bind` declared on a leaf inside a
+            // promoted record — the clock's three transport leaves — must
+            // decorate that leaf's own row. Keyed by first segment alone,
+            // all three collapsed onto the single `transport` row and the
+            // grouped control could not tell which dimension was wired.
+            let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
             let mut endpoint = self
@@ -1889,13 +1896,7 @@ impl ProjectController {
                 lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
                 lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
             };
-            facts.push((
-                binding.node,
-                SlotBindingFact {
-                    slot: name.as_str().to_string(),
-                    kind,
-                },
-            ));
+            facts.push((binding.node, SlotBindingFact { slot: name, kind }));
         }
         for (node_id, fact) in facts {
             if let Some(node) = self
@@ -2818,6 +2819,16 @@ impl ProjectController {
                     // one place that can fill in the real number (P2).
                     if let Some(transport) = clock.transport.as_mut() {
                         transport.seconds = *seconds;
+                    }
+                    // The grouped panel control carries its own copy of the
+                    // block (it travels onto the module panel without the
+                    // face), so the probe's anchor has to reach it too —
+                    // otherwise the panel's tape would render from 0:00
+                    // while the card's showed the real time (P8 item 4).
+                    for control in &mut clock.controls {
+                        if let crate::UiPanelWidget::Transport { transport } = &mut control.widget {
+                            transport.seconds = *seconds;
+                        }
                     }
                     (
                         crate::UiTimebaseState::Live,
@@ -6106,17 +6117,18 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             Some(crate::UiNodeFace::Controls(group)) => {
                 out.extend(group.controls.iter().map(|view| &view.control));
             }
+            // The clock contributes at most ONE control: the grouped
+            // Transport (P8). Its phasor listing stays read-only (D10) —
+            // the one editable period lives on the consuming shader's knob,
+            // never here.
+            Some(crate::UiNodeFace::Clock(clock)) => out.extend(clock.controls.iter()),
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls; an output face carries wires, not panel widgets;
-            // a clock face carries a READ-ONLY phasor listing (D10) — the one
-            // editable period lives on the consuming shader's knob, never
-            // here.
+            // not controls; an output face carries wires, not panel widgets.
             Some(
                 crate::UiNodeFace::Module(_)
                 | crate::UiNodeFace::Playlist(_)
-                | crate::UiNodeFace::Output(_)
-                | crate::UiNodeFace::Clock(_),
+                | crate::UiNodeFace::Output(_),
             )
             | None => {}
         }
