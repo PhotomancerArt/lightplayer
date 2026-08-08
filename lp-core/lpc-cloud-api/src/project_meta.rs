@@ -16,8 +16,10 @@ pub struct ProjectMeta {
     /// The project's uid — also the link token for `Visibility::Link`
     /// access (D-note: the 95-bit project uid IS the share link).
     pub uid: PrefixedUid,
-    /// Human-readable, server-unique slug used in share URLs alongside
-    /// `uid`.
+    /// Human-readable slug used in share URLs alongside `uid` (see
+    /// [`crate::share_link`]). Deliberately **not** unique — it is cosmetic
+    /// decoration a project's owner can change any time; `uid` is the key
+    /// and the whole of the identity.
     pub slug: String,
     /// Current access level.
     pub visibility: Visibility,

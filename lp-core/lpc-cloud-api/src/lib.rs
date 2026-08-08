@@ -32,6 +32,7 @@ pub mod project_meta;
 pub mod request;
 pub mod response;
 pub mod session_info;
+pub mod share_link;
 pub mod sidecar_meta;
 pub mod version;
 pub mod visibility;
