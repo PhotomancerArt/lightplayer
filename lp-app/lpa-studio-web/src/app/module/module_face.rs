@@ -165,6 +165,11 @@ pub fn ModuleFace(
 /// own state and dispatches that state outright rather than "the other
 /// one", so the active block is simply inert instead of flipping under a
 /// second click.
+///
+/// Icon-only (the G1 ruling — the labeled pair read too big on the hero,
+/// and "raster" was the wrong word anyway): the glyphs carry the states,
+/// the tooltips carry the words — "lamps" (the fixture's output, the app's
+/// own term) and "visual" (the product family `visual.out` names).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn HeroProductToggle(
@@ -186,8 +191,8 @@ fn HeroProductToggle(
                 current,
                 product: ModuleHeroProduct::Control,
                 // The node-kind glyphs read as the products themselves here:
-                // the fixture's bulb IS the lamps, the texture's frame IS the
-                // raster.
+                // the fixture's bulb IS the lamps, the texture's frame IS
+                // the visual.
                 icon: StudioIconName::NodeKind(NodeKindIcon::Fixture),
                 label: "lamps",
                 on_action,
@@ -197,14 +202,15 @@ fn HeroProductToggle(
                 current,
                 product: ModuleHeroProduct::Visual,
                 icon: StudioIconName::NodeKind(NodeKindIcon::Texture),
-                label: "raster",
+                label: "visual",
                 on_action,
             }
         }
     }
 }
 
-/// One state of the hero toggle.
+/// One state of the hero toggle. `label` never renders — it feeds the
+/// tooltip and the accessible name; the block itself is its icon.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn HeroProductBlock(
@@ -243,19 +249,18 @@ fn HeroProductBlock(
                 }
             },
             StudioIcon { name: icon, size: 11 }
-            span { class: "tw:leading-none", "{label}" }
         }
     }
 }
 
 /// The two block states. One geometry, two weights — squared, hairline-
-/// divided, and small enough to sit on the preview without competing with
-/// it.
+/// divided, icon-only, and small enough to sit on the preview without
+/// competing with it.
 fn hero_block_class(active: bool) -> &'static str {
     if active {
-        "tw:flex tw:cursor-default tw:items-center tw:gap-1 tw:border-0 tw:bg-card-subtle tw:px-1.5 tw:py-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-strong-foreground"
+        "tw:flex tw:cursor-default tw:items-center tw:border-0 tw:bg-card-subtle tw:px-1 tw:py-0.5 tw:text-strong-foreground"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-1 tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-muted-foreground tw:transition-colors tw:hover:bg-card-muted tw:hover:text-strong-foreground tw:motion-reduce:transition-none"
+        "tw:flex tw:cursor-pointer tw:items-center tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-muted-foreground tw:transition-colors tw:hover:bg-card-muted tw:hover:text-strong-foreground tw:motion-reduce:transition-none"
     }
 }
 
@@ -267,7 +272,7 @@ mod tests {
     fn the_two_hero_blocks_share_one_geometry() {
         // Two states of ONE control: only the weight may differ, or the
         // pair stops reading as a single switch.
-        for geometry in ["tw:px-1.5", "tw:py-1", "tw:text-[0.6rem]", "tw:gap-1"] {
+        for geometry in ["tw:px-1", "tw:py-0.5"] {
             assert!(hero_block_class(true).contains(geometry));
             assert!(hero_block_class(false).contains(geometry));
         }
