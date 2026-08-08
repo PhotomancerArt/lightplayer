@@ -212,7 +212,7 @@ mod tests {
     fn only_the_manifest_format_is_bumped() {
         let mut files: ProjectFiles = [(
             "project.json",
-            b"{\n  \"format\": 6,\n  \"name\": \"x\"\n}".to_vec(),
+            b"{\n  \"format\": 5,\n  \"name\": \"x\"\n}".to_vec(),
         )]
         .into_iter()
         .collect();
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn a_glsl_asset_is_rewritten_alongside_the_manifest() {
         let mut files: ProjectFiles = [
-            ("project.json", b"{\"format\": 6}".to_vec()),
+            ("project.json", b"{\"format\": 5}".to_vec()),
             (
                 "shader.glsl",
                 b"vec4 render(vec2 pos) {\n    return vec4(1.0);\n}\n".to_vec(),

@@ -590,7 +590,7 @@ mod tests {
         );
         assert_eq!(
             migrate_one("project.json", "{\n  \"format\": 4,\n  \"name\": \"x\"\n}"),
-            Some(String::from("{\n  \"format\": 6,\n  \"name\": \"x\"\n}\n"))
+            Some(String::from("{\n  \"format\": 5,\n  \"name\": \"x\"\n}\n"))
         );
     }
 
