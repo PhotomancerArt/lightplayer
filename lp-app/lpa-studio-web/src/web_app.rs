@@ -25,8 +25,11 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    CloudAccountControl, PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+    ChromeProjectMenu, CloudAccountControl, PlayToggle, SiteChrome, SiteSection,
+    StudioSettingsPopover, VersionBadge,
 };
+use crate::app::share::{ProjectShareControl, archive_project};
+use crate::base::{ToastHost, use_toast_provider};
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -119,6 +122,11 @@ pub fn App() -> Element {
     // context as a `Signal<CloudSession>` alongside a refresh handle. Nothing
     // renders it yet (P5/P6 do); an unreachable service leaves it quiet.
     crate::cloud::use_cloud_session_provider();
+    // The one transient-confirmation slot (base/toast.rs). Provided here so
+    // a line survives the surface that raised it: archiving navigates Home
+    // and unmounts the menu row that asked for it, and the "Archived —
+    // Restore from the Projects page." line still has to land.
+    let toasts = use_toast_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
@@ -730,6 +738,34 @@ pub fn App() -> Element {
         .is_lens()
         .then(|| current_route.with_play(!play).path());
 
+    // Sharing administers THE project in the address bar (D1 — the address
+    // bar IS the link), so both its doors exist only on a project route.
+    // Whether the pill actually draws is a further question only the
+    // service can answer; see `app::share::ProjectShareControl`.
+    let project_uid = match &current_route {
+        StudioRoute::Project { uid, .. } => Some(*uid),
+        _ => None,
+    };
+    // The ⋯ menu's "Sharing & access…" opens the SAME panel the pill does.
+    // A popover owns its own open state, so the row bumps a request count
+    // that re-keys the control and mounts it open — one bump per ask, so
+    // asking again after closing reopens it.
+    let mut share_request = use_signal(|| 0u32);
+    let project_menu = project_uid.map(|uid| ChromeProjectMenu {
+        on_share: EventHandler::new(move |()| share_request += 1),
+        on_archive: EventHandler::new(move |()| {
+            archive_project(uid, Some(toasts), move || {
+                // We just archived the project this route addresses; the
+                // link no longer resolves for anyone but its members, so
+                // staying here would be a lie. Home, with a real history
+                // entry — back returns to where the user was.
+                let mut route = route;
+                router::navigate(&StudioRoute::Home);
+                route.set(StudioRoute::Home);
+            });
+        }),
+    });
+
     // One shell for every section: the chrome renders at the same offset
     // whatever is below it, and switching sections swaps only the body —
     // the actor, runtime pool, and open sessions are untouched.
@@ -765,11 +801,24 @@ pub fn App() -> Element {
                 section,
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
+                project_menu,
                 if let Some(href) = play_toggle {
                     // A plain hash link, like the nav tabs: the route
                     // listener picks it up, sees the same session, and
                     // swaps only what the shell renders.
                     PlayToggle { href, playing: play }
+                }
+                if let Some(uid) = project_uid {
+                    // First in the right cluster, ahead of the gear and
+                    // the avatar (spike §1-A). Re-keyed on the request
+                    // count so the ⋯ row can mount it open, and on the
+                    // uid so moving to another project re-asks the
+                    // service instead of showing the last one's roster.
+                    ProjectShareControl {
+                        key: "{uid}-{share_request}",
+                        uid,
+                        initially_open: share_request() > 0,
+                    }
                 }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
@@ -832,6 +881,10 @@ pub fn App() -> Element {
                     }
                 },
             }
+            // Last, and outside every section: one line at the page's
+            // bottom for acts with no other visible consequence (a link on
+            // the clipboard, an access level flipped, a project archived).
+            ToastHost {}
         }
     }
 }
