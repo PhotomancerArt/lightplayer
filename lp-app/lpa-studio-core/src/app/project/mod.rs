@@ -26,6 +26,7 @@ pub mod asset;
 pub(crate) mod control_display_layout_fallback;
 pub mod demo_project;
 pub mod dirty_summary;
+pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
@@ -56,12 +57,14 @@ pub use asset::{
     UiAssetContentBody, UiShaderError,
 };
 pub use dirty_summary::DirtySummary;
+pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
+    ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp,
+    NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp,
+    PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
+    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
+    UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;
