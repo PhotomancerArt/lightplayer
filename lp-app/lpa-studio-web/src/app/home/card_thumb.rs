@@ -3,15 +3,21 @@
 //! Layers, top to bottom (gpu-live-gallery P4 + the M6 primary-visual
 //! coordination):
 //!
-//! 1. **Live canvas** — mounted when the card has a preview source,
+//! 1. **Lamp field** — for a control-first project (its root scope resolves
+//!    `control.out`, answered by the engine), the fixture's own lamps drawn
+//!    with `LampView`, over the raster it replaces. Same rule as the
+//!    editor's module-face hero: a project that drives lamps leads with
+//!    them. Present only once a drawable output frame has landed, which is
+//!    also its reveal.
+//! 2. **Live canvas** — mounted when the card has a preview source,
 //!    revealed once the `PreviewHost` slot presents its first frame. The
 //!    presented channel is bus `visual.out`, which IS the M6 "primary
 //!    visual" contract (the engine resolves the highest-priority
 //!    provider), so cards never re-derive which product is a project's
 //!    face.
-//! 2. **Snapshot seam** — a structurally present `<img>` for M6's
+//! 3. **Snapshot seam** — a structurally present `<img>` for M6's
 //!    save-time capture; sourceless (and hidden) until that lands.
-//! 3. **Gradient base** — the deterministic identity gradient with the
+//! 4. **Gradient base** — the deterministic identity gradient with the
 //!    name's initial: the placeholder before the first present, the
 //!    stories' whole face, and the fallback when previews fail.
 //!
@@ -19,9 +25,10 @@
 //! ADR: never silent).
 
 use dioxus::prelude::*;
-use lpa_studio_core::PreviewSource;
+use lpa_studio_core::{PreviewSource, UiControlProductPreview};
 
 use crate::app::home::gallery_preview::{ThumbPreviewBadge, use_thumb_preview};
+use crate::app::node::lamp_view::LampView;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -37,9 +44,15 @@ pub(crate) fn CardThumb(
     /// PreviewHost. Overrides the live badge when both exist.
     #[props(default)]
     static_badge: Option<ThumbPreviewBadge>,
+    /// Story/test injection: draw this lamp field, without any PreviewHost
+    /// (stories lease no slot, so a control-first thumb has no other way to
+    /// pose). Overrides the live one when both exist.
+    #[props(default)]
+    static_lamps: Option<UiControlProductPreview>,
 ) -> Element {
     let preview = use_thumb_preview(source);
     let badge = static_badge.or(preview.badge);
+    let lamps = static_lamps.or(preview.lamps);
     let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
@@ -83,6 +96,19 @@ pub(crate) fn CardThumb(
                     width: "256",
                     height: "96",
                     class: thumb_canvas_class(canvas.revealed),
+                }
+            }
+            // lamp layer: a control-first project's own fixture, over the
+            // raster it replaces. Black behind it (like the device card's ▶
+            // frame) because the lamp canvas is transparent where nothing is
+            // lit, and lamps must screen-blend against dark rather than
+            // against the identity gradient. Inset so an edge lamp is not
+            // clipped by the thumb's rounded corner.
+            if let Some(lamps) = lamps {
+                div { class: "tw:absolute tw:inset-0 tw:bg-black",
+                    div { class: "tw:absolute tw:inset-[6%]",
+                        LampView { preview: lamps }
+                    }
                 }
             }
             if let Some(badge) = badge {
