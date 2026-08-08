@@ -1,5 +1,4 @@
 use alloc::format;
-use alloc::string::String;
 
 use lps_shared::LpsType;
 
@@ -41,23 +40,28 @@ pub(super) fn binary_op_token(op: BinaryOp) -> &'static str {
     }
 }
 
-pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<String, Diagnostic> {
+/// The LPFN signature spelling of a parameter type.
+///
+/// Static spellings: the caller matches on them and joins them into one
+/// signature string, so handing back owned `String`s would allocate one per
+/// argument per call for nothing.
+pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<&'static str, Diagnostic> {
     Ok(match ty {
-        LpsType::Float => String::from("Float"),
-        LpsType::Int => String::from("Int"),
-        LpsType::UInt => String::from("UInt"),
-        LpsType::Vec2 => String::from("Vec2"),
-        LpsType::Vec3 => String::from("Vec3"),
-        LpsType::Vec4 => String::from("Vec4"),
-        LpsType::IVec2 => String::from("IVec2"),
-        LpsType::IVec3 => String::from("IVec3"),
-        LpsType::IVec4 => String::from("IVec4"),
-        LpsType::UVec2 => String::from("UVec2"),
-        LpsType::UVec3 => String::from("UVec3"),
-        LpsType::UVec4 => String::from("UVec4"),
-        LpsType::BVec2 => String::from("BVec2"),
-        LpsType::BVec3 => String::from("BVec3"),
-        LpsType::BVec4 => String::from("BVec4"),
+        LpsType::Float => "Float",
+        LpsType::Int => "Int",
+        LpsType::UInt => "UInt",
+        LpsType::Vec2 => "Vec2",
+        LpsType::Vec3 => "Vec3",
+        LpsType::Vec4 => "Vec4",
+        LpsType::IVec2 => "IVec2",
+        LpsType::IVec3 => "IVec3",
+        LpsType::IVec4 => "IVec4",
+        LpsType::UVec2 => "UVec2",
+        LpsType::UVec3 => "UVec3",
+        LpsType::UVec4 => "UVec4",
+        LpsType::BVec2 => "BVec2",
+        LpsType::BVec3 => "BVec3",
+        LpsType::BVec4 => "BVec4",
         other => {
             return Err(Diagnostic::error(
                 span,

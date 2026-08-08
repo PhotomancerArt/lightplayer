@@ -30,6 +30,11 @@ impl InlineFill for IrType {
     const FILL: Self = IrType::I32;
 }
 
+/// Static token lists (LPFN signature spellings) use the same inline storage.
+impl InlineFill for &'static str {
+    const FILL: Self = "";
+}
+
 /// A `Vec`-like append-only list that keeps its first `N` elements inline.
 ///
 /// `N` must be at most 255 — the inline length is a `u8` so that the inline
