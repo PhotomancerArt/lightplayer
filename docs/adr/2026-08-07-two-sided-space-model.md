@@ -28,7 +28,7 @@ Ambiance fat-signature anti-pattern, and the UX spike
    `VisualConsumerSpace` (per-pair default projection + `force`).
 2. **GLSL entries are explicit and dimension-named**: `vec4
    render_2d(vec2 pos)` / `vec4 render_1d(float pos)`. A bare `render`
-   is a hard error — no alias; project format v6's migration rewrites
+   is a hard error — no alias; project format v7's migration rewrites
    existing assets (alpha ruling: pay the rename once instead of
    carrying API debt). The signature and the declaration are two
    different jobs; they cross-validate, and the mismatch error class is
@@ -57,9 +57,11 @@ Ambiance fat-signature anti-pattern, and the UX spike
   device targets — validated by filetests across interp/wasm/rv32.
 - The scarf behavior and the precedence ladder are pinned as engine unit
   tests (`fixture_node.rs` negotiation suite).
-- Format v6: pre-v6 projects migrate automatically (`lpa-upgrade`
-  v5_to_v6 rewrites GLSL assets); devices and studio refuse v5 without
-  the migration, per the existing format gate.
+- Format v7: pre-v7 projects migrate automatically (`lpa-upgrade`
+  v6_to_v7 rewrites GLSL assets — renumbered from v5→v6 when the uid
+  re-render migration merged first and took that slot); devices and
+  studio refuse older formats without the migration, per the existing
+  format gate.
 - `space` doubles as browse/registry metadata for future packs
   (dimensionality is the first categorization axis).
 

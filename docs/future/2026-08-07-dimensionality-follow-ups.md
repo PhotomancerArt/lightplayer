@@ -23,4 +23,4 @@ deliberately, in rough order of expected pickup:
   are shader inputs and never hit the sampling boundary.
 - **3D/voxel cells**, authored 2D→1D scanline choice, 1D mappings.
 - **web-demo** still uses its own pre-uniform 3-arg `render` signature —
-  stale before v6; retire or re-port.
+  stale before the entry rename; retire or re-port.
