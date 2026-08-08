@@ -192,7 +192,7 @@ fn gallery_chooser_buttons() -> Element {
 }
 
 #[story(
-    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Export zip on the card, delete in the menu."
+    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Download zip on the card, delete in the menu."
 )]
 fn project_format_states() -> Element {
     let mut projects = packages();

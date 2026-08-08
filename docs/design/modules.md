@@ -36,7 +36,7 @@ composite-effects spike, is recorded in
 |---|---|---|
 | **Project** | The *container*: a folder with identity, provenance, history, and format. Not a node. What you open in Studio. | A node kind; a scope; anything the engine resolves against |
 | **Module** | The container *node kind* (replaces the `project` node kind). Owns a bus scope, a panel, and child nodes. The root module is an ordinary module that happens to be at the root. | Special at the root; a separate "composite"/"effect" structure |
-| **Effect** | A *category* of module (gallery/UI copy): a module authored to be dropped into other projects. | A distinct node kind or schema |
+| **Pattern** | A *category* of module (gallery/UI copy, amended 2026-08-07): a module authored to be dropped into other projects — the exported unit a pattern *project* designates (§6, `docs/adr/2026-08-07-project-kinds-and-pattern-exports.md`). "Effect" is reserved for a future modifier-of-patterns concept, not this category. | A distinct node kind or schema |
 | **Scope** | The bus namespace a module introduces around its children. | Global; a display prefix |
 | **Channel** | A named value stream within a scope. Exists iff some binding names it. | A declared registry entry; a place values are stored |
 | **Public slot** | A slot with a bus binding. Its channel appears in its scope. | A slot copied, aliased, or mirrored anywhere |
@@ -476,7 +476,8 @@ Two ownership tiers, and only two: everything in the project folder is
 ```text
 my-project/
 ├─ project.json          # container manifest — NOT a node:
-│                        #   format, uid, name, provenance (§8), created
+│                        #   format, uid, name, provenance (§8), created,
+│                        #   optional kind + exports (pattern designation, below)
 ├─ module.json           # root module node: nodes{}, bindings, exports,
 │                        #   per-channel meta overrides (R9), optional provenance
 ├─ shader.json …         # child nodes, one file per node (unchanged)
@@ -513,11 +514,22 @@ my-project/
 - Relative `node:` refs and file-relative artifact refs survive vendoring
   by construction — a module folder's internal wiring is
   location-independent.
+- **`project.json`'s optional `kind`/`exports` designate a project's
+  publishable module folders** (a *pattern* or *rig* project names them
+  in `exports`; `kind` absent = an ordinary project). The designation is
+  a workspace-level fact — the engine never reads it — and is what makes
+  a sub-module folder like `effect/` above importable elsewhere rather
+  than merely local: `docs/adr/2026-08-07-project-kinds-and-pattern-exports.md`
+  has the full model (designation UX, export lint, vendoring mechanics).
+  Existing flat examples are not migrated to this shape as part of that
+  work; each restructures opportunistically as it enters a pack, not in
+  one big-bang pass.
 
 > Status: the project.json/module.json split, the container-manifest
 > format gate (missing manifest = hard refuse, format bumped to 3), and
 > the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
-> panel phases.
+> panel phases. `kind`/`exports` and the vendoring/import flow landed
+> 2026-08-07 (module authoring unit, P1–P5).
 
 ## 7. Bus vocabulary — under discovery
 
@@ -552,7 +564,9 @@ Copy-on-extract per R14.
 
 > Status: landed 2026-08-01 as `ProvenanceDef` (module defs carry it;
 > the container manifest carries the same four keys at its top level).
-> Copy-on-extract mechanics arrive with the vendoring flows.
+> Copy-on-extract mechanics landed 2026-08-07 with the import flow
+> (module authoring unit, P5): an export with no provenance of its own
+> inherits the source project's attribution as it is vendored out.
 
 ## 9. Open questions (G1 redline register)
 

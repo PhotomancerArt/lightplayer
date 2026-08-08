@@ -224,7 +224,7 @@ pub(crate) fn PackageCard(
                         span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                             StudioIcon { name: StudioIconName::Download, size: 14 }
                         }
-                        span { "Export zip" }
+                        span { "Download zip" }
                     }
                 }
                 for (device_key, device_name) in empty_devices.iter().filter(|_| blocked.is_none()) {
@@ -381,7 +381,7 @@ pub(crate) fn PackageCardMenu(
                         span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                             StudioIcon { name: StudioIconName::Download, size: 14 }
                         }
-                        span { "Export zip" }
+                        span { "Download zip" }
                     }
                     ActionButton {
                         action: delete,
