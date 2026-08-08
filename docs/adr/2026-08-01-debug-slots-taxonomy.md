@@ -194,6 +194,12 @@ Refine later if a better word emerges. The known tension is the clock's
 diagnostics; the expectation is that they migrate to a transport surface,
 leaving Debug holding exactly the diagnostics it describes.
 
+**Resolved 2026-08-07** (follow-up (a), full answer in
+`docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md` §6): the
+migration happened, and the name outlives it — `Debug` turns out to name
+the persistence contract these fields have always carried, not the
+flat-section rendering that used to be its only presentation.
+
 ### Reconciliation with the runtime command-channel ADR
 
 `2026-07-27-runtime-node-command-channel.md` **stays valid and is not
@@ -292,8 +298,22 @@ Per the deferred-decision convention, these are indexed in
   then, it is permanent. *2026-08-05: the move happened — the tape transport
   (plan `2026-08-04-2355-clock-tape-hero`, P3–P5) claimed the clock's rows
   into a real instrument on the clock card, and the drawer's remaining
-  in-tree occupant is `test_pattern`, pure diagnostics. The re-check itself
-  is answered by that plan's ADR (P7).*
+  in-tree occupant is `test_pattern`, pure diagnostics.*
+  **Closed 2026-08-07 — `docs/adr/2026-08-07-clock-transport-is-a-panel
+  -instrument.md` §6.** The name stands, and the answer is sharper than
+  "the tension resolved": `Debug` names a **persistence contract**
+  (transient, no durable value underneath, verb Clear), not a rendering
+  location. Before the tape, the flat hazard-striped section was the only
+  rendering that contract ever had, so a Debug field implicitly meant a
+  Debug-section row. The clock's transport fields keep `SlotRole::Debug`
+  (Q2 — still transient by design) but now render as a bespoke instrument
+  that carries the contract's obligations directly (attention-orange tint
+  on a changed control, its own `clear` affordance) instead of living in
+  the flat section. A Debug-role field can legitimately render either
+  way; both satisfy the same contract. `DebugSlotsSection` is not dead —
+  `OutputDef::test_pattern` remains its one occupant, which is the good
+  outcome the taxonomy predicted: Debug holding exactly the diagnostics
+  it describes.
 - **(b) Debug indication on preview/play surfaces.** D8 covered the workspace
   (chip, card, section) only; a running installation showing a test pattern
   has no indication outside the editor. **Revisit when** the panels/play-mode
