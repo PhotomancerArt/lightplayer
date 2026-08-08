@@ -10,6 +10,7 @@ use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
 use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
 use crate::app::home::package_card::{PackageCard, home_action};
 use crate::app::home::{card_grid_class, section_title_class};
+use crate::app::share::ArchivedProjectsSection;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
@@ -143,6 +144,11 @@ pub fn ProjectsPage(
                     }
                 }
             }
+
+            // The archive, last and collapsed (Q12). Reads the account's
+            // own project list, so it renders nothing at all when signed
+            // out, unreachable, or empty — an empty drawer is not news.
+            ArchivedProjectsSection {}
 
             if drag_active() > 0 {
                 div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-accent tw:bg-background/80",

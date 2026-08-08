@@ -37,12 +37,30 @@
 //! any open sim/device session. Nothing here reloads the page.
 
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{Archive, UserRound};
 use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
 use crate::base::{
     IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
 use crate::router::StudioRoute;
+
+/// The project-scoped rows the ⋯ menu grows while a project route is open
+/// (spike `project-share` §5, ruling G4).
+///
+/// Sharing lives here as well as on the pill because a menu is where people
+/// look for a project's *settings*; archive lives here and nowhere else
+/// because the Share panel stays pure access control, the way Docs keeps
+/// them apart. Both are handlers rather than markup so the chrome stays
+/// presentational — what "archive" means to the service belongs to
+/// `app::share`, and where the app goes afterwards belongs to `web_app`.
+#[derive(Clone, PartialEq)]
+pub struct ChromeProjectMenu {
+    /// Open the Share panel (the same panel the pill opens).
+    pub on_share: EventHandler<()>,
+    /// Archive this project. Quiet, not destructive: it is reversible.
+    pub on_archive: EventHandler<()>,
+}
 
 /// Which nav tab renders as the current section. Home has no tab — the
 /// LOGO is its affordance, and at Home the logo wears the you're-here
@@ -82,6 +100,10 @@ pub fn SiteChrome(
     /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
     #[props(default = false)]
     overflow_menu_open: bool,
+    /// The project rows the ⋯ menu grows on a project route; `None`
+    /// everywhere else (the menu then reads exactly as it always has).
+    #[props(default)]
+    project_menu: Option<ChromeProjectMenu>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -152,6 +174,7 @@ pub fn SiteChrome(
                         sessions: sessions.clone(),
                         on_editor,
                         include_sections: false,
+                        project_menu: project_menu.clone(),
                     }
                 }
                 div { class: "tw:@min-[680px]:hidden",
@@ -161,6 +184,7 @@ pub fn SiteChrome(
                         on_editor,
                         include_sections: true,
                         initially_open: overflow_menu_open,
+                        project_menu,
                     }
                 }
             }
@@ -181,6 +205,7 @@ fn ChromeOverflowMenu(
     on_editor: bool,
     include_sections: bool,
     #[props(default = false)] initially_open: bool,
+    #[props(default)] project_menu: Option<ChromeProjectMenu>,
 ) -> Element {
     rsx! {
         IconMenuButton {
@@ -195,6 +220,13 @@ fn ChromeOverflowMenu(
             // children in its own content div, so the panel's classes
             // never reach them — inline rows would flow sideways.
             div { class: "tw:grid tw:gap-1",
+                // The project group leads: on a project route it is the
+                // most local thing in the menu, and the sections it sits
+                // above are the same everywhere in the app.
+                if let Some(project_menu) = project_menu {
+                    span { class: GROUP_HEADER_CLASS, "Project" }
+                    ProjectMenuRows { menu: project_menu }
+                }
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
                     NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
@@ -248,6 +280,57 @@ fn NavMenuItem(label: &'static str, href: &'static str, active: bool) -> Element
                 }
             },
             "{label}"
+        }
+    }
+}
+
+/// The ⋯ menu's project rows: the sharing door, then the removal verb.
+///
+/// **Archive is a quiet row, not a red one** (spike §5): it is reversible —
+/// the project stops resolving for everyone but its members and nothing is
+/// thrown away — and dressing a reversible act as a destructive one teaches
+/// people to fear the wrong control. There is no Delete forever here at
+/// all; the archive drawer on the Projects page is where such a thing would
+/// eventually have to live, spelled like what it is.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
+    let close = try_consume_context::<PopoverCloseHandle>();
+    let ChromeProjectMenu {
+        on_share,
+        on_archive,
+    } = menu;
+    rsx! {
+        button {
+            class: PROJECT_MENU_ROW,
+            r#type: "button",
+            onclick: move |_| {
+                // Close FIRST: the panel this opens is another popover
+                // anchored in the same bar, and two open at once reads as
+                // a stuck menu.
+                if let Some(mut close) = close {
+                    close.close();
+                }
+                on_share.call(());
+            },
+            UserRound { size: 14 }
+            // The row's type lives on the span: `style.css` resets
+            // `button { font: inherit }` UNLAYERED, which beats every
+            // (layered) Tailwind font utility on the button itself.
+            span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-semibold", "Sharing & access…" }
+        }
+        button {
+            class: PROJECT_MENU_ROW_QUIET,
+            r#type: "button",
+            title: "Archive this project — reversible, and nothing is deleted",
+            onclick: move |_| {
+                if let Some(mut close) = close {
+                    close.close();
+                }
+                on_archive.call(());
+            },
+            Archive { size: 14 }
+            span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-medium", "Archive project" }
         }
     }
 }
@@ -532,6 +615,13 @@ const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:a
 pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 /// ⋯ menu section/session row, current place.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
+/// ⋯ menu PROJECT row. A `<button>`, so it must name its own background
+/// and border explicitly — this build ships Tailwind without preflight, and
+/// an unstyled button paints the UA's `buttonface` (crate README).
+const PROJECT_MENU_ROW: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:text-muted-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+/// The same row, quieter: the reversible act (Archive) reads lighter than
+/// the one above it, and never destructive.
+const PROJECT_MENU_ROW_QUIET: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 
 // Session chips (D16): squared tab-chips in the entity grammar — never
 // status pills. One shared geometry, three states.
