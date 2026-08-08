@@ -65,8 +65,11 @@ pub fn compute_desc_from_model_def<'a>(
                     .data
                     .as_ref()
                     .ok_or(ComputeDescError::MissingMapping { slot: name.clone() })?;
+                // Both mapping kinds are the same uniform array to the
+                // compiler; they differ only in how the host marshals the
+                // slot map into it (key field vs element index).
                 match mapping.kind.value() {
-                    ShaderSlotMappingKind::Sentinel => {
+                    ShaderSlotMappingKind::Sentinel | ShaderSlotMappingKind::Dense => {
                         desc = desc.with_consumed(
                             name.clone(),
                             LpsType::Array {
@@ -107,6 +110,18 @@ pub fn compute_desc_from_model_def<'a>(
                             ty,
                             *mapping.len.value(),
                             mapping.key.value().clone(),
+                        );
+                    }
+                    // A dense output is a plain array global: no key field
+                    // to validate, so the plain value ABI already says
+                    // everything there is to say about it.
+                    ShaderSlotMappingKind::Dense => {
+                        desc = desc.with_produced(
+                            name.clone(),
+                            LpsType::Array {
+                                element: alloc::boxed::Box::new(ty),
+                                len: *mapping.len.value(),
+                            },
                         );
                     }
                 }
@@ -338,6 +353,87 @@ void tick() {{
                 .expect("phase")
                 .approx_eq_default(&LpsValueF32::F32(16.0))
         );
+    }
+
+    /// The fire2012 shape: per-cell scalar state in dense arrays on both
+    /// sides, indexed at RUNTIME — a loop over the consumed array and a
+    /// uniform-derived index into the produced global. This is exactly what
+    /// sentinel struct arrays cannot do on `Frontend::Lp` (constant-index
+    /// -only), and the reason the dense mapping kind exists.
+    #[test]
+    fn compute_desc_executes_dense_arrays_with_runtime_indexing() {
+        let registry = SlotShapeRegistry::default();
+
+        let mut consumed = VecMap::new();
+        consumed.insert(
+            String::from("cursor"),
+            ShaderSlotDef::value_f32("Cursor", "", 0.0, None),
+        );
+        consumed.insert(
+            String::from("seed"),
+            ShaderSlotDef::map_dense_builtin("f32", 4),
+        );
+
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef::map_dense_builtin("f32", 4),
+        );
+
+        let def = ComputeShaderDef {
+            source: lpc_model::AssetSlot::path("heat.glsl"),
+            bindings: BindingDefs::default(),
+            float_mode: lpc_model::OptionSlot::none(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        let header = generate_compute_shader_header(&def, &registry).expect("header");
+        assert!(header.contains("layout(binding = 1) uniform float seed[4];"));
+        assert!(header.contains("float heat[4];"));
+        let glsl = format!(
+            r#"{header}
+void tick() {{
+    for (int i = 0; i < 4; i++) {{
+        heat[i] = seed[i] * 2.0;
+    }}
+    int idx = int(cursor);
+    heat[idx] = heat[idx] + 100.0;
+}}
+"#
+        );
+
+        let desc =
+            compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
+                .expect("compute desc");
+        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let mut shader = graphics
+            .compile_compute_shader(desc)
+            .expect("compile compute");
+
+        shader
+            .tick(&[
+                ("cursor", LpsValueF32::F32(2.0)),
+                (
+                    "seed",
+                    LpsValueF32::Array(Box::new([
+                        LpsValueF32::F32(1.0),
+                        LpsValueF32::F32(2.0),
+                        LpsValueF32::F32(3.0),
+                        LpsValueF32::F32(4.0),
+                    ])),
+                ),
+            ])
+            .expect("tick");
+
+        let heat = shader.get_output("heat").expect("heat");
+        let expected = LpsValueF32::Array(Box::new([
+            LpsValueF32::F32(2.0),
+            LpsValueF32::F32(4.0),
+            LpsValueF32::F32(106.0),
+            LpsValueF32::F32(8.0),
+        ]));
+        assert!(heat.approx_eq_default(&expected), "heat: {heat:?}");
     }
 
     fn field<'a>(fields: &'a [(String, LpsValueF32)], name: &str) -> Option<&'a LpsValueF32> {

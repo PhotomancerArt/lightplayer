@@ -90,6 +90,9 @@ fn materialize_map_slot(
         .ok_or_else(|| ComputeMaterializeError::MissingMapping(String::from(slot_name)))?;
     match mapping.kind.value() {
         ShaderSlotMappingKind::Sentinel => {}
+        ShaderSlotMappingKind::Dense => {
+            return materialize_dense_slot(slot_name, value, revision);
+        }
     }
     let key_def = slot.key.data.as_ref().ok_or_else(|| {
         ComputeMaterializeError::Unsupported(format!("produced map slot {slot_name:?} missing key"))
@@ -114,6 +117,41 @@ fn materialize_map_slot(
             ))
         })?;
         entries.insert(key, SlotData::Value(WithRevision::new(revision, model)));
+    }
+
+    Ok(SlotData::Map(SlotMapDyn::with_revision(revision, entries)))
+}
+
+/// A dense array IS the map: the element index is the key and every index
+/// is present, so there is no key field to read and no empty sentinel to
+/// skip — element `i` lands at `SlotMapKey::U32(i)` unconditionally.
+fn materialize_dense_slot(
+    slot_name: &str,
+    value: &LpsValueF32,
+    revision: Revision,
+) -> Result<SlotData, ComputeMaterializeError> {
+    let LpsValueF32::Array(items) = value else {
+        return Err(ComputeMaterializeError::ExpectedArray(String::from(
+            slot_name,
+        )));
+    };
+
+    let mut entries = VecMap::new();
+    for (index, item) in items.iter().enumerate() {
+        let key = u32::try_from(index).map_err(|_| {
+            ComputeMaterializeError::Unsupported(format!(
+                "produced map slot {slot_name:?} index overflows u32"
+            ))
+        })?;
+        let model = lps_value_f32_to_model_value(item).map_err(|e| {
+            ComputeMaterializeError::Unsupported(format!(
+                "produced map slot {slot_name:?} item cannot convert value: {e}"
+            ))
+        })?;
+        entries.insert(
+            SlotMapKey::U32(key),
+            SlotData::Value(WithRevision::new(revision, model)),
+        );
     }
 
     Ok(SlotData::Map(SlotMapDyn::with_revision(revision, entries)))
@@ -178,6 +216,31 @@ mod tests {
             value.value(),
             LpValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "id" && value == &LpValue::U32(7))
         ));
+    }
+
+    /// A dense array lands every element at its index — no key field, no
+    /// skipped sentinel, zeros included.
+    #[test]
+    fn dense_array_materializes_to_index_keyed_map() {
+        let slot = ShaderSlotDef::map_dense_builtin("f32", 3);
+        let value = LpsValueF32::Array(Box::new([
+            LpsValueF32::F32(0.5),
+            LpsValueF32::F32(0.0),
+            LpsValueF32::F32(0.25),
+        ]));
+
+        let data = materialize_produced_slot("heat", &slot, &value, Revision::new(4)).expect("map");
+
+        let SlotData::Map(map) = data else {
+            panic!("map");
+        };
+        assert_eq!(map.entries.len(), 3);
+        for (index, expected) in [(0, 0.5), (1, 0.0), (2, 0.25)] {
+            let SlotDataAccess::Value(value) = map.entries[&SlotMapKey::U32(index)].access() else {
+                panic!("value at {index}");
+            };
+            assert_eq!(value.value(), LpValue::F32(expected));
+        }
     }
 
     fn emitter(id: u32, x: f32) -> LpsValueF32 {
