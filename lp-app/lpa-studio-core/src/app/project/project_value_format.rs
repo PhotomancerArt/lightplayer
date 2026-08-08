@@ -215,6 +215,12 @@ pub fn format_live_scalar(value: &LpValue) -> Option<String> {
         LpValue::I32(value) => Some(value.to_string()),
         LpValue::U32(value) => Some(value.to_string()),
         LpValue::Bool(value) => Some(value.to_string()),
+        // A `Kind::Choice` channel carries its variant's wire tag — the
+        // clock's `play_state` is the first one a control reads back (P8),
+        // and without this branch a run/pause panel write had no echo path
+        // at all: the button would have stayed on the authored default
+        // until a probe happened to land.
+        LpValue::String(value) => Some(value.clone()),
         _ => None,
     }
 }

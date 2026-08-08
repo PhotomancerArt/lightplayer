@@ -21,8 +21,9 @@ use lpa_studio_core::{
     SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin,
     UiBusSiteView, UiBusView, UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection,
     UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
-    UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
-    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    UiPanelWidget, UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue,
+    UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -115,6 +116,7 @@ fn knob(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -143,6 +145,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -167,6 +170,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -198,6 +202,7 @@ fn swatch(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
+            wires: Vec::new(),
         },
     )
 }
@@ -233,6 +238,98 @@ pub(crate) fn palette_panel() -> UiPanelGroup {
                 swatch(ROOT_SCOPE, "held", "engaged", &palette_cycle()),
                 "show \u{b7} palette",
             ),
+        ])
+}
+
+// ------------------------------------------------------- clock transport
+
+/// The clock's default wiring: each transport leaf on its own `clock.*`
+/// channel, promoted onto the panel by the record's `panel = "show"`.
+pub(crate) const TRANSPORT_CHANNELS: [(UiPanelWireRole, &str); 3] = [
+    (UiPanelWireRole::Rate, "clock.rate"),
+    (UiPanelWireRole::PlayState, "clock.play_state"),
+    (UiPanelWireRole::Scrub, "clock.scrub"),
+];
+
+/// The clock's GROUPED Transport control on a module panel (P8): one
+/// control, three wires, one faceplate.
+///
+/// `channels` is the per-dimension wiring in anchor order (rate first), so
+/// a story can retarget one leaf — an authored binding on `rate` — and see
+/// the group re-anchor without the faceplate changing shape.
+pub(crate) fn transport_control(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelControlView {
+    let target = |channel: &str| lpa_studio_core::UiPanelTarget {
+        scope: scope_target(ROOT_SCOPE),
+        channel: channel.to_string(),
+        engaged: false,
+    };
+    let slot = |role: UiPanelWireRole| match role {
+        UiPanelWireRole::Rate => "transport.rate",
+        UiPanelWireRole::PlayState => "transport.play_state",
+        UiPanelWireRole::Scrub => "transport.scrub_offset_seconds",
+    };
+    let wires: Vec<lpa_studio_core::UiPanelWire> = channels
+        .into_iter()
+        .map(|(role, channel)| lpa_studio_core::UiPanelWire {
+            role,
+            address: Some(walk_address(ROOT_SCOPE, slot(role))),
+            panel_target: Some(target(channel)),
+            live_value: None,
+        })
+        .collect();
+    // The anchor is the first wired dimension in the list (Q22).
+    let anchor = channels[0].1;
+    UiPanelControlView::new(
+        anchor,
+        UiPanelControl {
+            label: "Time".to_string(),
+            address: Some(walk_address(ROOT_SCOPE, "transport.rate")),
+            widget: UiPanelWidget::Transport {
+                transport: transport.clone(),
+            },
+            value: UiSlotValue::f32(transport.rate),
+            emit: UiPanelEmit::Value,
+            live_value: None,
+            live_gradient: None,
+            panel_target: Some(target(anchor)),
+            unit: None,
+            state: UiSlotFieldState::editable(),
+            aspects: Vec::new(),
+            wires,
+        },
+    )
+}
+
+/// A root panel with the clock's Transport in its own "Clock" child group
+/// (the production assembly shape — an instrument never sits in the flat
+/// strip; G2 feedback 2026-08-08), plus the scarf's brightness fader and a
+/// knob in the flat strip — the real shape of the panel a phone opens
+/// onto, so the instrument is judged in company rather than alone.
+pub(crate) fn transport_panel(
+    transport: lpa_studio_core::UiClockTransport,
+    channels: [(UiPanelWireRole, &str); 3],
+) -> UiPanelGroup {
+    UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            ),
+            following(
+                knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
+                "0.41",
+                "lfo · hue",
+            ),
+        ])
+        .with_groups(vec![
+            UiPanelGroup::new("Clock", "/aurora.sign/clock").with_controls(vec![at_default(
+                transport_control(transport, channels),
+                "the clock's own transport",
+            )]),
         ])
 }
 

@@ -172,7 +172,7 @@ impl Project {
     /// Debug slider does: a slot edit staged in the registry overlay, then
     /// applied to the engine.
     ///
-    /// This is the only way to drive `running` / `scrub_offset_seconds` —
+    /// This is the only way to drive `play_state` / `scrub_offset_seconds` —
     /// they are `Debug`-role slot data, which the project codec deliberately
     /// round-trips to defaults, so authoring them into the fixture's
     /// `clock.json` would be silently discarded (P2/P3 both hit this).
@@ -307,7 +307,7 @@ fn load(fs: LpFsMemory) -> Project {
 /// priority instead.
 fn clocked_fs(phasor: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 5 }\n");
+    write(&fs, "/project.json", "{ \"format\": 6 }\n");
     write(&fs, "/clocked.glsl", CLOCKED_GLSL);
     write(
         &fs,
@@ -338,7 +338,7 @@ fn clocked_fs(phasor: &str) -> LpFsMemory {
 /// statement about provenance, not about their authoring happening to agree.
 fn paired_fs(a_phasor: &str, b_phasor: &str, bind_config: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 5 }\n");
+    write(&fs, "/project.json", "{ \"format\": 6 }\n");
     write(&fs, "/plain.glsl", PLAIN_GLSL);
     let bindings = if bind_config {
         r#"{ "wave": { "source": "bus:wave_config" } }"#
@@ -872,7 +872,7 @@ fn timebase_uniforms_without_a_product_run_at_their_shaped_default_and_warn() {
 #[test]
 fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 5 }\n");
+    write(&fs, "/project.json", "{ \"format\": 6 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_time = time; }");
     write(
         &fs,
@@ -932,7 +932,7 @@ fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
 #[test]
 fn an_unbound_uniform_runs_quietly_on_its_authored_default() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 5 }\n");
+    write(&fs, "/project.json", "{ \"format\": 6 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_t = t; }");
     write(
         &fs,
@@ -1007,7 +1007,10 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
         .expect("published");
     assert!(live_edge > 0.0, "the clock has to have run: {live_edge}");
 
-    project.write_clock_control("transport.running", LpValue::Bool(false));
+    project.write_clock_control(
+        "transport.play_state",
+        LpValue::String(lpc_model::PlayState::Paused.as_str().to_string()),
+    );
     project.frame(&[compute]);
     let paused_at = project
         .engine
