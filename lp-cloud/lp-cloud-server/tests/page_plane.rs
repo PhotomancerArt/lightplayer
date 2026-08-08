@@ -1,18 +1,18 @@
 //! The page plane: share cards, the SPA fallback, and static files.
 //!
 //! The load-bearing property under test is that a share URL answers
-//! **identically** — same status, same document — whether the project is
-//! private, missing, or simply not a uid at all. Only a link-visible project
-//! adds tags. Anything else would make the route an oracle for which project
-//! uids exist.
+//! **identically** — same status, same document — whether the project's link
+//! opens nothing, the project is archived, the uid is missing, or the path is
+//! not a uid at all. Only a project whose link grants reading adds tags.
+//! Anything else would make the route an oracle for which project uids exist.
 
 mod edge_harness;
 
 use axum::http::{StatusCode, header};
 use edge_harness::{ASSET_BODY, ASSET_PATH, INDEX_HTML, TestServer, body_text, header_value};
-use lpc_cloud_api::request::{PublishProject, PushCommit};
+use lpc_cloud_api::request::{ArchiveProject, PublishProject, PushCommit, RestoreProject};
 use lpc_cloud_api::response::PushResult;
-use lpc_cloud_api::{CloudRequest, CloudResponse, SidecarMeta, Visibility};
+use lpc_cloud_api::{Access, CloudRequest, CloudResponse, SidecarMeta};
 use lpc_history::{
     ContentHash, EventKind, HistoryEvent, PrefixedUid, TreeEntry, TreeManifest, UidPrefix,
 };
@@ -25,7 +25,7 @@ async fn a_link_visible_project_gets_og_tags() {
     let server = TestServer::new();
     let session = server.sign_in("yona@example.com").await;
     let uid = uid(1);
-    let preview = publish(&server, &session, uid, Visibility::Link, "zook-dome", true).await;
+    let preview = publish(&server, &session, uid, Access::View, "zook-dome", true).await;
 
     let response = server.get(&format!("/p/zook-dome-{uid}")).await;
 
@@ -56,22 +56,15 @@ async fn a_link_visible_project_gets_og_tags() {
     assert!(html.find("og:title").unwrap() < html.find("</head>").unwrap());
 }
 
-/// A private project must be indistinguishable from a uid that never
-/// existed — including in what an unauthenticated share request gets back.
+/// A project whose link opens nothing must be indistinguishable from a uid
+/// that never existed — including in what an unauthenticated share request
+/// gets back.
 #[tokio::test]
-async fn a_private_project_and_an_unknown_uid_are_the_same_answer() {
+async fn a_closed_project_and_an_unknown_uid_are_the_same_answer() {
     let server = TestServer::new();
     let session = server.sign_in("yona@example.com").await;
     let private = uid(2);
-    publish(
-        &server,
-        &session,
-        private,
-        Visibility::Private,
-        "secret",
-        true,
-    )
-    .await;
+    publish(&server, &session, private, Access::None, "secret", true).await;
 
     let hidden = server.get(&format!("/p/secret-{private}")).await;
     let unknown = server.get(&format!("/p/whatever-{}", uid(3))).await;
@@ -92,6 +85,47 @@ async fn a_private_project_and_an_unknown_uid_are_the_same_answer() {
     );
 }
 
+/// Archiving takes the card down: the OG route is an anonymous `GetProject`
+/// and nothing else, so an archived project stops unfurling for exactly the
+/// reason it stops resolving.
+#[tokio::test]
+async fn an_archived_project_loses_its_card() {
+    let server = TestServer::new();
+    let session = server.sign_in("yona@example.com").await;
+    let uid = uid(6);
+    publish(&server, &session, uid, Access::View, "packed-away", true).await;
+    assert!(
+        body_text(server.get(&format!("/p/packed-away-{uid}")).await)
+            .await
+            .contains("og:title")
+    );
+
+    let archived = server
+        .call(
+            CloudRequest::ArchiveProject(ArchiveProject { uid }),
+            Some(&session),
+        )
+        .await;
+    assert!(archived.result.is_ok(), "{:?}", archived.result);
+
+    let html = body_text(server.get(&format!("/p/packed-away-{uid}")).await).await;
+    assert_eq!(html, INDEX_HTML, "the plain document, tags and all absent");
+
+    let restored = server
+        .call(
+            CloudRequest::RestoreProject(RestoreProject { uid }),
+            Some(&session),
+        )
+        .await;
+    assert!(restored.result.is_ok(), "{:?}", restored.result);
+    assert!(
+        body_text(server.get(&format!("/p/packed-away-{uid}")).await)
+            .await
+            .contains("og:title"),
+        "restoring brings the card back"
+    );
+}
+
 /// The slug is decoration (D24): the uid alone opens the card, and a stale
 /// slug still does.
 #[tokio::test]
@@ -99,7 +133,7 @@ async fn the_slug_in_a_share_link_is_ignored() {
     let server = TestServer::new();
     let session = server.sign_in("yona@example.com").await;
     let uid = uid(4);
-    publish(&server, &session, uid, Visibility::Link, "zook-dome", false).await;
+    publish(&server, &session, uid, Access::View, "zook-dome", false).await;
 
     let canonical = body_text(server.get(&format!("/p/zook-dome-{uid}")).await).await;
     let stale_slug = body_text(server.get(&format!("/p/old-name-{uid}")).await).await;
@@ -117,15 +151,7 @@ async fn a_project_without_a_preview_gets_a_card_without_an_image() {
     let server = TestServer::new();
     let session = server.sign_in("yona@example.com").await;
     let uid = uid(5);
-    publish(
-        &server,
-        &session,
-        uid,
-        Visibility::Link,
-        "no-preview",
-        false,
-    )
-    .await;
+    publish(&server, &session, uid, Access::View, "no-preview", false).await;
 
     let html = body_text(server.get(&format!("/p/no-preview-{uid}")).await).await;
 
@@ -196,7 +222,7 @@ async fn publish(
     server: &TestServer,
     session: &edge_harness::Session,
     uid: PrefixedUid,
-    visibility: Visibility,
+    access: Access,
     slug: &str,
     with_preview: bool,
 ) -> ContentHash {
@@ -204,7 +230,7 @@ async fn publish(
         .call(
             CloudRequest::PublishProject(PublishProject {
                 uid,
-                visibility,
+                access,
                 slug: slug.to_string(),
             }),
             Some(session),

@@ -1,6 +1,6 @@
 //! `POST /api` at the edge: the envelope, the version, and the cookie.
 //!
-//! What is deliberately *not* here: visibility, membership, push validation,
+//! What is deliberately *not* here: access rules, membership, push validation,
 //! and every other rule `lp-cloud-domain` already owns and tests. These
 //! tests only prove that a request reaches the domain as the right caller,
 //! or is refused before it gets there.
@@ -12,9 +12,7 @@ use axum::http::{Request, StatusCode};
 use edge_harness::TestServer;
 use lpc_cloud_api::request::{GetProject, PublishProject};
 use lpc_cloud_api::response::{ProjectInfo, UserInfo};
-use lpc_cloud_api::{
-    Actor, CLOUD_API_VERSION, CloudError, CloudRequest, CloudResponse, Visibility,
-};
+use lpc_cloud_api::{Access, Actor, CLOUD_API_VERSION, CloudError, CloudRequest, CloudResponse};
 use lpc_history::{PrefixedUid, UidPrefix};
 
 /// A client speaking another vocabulary is refused by name, with both
@@ -34,6 +32,28 @@ async fn a_mismatched_version_is_refused_before_the_request_is_read() {
         reply.result,
         Err(CloudError::VersionMismatch {
             client: CLOUD_API_VERSION + 1,
+            server: CLOUD_API_VERSION,
+        })
+    );
+}
+
+/// The concrete case the version-and-refuse policy exists for: a browser tab
+/// still speaking v2 across the access-model redeploy. Its envelope is a
+/// literal here rather than `CLOUD_API_VERSION - 1`, because the point is
+/// that *this* body — a real v2 call, `visibility` field and all — is refused
+/// by name instead of half-decoding into something the server misreads.
+#[tokio::test]
+async fn a_v2_envelope_is_refused_by_name() {
+    let server = TestServer::new();
+    let body = br#"{"version":2,"request":{"publishProject":{"uid":"prj0000000000000000","visibility":"link","slug":"zook-dome"}}}"#;
+
+    let reply = server.call_raw(body, None).await;
+
+    assert_eq!(reply.version, CLOUD_API_VERSION);
+    assert_eq!(
+        reply.result,
+        Err(CloudError::VersionMismatch {
+            client: 2,
             server: CLOUD_API_VERSION,
         })
     );
@@ -165,7 +185,7 @@ async fn a_published_project_is_readable_through_the_plane() {
         .call(
             CloudRequest::PublishProject(PublishProject {
                 uid,
-                visibility: Visibility::Link,
+                access: Access::View,
                 slug: "zook-dome".into(),
             }),
             Some(&session),

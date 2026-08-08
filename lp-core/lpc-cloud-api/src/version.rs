@@ -19,7 +19,12 @@ use crate::error::CloudError;
 ///
 /// v2 = account/session/login-options calls (2026-08-07): `GetMe`,
 /// `UpdateMe`, `ListSessions`, `RevokeSession`, `LoginOptions`.
-pub const CLOUD_API_VERSION: u32 = 2;
+///
+/// v3 = the access model (2026-08-07): `Visibility` → [`Access`](crate::access::Access)
+/// (`none`/`view`/`edit`), `SetVisibility` → `SetAccess`, `ArchiveProject`/
+/// `RestoreProject`, `ProjectMeta.archived`, `ProjectInfo.members`,
+/// `MemberRole::Member` → `Editor`.
+pub const CLOUD_API_VERSION: u32 = 3;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///

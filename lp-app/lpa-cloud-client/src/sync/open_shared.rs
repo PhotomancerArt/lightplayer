@@ -97,7 +97,7 @@ mod tests {
     use crate::sync::publish::publish;
     use crate::sync::pull::pull;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::{CloudError, Visibility};
+    use lpc_cloud_api::{Access, CloudError};
 
     #[test]
     fn an_anonymous_viewer_gets_content_history_and_a_binding() {
@@ -113,7 +113,7 @@ mod tests {
         let published = block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "zook-dome",
             &sidecar("Zook Dome"),
         ))
@@ -151,7 +151,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Private,
+            Access::None,
             "dome",
             &sidecar("Dome"),
         ))
@@ -175,7 +175,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

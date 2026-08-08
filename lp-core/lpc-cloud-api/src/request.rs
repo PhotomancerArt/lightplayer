@@ -21,8 +21,8 @@ use alloc::vec::Vec;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 use serde::{Deserialize, Serialize};
 
+use crate::access::Access;
 use crate::sidecar_meta::SidecarMeta;
-use crate::visibility::Visibility;
 
 /// A client→service request. See [`crate::response::CloudResponse`] for the
 /// matching typed answers, [`crate::call_spec::CloudCallSpec`] for the
@@ -37,8 +37,12 @@ pub enum CloudRequest {
     ListMyProjects,
     /// See [`PublishProject`].
     PublishProject(PublishProject),
-    /// See [`SetVisibility`].
-    SetVisibility(SetVisibility),
+    /// See [`SetAccess`].
+    SetAccess(SetAccess),
+    /// See [`ArchiveProject`].
+    ArchiveProject(ArchiveProject),
+    /// See [`RestoreProject`].
+    RestoreProject(RestoreProject),
     /// See [`AddMember`].
     AddMember(AddMember),
     /// See [`RemoveMember`].
@@ -77,27 +81,47 @@ pub struct ListMyProjects;
 
 /// Publish a project to the cloud service for the first time, minting its
 /// server-side [`crate::project_meta::ProjectMeta`] at the given `slug` and
-/// `visibility`.
+/// `access`.
+///
+/// The service does not default `access` — the client says what publishing
+/// means, and today's client says [`Access::View`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublishProject {
     /// The project's uid (already minted client-side).
     pub uid: PrefixedUid,
-    /// Initial access level.
-    pub visibility: Visibility,
+    /// What holding the link should grant.
+    pub access: Access,
     /// Human-readable slug for share URLs.
     pub slug: String,
 }
 
-/// Change an already-published project's access level.
+/// Change what an already-published project's link grants.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetVisibility {
+pub struct SetAccess {
     /// The project to change.
     pub uid: PrefixedUid,
     /// The new access level.
-    pub visibility: Visibility,
+    pub access: Access,
 }
 
-/// Grant a user access to a `Private` project by email.
+/// Archive a project: it stops resolving for everyone but its members and
+/// refuses every write until [`RestoreProject`]. Owner-only, and reversible —
+/// nothing is deleted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArchiveProject {
+    /// The project to archive.
+    pub uid: PrefixedUid,
+}
+
+/// Undo an [`ArchiveProject`], restoring the project to whatever [`Access`]
+/// it already had. Owner-only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestoreProject {
+    /// The project to restore.
+    pub uid: PrefixedUid,
+}
+
+/// Grant a user access to a project by email, whatever its [`Access`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddMember {
     /// The project to grant access to.
@@ -116,8 +140,9 @@ pub struct RemoveMember {
 }
 
 /// Fetch a project's current metadata, heads, and sidecar. Anonymous callers
-/// are answered when the project is `Visibility::Link`; a `Private` project
-/// answers [`crate::error::CloudError::NotFound`] for anyone without access,
+/// are answered when the project's [`Access`] is `View` or `Edit`; an
+/// `Access::None` (or archived) project answers
+/// [`crate::error::CloudError::NotFound`] for anyone without access,
 /// including anonymous callers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetProject {
@@ -226,9 +251,21 @@ impl From<PublishProject> for CloudRequest {
     }
 }
 
-impl From<SetVisibility> for CloudRequest {
-    fn from(request: SetVisibility) -> Self {
-        CloudRequest::SetVisibility(request)
+impl From<SetAccess> for CloudRequest {
+    fn from(request: SetAccess) -> Self {
+        CloudRequest::SetAccess(request)
+    }
+}
+
+impl From<ArchiveProject> for CloudRequest {
+    fn from(request: ArchiveProject) -> Self {
+        CloudRequest::ArchiveProject(request)
+    }
+}
+
+impl From<RestoreProject> for CloudRequest {
+    fn from(request: RestoreProject) -> Self {
+        CloudRequest::RestoreProject(request)
     }
 }
 
@@ -326,12 +363,24 @@ mod tests {
     fn serde_round_trip_publish_project() {
         let req = CloudRequest::PublishProject(PublishProject {
             uid: uid(),
-            visibility: Visibility::Link,
+            access: Access::View,
             slug: "zook-dome".to_string(),
         });
         let json = serde_json::to_string(&req).unwrap();
         let back: CloudRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back, req);
+    }
+
+    #[test]
+    fn serde_round_trip_archive_and_restore() {
+        for req in [
+            CloudRequest::ArchiveProject(ArchiveProject { uid: uid() }),
+            CloudRequest::RestoreProject(RestoreProject { uid: uid() }),
+        ] {
+            let json = serde_json::to_string(&req).unwrap();
+            let back: CloudRequest = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, req);
+        }
     }
 
     #[test]
@@ -382,6 +431,44 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
             r#"{"getProject":{"uid":"prj0000000000000000"}}"#
+        );
+    }
+
+    /// The v3 access vocabulary pinned: the field is `access`, its values
+    /// are `none`/`view`/`edit`, and `setAccess` is the verb.
+    #[test]
+    fn pinned_json_literal_publish_project() {
+        let req = CloudRequest::PublishProject(PublishProject {
+            uid: PrefixedUid::mint(UidPrefix::Project, &[0u8; 16]),
+            access: Access::View,
+            slug: "zook-dome".to_string(),
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"publishProject":{"uid":"prj0000000000000000","access":"view","slug":"zook-dome"}}"#
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_set_access() {
+        let req = CloudRequest::SetAccess(SetAccess {
+            uid: PrefixedUid::mint(UidPrefix::Project, &[0u8; 16]),
+            access: Access::Edit,
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"setAccess":{"uid":"prj0000000000000000","access":"edit"}}"#
+        );
+    }
+
+    #[test]
+    fn pinned_json_literal_archive_project() {
+        let req = CloudRequest::ArchiveProject(ArchiveProject {
+            uid: PrefixedUid::mint(UidPrefix::Project, &[0u8; 16]),
+        });
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"archiveProject":{"uid":"prj0000000000000000"}}"#
         );
     }
 

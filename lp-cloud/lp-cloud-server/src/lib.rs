@@ -36,7 +36,7 @@
 //! # What the edge owns
 //!
 //! Cookies, transport, hash verification of uploaded bytes, static files,
-//! and OG injection. Not access rules, not visibility, not push validation —
+//! and OG injection. Not access rules, not membership, not push validation —
 //! those are `lp-cloud-domain`'s, and this crate never re-implements or
 //! re-tests them.
 //!
