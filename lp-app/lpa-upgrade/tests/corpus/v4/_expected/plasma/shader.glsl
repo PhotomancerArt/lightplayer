@@ -4,7 +4,7 @@ layout(binding = 2) uniform float speed;
 layout(binding = 3) uniform float scale;
 
 // Classic plasma: three folded sine fields plus a radial term, hue-cycled.
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     float t = time * speed;
     float v = sin((uv.x * scale + t * 0.13) * 6.2831853)

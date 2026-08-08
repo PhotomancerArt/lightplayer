@@ -35,7 +35,7 @@ vec3 palette(float t) {
     );
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec2 c = uv - vec2(0.5, 0.5);
 

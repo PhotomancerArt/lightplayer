@@ -5,7 +5,7 @@
 //! the naga diagnostic text (consumed by browser-integration UX later).
 
 use lp_gfx::GfxError;
-use lp_shader::TextureBindingSpecs;
+use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
 
 use crate::assembly::{assemble_fragment_glsl, assemble_sample_fragment_glsl};
 use crate::tanh_pass::bound_tanh;
@@ -26,7 +26,8 @@ pub struct WgslShader {
 }
 
 /// Translate an authored pixel shader to WGSL at f32 semantics
-/// (fullscreen-triangle wrapper: `render(floor(gl_FragCoord.xy))`).
+/// (fullscreen-triangle wrapper around the declared entry, e.g.
+/// `render_2d(floor(gl_FragCoord.xy))`).
 ///
 /// `textures` is the compile-time `TextureBindingSpec` map; sampling call
 /// sites are lowered against it during assembly and the resulting texture
@@ -34,18 +35,20 @@ pub struct WgslShader {
 pub fn compile_wgsl(
     authored: &str,
     textures: &TextureBindingSpecs,
+    space: ShaderEntrySpace,
 ) -> Result<WgslShader, GfxError> {
-    translate_assembled_glsl(assemble_fragment_glsl(authored, textures)?)
+    translate_assembled_glsl(assemble_fragment_glsl(authored, textures, space)?)
 }
 
 /// Translate the sample-point variant of an authored pixel shader: the same
-/// unit with a wrapper `main` that evaluates `render` at a caller-provided
-/// position varying (see [`crate::sample_pass`]).
+/// unit with a wrapper `main` that evaluates the declared entry at a
+/// caller-provided position varying (see [`crate::sample_pass`]).
 pub fn compile_sample_wgsl(
     authored: &str,
     textures: &TextureBindingSpecs,
+    space: ShaderEntrySpace,
 ) -> Result<WgslShader, GfxError> {
-    translate_assembled_glsl(assemble_sample_fragment_glsl(authored, textures)?)
+    translate_assembled_glsl(assemble_sample_fragment_glsl(authored, textures, space)?)
 }
 
 /// naga `glsl-in` → bounded-tanh pass → validation → `wgsl-out` on an
@@ -93,14 +96,18 @@ mod tests {
     use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
     fn compile_wgsl_no_textures(authored: &str) -> Result<WgslShader, GfxError> {
-        compile_wgsl(authored, &TextureBindingSpecs::new())
+        compile_wgsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
+        )
     }
 
     #[test]
     fn minimal_shader_translates_to_wgsl() {
         let shader = compile_wgsl_no_textures(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
         )
         .expect("translates");
         assert!(shader.wgsl.contains("fn main"), "entry point present");
@@ -111,8 +118,9 @@ mod tests {
     fn sample_unit_translates_with_a_location_zero_input() {
         let shader = compile_sample_wgsl(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
             &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
         )
         .expect("translates");
         assert!(shader.wgsl.contains("fn main"), "entry point present");
@@ -128,7 +136,7 @@ mod tests {
     fn tanh_is_bounded_in_the_emitted_wgsl() {
         let shader = compile_wgsl_no_textures(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return tanh(vec4(pos, pos) * 100.0); }\n",
+             vec4 render_2d(vec2 pos) { return tanh(vec4(pos, pos) * 100.0); }\n",
         )
         .expect("translates");
         assert!(
@@ -141,7 +149,8 @@ mod tests {
     #[test]
     fn broken_shader_reports_a_compile_error_with_diagnostics() {
         let err =
-            match compile_wgsl_no_textures("vec4 render(vec2 pos) { return not_defined(pos); }") {
+            match compile_wgsl_no_textures("vec4 render_2d(vec2 pos) { return not_defined(pos); }")
+            {
                 Err(e) => e,
                 Ok(_) => panic!("must not compile"),
             };
@@ -160,7 +169,7 @@ mod tests {
     fn out_of_order_authored_functions_compile_via_prototypes() {
         let shader = compile_wgsl_no_textures(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return late(pos); }\n\
+             vec4 render_2d(vec2 pos) { return late(pos); }\n\
              vec4 late(vec2 pos) { return vec4(pos, 0.0, 1.0); }\n",
         )
         .expect("prototype splice closes the declaration-order gap");
@@ -181,8 +190,9 @@ mod tests {
         );
         let shader = compile_wgsl(
             "uniform sampler2D inputColor;\n\
-             vec4 render(vec2 pos) { return texelFetch(inputColor, ivec2(pos), 0); }\n",
+             vec4 render_2d(vec2 pos) { return texelFetch(inputColor, ivec2(pos), 0); }\n",
             &textures,
+            ShaderEntrySpace::TwoD,
         )
         .expect("translates");
         assert!(
@@ -216,8 +226,9 @@ mod tests {
         );
         let shader = compile_wgsl(
             "uniform sampler2D t;\n\
-             vec4 render(vec2 pos) { return texture(t, pos / 8.0); }\n",
+             vec4 render_2d(vec2 pos) { return texture(t, pos / 8.0); }\n",
             &textures,
+            ShaderEntrySpace::TwoD,
         )
         .expect("translates");
         assert!(shader.wgsl.contains("textureLoad"), "{}", shader.wgsl);

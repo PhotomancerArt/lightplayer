@@ -21,7 +21,7 @@ use lp_gfx::{GfxError, LpGraphics, ShaderCompileOptions, ShaderFloatImpl, Shader
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lp_shader::ShaderFrontend;
 
-const SHADER: &str = "vec4 render(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }";
+const SHADER: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }";
 
 /// The tier a `float_mode = Float` shader is compiled at on a CPU backend.
 ///

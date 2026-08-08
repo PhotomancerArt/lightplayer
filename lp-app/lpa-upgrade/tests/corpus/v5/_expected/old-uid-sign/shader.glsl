@@ -87,7 +87,7 @@ layout(binding = 2) uniform float palettePhase01;
 layout(binding = 3) uniform float panPhase;
 layout(binding = 4) uniform float scalePhase;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 virtCoord = pos * REF_SIZE / outputSize;

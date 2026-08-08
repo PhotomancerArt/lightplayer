@@ -16,7 +16,7 @@ use lp_shader::{ShaderFrontend, texture_binding};
 use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
 const TEXTURE_SHADER: &str = "uniform sampler2D inputColor;\n\
-                              vec4 render(vec2 pos) { return texelFetch(inputColor, ivec2(pos), 0); }\n";
+                              vec4 render_2d(vec2 pos) { return texelFetch(inputColor, ivec2(pos), 0); }\n";
 
 /// LpsGlsl always; Naga when compiled in (some crate in the test build graph
 /// enables `lp-shader/naga` — probe rather than guess).
@@ -24,7 +24,7 @@ fn available_frontends() -> Vec<ShaderFrontend> {
     let mut list = vec![ShaderFrontend::LpsGlsl];
     let graphics = TargetLpvmGraphics::new(ShaderFrontend::Naga);
     let options = ShaderCompileOptions::new(ShaderSemantics::Q32, ShaderFrontend::Naga);
-    match graphics.compile_shader("vec4 render(vec2 pos) { return vec4(0.0); }", &options) {
+    match graphics.compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.0); }", &options) {
         Err(GfxError::Compile(m)) if m.contains("naga frontend was not built") => {}
         _ => list.push(ShaderFrontend::Naga),
     }

@@ -7,10 +7,12 @@
 //! breaks a link that is already in somebody's chat history, and the same
 //! project reached through two different slugs is the same project.
 //!
-//! This is the server half of the rule; `lpa-studio-web`'s router parses the
-//! same shape client-side (P09).
+//! Thin wrappers over the one shared grammar,
+//! [`lpc_cloud_api::share_link`]; `lpa-studio-web`'s router and
+//! `lpa-cloud-client`'s `ProjectLink` delegate to the same module so all
+//! three parsers agree on what a share URL means.
 
-use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
+use lpc_history::PrefixedUid;
 
 /// The uid a share path points at, or `None` if there is not one in it.
 ///
@@ -18,34 +20,18 @@ use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
 /// and `/p/anything/else/prjXXXXXXXXXXXXXXXXXXXX` both resolve, and a path
 /// with no uid resolves to nothing rather than to a guess.
 pub fn project_uid(share_path: &str) -> Option<PrefixedUid> {
-    let segment = share_path
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|segment| !segment.is_empty())?;
-
-    // The slug may itself contain '-' — and `prj` can even occur inside a
-    // uid body — but the uid's length is FIXED, so the split point is
-    // simply the last `"prj".len() + UID_BODY_LEN` characters. Strict
-    // parsing of that tail is what makes trailing junk a miss rather than
-    // a truncation.
-    let start = segment.len().checked_sub("prj".len() + UID_BODY_LEN)?;
-    let uid: PrefixedUid = segment.get(start..)?.parse().ok()?;
-    (uid.prefix() == UidPrefix::Project).then_some(uid)
+    lpc_cloud_api::share_link::parse_path(share_path)
 }
 
 /// The canonical share path for a project: cosmetic slug, load-bearing uid.
 pub fn canonical(slug: &str, uid: PrefixedUid) -> String {
-    if slug.is_empty() {
-        format!("/p/{uid}")
-    } else {
-        format!("/p/{slug}-{uid}")
-    }
+    lpc_cloud_api::share_link::canonical_path(slug, uid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpc_history::UidPrefix;
 
     #[test]
     fn reads_the_uid_out_of_a_decorated_path() {

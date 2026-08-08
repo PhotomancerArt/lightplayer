@@ -45,14 +45,14 @@ fn write(fs: &LpFsMemory, path: &str, body: &str) {
 
 const PALETTE_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
      layout(binding = 1) uniform sampler2D palette;\n\
-     vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
+     vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
 
 /// One shader with an unbound palette slot. `panel` decides whether the
 /// slot def carries the `panel: "show"` hint.
 fn palette_fs(panel: bool) -> LpFsMemory {
     let hint = if panel { r#", "panel": "show""# } else { "" };
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 7 }\n");
+    write(&fs, "/project.json", "{ \"format\": 8 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,

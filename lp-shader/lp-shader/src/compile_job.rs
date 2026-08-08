@@ -6,6 +6,7 @@ use lps_shared::{LpsModuleSig, TextureStorageFormat};
 use lpvm::{LpvmCompileBudget, LpvmCompileParams, LpvmCompileStepResult, LpvmEngine};
 
 use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
+use crate::entry_space::ShaderEntrySpace;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 
@@ -90,6 +91,10 @@ pub struct ShaderCompileJob<'src, 'engine, E: LpvmEngine> {
     /// unit — both are per-compile choices (`CompilePxDesc`).
     params: LpvmCompileParams,
     textures: TextureBindingSpecs,
+    /// Declared space of the shader being compiled — the entry contract
+    /// validation, both synth passes, and the host-side target-shape check
+    /// all read it (`CompilePxDesc::space`).
+    space: ShaderEntrySpace,
     state: ShaderCompileState<'src, 'engine, E>,
 }
 
@@ -126,6 +131,7 @@ where
                 float_mode: desc.float_mode,
             },
             textures: desc.textures,
+            space: desc.space,
             state,
         }
     }
@@ -199,8 +205,9 @@ where
                     return ShaderCompileStepResult::Failed(err);
                 }
                 let render_fn_index =
-                    match crate::engine::validate_render_sig(&meta, self.output_format) {
-                        Ok(index) => index,
+                    match crate::engine::validate_render_sig(&meta, self.output_format, self.space)
+                    {
+                        Ok(entry) => entry.index,
                         Err(err) => return ShaderCompileStepResult::Failed(err),
                     };
                 let render_texture_fn_name = match crate::synth::synthesise_render_texture(
@@ -209,6 +216,7 @@ where
                     render_fn_index,
                     self.output_format,
                     self.params.float_mode,
+                    self.space,
                 ) {
                     Ok(name) => name,
                     Err(err) => {
@@ -224,6 +232,7 @@ where
                             &mut meta,
                             render_fn_index,
                             self.params.float_mode,
+                            self.space,
                         ) {
                             Ok(name) => Some(name),
                             Err(err) => {
@@ -257,6 +266,7 @@ where
                                 meta,
                                 &ir,
                                 self.output_format,
+                                self.space,
                                 render_fn_index,
                                 render_texture_fn_name,
                                 render_samples_fn_name,
@@ -301,6 +311,7 @@ where
                         meta,
                         &ir,
                         self.output_format,
+                        self.space,
                         render_fn_index,
                         render_texture_fn_name,
                         render_samples_fn_name,

@@ -2,10 +2,10 @@
 //!
 //! Responses mirror requests one-to-one where the request produces a
 //! distinct payload; a request whose only job is to mutate project state
-//! (`PublishProject`, `SetVisibility`, `AddMember`, `RemoveMember`) answers
-//! with the resulting [`ProjectInfo`] rather than a bare acknowledgement, so
-//! the caller never needs a follow-up `GetProject` to see what it just
-//! changed.
+//! (`PublishProject`, `SetAccess`, `ArchiveProject`, `RestoreProject`,
+//! `AddMember`, `RemoveMember`) answers with the resulting [`ProjectInfo`]
+//! rather than a bare acknowledgement, so the caller never needs a follow-up
+//! `GetProject` to see what it just changed.
 //!
 //! Like the requests, each response is a **struct** and [`CloudResponse`] is
 //! the closed set of them as newtype variants. External tagging means the
@@ -23,6 +23,7 @@ use crate::actor::Actor;
 use crate::head_info::{HeadInfo, PushOutcome};
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
+use crate::member_info::MemberInfo;
 use crate::project_meta::ProjectMeta;
 use crate::session_info::SessionList;
 use crate::sidecar_meta::SidecarMeta;
@@ -71,8 +72,8 @@ pub struct ProjectList {
 }
 
 /// Answers [`crate::request::GetProject`] and the mutating project requests
-/// (`PublishProject`, `SetVisibility`, `AddMember`, `RemoveMember`) with the
-/// resulting state.
+/// (`PublishProject`, `SetAccess`, `ArchiveProject`, `RestoreProject`,
+/// `AddMember`, `RemoveMember`) with the resulting state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectInfo {
     /// Identity and access metadata.
@@ -81,6 +82,15 @@ pub struct ProjectInfo {
     pub heads: Vec<HeadInfo>,
     /// Client-computed display metadata from the most recent commit.
     pub sidecar: SidecarMeta,
+    /// Who has been granted access by email, or `None` when the caller is
+    /// not entitled to know.
+    ///
+    /// The member list is a list of people's **email addresses**, so it is
+    /// answered to the people on it — the project's members — and to nobody
+    /// else. A link-holder gets `None` however much the link grants them:
+    /// an [`Access::Edit`](crate::access::Access::Edit) link is write access
+    /// to the project, never access to the roster of who else has it.
+    pub members: Option<Vec<MemberInfo>>,
 }
 
 /// Answers [`crate::request::GetHeads`].
@@ -189,7 +199,8 @@ impl From<LoginOptionsInfo> for CloudResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::visibility::Visibility;
+    use crate::access::Access;
+    use crate::member_role::MemberRole;
     use alloc::string::ToString;
     use alloc::vec;
     use lpc_history::{PrefixedUid, UidPrefix};
@@ -214,8 +225,9 @@ mod tests {
             meta: ProjectMeta {
                 uid: uid(),
                 slug: "zook-dome".to_string(),
-                visibility: Visibility::Link,
+                access: Access::View,
                 owner: Actor::Anonymous,
+                archived: false,
             },
             heads: vec![HeadInfo {
                 tree: ContentHash::of(b"tree"),
@@ -226,8 +238,41 @@ mod tests {
                 format_version: 4,
                 preview_png: None,
             },
+            members: Some(vec![MemberInfo {
+                email: "yona@example.com".to_string(),
+                role: MemberRole::Owner,
+                pending: false,
+                user: Some(PrefixedUid::mint(UidPrefix::User, &[5u8; 16])),
+            }]),
         });
         let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    /// A caller with no claim on the member list gets a `null` there, not an
+    /// empty list: "you may not know" and "nobody has been invited" are
+    /// different answers.
+    #[test]
+    fn serde_round_trip_project_info_without_members() {
+        let resp = CloudResponse::ProjectInfo(ProjectInfo {
+            meta: ProjectMeta {
+                uid: uid(),
+                slug: "zook-dome".to_string(),
+                access: Access::View,
+                owner: Actor::Anonymous,
+                archived: true,
+            },
+            heads: vec![],
+            sidecar: SidecarMeta {
+                name: "Zook Dome".to_string(),
+                format_version: 4,
+                preview_png: None,
+            },
+            members: None,
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""members":null"#), "{json}");
         let back: CloudResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(back, resp);
     }

@@ -5,7 +5,7 @@
 //! [`meta_store_conformance_tests!`].
 
 use lp_cloud_domain::{CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord};
-use lpc_cloud_api::Visibility;
+use lpc_cloud_api::Access;
 use lpc_history::ContentHash;
 
 use crate::conformance::fixtures::{
@@ -32,6 +32,7 @@ macro_rules! meta_store_conformance_tests {
             users_are_ordered_oldest_first_and_capped_at_the_limit,
             profile_fields_and_session_metadata_round_trip,
             projects_round_trip_by_uid,
+            projects_round_trip_every_access_level_and_the_archive_stamp,
             replacing_a_project_keeps_its_members_refs_events_and_sidecar,
             projects_for_user_lists_only_resolved_memberships,
             pending_membership_resolves_at_first_login,
@@ -213,12 +214,47 @@ pub fn projects_round_trip_by_uid(store: &mut dyn MetaStore) {
 
     let project = store.project(uid).expect("the project was stored");
     assert_eq!(project.owner, owner);
-    assert_eq!(project.visibility, Visibility::Private);
+    assert_eq!(project.access, Access::None);
+    assert_eq!(project.archived_at, None);
     assert_eq!(store.project(project_uid(9)), None);
 }
 
-/// `put_project` is an upsert, and the service calls it that way — a
-/// visibility change re-puts the record. Everything hanging off the project
+/// Every [`Access`] level survives the trip, and so does an archive stamp —
+/// the two columns 0003 added, read back as the domain wrote them.
+pub fn projects_round_trip_every_access_level_and_the_archive_stamp(store: &mut dyn MetaStore) {
+    let owner = seed_user(store, 1);
+    let uid = seed_project(store, 1, owner);
+    let stored = store.project(uid).expect("the project was stored");
+
+    for access in [Access::None, Access::View, Access::Edit] {
+        store.put_project(CloudProject {
+            access,
+            ..stored.clone()
+        });
+        assert_eq!(
+            store.project(uid).map(|project| project.access),
+            Some(access)
+        );
+    }
+
+    store.put_project(CloudProject {
+        archived_at: Some(42.5),
+        ..stored.clone()
+    });
+    assert_eq!(
+        store.project(uid).and_then(|project| project.archived_at),
+        Some(42.5)
+    );
+    store.put_project(stored);
+    assert_eq!(
+        store.project(uid).and_then(|project| project.archived_at),
+        None,
+        "restoring clears the stamp rather than leaving the old one"
+    );
+}
+
+/// `put_project` is an upsert, and the service calls it that way — an
+/// access change re-puts the record. Everything hanging off the project
 /// has to survive that. (In SQL this is the difference between an upsert
 /// and `INSERT OR REPLACE`, which deletes the row first and takes every
 /// cascading child with it.)
@@ -237,13 +273,13 @@ pub fn replacing_a_project_keeps_its_members_refs_events_and_sidecar(store: &mut
 
     let existing = store.project(project).expect("the project was stored");
     store.put_project(CloudProject {
-        visibility: Visibility::Link,
+        access: Access::View,
         ..existing
     });
 
     assert_eq!(
-        store.project(project).map(|project| project.visibility),
-        Some(Visibility::Link)
+        store.project(project).map(|project| project.access),
+        Some(Access::View)
     );
     assert_eq!(store.members(project).len(), 1);
     assert_eq!(store.refs(project).heads.len(), 1);
@@ -268,14 +304,14 @@ pub fn projects_for_user_lists_only_resolved_memberships(store: &mut dyn MetaSto
         joined,
         "user2@example.com",
         Some(member),
-        MemberRole::Member,
+        MemberRole::Editor,
     ));
     // Pending: an invitation is not a key.
     store.put_member(sample_member(
         invited,
         "user2@example.com",
         None,
-        MemberRole::Member,
+        MemberRole::Editor,
     ));
 
     let uids: Vec<_> = store
@@ -297,7 +333,7 @@ pub fn pending_membership_resolves_at_first_login(store: &mut dyn MetaStore) {
         project,
         "later@example.com",
         None,
-        MemberRole::Member,
+        MemberRole::Editor,
     ));
 
     let user = seed_user(store, 2);
@@ -321,7 +357,7 @@ pub fn membership_rows_are_keyed_by_project_and_email(store: &mut dyn MetaStore)
         (project, "a@example.com"),
         (other, "c@example.com"),
     ] {
-        store.put_member(sample_member(project, email, None, MemberRole::Member));
+        store.put_member(sample_member(project, email, None, MemberRole::Editor));
     }
 
     // Deterministic order: email-sorted within a project.
@@ -356,7 +392,7 @@ pub fn member_for_user_ignores_pending_rows(store: &mut dyn MetaStore) {
         project,
         "pending@example.com",
         None,
-        MemberRole::Member,
+        MemberRole::Editor,
     ));
 
     assert_eq!(store.member_for_user(project, user), None);
@@ -365,7 +401,7 @@ pub fn member_for_user_ignores_pending_rows(store: &mut dyn MetaStore) {
         project,
         "user2@example.com",
         Some(user),
-        MemberRole::Member,
+        MemberRole::Editor,
     ));
     let found = store
         .member_for_user(project, user)

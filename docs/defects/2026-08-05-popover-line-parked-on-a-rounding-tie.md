@@ -1,6 +1,7 @@
 ---
-status: open          # diagnosed 2026-08-05, not fixed
+status: fixed         # diagnosed 2026-08-05; fixes (1)+(2) landed 2026-08-08
 found: 2026-08-05     # how: ci (two consecutive validate-stories captures of the same tree)
+fixed: 1f253f62d
 area: lpa-studio-web/src/base/popover.rs + lpa-studio-web/src/style.css (.ux-node-ui-status-popup-error-detail)
 class: metastable-rounding-boundary
 related:
@@ -141,10 +142,25 @@ between loads. The 1px case above (920.2 vs 921.2) is larger than what CI
 captured (CI's variation was sub-pixel — a 1px panel move would have
 shifted all five lines, not one). That wobble is its own open question.
 
-## Fix (none landed)
+## Fix (1 and 2 landed 2026-08-08)
 
-Ranked, and deliberately not "raise the tolerance" — the debt entry's
-exit criterion (5b) rules that out explicitly:
+Both landed together: `PopoverPosition::from_anchor` snaps `left`/`top`
+to the device-pixel grid at creation (so the emitted style, the animated
+outline's final rect, and the clip inset all read the same
+whole-device-pixel geometry), `open_trigger_style` snaps the top-layer
+trigger copy's position (rounding) and size (ceiling, so the copy can
+never re-wrap a fraction narrower than the in-flow button), and
+`.ux-node-ui-status-popup-error-detail` / `.ux-node-ui-json` get an
+integral `line-height: 16px`. The trigger-copy half also explains the
+`studio__home__new-project-menu__menu-open__sm` flap seen on in-flight
+branches: the "New" trigger's glyphs re-render in the top layer at the
+measured 0.1px-quantized position, so they inherit the same wobble the
+panel did. (3) — why the underlying measurement wobbles — remains open,
+but (1)+(2) make renders insensitive to it below half a device pixel.
+
+The original ranking, kept for the record — deliberately not "raise the
+tolerance", the debt entry's exit criterion (5b) rules that out
+explicitly:
 
 1. **Emit whole-pixel popover positions** (`{:.0}`, or round before
    formatting, in `PopoverPosition::style()`). This collapses the

@@ -8,13 +8,30 @@ use lpa_studio_core::{HomeOp, UiAction};
 
 use crate::app::home::package_card::home_action;
 use crate::base::{LogoStacked, StudioIcon, StudioIconName};
+use crate::cloud::SharedOpenState;
 
 /// The landing stub: the brand, what this is, and three ways in.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
+    // A `/p/` link that landed here (P6): one quiet line about where it
+    // stands — opening, or the calm refusal that never says which of
+    // restricted/archived/absent it was. Stories provide no context and
+    // render nothing.
+    let shared_open = try_consume_context::<Signal<SharedOpenState>>();
+    let shared_line = shared_open.and_then(|state| {
+        let state = state();
+        state.line().map(|line| (line, state.is_refusal()))
+    });
     rsx! {
         section { class: "tw:flex tw:min-h-[60vh] tw:flex-col tw:items-center tw:justify-center tw:gap-8 tw:text-center",
+            if let Some((line, refusal)) = shared_line {
+                p {
+                    class: if refusal { "{SHARED_LINE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground" } else { "{SHARED_LINE_CLASS} tw:border-border tw:bg-card tw:text-muted-foreground" },
+                    role: "status",
+                    "{line}"
+                }
+            }
             LogoStacked { size: 96 }
             p { class: "tw:m-0 tw:max-w-md tw:text-sm tw:text-muted-foreground",
                 "Friendly shaders, everywhere"
@@ -82,3 +99,7 @@ fn DiveInCard(
 }
 
 const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:bg-card-raised";
+
+/// The one quiet line for a `/p/` link's fate (tone classes appended).
+const SHARED_LINE_CLASS: &str =
+    "tw:m-0 tw:max-w-md tw:rounded-md tw:border tw:px-4 tw:py-2.5 tw:text-xs tw:leading-snug";

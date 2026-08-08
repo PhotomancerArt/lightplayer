@@ -10,6 +10,6 @@ float get_val() { return 1.0; }
 const float BAD = get_val();  // expected-error {{unknown constructor or non-const function}}
 
 // Naga stops after the const initializer error; `BAD` is never bound for a follow-up diagnostic.
-float render() {
+float probe() {
     return BAD;
 }

@@ -78,11 +78,30 @@ is the reminder mechanism. The ritual, alongside `just format-bump`:
   are **our** contract, human-reviewed once and frozen thereafter. They
   deliberately do not match today's `examples/` and `projects/test/`, which
   were hand-polished past behavior preservation.
+- `tests/corpus/v5/<project>/` — real format-5 projects: the two frozen
+  `schemas/history/v5/fixtures/` snapshots (`quad-strips-v3`, a bare
+  single-shader project; `fyeah-sign`, multi-shader), plus `basic` (pulled
+  from `examples/basic/`), chosen because its `shader.glsl` has two comments
+  that literally contain the word `render` next to the entry — proof the
+  signature-anchored rename does not touch comment text.
+- `tests/corpus/v5/_expected/<project>/` — same contract as the v4 goldens,
+  own test file (`corpus_goldens_v5.rs`).
+
+A project's goldens live in a **separate test file per corpus version**
+(`corpus_goldens.rs` for v4, `corpus_goldens_v5.rs` for v5, and so on): each
+migration's assertions are specific to what it actually changed (the v4→v5
+goldens assert nothing still references `bus:time`; the v5→v6 goldens assert
+nothing still defines a bare `render` entry), so sharing one generic test
+file across migrations would either genericize those assertions into
+uselessness or bit-rot them. `upgrade_to_current` always walks the *whole*
+remaining chain, though — the v4 corpus goes through both steps now, so its
+goldens carry the v5→v6 rename too. A format bump touches every existing
+corpus version's goldens (re-bless and read the diff), not just the new one.
 
 Regenerate after an intentional change:
 
 ```bash
-LPA_UPGRADE_BLESS=1 cargo test -p lpa-upgrade --test corpus_goldens
+LPA_UPGRADE_BLESS=1 cargo test -p lpa-upgrade --test corpus_goldens --test corpus_goldens_v5
 ```
 
 then read every line of `git diff` before committing. A blessed golden nobody

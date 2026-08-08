@@ -13,7 +13,7 @@ float circleMask(vec2 uv, vec2 center, float radius) {
     return 1.0 - smoothstep(inner * inner, radius * radius, d2);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec3 color = vec3(0.012, 0.015, 0.020);
 

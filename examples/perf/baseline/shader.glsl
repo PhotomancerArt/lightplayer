@@ -83,7 +83,7 @@ layout(binding = 2) uniform float palettePhase01;
 layout(binding = 3) uniform float panPhase;
 layout(binding = 4) uniform float scalePhase;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Palette cycle: 5s per palette, 1s smooth transition to next. One 25 s
     // phasor carries both the palette index and the blend phase.
     float cyclePhase = mod(palettePhase01 * 25.0, 5.0);
