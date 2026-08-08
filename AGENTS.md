@@ -183,6 +183,11 @@ The core is IO-free state machines; async belongs to platform edges. See
   `Display`/`FromStr` change in a type that appears in `schemas/` or in any
   `*.json` a user's library can hold. If old bytes would no longer round-
   trip, the change ships WITH its migration step or it does not ship.
+- **A green PR with a known-incomplete compat story must say so on the PR
+  itself** the moment the gap is found — convert it to draft or comment
+  "DO NOT MERGE: <what's in flight>". "Green and mergeable" is read as
+  "ready"; work happening in a session is invisible to the merge button.
+  (docs/incidents/2026-08-08-uid-format-broke-prod-projects.md, cause 4.)
 
 ## Architecture Quick Reference
 
