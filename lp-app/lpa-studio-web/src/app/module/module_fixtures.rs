@@ -284,7 +284,7 @@ pub(crate) fn transport_control(
     UiPanelControlView::new(
         anchor,
         UiPanelControl {
-            label: "Transport".to_string(),
+            label: "Time".to_string(),
             address: Some(walk_address(ROOT_SCOPE, "transport.rate")),
             widget: UiPanelWidget::Transport {
                 transport: transport.clone(),
@@ -302,10 +302,11 @@ pub(crate) fn transport_control(
     )
 }
 
-/// A root panel whose first control is the clock's Transport, with the
-/// scarf's brightness fader and a knob beside it — the real shape of the
-/// panel a phone opens onto, so the instrument is judged in company rather
-/// than alone.
+/// A root panel with the clock's Transport in its own "Clock" child group
+/// (the production assembly shape — an instrument never sits in the flat
+/// strip; G2 feedback 2026-08-08), plus the scarf's brightness fader and a
+/// knob in the flat strip — the real shape of the panel a phone opens
+/// onto, so the instrument is judged in company rather than alone.
 pub(crate) fn transport_panel(
     transport: lpa_studio_core::UiClockTransport,
     channels: [(UiPanelWireRole, &str); 3],
@@ -313,10 +314,6 @@ pub(crate) fn transport_panel(
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
         .with_target(scope_target(ROOT_SCOPE))
         .with_controls(vec![
-            at_default(
-                transport_control(transport, channels),
-                "the clock's own transport",
-            ),
             at_default(
                 fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
                 "authored 200",
@@ -326,6 +323,12 @@ pub(crate) fn transport_panel(
                 "0.41",
                 "lfo · hue",
             ),
+        ])
+        .with_groups(vec![
+            UiPanelGroup::new("Clock", "/aurora.sign/clock").with_controls(vec![at_default(
+                transport_control(transport, channels),
+                "the clock's own transport",
+            )]),
         ])
 }
 
