@@ -2839,6 +2839,169 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     );
 }
 
+/// The `space` sections both visual-side cards grow (plan-B P3), against a
+/// REAL projection: the slot rows have to flatten the way the derivation
+/// assumes, the claimed rows have to leave the advanced drawer, and the
+/// preview has to come back tagged with the space it rendered in.
+#[test]
+fn space_sections_derive_and_claim_their_rows_end_to_end() {
+    use crate::{UiSpaceCellRole, UiSpaceFlagRole, UiSpaceSide, UiVisualSpace};
+
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // -- producer side ----------------------------------------------------
+    let shader = node_by_kind(&snapshot, "Shader");
+    let Some(UiNodeFace::Shader(face)) = &shader.face else {
+        panic!("shader node derives a shader face");
+    };
+    let space = face
+        .space
+        .as_ref()
+        .expect("the shader card's space section");
+    assert_eq!(space.side, UiSpaceSide::Producer);
+    assert_eq!(
+        space.declared_space,
+        Some(UiVisualSpace::TwoD),
+        "every shader authored before this plan declares 2D"
+    );
+    assert_eq!(space.primary.active, "TwoD");
+    assert_eq!(
+        space.primary.choices.len(),
+        2,
+        "both declared variants reach the picker"
+    );
+    let in_1d = space
+        .cell(UiSpaceCellRole::ProducerIn1d)
+        .expect("a 2D shader carries its 1D answer cell");
+    assert_eq!(
+        in_1d
+            .address
+            .as_ref()
+            .expect("the answer cell is addressed")
+            .path
+            .to_string(),
+        "space.TwoD.in_1d",
+        "the cell dispatches EnsurePresent at the real slot path"
+    );
+    assert!(
+        !in_1d.is_choosable(),
+        "centre scanline is the only declared answer today"
+    );
+    assert!(space.mismatch.is_none(), "the demo shader compiles");
+    assert!(
+        !config_row_keys(&shader).iter().any(|key| key == "space"),
+        "the section CLAIMED the row: {:?}",
+        config_row_keys(&shader)
+    );
+
+    // The hero preview is space-tagged now, and the card previews exactly
+    // one space by default — its producer's own.
+    assert_eq!(
+        face.preview
+            .spaces
+            .iter()
+            .map(|view| (view.space, view.hero))
+            .collect::<Vec<_>>(),
+        vec![(UiVisualSpace::TwoD, true)],
+        "default = primary-space-only (D15)"
+    );
+    // …and once a probe has actually answered, the view carries the
+    // metadata the D15 caption reads (`native · 2D` here).
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+    let shader = node_by_kind(&snapshot, "Shader");
+    let Some(UiNodeFace::Shader(face)) = &shader.face else {
+        panic!("shader node derives a shader face");
+    };
+    let hero = &face.preview.spaces[0];
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::VisualSrgb8 { .. }),
+        "the hero space carries the probed bytes, got {:?}",
+        hero.preview
+    );
+    let meta = hero.meta.expect("the probe answered space metadata");
+    assert_eq!(meta.primary, UiVisualSpace::TwoD);
+    assert_eq!(meta.space, UiVisualSpace::TwoD);
+    assert_eq!(
+        meta.projection, None,
+        "a 2D producer asked for 2D projects nothing"
+    );
+
+    // -- consumer side (the mirror) ---------------------------------------
+    let fixture = node_by_kind(&snapshot, "Fixture");
+    let Some(UiNodeFace::Fixture(face)) = &fixture.face else {
+        panic!("fixture node derives a fixture face");
+    };
+    let space = face
+        .space
+        .as_ref()
+        .expect("the fixture card's space section");
+    assert_eq!(space.side, UiSpaceSide::Consumer);
+    assert_eq!(space.declared_space, None, "a fixture states a policy");
+    assert_eq!(space.primary.active, "Auto");
+    assert!(
+        space.cells.is_empty(),
+        "Auto is the unexpanded state — a unit variant has no payload rows"
+    );
+    let strip = space
+        .flag(UiSpaceFlagRole::StripOrderMeaningful)
+        .expect("the strip-order flag");
+    assert!(strip.value, "a bare strip is {{1D}} by default (D3)");
+    assert_eq!(
+        strip
+            .address
+            .as_ref()
+            .expect("the flag is addressed")
+            .path
+            .to_string(),
+        "strip_order_meaningful",
+    );
+    let keys = config_row_keys(&fixture);
+    assert!(
+        !keys
+            .iter()
+            .any(|key| key == "consume" || key == "strip_order_meaningful"),
+        "both consumer rows left the drawer: {keys:?}"
+    );
+    assert!(
+        keys.iter().any(|key| key == "mapping"),
+        "and the drawer keeps everything the section did not claim: {keys:?}"
+    );
+}
+
+/// Top-level config-row keys in a card's advanced drawer.
+fn config_row_keys(node: &UiNodeView) -> Vec<String> {
+    node.tabs
+        .iter()
+        .flat_map(|tab| match &tab.body {
+            crate::UiNodeTabBody::Sections(sections) => sections.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|section| match section {
+            crate::UiNodeSection::ConfigSlots(rows) => Some(rows),
+            _ => None,
+        })
+        .flatten()
+        .map(|row| row.key)
+        .collect()
+}
+
 fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
     let bytes = server
         .borrow()

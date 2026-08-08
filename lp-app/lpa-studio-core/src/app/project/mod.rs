@@ -66,7 +66,9 @@ pub use node::{
     ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
     UiImportablePattern, UiNodeRemovePreflight,
 };
-pub use node_card_ui_state::{ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp};
+pub use node_card_ui_state::{
+    ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
+};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
@@ -82,7 +84,7 @@ pub use project_op::ProjectOp;
 pub use project_runtime_summary::ProjectRuntimeSummary;
 pub use project_snapshot::ProjectSnapshot;
 pub use project_state::ProjectState;
-pub use project_sync::{ProjectSync, UiTimebaseRead};
+pub use project_sync::{ProjectSync, UiProductSpaceRequest, UiTimebaseRead, visual_probe_request};
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;

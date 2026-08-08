@@ -556,6 +556,101 @@ pub(crate) fn shader_face(speed_bound: bool, agent_status: UiAgentStatus) -> UiS
         controls: shader_controls(speed_bound),
         agent: Some(shader_agent_view(agent_status)),
         code_drawer: Some(shader_code_editor()),
+        space: Some(shader_space_section()),
+    }
+}
+
+// -- space sections (plan-B P3/P4) -------------------------------------------
+//
+// Hand-built mirrors of what `node_space_section` derives from the real
+// `space` / `consume` rows, so the space stories stay a faithful design
+// record of the two-sided model: same DTO on both sides, addresses that a
+// live card would really dispatch `EnsurePresent`/`SetValue` at.
+
+/// One space cell, addressed at `path` so the story's picker is live.
+fn space_cell(
+    role: lpa_studio_core::UiSpaceCellRole,
+    label: &str,
+    path: &str,
+    active: &str,
+    choices: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)],
+) -> lpa_studio_core::UiSpaceCell {
+    lpa_studio_core::UiSpaceCell {
+        role,
+        label: label.to_string(),
+        active: active.to_string(),
+        active_label: choices
+            .iter()
+            .find(|(variant, ..)| *variant == active)
+            .map(|(_, label, _)| (*label).to_string())
+            .unwrap_or_else(|| active.to_string()),
+        choices: choices
+            .iter()
+            .map(
+                |(variant, label, projection)| lpa_studio_core::UiSpaceChoice {
+                    variant: (*variant).to_string(),
+                    label: (*label).to_string(),
+                    projection: *projection,
+                    selected: *variant == active,
+                },
+            )
+            .collect(),
+        address: Some(story_slot_address(path)),
+        state: UiSlotFieldState::editable(),
+    }
+}
+
+/// The ordinary producer section: a 2D shader, answering 1D consumers with
+/// the only answer there is (centre scanline).
+pub(crate) fn shader_space_section() -> lpa_studio_core::UiSpaceSection {
+    use lpa_studio_core::{UiSpaceCellRole, UiSpaceSection, UiSpaceSide, UiVisualSpace};
+    UiSpaceSection {
+        side: UiSpaceSide::Producer,
+        primary: space_cell(
+            UiSpaceCellRole::Primary,
+            "Space",
+            "space",
+            "TwoD",
+            &[("TwoD", "2D", None), ("OneD", "1D", None)],
+        ),
+        declared_space: Some(UiVisualSpace::TwoD),
+        cells: vec![space_cell(
+            UiSpaceCellRole::ProducerIn1d,
+            "To 1D consumers",
+            "space.TwoD.in_1d",
+            "Default",
+            &[("Default", "default", None)],
+        )],
+        flags: Vec::new(),
+        mismatch: None,
+    }
+}
+
+/// The consumer mirror in its unexpanded state: `Auto`, plus the
+/// strip-order declaration (D3).
+pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
+    use lpa_studio_core::{
+        UiSpaceCellRole, UiSpaceFlag, UiSpaceFlagRole, UiSpaceSection, UiSpaceSide,
+    };
+    UiSpaceSection {
+        side: UiSpaceSide::Consumer,
+        primary: space_cell(
+            UiSpaceCellRole::Primary,
+            "Consume",
+            "consume",
+            "Auto",
+            &[("Auto", "auto", None), ("Policy", "policy", None)],
+        ),
+        declared_space: None,
+        cells: Vec::new(),
+        flags: vec![UiSpaceFlag {
+            role: UiSpaceFlagRole::StripOrderMeaningful,
+            label: "Strip order means something".to_string(),
+            value: true,
+            address: Some(story_slot_address("strip_order_meaningful")),
+            state: UiSlotFieldState::editable(),
+        }],
+        mismatch: None,
     }
 }
 
@@ -604,6 +699,7 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
         // Opted out (budget 0) — the only state with no readout now that an
         // unstated budget falls back to the default guard.
         power: None,
+        space: Some(fixture_space_section()),
     }
 }
 
@@ -667,6 +763,7 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
             UiSlotSourceState::Unset,
         ),
         power: None,
+        space: Some(fixture_space_section()),
     }
 }
 
