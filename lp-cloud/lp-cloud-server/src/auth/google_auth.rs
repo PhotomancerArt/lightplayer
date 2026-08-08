@@ -599,8 +599,8 @@ mod tests {
     fn an_ordinary_relative_path_survives() {
         assert_eq!(safe_next_path("/"), Some("/".into()));
         assert_eq!(
-            safe_next_path("/p/zook-dome-prj_abc?tab=play"),
-            Some("/p/zook-dome-prj_abc?tab=play".into())
+            safe_next_path("/p/zook-dome-prjabc?tab=play"),
+            Some("/p/zook-dome-prjabc?tab=play".into())
         );
         assert_eq!(safe_next_path("  /projects  "), Some("/projects".into()));
     }

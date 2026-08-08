@@ -30,7 +30,7 @@ async fn unsolicited_hello_with_matching_proto_makes_the_session_ready() {
     let (connector, endpoint_id, _device) =
         fake_device_connector(FakeDeviceScript::new(FakeBootState::LightPlayer(
             FakeLightPlayerState::new()
-                .with_identity(FakeDeviceIdentity::new("dev_fakefakefakefak0", "Bench")),
+                .with_identity(FakeDeviceIdentity::new("devfakefakefakefake", "Bench")),
         )));
     let (sink, events) = recording_sink();
     let session = DeviceSession::connect(connector, &endpoint_id, test_timers(), sink)
@@ -43,7 +43,7 @@ async fn unsolicited_hello_with_matching_proto_makes_the_session_ready() {
         panic!("expected Ready, got {state:?}");
     };
     assert_eq!(hello.proto, WIRE_PROTO_VERSION);
-    assert_eq!(hello.device_uid.as_deref(), Some("dev_fakefakefakefak0"));
+    assert_eq!(hello.device_uid.as_deref(), Some("devfakefakefakefake"));
     assert_eq!(session.hello(), Some(hello));
 
     let states = recorded_states(&events);
@@ -473,7 +473,7 @@ async fn reset_replays_the_boot_and_lands_ready_again() {
     let (connector, endpoint_id, _device) =
         fake_device_connector(FakeDeviceScript::new(FakeBootState::LightPlayer(
             FakeLightPlayerState::new()
-                .with_identity(FakeDeviceIdentity::new("dev_fakefakefakefak0", "Bench")),
+                .with_identity(FakeDeviceIdentity::new("devfakefakefakefake", "Bench")),
         )));
     let session = DeviceSession::connect(
         connector,
@@ -494,7 +494,7 @@ async fn reset_replays_the_boot_and_lands_ready_again() {
     let DeviceState::Ready { hello } = outcome.state else {
         panic!("expected Ready after reset, got {:?}", outcome.state);
     };
-    assert_eq!(hello.device_uid.as_deref(), Some("dev_fakefakefakefak0"));
+    assert_eq!(hello.device_uid.as_deref(), Some("devfakefakefakefake"));
 }
 
 #[tokio::test]

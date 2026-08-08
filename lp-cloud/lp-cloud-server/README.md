@@ -181,7 +181,7 @@ With `just cloud-serve` running at `$BASE` (the URL it printed):
 curl -c /tmp/lp.jar "$BASE/auth/dev?email=you@example.com"
 
 # 2. publish a project at a client-minted uid, link-visible
-UID=prj_$(LC_ALL=C tr -dc '0-9A-Za-z' </dev/urandom | head -c 16)
+UID=prj$(LC_ALL=C tr -dc '0-9a-hj-km-np-tv-z' </dev/urandom | head -c 16)
 curl -b /tmp/lp.jar -X POST "$BASE/api" -H 'content-type: application/json' \
   -d "{\"version\":1,\"request\":{\"publishProject\":{\"uid\":\"$UID\",\"visibility\":\"link\",\"slug\":\"zook-dome\"}}}"
 

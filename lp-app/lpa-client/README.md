@@ -68,7 +68,7 @@ injected request-idle budget (expiry lands the device on `Unresponsive`).
 ## Server Hello
 
 Servers announce themselves with a `ServerHello` (wire protocol version,
-firmware build provenance, optional stamped `dev_…` uid): once unsolicited
+firmware build provenance, optional stamped `dev…` uid): once unsolicited
 as the first id-0 frame when the server loop starts serving, and on demand
 via `ClientRequest::Hello`. This crate surfaces it two ways:
 

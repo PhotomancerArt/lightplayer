@@ -160,13 +160,13 @@ mod tests {
         assert_eq!(apply(&mut conn, &MIGRATIONS[..1]).unwrap(), 1);
         conn.execute(
             "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
-             VALUES ('usr_x', 'g-1', 'x@example.com', 'X', 1.0)",
+             VALUES ('usrx', 'g-1', 'x@example.com', 'X', 1.0)",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO sessions (token_hash, user_uid, expires_at)\n\
-             VALUES ('deadbeef', 'usr_x', 100.0)",
+             VALUES ('deadbeef', 'usrx', 100.0)",
             [],
         )
         .unwrap();
@@ -176,7 +176,7 @@ mod tests {
 
         let (email, given_name, provider): (String, Option<String>, String) = conn
             .query_row(
-                "SELECT email, given_name, provider FROM users WHERE uid = 'usr_x'",
+                "SELECT email, given_name, provider FROM users WHERE uid = 'usrx'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )

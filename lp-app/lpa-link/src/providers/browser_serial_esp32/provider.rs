@@ -578,7 +578,7 @@ impl LinkProvider for BrowserSerialEsp32Provider {
     /// This is the ONE place a grant dies. Without it, "forget this
     /// device" was undone by the next page load: the grant survived, the
     /// auto-connect sweep re-enumerated the port, and the silicon-anchored
-    /// identity re-derived the same `dev_` uid, so the sighting write
+    /// identity re-derived the same `dev` uid, so the sighting write
     /// recreated the registry row the user had just deleted.
     ///
     /// Endpoint state goes first so a failed `forget()` cannot leave this

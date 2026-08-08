@@ -22,7 +22,7 @@ pub const FAKE_PROBED_MAC: &str = "60:55:F9:0A:0B:0C";
 /// `/.lp/device.json` at the device's fs ROOT.
 ///
 /// Serializes to the same JSON shape the studio writes when stamping
-/// (`{"uid": "dev_…", "name": "…"}`). The uid also rides the wire hello as
+/// (`{"uid": "dev…", "name": "…"}`). The uid also rides the wire hello as
 /// `device_uid`.
 #[derive(Clone, Debug, Serialize)]
 pub struct FakeDeviceIdentity {

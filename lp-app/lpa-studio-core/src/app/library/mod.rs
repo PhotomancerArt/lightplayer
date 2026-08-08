@@ -5,9 +5,9 @@
 //! `LpFsMemory` in host tests — with randomness and timestamps injected.
 //!
 //! Invariants:
-//! - **The uid is identity** (`prj_…` in `project.json`); directory names
+//! - **The uid is identity** (`prj…` in `project.json`); directory names
 //!   are human-friendly slugs and may collide-suffix freely.
-//! - Layout: `/packages/<slug>/` package dirs; `/history/<prj_uid>/`
+//! - Layout: `/packages/<slug>/` package dirs; `/history/<prj-uid>/`
 //!   lpc-history roots — beside, never inside, the package.
 //! - Provenance lives in the package at `/.lp/meta.json` (excluded from
 //!   the canonical content hash by the lph1 spec) and seeds the history's
