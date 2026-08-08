@@ -113,6 +113,32 @@ baselines — and keep colliding with this branch on add/add PNG
 conflicts — until this lands, which is the argument for merging it
 promptly rather than letting it sit.
 
+**`git checkout --ours` on a baseline conflict is NOT a safe default —
+it re-landed the bug on main (2026-08-08).** Resolving the repeated
+add/add PNG conflicts, "take ours, my side is the fixed-code capture"
+looked obviously right and was wrong: after several merges from main,
+the branch's OWN copy of a file was, for some paths, main's degraded
+pre-fix bitmap that an earlier merge had imported. Applying that rule
+blanket-wise put 11 pre-fix baselines (9 clock-face, 2 transport) onto
+main, and main's next run failed with those exact 11 in its refresh
+manifest.
+
+The tell is that neither `--ours` nor `--theirs` is meaningful for a
+PNG whose content is a *capture of code*: the only correct bytes are a
+fresh capture of the merged tree. So on a baseline conflict, do not
+pick a side — take either to get the merge committed, then let CI
+re-capture and read the REFRESH MANIFEST (not the drift list) to see
+what is genuinely stale. `.refresh-manifest.json` inside the
+`story-images-fresh` artifact lists only files the check judged stale;
+the console drift list is much longer because it also prints
+sub-threshold jitter it tolerated. Recovering is `just
+studio-story-pull` on the branch whose run captured them — and when the
+run was on main (whose protected branch the bot cannot push to), that
+script finds nothing because it keys off the current branch: download
+the artifact from main's run and call `applyRefresh(freshDir,
+baselineDir)` from `story-apply-refresh.mjs` directly, which applies
+the same manifest semantics.
+
 **Lesson** — A defect fixed in one component recurs when the mechanism is
 re-implemented elsewhere; the class guard (`ux-box-sized-canvas` + gate)
 only protects canvases that opt in. Any NEW imperatively-painted canvas
