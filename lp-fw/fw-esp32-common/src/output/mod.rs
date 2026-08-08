@@ -7,6 +7,7 @@
 //! with its last consumer went the module: `lp_ws281x::ChannelState` is where
 //! per-channel state lives now, one implementation for all three targets.
 
+pub mod power_gate;
 pub mod provider;
 #[cfg(feature = "server")]
 pub mod wire_stats_source;
