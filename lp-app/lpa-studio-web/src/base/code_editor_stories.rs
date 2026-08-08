@@ -13,7 +13,7 @@ const STORY_GLSL: &str = "\
 // Studio code editor story fixture.
 uniform float time;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float wave = 0.5 + 0.5 * sin(time + pos.x * 6.0);
     vec3 color = mix(vec3(0.05, 0.1, 0.2), vec3(0.2, 0.9, 0.6), wave);
     return vec4(color * pos.y, 1.0);

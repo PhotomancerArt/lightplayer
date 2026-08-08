@@ -180,11 +180,11 @@ fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_transport: &str, endpoint
 }
 
 fn write_shared_assets(fs: &LpFsMemory) {
-    write(fs, "/project.json", "{ \"format\": 7 }\n");
+    write(fs, "/project.json", "{ \"format\": 8 }\n");
     write(
         fs,
         "/shader.glsl",
-        "uniform float time;\nvec4 render(vec2 p) { return vec4(time, p.y, 0.0, 1.0); }\n",
+        "uniform float time;\nvec4 render_2d(vec2 p) { return vec4(time, p.y, 0.0, 1.0); }\n",
     );
     write(
         fs,

@@ -57,14 +57,14 @@ const RING_LEDS: usize = 24;
 const USD_PER_M_INPUT: f64 = 3.0;
 const USD_PER_M_OUTPUT: f64 = 15.0;
 
-const BLANK_SOURCE: &str = "vec4 render(vec2 pos) {\n    return vec4(0.0);\n}\n";
+const BLANK_SOURCE: &str = "vec4 render_2d(vec2 pos) {\n    return vec4(0.0);\n}\n";
 
 /// Starting source for the fix-it task: `brightnes` is undeclared, so this
 /// fails to compile as-is.
 const BROKEN_SOURCE: &str = "\
 layout(binding = 0) uniform float time;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float glow = brightnes * 0.8;
     return vec4(glow, glow * 0.5, 0.1, 1.0);
 }
@@ -192,7 +192,7 @@ fn tasks() -> Vec<EvalTask> {
                 probes: vec![ProbeSpec {
                     id: "leds".into(),
                     ty: ProbeType::Vec4,
-                    expr: "render(pos)".into(),
+                    expr: "render_2d(pos)".into(),
                     domain: ProbeDomain::Leds { indices: None },
                     vary: None,
                     reduce: ProbeReduce::Stats,
@@ -210,7 +210,7 @@ fn tasks() -> Vec<EvalTask> {
                 probes: vec![ProbeSpec {
                     id: "leds".into(),
                     ty: ProbeType::Vec4,
-                    expr: "render(pos)".into(),
+                    expr: "render_2d(pos)".into(),
                     domain: ProbeDomain::Leds { indices: None },
                     vary: Some(lps_probe::ProbeVary {
                         binding: "time".into(),
@@ -243,7 +243,7 @@ fn tasks() -> Vec<EvalTask> {
                 probes: vec![ProbeSpec {
                     id: "lum".into(),
                     ty: ProbeType::Float,
-                    expr: "dot(render(pos).rgb, vec3(0.2126, 0.7152, 0.0722))".into(),
+                    expr: "dot(render_2d(pos).rgb, vec3(0.2126, 0.7152, 0.0722))".into(),
                     domain: ProbeDomain::Line {
                         from: [0.5, 0.5],
                         to: [1.0, 1.0],
@@ -265,7 +265,7 @@ fn tasks() -> Vec<EvalTask> {
                 probes: vec![ProbeSpec {
                     id: "led_rgb".into(),
                     ty: ProbeType::Vec3,
-                    expr: "render(pos).rgb".into(),
+                    expr: "render_2d(pos).rgb".into(),
                     domain: ProbeDomain::Leds { indices: None },
                     vary: None,
                     reduce: ProbeReduce::None,

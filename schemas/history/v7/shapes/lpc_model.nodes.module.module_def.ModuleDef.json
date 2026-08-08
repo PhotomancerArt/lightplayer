@@ -1,0 +1,106 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "nodes",
+        "role": "fixed",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "enum": {
+                "encoding": "external",
+                "meta": {},
+                "variants": [
+                  {
+                    "name": "unset",
+                    "shape": {
+                      "unit": {
+                        "meta": {}
+                      }
+                    }
+                  },
+                  {
+                    "name": "ref",
+                    "shape": {
+                      "value": {
+                        "shape": {
+                          "editor": "path",
+                          "id": 2244609540,
+                          "meta": {},
+                          "ty": "string"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "exports",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "value": {
+                "shape": {
+                  "editor": "path",
+                  "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "meta",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1452279109
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "provenance",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "ref": {
+                "id": 718754952
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

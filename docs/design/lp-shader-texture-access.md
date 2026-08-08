@@ -52,7 +52,7 @@ contract and runtime buffers supplied to it.
 `lp-shader` already has the write side of CPU texture rendering:
 
 - `LpsEngine::compile_px` compiles GLSL through `lps-frontend`, lowers to LPIR,
-  validates `render(vec2 pos)`, and synthesizes a format-specific
+  validates `render_2d(vec2 pos)`, and synthesizes a format-specific
   `__render_texture_<format>` function.
 - `LpsTextureBuf` wraps an `LpvmBuffer`; that memory is guest-addressable and
   already suitable for shader reads.

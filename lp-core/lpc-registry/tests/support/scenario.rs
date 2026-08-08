@@ -49,7 +49,7 @@ impl RegistryScenario {
     }
 
     pub fn write_container_manifest(&mut self) {
-        self.write_file("/project.json", b"{\n  \"format\": 7\n}\n");
+        self.write_file("/project.json", b"{\n  \"format\": 8\n}\n");
     }
 
     pub fn write_file(&mut self, path: &str, bytes: impl AsRef<[u8]>) {

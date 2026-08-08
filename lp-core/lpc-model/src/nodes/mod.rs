@@ -21,8 +21,9 @@ pub use clock::{
     ClockTransport, PlayState,
 };
 pub use fixture::{
-    Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixturePower,
-    FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig, PathSpec,
+    Brightness, ColorOrder, ConsumerCell2, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
+    FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig,
+    PathSpec, VisualConsumerSpace,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use module::{ChannelMetaDef, ChannelMetaDefView, ModuleDef, ModuleDefView};
@@ -46,9 +47,9 @@ pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, Control
 pub use shader::{
     ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderDef,
     ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView,
-    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState,
-    ShaderStateView, ShaderValueShapeRef, generate_compute_shader_header, glsl_type_for_lp_type,
-    shader_panel_step,
+    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace,
+    ShaderState, ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2,
+    generate_compute_shader_header, glsl_type_for_lp_type, shader_panel_step,
 };
 pub use starter::{
     NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_ref,

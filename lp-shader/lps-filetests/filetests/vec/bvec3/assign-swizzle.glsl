@@ -61,7 +61,7 @@ bvec3 test_bvec3_assign_swizzle_xy() {
 
 // run: test_bvec3_assign_swizzle_xy() == bvec3(true, false, true)
 
-bvec3 render() {
+bvec3 probe() {
     return test_bvec3_assign_swizzle_xy();
 }
 

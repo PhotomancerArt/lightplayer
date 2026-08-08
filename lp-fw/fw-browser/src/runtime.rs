@@ -7,8 +7,8 @@ use std::sync::Arc;
 use fw_core::{drain_client_messages, tick_server_frame};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{
-    ButtonService, LpGraphics, LpServer, RadioService, RenderTextureRequest, TextureRenderProduct,
-    VisualProduct,
+    ButtonService, ConsumerPolicy, LpGraphics, LpServer, RadioService, RenderTextureRequest,
+    TextureRenderProduct, VisualProduct, VisualSpace,
 };
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
@@ -459,6 +459,8 @@ impl BrowserFirmwareRuntime {
             height,
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: project.engine().frame_time().total_ms as f32 / 1000.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         match project.render_visual_texture(product, &request) {
             Ok(texture) => Ok(texture),

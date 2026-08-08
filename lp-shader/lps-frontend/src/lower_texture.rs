@@ -718,15 +718,15 @@ mod texel_fetch_naga_shape_tests {
     fn texel_fetch_glsl_maps_to_expression_image_load_with_level() {
         let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
         let NagaModule { module, functions } = compile(glsl).expect("compile");
         let h = functions
             .iter()
-            .find(|(_, i)| i.name == "render")
-            .expect("render")
+            .find(|(_, i)| i.name == "render_2d")
+            .expect("render_2d")
             .0;
         let func = &module.functions[h];
         let mut found_image_load_texel_fetch = false;
@@ -794,15 +794,15 @@ mod texture_sampling_tests {
     fn texture_vec2_glsl_maps_to_naga_image_sample_implicit_lod() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, pos);
 }
 "#;
         let NagaModule { module, functions } = compile(glsl).expect("compile");
         let h = functions
             .iter()
-            .find(|(_, i)| i.name == "render")
-            .expect("render")
+            .find(|(_, i)| i.name == "render_2d")
+            .expect("render_2d")
             .0;
         let func = &module.functions[h];
         let mut ok = false;
@@ -833,7 +833,7 @@ vec4 render(vec2 pos) {
     fn general2d_rgba16_texture_lowers_to_texture2d_builtin_call() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, pos);
 }
 "#;
@@ -857,7 +857,7 @@ vec4 render(vec2 pos) {
     fn height_one_rgba16_texture_lowers_to_texture1d_builtin_call() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, vec2(pos.x, 0.25));
 }
 "#;
@@ -890,7 +890,7 @@ vec4 render(vec2 pos) {
         let glsl = r#"
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform sampler2D palette;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(palette, vec2(pos.x / outputSize.x, 0.0));
 }
 "#;
@@ -916,7 +916,7 @@ vec4 render(vec2 pos) {
     fn texel_fetch_accepts_conversion_constructor_coordinate() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(tex, ivec2(pos), 0);
 }
 "#;
@@ -935,7 +935,7 @@ vec4 render(vec2 pos) {
     fn texel_fetch_accepts_conversion_constructor_lod() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(tex, ivec2(pos), int(0));
 }
 "#;
@@ -954,7 +954,7 @@ vec4 render(vec2 pos) {
     fn texture_accepts_conversion_constructor_coordinate() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, vec2(ivec2(pos)));
 }
 "#;
@@ -975,7 +975,7 @@ vec4 render(vec2 pos) {
     fn texel_fetch_still_rejects_float_coordinate() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(tex, pos, 0);
 }
 "#;
@@ -990,7 +990,7 @@ vec4 render(vec2 pos) {
     fn texture_errors_when_texture_binding_spec_missing() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, pos);
 }
 "#;
@@ -1007,7 +1007,7 @@ vec4 render(vec2 pos) {
     fn texture_errors_for_rgb16_format_until_builtin_exists() {
         let glsl = r#"
 uniform sampler2D tex;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(tex, pos);
 }
 "#;
@@ -1052,7 +1052,7 @@ struct Inner {
     float x;
 };
 layout(set = 0, binding = 0) uniform Inner u;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return vec4(u.x, 0.0, 0.0, 1.0);
 }
 "#;

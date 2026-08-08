@@ -40,9 +40,9 @@ let report = lps_probe::diff_experiments(&prev, &cur, &spec); // DiffReport
 
 ## Entry contract
 
-User shaders define `vec4 render(vec2 pos)` with `pos` in shader pixel
+User shaders define `vec4 render_2d(vec2 pos)` with `pos` in shader pixel
 space; `outputSize`/`time` are ordinary uniforms by convention. A shader
-without a conforming `render` is reported as a compile outcome error.
+without a conforming `render_2d` is reported as a compile outcome error.
 
 ## Semantics: f32 oracle
 
