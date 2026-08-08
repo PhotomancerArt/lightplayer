@@ -181,7 +181,7 @@ pub struct StudioController {
     /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
     /// restart instead of reboot-looping a crashing project.
     sim_crash_reboot_at: Option<f64>,
-    /// Injected randomness for identity minting (`dev_` uids). The web
+    /// Injected randomness for identity minting (`dev` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
     random: Rc<dyn Fn() -> [u8; 16]>,
@@ -239,7 +239,7 @@ struct SessionIdentity {
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
-    /// A library package, by key (`prj_…` uid or slug).
+    /// A library package, by key (`prj…` uid or slug).
     Package(String),
     /// An embedded example, by id (seeded into the library on first open).
     Example(String),
@@ -1473,7 +1473,7 @@ impl StudioController {
 
     /// The lens's runtime binding for the view (SDI: the URL is the
     /// focused document — the web shell's D37 route reconciliation binds
-    /// to this). A device session's `dev_` uid prefers the wire hello and
+    /// to this). A device session's `dev` uid prefers the wire hello and
     /// falls back to the connect-as-pull identity.
     fn lens_runtime(&self) -> Option<crate::UiLensRuntime> {
         self.pool.lens_session().map(|session| {
@@ -2053,7 +2053,7 @@ impl StudioController {
     /// identified key flip.
     ///
     /// `card_ui` is keyed by `UiDeviceCard::identity_key()`, which is the
-    /// session key while a board is anonymous and its `dev_…` uid the
+    /// session key while a board is anonymous and its `dev…` uid the
     /// moment identity resolves. The flip is the same wart
     /// [`Self::migrate_card_op`] exists for (2026-08-02): state the user
     /// built on the anonymous card — the open tab, the open sheet —
@@ -2076,7 +2076,7 @@ impl StudioController {
     /// The live device session a CARD KEY names, if any.
     ///
     /// One vocabulary for op targeting (M4): `UiDeviceCard::identity_key()`
-    /// is a stamped device's `dev_…` uid, or an anonymous board's session
+    /// is a stamped device's `dev…` uid, or an anonymous board's session
     /// key — and this resolves both, session key first, because that is
     /// the key an unstamped board wears. A registry (offline) card's uid
     /// resolves to nothing, which is correct: there is no session to
@@ -4137,7 +4137,7 @@ impl StudioController {
     /// 2026-08-05). Deleting the row alone was silently undone by the next
     /// page load: the Web Serial grant outlives the page, so the app
     /// re-enumerated the granted port, auto-probed it, re-derived the same
-    /// `dev_` uid from its efuse MAC (identity design §3 — the uid is
+    /// `dev` uid from its efuse MAC (identity design §3 — the uid is
     /// silicon, not a stored fact), and the sighting write recreated the
     /// row the user had just deleted.
     ///
@@ -7984,7 +7984,7 @@ mod tests {
         use crate::app::library::{CatalogOutcome, PackageHealth, PackageSummary};
 
         let summary = PackageSummary {
-            uid: "prj_0123456789abcdef".parse().unwrap(),
+            uid: "prj0123456789abcdef".parse().unwrap(),
             name: "Plasma".to_string(),
             kind: "Project".to_string(),
             slug: "2026-08-04-1800-plasma".to_string(),
@@ -9524,7 +9524,7 @@ mod tests {
         );
     }
 
-    const KNOWN_UID: &str = "dev_000000029EVDlKLX";
+    const KNOWN_UID: &str = "dev000000daqf6dvvqz";
 
     /// Install a stub device session — a board on the wire, no flow.
     fn install_stub_device(studio: &mut StudioController) -> crate::RuntimeId {
@@ -9581,7 +9581,7 @@ mod tests {
         flow.handle(crate::SetupEvent::FlashSucceeded);
         flow.handle(crate::SetupEvent::Confirm);
         flow.handle(crate::SetupEvent::ProjectGenerated {
-            project_uid: "prj_test".to_string(),
+            project_uid: "prjtest".to_string(),
         });
         flow.handle(crate::SetupEvent::PushCompleted);
     }
@@ -9796,7 +9796,7 @@ mod tests {
             });
         }
         // …and the flash's reattach absorbed the board's identity.
-        absorb_identity(&mut studio, device_id, "dev_fromthehello");
+        absorb_identity(&mut studio, device_id, "devfromthehello");
 
         block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
             .expect("provisioning runs");
@@ -9806,7 +9806,7 @@ mod tests {
             .expect("the registry is readable");
         let row = rows
             .iter()
-            .find(|row| row.uid == "dev_fromthehello")
+            .find(|row| row.uid == "devfromthehello")
             .unwrap_or_else(|| panic!("the board is remembered; got {rows:?}"));
         assert_eq!(row.name, "Porch sign", "under the name the user typed");
         assert_eq!(

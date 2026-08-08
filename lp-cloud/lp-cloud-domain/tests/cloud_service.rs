@@ -13,17 +13,20 @@
 //! Pure logic that needs no store is unit-tested in place: see the test
 //! modules at the bottom of `push_validation.rs` and `model/project_refs.rs`.
 
-use lp_cloud_domain::{CloudService, MetaStore};
+use lp_cloud_domain::{
+    Caller, CloudService, DevPickerConnection, LoginProviders, MetaStore, OidcConnection,
+    session_token_hash,
+};
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::request::{
     AddMember, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
-    RemoveMember, SetVisibility,
+    RemoveMember, RevokeSession, SetVisibility, UpdateMe,
 };
 use lpc_cloud_api::response::{
     Events, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Actor, CloudError, CloudRequest, CloudResponse, PushOutcome, SidecarMeta, Visibility,
+    Ack, Actor, CloudError, CloudRequest, CloudResponse, PushOutcome, SidecarMeta, Visibility,
 };
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 
@@ -415,7 +418,15 @@ fn republishing_restates_slug_and_visibility() {
 #[test]
 fn publish_validates_uid_prefix_and_slug() {
     let mut svc = service();
-    let owner = svc.upsert_user("g-owner", "owner@example.com", "Owner");
+    let owner = svc.upsert_user(
+        "g-owner",
+        "owner@example.com",
+        "Owner",
+        "google",
+        None,
+        None,
+        None,
+    );
     let actor = Actor::User(owner.uid);
 
     let wrong_prefix = svc.handle(
@@ -478,7 +489,15 @@ fn membership_invited_by_email_resolves_at_first_login() {
         Err(CloudError::NotFound)
     );
 
-    let later = svc.upsert_user("g-later", "later@example.com", "Later");
+    let later = svc.upsert_user(
+        "g-later",
+        "later@example.com",
+        "Later",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert!(
         svc.handle(Actor::User(later.uid), get_project(world.project))
             .is_ok(),
@@ -544,7 +563,15 @@ fn who_am_i_reports_the_caller_without_failing() {
             actor: Actor::Anonymous
         }))
     );
-    let user = svc.upsert_user("g-user", "user@example.com", "User");
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(
         svc.handle(Actor::User(user.uid), CloudRequest::WhoAmI),
         Ok(CloudResponse::UserInfo(UserInfo {
@@ -556,10 +583,26 @@ fn who_am_i_reports_the_caller_without_failing() {
 #[test]
 fn minted_user_uids_are_usr_prefixed() {
     let mut svc = service();
-    let user = svc.upsert_user("g-user", "user@example.com", "User");
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(user.uid.prefix(), UidPrefix::User);
     // Same Google subject, second login: same account.
-    let again = svc.upsert_user("g-user", "user@example.com", "User");
+    let again = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
     assert_eq!(again.uid, user.uid);
 }
 
@@ -616,8 +659,16 @@ fn have_blobs_reports_only_what_is_missing() {
 #[test]
 fn sessions_resolve_until_they_expire() {
     let mut svc = service();
-    let user = svc.upsert_user("g-user", "user@example.com", "User");
-    let token = svc.open_session(user.uid, 60.0);
+    let user = svc.upsert_user(
+        "g-user",
+        "user@example.com",
+        "User",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let token = svc.open_session(user.uid, 60.0, None);
     assert_eq!(svc.resolve_session(&token), Actor::User(user.uid));
 
     svc.clock().advance(61.0);
@@ -635,6 +686,264 @@ fn an_unknown_token_is_simply_anonymous() {
     assert_eq!(svc.resolve_session(b"nonsense"), Actor::Anonymous);
 }
 
+// ---- account / sessions (P2) ---------------------------------------
+
+#[test]
+fn get_me_refuses_an_anonymous_caller() {
+    let mut svc = service();
+    assert_eq!(
+        svc.handle(Actor::Anonymous, CloudRequest::GetMe),
+        Err(CloudError::NotAuthenticated)
+    );
+}
+
+/// `provider_label` comes from the account's `provider`, not a guess: a
+/// dev-picker account (`google_sub` namespaced `dev-auth:…`, per
+/// `dev_auth.rs`) is labeled "Dev" precisely because it was created with
+/// `provider: "dev"`, not because of anything in its `google_sub` text.
+#[test]
+fn get_me_reports_the_providers_label() {
+    let mut svc = service();
+    let google_user = svc.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
+    let dev_user = svc.upsert_user(
+        "dev-auth:two@example.com",
+        "two@example.com",
+        "Two",
+        "dev",
+        None,
+        None,
+        None,
+    );
+
+    let CloudResponse::MeInfo(info) = svc
+        .handle(Actor::User(google_user.uid), CloudRequest::GetMe)
+        .unwrap()
+    else {
+        panic!("expected MeInfo");
+    };
+    assert_eq!(info.provider_label, "Google");
+    assert_eq!(info.email, "one@example.com");
+
+    let CloudResponse::MeInfo(info) = svc
+        .handle(Actor::User(dev_user.uid), CloudRequest::GetMe)
+        .unwrap()
+    else {
+        panic!("expected MeInfo");
+    };
+    assert_eq!(info.provider_label, "Dev");
+}
+
+#[test]
+fn update_me_trims_and_recomputes_display_name() {
+    let mut svc = service();
+    let user = svc.upsert_user(
+        "g-1",
+        "one@example.com",
+        "Provider Name",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let actor = Actor::User(user.uid);
+
+    let CloudResponse::MeInfo(info) = svc
+        .handle(
+            actor,
+            CloudRequest::UpdateMe(UpdateMe {
+                given_name: Some("  Yona  ".to_string()),
+                family_name: Some("  Appletree  ".to_string()),
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("expected MeInfo");
+    };
+    assert_eq!(info.given_name.as_deref(), Some("Yona"));
+    assert_eq!(info.family_name.as_deref(), Some("Appletree"));
+    assert_eq!(info.display_name, "Yona Appletree");
+
+    // The mononym case: a family name that is empty after trimming clears
+    // the field, and display_name follows.
+    let CloudResponse::MeInfo(info) = svc
+        .handle(
+            actor,
+            CloudRequest::UpdateMe(UpdateMe {
+                given_name: Some("Yona".to_string()),
+                family_name: Some("   ".to_string()),
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("expected MeInfo");
+    };
+    assert_eq!(info.family_name, None);
+    assert_eq!(info.display_name, "Yona");
+}
+
+#[test]
+fn update_me_refuses_a_name_over_the_length_cap() {
+    let mut svc = service();
+    let user = svc.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
+    let too_long = "x".repeat(201);
+    let answer = svc.handle(
+        Actor::User(user.uid),
+        CloudRequest::UpdateMe(UpdateMe {
+            given_name: Some(too_long),
+            family_name: None,
+        }),
+    );
+    assert!(matches!(answer, Err(CloudError::InvalidRequest { .. })));
+}
+
+/// The caller cannot report its own session id (it lives in an HttpOnly
+/// cookie it never reads), so `ListSessions` has to mark `current` itself —
+/// and only ever among the caller's own rows.
+#[test]
+fn list_sessions_marks_the_caller_and_isolates_by_account() {
+    let mut svc = service();
+    let alice = svc.upsert_user(
+        "g-alice",
+        "alice@example.com",
+        "Alice",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let bob = svc.upsert_user(
+        "g-bob",
+        "bob@example.com",
+        "Bob",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let alice_token = svc.open_session(alice.uid, 60.0, Some("Mozilla/5.0".to_string()));
+    let _second_alice_token = svc.open_session(alice.uid, 60.0, None);
+    let _bob_token = svc.open_session(bob.uid, 60.0, None);
+
+    let caller = Caller {
+        actor: Actor::User(alice.uid),
+        session: Some(session_token_hash(&alice_token)),
+    };
+    let CloudResponse::SessionList(list) = svc.handle(caller, CloudRequest::ListSessions).unwrap()
+    else {
+        panic!("expected SessionList");
+    };
+    assert_eq!(list.sessions.len(), 2, "only alice's own sessions");
+    let current: Vec<_> = list.sessions.iter().filter(|s| s.current).collect();
+    assert_eq!(current.len(), 1, "exactly the calling session");
+    assert_eq!(current[0].user_agent.as_deref(), Some("Mozilla/5.0"));
+}
+
+#[test]
+fn revoke_session_refuses_bad_hex_and_someone_elses_session() {
+    let mut svc = service();
+    let alice = svc.upsert_user(
+        "g-alice",
+        "alice@example.com",
+        "Alice",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let bob = svc.upsert_user(
+        "g-bob",
+        "bob@example.com",
+        "Bob",
+        "google",
+        None,
+        None,
+        None,
+    );
+    let bob_token = svc.open_session(bob.uid, 60.0, None);
+
+    let bad_hex = svc.handle(
+        Actor::User(alice.uid),
+        CloudRequest::RevokeSession(RevokeSession {
+            id: "not-hex".to_string(),
+        }),
+    );
+    assert!(matches!(bad_hex, Err(CloudError::InvalidRequest { .. })));
+
+    let bob_session_id = session_token_hash(&bob_token).to_string();
+    let foreign = svc.handle(
+        Actor::User(alice.uid),
+        CloudRequest::RevokeSession(RevokeSession { id: bob_session_id }),
+    );
+    assert_eq!(foreign, Err(CloudError::NotFound));
+    // Bob's session is untouched by alice's refused attempt.
+    assert_eq!(svc.resolve_session(&bob_token), Actor::User(bob.uid));
+
+    let own_token = svc.open_session(alice.uid, 60.0, None);
+    let own_id = session_token_hash(&own_token).to_string();
+    let revoked = svc.handle(
+        Actor::User(alice.uid),
+        CloudRequest::RevokeSession(RevokeSession { id: own_id }),
+    );
+    assert_eq!(revoked, Ok(CloudResponse::Ack(Ack)));
+    assert_eq!(svc.resolve_session(&own_token), Actor::Anonymous);
+}
+
+#[test]
+fn login_options_reports_the_dev_picker_only_when_enabled() {
+    let mut plain = service();
+    let CloudResponse::LoginOptionsInfo(info) = plain
+        .handle(Actor::Anonymous, CloudRequest::LoginOptions)
+        .unwrap()
+    else {
+        panic!("expected LoginOptionsInfo");
+    };
+    assert!(info.oidc.is_empty());
+    assert!(info.dev_picker.is_none());
+
+    let mut with_picker = CloudService::new(
+        MemMetaStore::new(),
+        MemClock::new(1_700_000_000.0),
+        MemIdMint::new(),
+    )
+    .with_login_providers(LoginProviders {
+        oidc: vec![OidcConnection {
+            id: "google".to_string(),
+            label: "Google".to_string(),
+            start_path: "/auth/google".to_string(),
+        }],
+        dev_picker: Some(DevPickerConnection {
+            start_path: "/auth/dev".to_string(),
+        }),
+    });
+    with_picker.upsert_user("g-1", "one@example.com", "One", "google", None, None, None);
+    with_picker.upsert_user(
+        "dev-auth:two@example.com",
+        "two@example.com",
+        "Two",
+        "dev",
+        None,
+        None,
+        None,
+    );
+
+    let CloudResponse::LoginOptionsInfo(info) = with_picker
+        .handle(Actor::Anonymous, CloudRequest::LoginOptions)
+        .unwrap()
+    else {
+        panic!("expected LoginOptionsInfo");
+    };
+    assert_eq!(info.oidc.len(), 1);
+    assert_eq!(info.oidc[0].id, "google");
+    let choices: Vec<_> = info
+        .dev_picker
+        .expect("dev picker is on")
+        .choices
+        .into_iter()
+        .map(|choice| choice.email)
+        .collect();
+    assert_eq!(choices, vec!["one@example.com", "two@example.com"]);
+}
+
 // ---- helpers ------------------------------------------------------
 
 /// The cast for the access tests: one project, its owner, one member,
@@ -648,9 +957,33 @@ struct World {
 
 impl World {
     fn publish(svc: &mut Service, visibility: Visibility) -> Self {
-        let owner = svc.upsert_user("g-owner", "owner@example.com", "Owner");
-        let member = svc.upsert_user("g-member", "member@example.com", "Member");
-        let stranger = svc.upsert_user("g-stranger", "stranger@example.com", "Stranger");
+        let owner = svc.upsert_user(
+            "g-owner",
+            "owner@example.com",
+            "Owner",
+            "google",
+            None,
+            None,
+            None,
+        );
+        let member = svc.upsert_user(
+            "g-member",
+            "member@example.com",
+            "Member",
+            "google",
+            None,
+            None,
+            None,
+        );
+        let stranger = svc.upsert_user(
+            "g-stranger",
+            "stranger@example.com",
+            "Stranger",
+            "google",
+            None,
+            None,
+            None,
+        );
         let project = project_uid();
 
         svc.handle(

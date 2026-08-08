@@ -417,7 +417,7 @@ fn RichObjectCard(
     };
     let (shape, tone) = circle_props(state.spec());
     let status_line = state.status_line(0.0);
-    let swatch = thumb_swatch_style("prj_3fKq8Zr21bTxYw0A", false);
+    let swatch = thumb_swatch_style("prj3fKq8Zr21bTxYw0A", false);
 
     rsx! {
         article { class: "tw:w-64 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
@@ -673,7 +673,7 @@ fn running_behind_sections() -> Vec<RichSectionSpec> {
             tint: DetailSectionTint::None,
             rows: vec![
                 ("board", "ESP32-C6"),
-                ("uid", "dev_7pQr5St89uVwXy2C"),
+                ("uid", "dev7pQr5St89uVwXy2C"),
                 ("transport", "USB · Web Serial"),
                 ("firmware", "fw-esp32c6 @ 9f31c2a · release-esp32"),
             ],

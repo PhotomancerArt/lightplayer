@@ -19,7 +19,7 @@ pub const DEPLOY_NODE_ID: &str = "studio|deploy";
 /// head).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeployTarget {
-    /// `prj_…` uid.
+    /// `prj…` uid.
     pub project_uid: String,
     /// Library slug at resolve time (display).
     pub slug: String,

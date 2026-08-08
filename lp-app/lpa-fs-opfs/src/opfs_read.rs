@@ -23,7 +23,7 @@ pub async fn load_tree(
 
 /// [`load_tree`], skipping directories the predicate rejects.
 ///
-/// `skip_dir` sees absolute lp-style directory paths (`/history/prj_x/blobs`)
+/// `skip_dir` sees absolute lp-style directory paths (`/history/prjx/blobs`)
 /// and is consulted *before descending* — a skipped directory's files are
 /// never read, which is the point: gallery snapshots skip history payloads
 /// without paying to load them.

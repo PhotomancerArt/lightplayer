@@ -165,7 +165,7 @@ fn project_schema() -> Result<Value> {
                 "const": PROJECT_FORMAT_VERSION,
             },
             "uid": {
-                "title": "Stable project identity (prj_…, base-62)",
+                "title": "Stable project identity (prj…, base-32)",
                 "type": "string",
             },
             "name": {

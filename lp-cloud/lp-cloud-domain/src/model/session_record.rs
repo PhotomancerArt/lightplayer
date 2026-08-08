@@ -1,5 +1,6 @@
 //! A logged-in session, stored as a hash of its token.
 
+use alloc::string::String;
 use lpc_history::{ContentHash, PrefixedUid};
 
 /// Length of a session token in bytes (256 bits).
@@ -17,9 +18,16 @@ pub struct SessionRecord {
     pub token_hash: ContentHash,
     /// The account the session authenticates.
     pub user: PrefixedUid,
+    /// When the session was opened, f64 epoch seconds from the clock port
+    /// — what `ListSessions` sorts by and displays.
+    pub created_at: f64,
     /// Expiry, f64 epoch seconds. A session at or past this instant
     /// resolves to `Actor::Anonymous`.
     pub expires_at: f64,
+    /// The `User-Agent` header the edge captured when the session was
+    /// opened, if any (edge capture is P3's job; the field exists here so
+    /// the domain has somewhere to put it).
+    pub user_agent: Option<String>,
 }
 
 /// The storage key for a raw session token.

@@ -72,6 +72,22 @@ between targets. The Xtensa entries are established by the M6 hardware
 conformance campaign and recorded in its FP-contract ADR; wasm's come from
 the WebAssembly spec; RV32F's from the RISC-V F spec.
 
+**"Xtensa" here means both parts.** The entries below were measured on the
+ESP32-S3's LX7 and re-measured on the classic ESP32's LX6 on 2026-08-06:
+5 630/5 630 agreement, and byte-identical estimate ROMs. There is one Xtensa
+row, not two, because the silicon gave one answer — see the amendment in
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` §10.
+
+⚠️ **Identical numerics, different speed.** Agreement to the bit is not a
+performance claim. On the classic, an f32 shader renders **~17 % slower** than
+the same shader in Q32 — 20 fps vs 24 fps at 1500 LEDs, tick 46 ms vs 40 ms —
+while emitting marginally *less* code and using marginally *less* heap. The S3
+showed no such penalty on a much smaller fixture. The likely cost is the frame
+boundary: it stays Q16.16-in / RGBA16-out in both modes by design, so an f32
+shader pays two conversions per coordinate per sample, which at 1500 LEDs is
+3 000 decodes per frame. Choose `float_mode: float` on the classic for the
+numerics it gives you, not for speed.
+
 - **Denormal (subnormal) handling.** A target may flush denormal inputs
   and/or outputs to zero. wasm and RV32F preserve denormals (their specs
   require it); typical GPUs flush. **Measured on the ESP32-S3 Xtensa FPU by

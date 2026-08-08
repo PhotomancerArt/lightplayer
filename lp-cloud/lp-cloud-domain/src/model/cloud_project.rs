@@ -13,7 +13,7 @@ use lpc_history::PrefixedUid;
 /// authoritative.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloudProject {
-    /// The project's uid (`prj_…`), minted client-side.
+    /// The project's uid (`prj…`), minted client-side.
     pub uid: PrefixedUid,
     /// The account that published it. The owner can never be removed as a
     /// member.

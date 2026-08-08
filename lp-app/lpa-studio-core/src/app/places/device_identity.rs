@@ -1,7 +1,7 @@
 //! The LEGACY on-device identity convention: `/.lp/device.json` at the
 //! device's filesystem ROOT (the lpa-server base fs).
 //!
-//! This file used to be where a device's identity came from — a `dev_`
+//! This file used to be where a device's identity came from — a `dev`
 //! uid Studio minted and stamped at provisioning. Since
 //! `docs/adr/2026-08-04-device-identity-anchored-in-silicon.md` an
 //! ESP-class board's identity is its factory efuse MAC, and this file
@@ -42,7 +42,7 @@ pub const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceIdentity {
-    /// `dev_…` uid.
+    /// `dev…` uid.
     pub uid: String,
     /// Human name, gently insisted on at provisioning ("Luna's porch sign").
     pub name: String,
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn round_trips() {
         let identity = DeviceIdentity {
-            uid: "dev_0000000000000001".to_string(),
+            uid: "dev0000000000000001".to_string(),
             name: "Porch sign".to_string(),
         };
         let bytes = identity.to_json_bytes();

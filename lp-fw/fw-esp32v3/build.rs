@@ -4,9 +4,14 @@
 //! (ADR 2026-07-29-per-chip-fw-toolchains), so there is no `.eh_frame`
 //! patching to do — that machinery is the C6's `panic=unwind` tier only.
 //!
-//! Unlike fw-esp32s3's build.rs, this one does not emit the `fw_harness` cfg:
-//! there are no `test_*` harness features on this crate yet. Port that half
-//! from fw-esp32s3's build.rs when the first one lands.
+//! The `fw_harness` half mirrors fw-esp32s3's: any `test_*` feature selects a
+//! hardware harness entrypoint instead of the app, collapsed to a single cfg so
+//! app-only code carries one gate rather than a wall of per-feature conditions.
+//!
+//! The `LP_FP_*` rerun-if-env-changed tracking that fw-esp32s3 used to carry is
+//! **not** duplicated here. It lives in `lp-xt-fp-harness/build.rs`, next to the
+//! `option_env!` calls that read those variables — tracking has to sit where the
+//! macro expands, not where the feature is switched on.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,6 +31,12 @@ fn main() {
 
     emit_build_provenance();
     emit_partition_facts();
+
+    println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
+    if harness {
+        println!("cargo::rustc-cfg=fw_harness");
+    }
 }
 
 /// Emit build provenance for the wire hello (`ServerHello.fw`):

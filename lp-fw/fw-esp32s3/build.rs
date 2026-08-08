@@ -31,15 +31,11 @@ fn main() {
     // entrypoint instead of the app. Collapsed to a single cfg so app-only
     // code carries one gate rather than a wall of per-feature conditions —
     // the same shape fw-esp32c6 uses, deliberately not a second mechanism.
-    // The FP conformance harness reads its mode, family filter and vector limit
-    // through `option_env!`, which cargo does NOT track on its own — without
-    // these lines, changing `LP_FP_FAMILY` reuses the previous build and the
-    // board silently runs the wrong subset. Named explicitly rather than
-    // wildcarded because cargo has no wildcard here.
-    for var in ["LP_FP_MODE", "LP_FP_FAMILY", "LP_FP_LIMIT"] {
-        println!("cargo:rerun-if-env-changed={var}");
-    }
-
+    //
+    // The `LP_FP_*` rerun-if-env-changed lines that used to live here moved to
+    // `lp-xt-fp-harness/build.rs` along with the `option_env!` calls that read
+    // them. That tracking has to sit in the crate where the macro expands, not
+    // in the crate that turns the feature on.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {

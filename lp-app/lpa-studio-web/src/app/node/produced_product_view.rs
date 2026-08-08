@@ -65,6 +65,38 @@ pub fn ProducedProductView(
     }
 }
 
+/// Who this product IS, for the faces that draw their own hero instead of
+/// the boxed [`ProducedProductView`] pane: the name (its detail on the
+/// tooltip) and the publish chip when the output is wired to a bus channel.
+///
+/// A custom hero replaces the pane, and the pane is what carried the
+/// product's chrome — so every face that grows one owes its output this
+/// much, or that output becomes the one produced thing in Studio whose
+/// identity and link status are invisible ("we don't show the output detail
+/// / link status either" — 2026-08-05). Shared so the fixture's and
+/// shader's headers cannot drift apart. The detail popover is NOT in here:
+/// a face parks [`SlotDetailButton`] at the far end of whatever row it has,
+/// which is a placement only the face knows.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn ProductIdentity(product: UiProducedProduct) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+            strong {
+                class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                title: product.detail.clone().unwrap_or_default(),
+                "{product.name}"
+            }
+            if let Some(endpoint) = product.binding.bindings.bus_target.clone() {
+                BindingChip {
+                    endpoint,
+                    direction: BindingChipDirection::Publishes,
+                }
+            }
+        }
+    }
+}
+
 /// The bare preview media (pixel grid / lamp layout / skeleton / message)
 /// inside the product's aspect frame. `pub(crate)` so node-face heroes and
 /// playlist strip thumbnails reuse the exact preview path instead of

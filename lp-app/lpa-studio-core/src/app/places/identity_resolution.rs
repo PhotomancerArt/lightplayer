@@ -38,7 +38,7 @@ pub struct IdentityEvidence {
     /// `lpa_link::normalize_base_mac`, re-parsed here anyway because the
     /// rule belongs to whoever mints an identity from it.
     pub probed_mac: Option<String>,
-    /// A3: the stamped `dev_…` uid, from `/.lp/device.json` when the file
+    /// A3: the stamped `dev…` uid, from `/.lp/device.json` when the file
     /// exists, else the hello's `device_uid`. Unparseable text is treated
     /// as absent (a device may hold anything).
     pub stamped_uid: Option<String>,
@@ -99,8 +99,8 @@ pub fn resolve_identity(evidence: &IdentityEvidence) -> Option<ResolvedIdentity>
     })
 }
 
-/// Parse a `dev_…` uid, rejecting anything else — including a well-formed
-/// uid of the wrong family (a `prj_` string is not a device).
+/// Parse a `dev…` uid, rejecting anything else — including a well-formed
+/// uid of the wrong family (a `prj` string is not a device).
 fn parse_device_uid(s: &str) -> Option<PrefixedUid> {
     let uid: PrefixedUid = s.parse().ok()?;
     (uid.prefix() == UidPrefix::Device).then_some(uid)
@@ -111,7 +111,7 @@ mod tests {
     use super::*;
 
     const MAC: &str = "aa:bb:cc:dd:ee:ff";
-    const STAMPED: &str = "dev_aaaaaaaaaaaaaaaa";
+    const STAMPED: &str = "devaaaaaaaaaaaaaaaa";
 
     #[test]
     fn a1_the_hello_mac_wins_and_derives_the_uid() {
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn unparseable_stamped_text_counts_as_absent() {
-        for stamped in ["", "not-a-uid", "prj_aaaaaaaaaaaaaaaa", "dev_short"] {
+        for stamped in ["", "not-a-uid", "prjaaaaaaaaaaaaaaaa", "devshort"] {
             assert_eq!(
                 resolve_identity(&IdentityEvidence {
                     stamped_uid: Some(stamped.to_string()),

@@ -45,6 +45,10 @@ impl MetaStore for AnyMetaStore {
         self.0.user_by_email(email)
     }
 
+    fn users(&self, limit: usize) -> Vec<CloudUser> {
+        self.0.users(limit)
+    }
+
     fn put_session(&mut self, session: SessionRecord) {
         self.0.put_session(session);
     }
@@ -55,6 +59,10 @@ impl MetaStore for AnyMetaStore {
 
     fn delete_session(&mut self, token_hash: ContentHash) {
         self.0.delete_session(token_hash);
+    }
+
+    fn sessions_for_user(&self, user: PrefixedUid) -> Vec<SessionRecord> {
+        self.0.sessions_for_user(user)
     }
 
     fn put_project(&mut self, project: CloudProject) {

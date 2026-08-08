@@ -4,7 +4,7 @@
 ///
 /// One vocabulary: the CARD KEY every UI surface already holds
 /// ([`crate::UiDeviceCard::identity_key`]). It is a stamped device's
-/// `dev_…` uid, or an anonymous board's session key — and one resolver
+/// `dev…` uid, or an anonymous board's session key — and one resolver
 /// handles both, because `identity_key` puts the uid first, so a live
 /// stamped card's key IS its uid.
 ///

@@ -6,9 +6,11 @@
 //! [`lpc_cloud_api::SidecarMeta`], which is stored verbatim because the
 //! server is content-opaque (D3) and never recomputes it.
 
+pub mod caller;
 pub mod cloud_project;
 pub mod cloud_user;
 pub mod head_ref;
+pub mod login_providers;
 pub mod member_record;
 pub mod member_role;
 pub mod project_refs;

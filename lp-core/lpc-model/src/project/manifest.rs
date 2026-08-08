@@ -70,7 +70,7 @@ pub const PROJECT_FORMAT_VERSION: u32 = 5;
 pub struct ProjectManifest {
     /// Authored format version; see [`PROJECT_FORMAT_VERSION`].
     pub format: Option<u32>,
-    /// Stable project identity (`prj_…`, base-62), minted by the library
+    /// Stable project identity (`prj…`, base-32), minted by the library
     /// when a project enters it. Parity checks, history, and device
     /// associations key off it.
     pub uid: Option<String>,
@@ -301,7 +301,7 @@ mod tests {
     fn manifest_round_trips_byte_identically() {
         let manifest = ProjectManifest {
             format: Some(PROJECT_FORMAT_VERSION),
-            uid: Some(String::from("prj_0000000000000042")),
+            uid: Some(String::from("prj0000000000000042")),
             name: Some(String::from("Porch sign")),
             author: Some(String::from("Yona")),
             version: Some(String::from("0.1")),
@@ -312,7 +312,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 5,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 5,\n  \"uid\": \"prj0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);

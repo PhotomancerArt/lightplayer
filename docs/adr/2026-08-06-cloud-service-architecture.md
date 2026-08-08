@@ -76,7 +76,15 @@ one page.
 
 - Auth is Google-only (server-side code flow + userinfo; sessions as
   hashed DB tokens). Membership is per-project by email, resolving at
-  first sign-in.
+  first sign-in. **Amended 2026-08-07**
+  (`2026-08-07-provider-based-auth.md`): auth is now provider-based, not
+  Google-shaped — `LoginProviders`/`LoginOptions` let the client render
+  sign-in from server-reported connections (prod Google, local dev a
+  passwordless picker, a self-host password method possible later
+  without a client fork). The session mint stays exactly as described
+  here (one `open_session` every provider converges on; the cookie
+  carries no provider), which is what made the amendment additive
+  rather than a rewrite.
 - Deploys ride CI (`deploy-cloud.yml` on a green "Main push"),
   carrying the validated sha into `/healthz`'s build report.
 - The share-envelope ADR's "no cloud provider and no account system"

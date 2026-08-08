@@ -18,7 +18,7 @@ mock, no sleeps, no wall clock.
 | `td.invitee()` | an email address with no account behind it yet |
 | `user.project()` | a new local project with one saved version, not on the cloud |
 | `user.open_shared(&link)` | that person's tracking copy of a shared project |
-| `user.open_url("https://…/p/slug-prj_…")` | the same thing, opened the way a person does |
+| `user.open_url("https://…/p/slug-prj…")` | the same thing, opened the way a person does |
 
 A `Project` is **one copy of one project on one machine**. Two handles on the
 same uid — the owner's and a member's — are two copies, which is what makes

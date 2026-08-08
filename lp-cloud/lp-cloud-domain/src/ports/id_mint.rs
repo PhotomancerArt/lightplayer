@@ -7,7 +7,7 @@ use crate::model::session_record::SESSION_TOKEN_LEN;
 /// Same posture as `lpc-history`'s uid minting: the *caller* owns
 /// randomness, and the domain only ever consumes bytes it was handed. That
 /// is what keeps this crate free of an rng dependency, and what lets a test
-/// mint a predictable `usr_` uid without stubbing a global.
+/// mint a predictable `usr` uid without stubbing a global.
 ///
 /// An adapter backing this in production must return
 /// cryptographically-secure bytes — [`IdMint::session_token`] is a bearer
