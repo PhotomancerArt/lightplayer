@@ -17,12 +17,13 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
-    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
-    UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
-    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    LpValue, ModuleHeroProduct, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot,
+    SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin,
+    UiBusSiteView, UiBusView, UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection,
+    UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup,
+    UiPanelWidget, UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue,
+    UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -415,6 +416,9 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 5))
                 .with_preview(aurora_preview(48, 15, seed)),
         ),
+        // An embedded effect's scope carries a visual and nothing else, so
+        // its hero is not a choice.
+        hero_choice: None,
         panel,
         wiring: Some(plasma_wiring()),
         wiring_open: false,
@@ -552,6 +556,9 @@ pub(crate) fn root_face() -> UiModuleFace {
                 .with_frame(UiProductPreviewFrame::new(16, 7))
                 .with_preview(aurora_preview(48, 21, 0.0)),
         ),
+        // The sign's scope drives no lamps of its own (its wiring publishes
+        // `visual.out` and nothing else), so there is nothing to switch to.
+        hero_choice: None,
         panel: root_panel(),
         wiring: Some(root_wiring()),
         wiring_open: false,
@@ -572,6 +579,9 @@ pub(crate) fn control_root_face() -> UiModuleFace {
                 .with_detail("16 RGB lamps · mirrors control.out")
                 .with_tracking(UiProductTrackingState::Tracking),
         ),
+        // Control only: no channel here carries a visual, so the hero is
+        // forced rather than chosen and no toggle rides it.
+        hero_choice: None,
         panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
             .with_target(scope_target(ROOT_SCOPE))
             .with_controls(vec![at_default(
@@ -616,6 +626,67 @@ fn control_wiring() -> UiBusView {
             },
         ],
     }
+}
+
+/// The ordinary fixture-project shape: a shader paints `visual.out`, the
+/// fixture turns it into `control.out` lamps, so the scope resolves BOTH
+/// primaries and the hero is a **choice** — lamps by default, the raster one
+/// toggle away.
+///
+/// The face carries the hero already resolved, exactly as
+/// `ProjectController::module_face` hands it over: one preview plus the
+/// preference the toggle reflects, never both products at once.
+pub(crate) fn both_products_root_face(hero: ModuleHeroProduct) -> UiModuleFace {
+    let preview = match hero {
+        ModuleHeroProduct::Control => control_preview_product("output")
+            .with_detail("16 RGB lamps · mirrors control.out")
+            .with_tracking(UiProductTrackingState::Tracking),
+        ModuleHeroProduct::Visual => UiProducedProduct::visual("output")
+            .with_detail("256 x 256 · mirrors visual.out")
+            .with_tracking(UiProductTrackingState::Tracking)
+            .with_frame(UiProductPreviewFrame::new(16, 7))
+            .with_preview(aurora_preview(48, 21, 0.0)),
+    };
+    UiModuleFace {
+        preview: Some(preview),
+        hero_choice: Some(hero),
+        panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
+            .with_target(scope_target(ROOT_SCOPE))
+            .with_controls(vec![at_default(
+                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                "authored 200",
+            )]),
+        wiring: Some(both_products_wiring()),
+        wiring_open: false,
+        provenance: None,
+        auto_save: Some(true),
+    }
+}
+
+/// [`control_wiring`] with the shader's raster in front of it — the chain
+/// the toggle picks two points on.
+fn both_products_wiring() -> UiBusView {
+    let mut wiring = control_wiring();
+    wiring.channels.insert(
+        1,
+        UiBusChannelView {
+            primary_visual: true,
+            preview: Some(UiBusChannelPreview {
+                kind: UiProductKind::Visual,
+                preview: aurora_preview(48, 21, 0.0),
+                tracking: UiProductTrackingState::Tracking,
+                frame: UiProductPreviewFrame::new(16, 7),
+            }),
+            ..channel(
+                "visual.out",
+                "Color",
+                Some("visual product #4:0"),
+                vec![site("scanner", "visual")],
+                vec![site("Fixture", "input")],
+            )
+        },
+    );
+    wiring
 }
 
 /// The root module's children, as sibling cards BELOW its card: two leaves

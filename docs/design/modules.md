@@ -189,6 +189,17 @@ feed a module's inner consumers with zero authoring (see E6).
 > engine-reported primary-visual role. See
 > `docs/adr/2026-08-01-scoped-bus-engine-architecture.md`.
 
+> **Presentation amendment (2026-08-07, PR #387).** The R7 mirror still
+> defines the module's *output interface*, but Studio's module-face
+> **hero no longer leads with it**: when the module's scope resolves
+> both primaries, the hero shows `control.out` — the lamps the project
+> actually drives — with an icon-only toggle back to the visual
+> (per-card `NodeCardUiState` preference, default control). The visual
+> mirror is the fallback, not the lead; a fixture project's output IS
+> its lamps. Project/Explore card thumbnails follow the same default
+> with no toggle. See the amendment note on
+> `docs/adr/2026-07-16-primary-visual-product.md`.
+
 ### R8 — The panel: one concept, every node, derived from publicity
 
 The **panel** is a first-class per-node concept, not a feature of

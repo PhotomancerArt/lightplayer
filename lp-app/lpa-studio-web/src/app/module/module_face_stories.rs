@@ -15,8 +15,9 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, control_root_face, held_root_face, held_root_view,
-    module_node_view, plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
+    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, both_products_root_face, control_root_face,
+    held_root_face, held_root_view, module_node_view, plasma_children, plasma_face,
+    plasma_one_panel, root_module_node_view,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -130,6 +131,46 @@ fn control_output() -> Element {
         WorkspaceCanvas {
             NodePane {
                 view: module_node_view("Scanner Rig", ROOT_SCOPE, "3 nodes · 1 fixture", face),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Hero · Lamps",
+    description = "The default hero on a module whose scope resolves BOTH primaries: the lamps, because a fixture project's output IS the lamps and the raster is the intermediate that made them (Yona's ruling 2026-08-07, reversing R7's visual-first reading). The choice lives in the hero's upper right as two squared blocks — a discrete two-state control, so blocks rather than a pill — with `lamps` engaged. The preference is per card and core-owned, so it survives a remount."
+)]
+fn hero_lamps() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view(
+                    "Scanner Rig",
+                    ROOT_SCOPE,
+                    "4 nodes · 1 fixture",
+                    both_products_root_face(lpa_studio_core::ModuleHeroProduct::Control),
+                ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Hero · Raster",
+    description = "The same module with the hero toggled to the visual: the raster the shader painted, one gesture away, with `raster` engaged in the upper-right blocks. Same card, same panel, same wiring — only the hero and the engaged block move, which is what makes the pair read as two states of one control rather than two cards."
+)]
+fn hero_raster() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view(
+                    "Scanner Rig",
+                    ROOT_SCOPE,
+                    "4 nodes · 1 fixture",
+                    both_products_root_face(lpa_studio_core::ModuleHeroProduct::Visual),
+                ),
                 on_action: move |_| {},
             }
         }
