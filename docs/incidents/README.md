@@ -27,6 +27,30 @@ discretion; test/CI breakage never does.
 Small still counts. A ten-minute self-inflicted outage with one affected
 user is a cheap rehearsal for the one with a hundred.
 
+## Severity
+
+Grade **by fraction and function, as if at scale** — headcount belongs
+in the Impact paragraph, never in the grade. "All existing projects
+unopenable for 100% of users" is the same severity at two users as at
+two million; a tiny userbase is a *mitigating fact about impact*, not a
+*discount on severity*, and grading it down would teach us nothing for
+the day the userbase isn't tiny.
+
+- **critical** — data loss or corruption, a security/privacy breach, or
+  the product wholly unusable (no core function at all) for a large
+  fraction of users; any irreversible harm is automatically critical.
+- **severe** — a core workflow broken or existing content unavailable
+  for a large fraction of users, with no workaround or only
+  destructive/manual ones. Duration doesn't change the grade; it's
+  reported separately.
+- **minor** — degraded or annoying with a reasonable workaround, or a
+  broken edge affecting a small fraction.
+
+When torn between two grades, **grade up** — the opposite of review
+findings, deliberately: a review finding graded down communicates merge
+risk honestly; an incident graded up buys the rehearsal for the bigger
+version of itself.
+
 ## Blameless, agentic edition
 
 The classic rule: name conditions, not actors — "the merge raced the
@@ -74,7 +98,7 @@ drove the response (it holds the whole timeline). The steps:
 ---
 status: actions-open    # actions-open | closed
 date: YYYY-MM-DD        # when impact began
-severity: minor         # minor | major | critical (user-impact scale)
+severity: severe        # minor | severe | critical (see Severity above)
 duration: <impact window, humans-first ("5h 10m")>
 related: []             # defects, debt, ADRs, PRs
 ---
@@ -92,4 +116,4 @@ surface; done-during-response items stay listed, checked.
 
 | Date | Incident | Severity | Status |
 |---|---|---|---|
-| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.md) | minor | actions-open |
+| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.md) | severe | actions-open |

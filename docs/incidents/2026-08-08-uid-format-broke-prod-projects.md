@@ -1,7 +1,7 @@
 ---
 status: actions-open
 date: 2026-08-08
-severity: minor
+severity: severe
 duration: 5h 10m (fix availability; per-project recovery = one Upgrade click)
 related:
   [
@@ -80,7 +80,7 @@ associations survived); history kept pre-migration bytes as undo.
 **Where we got lucky** — Only string renderings changed, so a
 value-preserving transcode could exist at all; device-side identity
 treats uids as opaque strings, so fielded firmware never noticed;
-production had a single user; the cloud store's old-format rows were
+production had a single-digit userbase (a fact about impact, not severity — see the README rubric); the cloud store's old-format rows were
 already scheduled for a wipe.
 
 **Action items**
