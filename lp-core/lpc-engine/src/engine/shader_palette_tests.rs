@@ -28,6 +28,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::products::visual::{ConsumerPolicy, VisualSpace};
 use lpc_model::{
     ChannelName, Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, Kind, LpValue,
     NodeId, ProductRef, TimeProduct, ToLpValue, TreePath,
@@ -100,6 +101,8 @@ impl Project {
                     height: 1,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render palette shader");
