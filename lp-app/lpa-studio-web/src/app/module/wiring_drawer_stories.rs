@@ -219,6 +219,7 @@ fn drawer_only_face(wiring: UiBusView) -> UiModuleFace {
         wiring_open: true,
         provenance: None,
         auto_save: None,
+        export: None,
     }
 }
 

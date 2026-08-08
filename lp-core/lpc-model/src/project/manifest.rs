@@ -14,6 +14,7 @@
 //! construction (there is nothing the writer could drop).
 
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 
@@ -52,6 +53,14 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 ///   loud rather than silent — see the module-level doc above). Reserve
 ///   the bump for changes that alter the *meaning* of already-authored
 ///   data, as this format's own `channels` change did.
+///   Later still in the same format: the container gained `kind`/`exports`
+///   (module authoring unit, P1): an optional authored project kind
+///   (`"general"` (default, absent), `"pattern"`, `"show"`, `"rig"`) and,
+///   for the two library kinds, an `exports` list of module folder names.
+///   Not a bump for the same reason `target` was not — purely additive,
+///   never read by the engine, and the container's closed-vocabulary
+///   parser already turns an unaware reader's encounter with either key
+///   into a loud parse error rather than a silent drop.
 /// - `3` — project/module mitosis: `project.json` became the non-node
 ///   container manifest (`format`/`uid`/`name`), and the root module node
 ///   moved to `module.json` (kind `Module`, renamed from `project` in the
@@ -61,6 +70,30 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
 pub const PROJECT_FORMAT_VERSION: u32 = 6;
+
+/// A project's authored kind (module authoring unit, P1 —
+/// `docs/design/modules.md`): the default general project, or one of two
+/// *library* kinds that export named modules for other projects to import.
+///
+/// Resolved from the manifest's flat `kind`/`exports` JSON keys via
+/// [`ProjectManifest::project_kind`] — the manifest itself keeps the raw
+/// strings ([`ProjectManifest::kind_raw`]/[`ProjectManifest::exports_raw`])
+/// so an unresolved manifest can still round-trip byte-identically. The
+/// engine never reads this (D14 of the module authoring plan); it drives
+/// Studio-side lint (P2) and UI (P3+) only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ProjectKind {
+    /// An ordinary authored project. `kind` absent on disk.
+    #[default]
+    General,
+    /// A library project: authors named modules other projects import,
+    /// listed by folder name in `exports`.
+    Pattern { exports: Vec<String> },
+    /// A show project: sequences/plays other projects. Exports nothing.
+    Show,
+    /// A library project like [`Self::Pattern`], for physical rig modules.
+    Rig { exports: Vec<String> },
+}
 
 /// Parsed `project.json` container manifest.
 ///
@@ -84,6 +117,19 @@ pub struct ProjectManifest {
     pub license: Option<String>,
     /// Provenance: ISO date the project was created.
     pub created: Option<String>,
+    /// Authored project kind, as the raw JSON string (`"general"` |
+    /// `"pattern"` | `"show"` | `"rig"`), or `None` when the key is absent
+    /// (the common case: an ordinary project, equivalent to `"general"`).
+    /// [`Self::read_json`] validates this against the closed vocabulary,
+    /// but keeps it raw rather than resolved — read [`ProjectKind`] through
+    /// [`Self::project_kind`], and patch it through [`Self::set_kind`].
+    pub kind_raw: Option<String>,
+    /// Authored module export list: plain folder names under the project,
+    /// each one another project imports by
+    /// (`docs/design/modules.md`). Meaningful only when [`Self::kind_raw`]
+    /// is `"pattern"` or `"rig"` — [`Self::read_json`] refuses `exports`
+    /// alongside any other kind, including absent.
+    pub exports_raw: Option<Vec<String>>,
     /// Advisory board target: a board catalog id in the registry's
     /// `vendor/product` vocabulary (e.g. `espressif/esp32-c6-devkitc-1`),
     /// the same strings as `RegisteredDevice.board_id`. Feeds generation,
@@ -101,6 +147,55 @@ impl ProjectManifest {
             format: Some(PROJECT_FORMAT_VERSION),
             name: Some(String::from(name)),
             ..Self::default()
+        }
+    }
+
+    /// Resolve the authored `kind`/`exports` keys into [`ProjectKind`]
+    /// ([`ProjectKind::General`] when `kind` is absent).
+    ///
+    /// Infallible: [`Self::read_json`] already refused any manifest whose
+    /// `kind`/`exports` combination this cannot represent (an unknown
+    /// `kind` string, or `exports` without a library kind), so by the time
+    /// a manifest exists via the parser its `kind_raw`/`exports_raw` are
+    /// always one of the four known shapes. A manifest built directly
+    /// (bypassing the parser) with an out-of-vocabulary `kind_raw` resolves
+    /// to [`ProjectKind::General`] rather than panicking.
+    pub fn project_kind(&self) -> ProjectKind {
+        match self.kind_raw.as_deref() {
+            Some("pattern") => ProjectKind::Pattern {
+                exports: self.exports_raw.clone().unwrap_or_default(),
+            },
+            Some("show") => ProjectKind::Show,
+            Some("rig") => ProjectKind::Rig {
+                exports: self.exports_raw.clone().unwrap_or_default(),
+            },
+            None | Some("general") | Some(_) => ProjectKind::General,
+        }
+    }
+
+    /// Set the authored project kind, keeping [`Self::kind_raw`]/
+    /// [`Self::exports_raw`] consistent with it: [`ProjectKind::General`]
+    /// clears both keys (the default needs no authored trace), the two
+    /// library kinds author their `exports` list, and `Show` clears
+    /// `exports` (it is never a library kind).
+    pub fn set_kind(&mut self, kind: ProjectKind) {
+        match kind {
+            ProjectKind::General => {
+                self.kind_raw = None;
+                self.exports_raw = None;
+            }
+            ProjectKind::Pattern { exports } => {
+                self.kind_raw = Some(String::from("pattern"));
+                self.exports_raw = Some(exports);
+            }
+            ProjectKind::Show => {
+                self.kind_raw = Some(String::from("show"));
+                self.exports_raw = None;
+            }
+            ProjectKind::Rig { exports } => {
+                self.kind_raw = Some(String::from("rig"));
+                self.exports_raw = Some(exports);
+            }
         }
     }
 
@@ -145,6 +240,10 @@ impl ProjectManifest {
                     "version" => manifest.version = Some(read_string(&mut source, "version")?),
                     "license" => manifest.license = Some(read_string(&mut source, "license")?),
                     "created" => manifest.created = Some(read_string(&mut source, "created")?),
+                    "kind" => manifest.kind_raw = Some(read_string(&mut source, "kind")?),
+                    "exports" => {
+                        manifest.exports_raw = Some(read_string_array(&mut source, "exports")?);
+                    }
                     "target" => manifest.target = Some(read_string(&mut source, "target")?),
                     other => {
                         return Err(ManifestParseError::UnknownField {
@@ -165,13 +264,14 @@ impl ProjectManifest {
                 }
             }
         }
+        validate_kind_and_exports(&manifest)?;
         Ok(manifest)
     }
 
     /// Write the manifest as canonical authored JSON: pretty-printed, fixed
     /// field order (`format`, `uid`, `name`, `author`, `version`,
-    /// `license`, `created`, `target`), absent fields omitted,
-    /// trailing newline. Deterministic so unchanged models produce
+    /// `license`, `created`, `kind`, `exports`, `target`), absent fields
+    /// omitted, trailing newline. Deterministic so unchanged models produce
     /// byte-identical files.
     pub fn write_json(&self) -> String {
         let mut out = String::from("{");
@@ -210,6 +310,24 @@ impl ProjectManifest {
         }
         if let Some(created) = &self.created {
             field("created", created, true, &mut out);
+        }
+        if let Some(kind) = &self.kind_raw {
+            field("kind", kind, true, &mut out);
+        }
+        if let Some(exports) = &self.exports_raw {
+            let mut array = String::from("[");
+            for (index, item) in exports.iter().enumerate() {
+                if index > 0 {
+                    array.push(',');
+                }
+                array.push_str("\n    ");
+                push_json_string(&mut array, item);
+            }
+            if !exports.is_empty() {
+                array.push_str("\n  ");
+            }
+            array.push(']');
+            field("exports", &array, false, &mut out);
         }
         if let Some(target) = &self.target {
             field("target", target, true, &mut out);
@@ -269,6 +387,102 @@ fn read_string(
     }
 }
 
+/// Read a JSON array of plain strings (the `exports` shape): each item a
+/// module folder name, validated as a plain path segment as it is read.
+fn read_string_array(
+    source: &mut JsonSyntaxSource<'_>,
+    field: &str,
+) -> Result<Vec<String>, ManifestParseError> {
+    let syntax_error =
+        |error: crate::slot_codec::SyntaxError| ManifestParseError::Syntax(error.to_string());
+    match source.next_event().map_err(syntax_error)? {
+        Some(SyntaxEvent::StartArray { .. }) => {}
+        _ => {
+            return Err(ManifestParseError::Syntax(alloc::format!(
+                "field `{field}` must be an array of strings"
+            )));
+        }
+    }
+    let mut items = Vec::new();
+    loop {
+        match source.next_event().map_err(syntax_error)? {
+            Some(SyntaxEvent::EndArray { .. }) => break,
+            Some(SyntaxEvent::StringChunk { text, is_last, .. }) => {
+                let mut value = text;
+                let mut done = is_last;
+                while !done {
+                    match source.next_event().map_err(syntax_error)? {
+                        Some(SyntaxEvent::StringChunk {
+                            text: next,
+                            is_last: next_done,
+                            ..
+                        }) => {
+                            value.push_str(&next);
+                            done = next_done;
+                        }
+                        _ => {
+                            return Err(ManifestParseError::Syntax(alloc::format!(
+                                "field `{field}` must be an array of strings"
+                            )));
+                        }
+                    }
+                }
+                validate_export_segment(field, &value)?;
+                items.push(value);
+            }
+            _ => {
+                return Err(ManifestParseError::Syntax(alloc::format!(
+                    "field `{field}` must be an array of strings"
+                )));
+            }
+        }
+    }
+    Ok(items)
+}
+
+/// An export entry names a module by its folder — a plain path segment,
+/// never a path: nonempty, no `/`, no `..`. Whether the folder actually
+/// exists is not a parse concern (that's lint, P2).
+fn validate_export_segment(field: &str, segment: &str) -> Result<(), ManifestParseError> {
+    if segment.is_empty() {
+        return Err(ManifestParseError::Syntax(alloc::format!(
+            "field `{field}` entries must be nonempty"
+        )));
+    }
+    if segment.contains('/') {
+        return Err(ManifestParseError::Syntax(alloc::format!(
+            "field `{field}` entry {segment:?} must be a plain folder name, not a path"
+        )));
+    }
+    if segment.contains("..") {
+        return Err(ManifestParseError::Syntax(alloc::format!(
+            "field `{field}` entry {segment:?} must not contain `..`"
+        )));
+    }
+    Ok(())
+}
+
+/// Cross-field validation for the closed `kind`/`exports` vocabulary,
+/// applied once the whole object has been read (JSON key order is not
+/// authored order, so `exports` may have arrived before `kind`).
+fn validate_kind_and_exports(manifest: &ProjectManifest) -> Result<(), ManifestParseError> {
+    if let Some(kind) = &manifest.kind_raw {
+        if !matches!(kind.as_str(), "general" | "pattern" | "show" | "rig") {
+            return Err(ManifestParseError::Syntax(alloc::format!(
+                "unknown project kind {kind:?}; must be one of \"general\", \"pattern\", \"show\", \"rig\""
+            )));
+        }
+    }
+    if manifest.exports_raw.is_some()
+        && !matches!(manifest.kind_raw.as_deref(), Some("pattern") | Some("rig"))
+    {
+        return Err(ManifestParseError::Syntax(String::from(
+            "field `exports` requires `kind` to be \"pattern\" or \"rig\"",
+        )));
+    }
+    Ok(())
+}
+
 fn push_json_string(out: &mut String, value: &str) {
     out.push('"');
     for ch in value.chars() {
@@ -307,6 +521,8 @@ mod tests {
             version: Some(String::from("0.1")),
             license: Some(String::from("CC0-1.0")),
             created: Some(String::from("2026-08-01")),
+            kind_raw: None,
+            exports_raw: None,
             target: Some(String::from("espressif/esp32-c6-devkitc-1")),
         };
         let text = manifest.write_json();
@@ -374,15 +590,152 @@ mod tests {
                 field: String::from("nodes")
             }
         );
-        // The pre-mitosis root is diagnosable by its `kind` key.
+        // P1: `kind` is now a KNOWN container key with a closed value set,
+        // not an unknown field — but the pre-mitosis root's value
+        // (`"Module"`, a node-kind tag, never a project kind) is still
+        // outside that vocabulary, so it must still fail loudly, just with
+        // a different diagnosis than an unknown *key*: a clear message
+        // naming the four allowed project kinds.
         let err = ProjectManifest::read_json(r#"{ "kind": "Module", "format": 2 }"#)
-            .expect_err("kind is not a container field");
+            .expect_err("Module is not a known project kind");
+        assert!(
+            err.to_string().contains("general")
+                && err.to_string().contains("pattern")
+                && err.to_string().contains("show")
+                && err.to_string().contains("rig")
+                && err.to_string().contains("Module"),
+            "{err}"
+        );
+    }
+
+    /// P1: `kind`/`exports` round-trip byte-identically for both library
+    /// kinds, and the fixed writer order places them between `created` and
+    /// `target`.
+    #[test]
+    fn manifest_kind_and_exports_round_trip() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            created: Some(String::from("2026-08-07")),
+            kind_raw: Some(String::from("pattern")),
+            exports_raw: Some(alloc::vec![String::from("chase"), String::from("sparkle")]),
+            target: Some(String::from("espressif/esp32-c6-devkitc-1")),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
         assert_eq!(
-            err,
-            ManifestParseError::UnknownField {
-                field: String::from("kind")
+            text,
+            "{\n  \"format\": 6,\n  \"created\": \"2026-08-07\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\",\n    \"sparkle\"\n  ],\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read, manifest);
+        assert_eq!(read.write_json(), text);
+        assert_eq!(
+            read.project_kind(),
+            ProjectKind::Pattern {
+                exports: alloc::vec![String::from("chase"), String::from("sparkle")]
             }
         );
+    }
+
+    /// P1: `rig` is the other library kind, and its `exports` list can be
+    /// empty (authored but with nothing exported yet).
+    #[test]
+    fn manifest_rig_kind_with_empty_exports_round_trips() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            kind_raw: Some(String::from("rig")),
+            exports_raw: Some(Vec::new()),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert_eq!(
+            text,
+            "{\n  \"format\": 6,\n  \"kind\": \"rig\",\n  \"exports\": []\n}\n"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read, manifest);
+        assert_eq!(
+            read.project_kind(),
+            ProjectKind::Rig {
+                exports: Vec::new()
+            }
+        );
+    }
+
+    /// P1: `show` is a real kind but never a library kind — it carries no
+    /// `exports` key at all.
+    #[test]
+    fn manifest_show_kind_round_trips_without_exports() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            kind_raw: Some(String::from("show")),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert_eq!(text, "{\n  \"format\": 6,\n  \"kind\": \"show\"\n}\n");
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read, manifest);
+        assert_eq!(read.project_kind(), ProjectKind::Show);
+    }
+
+    /// P1: `kind` absent resolves to `General` — the common, untargeted
+    /// case, exactly like the other optional fields.
+    #[test]
+    fn manifest_kind_absent_resolves_to_general() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            ..ProjectManifest::default()
+        };
+        assert_eq!(manifest.project_kind(), ProjectKind::General);
+        assert!(!manifest.write_json().contains("kind"));
+    }
+
+    /// P1: `exports` is only meaningful alongside a library kind —
+    /// authoring it with `kind` absent, or with a non-library kind, is a
+    /// parse error naming the requirement, not a silently-ignored field.
+    #[test]
+    fn manifest_rejects_exports_without_library_kind() {
+        let err = ProjectManifest::read_json(r#"{ "format": 5, "exports": ["chase"] }"#)
+            .expect_err("exports without any kind at all");
+        assert!(
+            err.to_string().contains("pattern") && err.to_string().contains("rig"),
+            "{err}"
+        );
+
+        let err =
+            ProjectManifest::read_json(r#"{ "format": 5, "kind": "show", "exports": ["chase"] }"#)
+                .expect_err("exports alongside a non-library kind");
+        assert!(
+            err.to_string().contains("pattern") && err.to_string().contains("rig"),
+            "{err}"
+        );
+    }
+
+    /// P1: an unrecognized `kind` string is refused with a message naming
+    /// the closed set of allowed values.
+    #[test]
+    fn manifest_rejects_unknown_kind_value() {
+        let err = ProjectManifest::read_json(r#"{ "format": 5, "kind": "diorama" }"#)
+            .expect_err("diorama is not a project kind");
+        assert!(err.to_string().contains("diorama"), "{err}");
+        assert!(
+            err.to_string().contains("general")
+                && err.to_string().contains("pattern")
+                && err.to_string().contains("show")
+                && err.to_string().contains("rig"),
+            "{err}"
+        );
+    }
+
+    /// P1: an export entry must be a plain folder name — not a path, not
+    /// empty, and not a `..` escape.
+    #[test]
+    fn manifest_rejects_malformed_export_segments() {
+        for bad in [r#""""#, r#""a/b""#, r#""..""#, r#""../escape""#] {
+            let text =
+                alloc::format!(r#"{{ "format": 5, "kind": "pattern", "exports": [{bad}] }}"#);
+            ProjectManifest::read_json(&text).expect_err(&alloc::format!("bad segment {bad}"));
+        }
     }
 
     #[test]

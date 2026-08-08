@@ -15,9 +15,10 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, both_products_root_face, control_root_face,
-    held_root_face, held_root_view, module_node_view, plasma_children, plasma_face,
-    plasma_one_panel, root_module_node_view,
+    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, both_products_root_face, clean_exports_view,
+    control_root_face, designated_export, error_exports_view, fire_export, held_root_face,
+    held_root_view, module_card_with_export, module_node_view, plasma_children, plasma_face,
+    plasma_one_panel, root_module_node_view, scaffolding_warning, warning_exports_view,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -188,6 +189,70 @@ fn workspace_no_bus_pane() -> Element {
     rsx! {
         div { class: "tw:grid tw:w-full tw:max-w-[860px] tw:gap-3.5 tw:bg-page tw:p-3",
             NodePane { view, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "A PATTERN project's workspace column, grouped (module authoring unit, G1 R-A): the root card, then its children split into what this project HANDS OUT and what stays home. The `exports` header wears the sage export family and the effect folders' cards sit under it, each with the display-only chip on its header; `rig` collects the clock, the shared non-exported `common` module, and the fixture — D17's word for scaffolding-as-context. Both exports read clean, so there is no preamble at all. P3 put this on the root card as a rail of names; here the exports are the cards themselves, so 'what does this ship' is answered by where a card sits."
+)]
+fn child_grouping_clean() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane { view: clean_exports_view(), on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The same column with one export carrying a WARNING: fire reads a channel only the non-exported `common` writes, so an imported copy runs on the authored default. The aggregate line sits directly under the `exports` header, above the cards — say it once for the group — and fire's own chip takes the warning tone so the sentence and the card that owns it are connected without a name lookup. The `rig` half stays untouched: nothing about a warning changes what scaffolding is."
+)]
+fn child_grouping_warning() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane { view: warning_exports_view(), on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "Both severities at once: a warning and a hard ERROR (a file inside ripple_interference_cascade points outside the folder, so the vendored copy would not load). Two preamble lines rank worst-last in report order, and each card's chip carries its OWN verdict — warning on fire, error on ripple, plain sage on the clean one. This is the story that says whether the group can carry bad news: the error must not be swallowed by the warning above it, and the sage header must not soften either."
+)]
+fn child_grouping_error() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            NodePane { view: error_exports_view(), on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The chip alone, four ways, on cards out of any column: clean (sage), warning, error, and undesignated. The chip is DISPLAY only (D12 — it never toggles anything; the gesture lives in the popup behind the ⓘ), and its tone is this export's own lint verdict, so a card that would ship badly says so where you can see it. Read top to bottom: the chip has to be findable without being loud, and the three tones have to be distinguishable at chip size."
+)]
+fn child_card_export_chip() -> Element {
+    rsx! {
+        WorkspaceCanvas {
+            div { class: "tw:grid tw:gap-3",
+                NodePane {
+                    view: module_card_with_export("noise_party", designated_export("noise_party", Vec::new())),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export(
+                        "fire",
+                        designated_export("fire", vec![scaffolding_warning()]),
+                    ),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export("ripple_interference_cascade", fire_export(true)),
+                    on_action: move |_| {},
+                }
+                NodePane {
+                    view: module_card_with_export("common", fire_export(false)),
+                    on_action: move |_| {},
+                }
+            }
         }
     }
 }
