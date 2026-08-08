@@ -616,7 +616,7 @@ mod tests {
 
     fn card(connected: Option<SyncRelation>, running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
-            uid: "prj_1".to_string(),
+            uid: "prj1".to_string(),
             kind: "Module".to_string(),
             project_kind: "General".to_string(),
             exports: Vec::new(),

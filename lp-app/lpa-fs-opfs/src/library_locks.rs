@@ -46,7 +46,7 @@ pub enum LibraryLock {
     /// Catalog structure (package dir create/remove/move), /registry.json,
     /// seed-once. Short-lived; transactions flush before release.
     Catalog,
-    /// One project's /packages + /history subtrees, keyed by `prj_…` uid.
+    /// One project's /packages + /history subtrees, keyed by `prj…` uid.
     /// Held while the project is open.
     Project(String),
 }
@@ -232,16 +232,16 @@ mod tests {
     fn lock_names_are_the_documented_scheme() {
         assert_eq!(LibraryLock::Catalog.name(), "lp-catalog");
         assert_eq!(
-            LibraryLock::Project("prj_abc123".to_string()).name(),
-            "lp-project:prj_abc123"
+            LibraryLock::Project("prjabc123".to_string()).name(),
+            "lp-project:prjabc123"
         );
     }
 
     #[test]
     fn project_uid_parses_only_project_locks() {
         assert_eq!(
-            LibraryLock::project_uid("lp-project:prj_abc123"),
-            Some("prj_abc123")
+            LibraryLock::project_uid("lp-project:prjabc123"),
+            Some("prjabc123")
         );
         assert_eq!(LibraryLock::project_uid("lp-catalog"), None);
         assert_eq!(LibraryLock::project_uid("some-other-lock"), None);

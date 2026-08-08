@@ -39,14 +39,14 @@ fn hello_request_returns_injected_provenance_with_live_device_uid() {
         .base_fs_mut()
         .write_file(
             DEVICE_IDENTITY_PATH.as_path(),
-            br#"{"uid":"dev_0000000000000002","name":"Porch sign"}"#,
+            br#"{"uid":"dev0000000000000002","name":"Porch sign"}"#,
         )
         .unwrap();
     let response = dispatch_hello(&mut server, &output_provider, &graphics);
     match response {
         lpc_wire::server::ServerMsgBody::Hello(hello) => {
             assert_eq!(hello.proto, WIRE_PROTO_VERSION);
-            assert_eq!(hello.device_uid.as_deref(), Some("dev_0000000000000002"));
+            assert_eq!(hello.device_uid.as_deref(), Some("dev0000000000000002"));
         }
         other => panic!("expected hello response, got {other:?}"),
     }
@@ -81,7 +81,7 @@ fn server_with_injected_hello() -> (
     server.set_hello_identity(
         HelloIdentity::new("hello-test", "abc123456789", true, "debug")
             // A boot-time hint only: dispatch re-reads the root identity file.
-            .with_device_uid(Some("dev_0000000000000001".to_string())),
+            .with_device_uid(Some("dev0000000000000001".to_string())),
     );
     let hello = server.hello();
     assert_eq!(hello.proto, WIRE_PROTO_VERSION);
@@ -89,7 +89,7 @@ fn server_with_injected_hello() -> (
     assert_eq!(hello.build.commit, "abc123456789");
     assert!(hello.build.dirty);
     assert_eq!(hello.build.profile, "debug");
-    assert_eq!(hello.device_uid.as_deref(), Some("dev_0000000000000001"));
+    assert_eq!(hello.device_uid.as_deref(), Some("dev0000000000000001"));
     assert_eq!(
         hello.build.features, derived_features,
         "identity injection never touches the capability half"

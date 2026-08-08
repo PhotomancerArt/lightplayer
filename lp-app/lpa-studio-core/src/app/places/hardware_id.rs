@@ -2,7 +2,7 @@
 //!
 //! Design: `~/.photomancer/planning/lp2025/2026-08-04-1748-hardware-anchored-device-identity/design.md`
 //! §2/§4 (graduates to `docs/design/device-identity.md` at P5). The point
-//! of this type is erase-proofness: a `dev_…` uid stamped into the
+//! of this type is erase-proofness: a `dev…` uid stamped into the
 //! device's filesystem dies with `EraseDevice`, but the factory efuse MAC
 //! survives it by construction, so deriving the uid FROM the MAC instead
 //! of inventing one means re-flashing a board lands back on the same
@@ -21,7 +21,7 @@ pub enum HardwareId {
     /// (`HardwareFacts::base_mac` / a download-mode ROM read).
     EspEfuse { mac: [u8; 6] },
     /// Host-class embedders (`fw-host`, `lp-cli`) and legacy/stamped
-    /// devices: a random `dev_` uid (today's scheme, demoted to
+    /// devices: a random `dev` uid (today's scheme, demoted to
     /// fallback).
     Minted { uid: PrefixedUid },
 }
@@ -78,7 +78,7 @@ impl HardwareId {
     /// is 16 bytes — 9 zero bytes, one `0x01` tag byte, then the 6 MAC
     /// bytes. This is a transparent embed (design §2, D2), not a salted
     /// hash: two studio installs must agree on a board's uid because the
-    /// device carries it, and `mint` reduces mod 62^16 (~95 bits) so the
+    /// device carries it, and `mint` keeps the low 80 bits (16 base-32 digits) so the
     /// embedded value (< 2^56) survives untouched — the body renders
     /// zero-prefixed, visibly distinct from a random mint.
     ///
@@ -157,8 +157,10 @@ mod tests {
     #[test]
     fn golden_device_uid_for_a_known_mac() {
         // Pinned so the derivation can never silently change (P1 spec).
+        // Re-pinned once: the RENDERING changed with the base-32 uid format
+        // (ADR 2026-08-07); the derivation bytes did not.
         let id = HardwareId::EspEfuse { mac: MAC };
-        assert_eq!(id.device_uid().to_string(), "dev_000000029EVDlKLX");
+        assert_eq!(id.device_uid().to_string(), "dev000000daqf6dvvqz");
     }
 
     #[test]

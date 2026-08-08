@@ -46,6 +46,10 @@ pub fn sample_user(uid: PrefixedUid, email: &str) -> CloudUser {
         google_sub: format!("g-{uid}"),
         email: email.to_string(),
         display_name: "Sample".to_string(),
+        given_name: None,
+        family_name: None,
+        picture_url: None,
+        provider: "google".to_string(),
         created_at: 1.0,
     }
 }
@@ -66,7 +70,9 @@ pub fn sample_session(user: PrefixedUid, token: &[u8], expires_at: f64) -> Sessi
     SessionRecord {
         token_hash: ContentHash::of(token),
         user,
+        created_at: 1.0,
         expires_at,
+        user_agent: None,
     }
 }
 

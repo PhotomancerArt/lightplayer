@@ -75,11 +75,11 @@ impl ProjectTemplate {
     }
 }
 
-/// One home-gallery gesture. Package identity travels as the `prj_…` uid
+/// One home-gallery gesture. Package identity travels as the `prj…` uid
 /// string straight off the card view model.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeOp {
-    /// Open a library package — by slug (URLs) or `prj_…` uid (cards) —
+    /// Open a library package — by slug (URLs) or `prj…` uid (cards) —
     /// pushing its head to the simulator (D13/D19).
     OpenPackage {
         key: String,
@@ -149,7 +149,7 @@ pub enum HomeOp {
         uid: String,
     },
     /// Name an anonymous connected device (the Needs-a-name card's inline
-    /// form): mints a `dev_` uid and stamps the identity over the wire —
+    /// form): mints a `dev` uid and stamps the identity over the wire —
     /// card-anchored, never a dialog. `target` is that card (M4): with
     /// two blank boards attached, naming one must not stamp the other.
     NameDevice {
@@ -372,7 +372,7 @@ mod tests {
     fn opens_use_the_project_load_deadline() {
         for op in [
             HomeOp::OpenPackage {
-                key: "prj_1".to_string(),
+                key: "prj1".to_string(),
             },
             HomeOp::OpenExample {
                 id: "examples/basic".to_string(),
@@ -450,21 +450,21 @@ mod tests {
     fn library_crud_uses_the_project_action_deadline() {
         for op in [
             HomeOp::RenamePackage {
-                uid: "prj_1".to_string(),
+                uid: "prj1".to_string(),
                 name: "n".to_string(),
             },
             HomeOp::DuplicatePackage {
-                uid: "prj_1".to_string(),
+                uid: "prj1".to_string(),
             },
             HomeOp::DeletePackage {
-                uid: "prj_1".to_string(),
+                uid: "prj1".to_string(),
             },
             HomeOp::ImportZip {
                 file_name: "a.zip".to_string(),
                 bytes: ZipBytes(vec![1, 2]),
             },
             HomeOp::RenameDevice {
-                uid: "dev_1".to_string(),
+                uid: "dev1".to_string(),
                 name: "n".to_string(),
             },
         ] {
@@ -487,7 +487,7 @@ mod tests {
     fn forgetting_a_device_owns_the_connection() {
         assert_eq!(
             HomeOp::ForgetDevice {
-                uid: "dev_1".to_string(),
+                uid: "dev1".to_string(),
             }
             .action_class(),
             ActionClass::Recovery,

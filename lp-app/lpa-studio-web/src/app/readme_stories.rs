@@ -217,7 +217,7 @@ fn readme_lens_card() -> UiDeviceCard {
         transport: String::new(),
         state: RosterCardState::RunningUpToDate,
         project: Some(UiDeviceProjectChip {
-            uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             name: "evening-glow".to_string(),
         }),
         fw: None,
@@ -241,7 +241,7 @@ fn readme_lens_card() -> UiDeviceCard {
 fn readme_home_view() -> UiHomeView {
     let projects = vec![
         UiPackageCard {
-            uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
             kind: "Module".to_string(),
             project_kind: "General".to_string(),
             exports: Vec::new(),
@@ -260,7 +260,7 @@ fn readme_home_view() -> UiHomeView {
             health: PackageHealth::Ready,
         },
         UiPackageCard {
-            uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             kind: "Module".to_string(),
             project_kind: "General".to_string(),
             exports: Vec::new(),
@@ -275,7 +275,7 @@ fn readme_home_view() -> UiHomeView {
             health: PackageHealth::Ready,
         },
         UiPackageCard {
-            uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
+            uid: "prj1aBc3De56fGhIj8KlMnOpq".to_string(),
             kind: "Module".to_string(),
             project_kind: "General".to_string(),
             exports: Vec::new(),
@@ -302,7 +302,7 @@ fn readme_home_view() -> UiHomeView {
             transport: String::new(),
             state: RosterCardState::RunningUpToDate,
             project: Some(UiDeviceProjectChip {
-                uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
                 name: "2026-07-04-1102-evening-glow".to_string(),
             }),
             fw: None,
@@ -320,12 +320,12 @@ fn readme_home_view() -> UiHomeView {
             frame_fps: None,
             port_label: None,
             session_key: None,
-            uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
+            uid: Some("dev7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
             state: RosterCardState::RunningUpToDate,
             project: Some(UiDeviceProjectChip {
-                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,

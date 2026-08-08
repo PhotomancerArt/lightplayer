@@ -4063,7 +4063,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
- "lp-xt-fp-vectors",
+ "lp-xt-fp-harness",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -4102,6 +4102,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-xt-fp-harness",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -5838,6 +5839,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-xt-fp-harness"
+version = "40.0.0"
+dependencies = [
+ "esp-println",
+ "lp-xt-fp-vectors",
+]
+
+[[package]]
 name = "lp-xt-fp-vectors"
 version = "40.0.0"
 
@@ -6075,12 +6084,14 @@ dependencies = [
  "lpa-board-editor",
  "lpa-boards",
  "lpa-client",
+ "lpa-cloud-client",
  "lpa-fs-opfs",
  "lpa-link",
  "lpa-mapping-editor",
  "lpa-palettes",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
+ "lpc-cloud-api",
  "lpc-history",
  "lpc-mapping",
  "lpc-model",

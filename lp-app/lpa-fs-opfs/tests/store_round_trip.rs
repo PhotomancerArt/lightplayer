@@ -113,7 +113,7 @@ async fn chroot_view_changes_reach_the_flusher() {
     let dir = fresh_test_dir("s-chroot").await;
     let store = LpFsOpfs::mount(dir.clone()).await.unwrap();
 
-    let view = store.chroot(LpPath::new("/history/prj_x")).unwrap();
+    let view = store.chroot(LpPath::new("/history/prjx")).unwrap();
     view.borrow()
         .write_file(LpPath::new("/events.jsonl"), b"{}\n")
         .unwrap();
@@ -124,7 +124,7 @@ async fn chroot_view_changes_reach_the_flusher() {
     let store2 = LpFsOpfs::mount(dir).await.unwrap();
     assert_eq!(
         store2
-            .read_file(LpPath::new("/history/prj_x/events.jsonl"))
+            .read_file(LpPath::new("/history/prjx/events.jsonl"))
             .unwrap(),
         b"{}\n"
     );
@@ -178,7 +178,7 @@ async fn lpc_history_runs_over_the_store() {
         .unwrap();
 
     let package_view = store.chroot(LpPath::new("/packages/x")).unwrap();
-    let history_view = store.chroot(LpPath::new("/history/prj_x")).unwrap();
+    let history_view = store.chroot(LpPath::new("/history/prjx")).unwrap();
 
     let (package_hash, version) = {
         let history_fs = history_view.borrow();
@@ -201,7 +201,7 @@ async fn lpc_history_runs_over_the_store() {
 
     // reload: everything reconstructs from OPFS alone
     let store2 = LpFsOpfs::mount(dir).await.unwrap();
-    let history_view2 = store2.chroot(LpPath::new("/history/prj_x")).unwrap();
+    let history_view2 = store2.chroot(LpPath::new("/history/prjx")).unwrap();
     let history_fs2 = history_view2.borrow();
 
     let log2 = EventLog::new(&*history_fs2);

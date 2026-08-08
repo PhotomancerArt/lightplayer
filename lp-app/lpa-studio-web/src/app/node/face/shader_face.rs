@@ -9,6 +9,15 @@
 //! shader* (item 2). The code and advanced drawers render below via
 //! [`super::NodeCardDrawers`], never hiding the face.
 //!
+//! The hero carries a slim product header —
+//! [`ProductIdentity`](crate::app::node::ProductIdentity) plus the detail
+//! popover — because a full-bleed hero replaces the boxed
+//! [`ProducedProductView`](crate::app::node::ProducedProductView) pane, and
+//! the pane is what used to say what the product is and where its output
+//! goes (2026-08-05: "we don't show the output detail / link status
+//! either"). Same chrome as the fixture face, which merges it into the
+//! toggle bar it already had.
+//!
 //! The agent section is COLLAPSIBLE on core-owned state
 //! (`NodeCardUiState.agent_collapsed`); its collapsed row shows a
 //! status-aware summary ([`agent_section_summary`]). The composer DRAFT
@@ -23,8 +32,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{NodeUiOp, UiAction, UiAgentView, UiShaderFace as UiShaderFaceData};
 
-use crate::app::node::produced_product_view::ProductPreview;
-use crate::app::node::{AgentChatPane, NodeCardSection, PanelControl};
+use crate::app::node::{
+    AgentChatPane, NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
+};
 use crate::base::StudioIconName;
 
 use super::node_ui_action;
@@ -52,6 +62,10 @@ pub fn ShaderFace(
     /// (stories).
     #[props(default = None)]
     detail_open_control: Option<String>,
+    /// Open the produced output's header detail popover on first render
+    /// (stories).
+    #[props(default = false)]
+    output_detail_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
@@ -78,6 +92,25 @@ pub fn ShaderFace(
 
     rsx! {
         NodeCardSection { label: "output", first: true,
+            // The visual's own chrome above the full-bleed hero: name,
+            // publish chip when the render is wired to a bus channel, and
+            // the detail popover at the far end. The hero replaced the
+            // boxed product pane, which is what used to carry all three —
+            // the fixture face lost the same chrome the same way (its
+            // header rides its toggle bar; there is no bar here, so the
+            // clock's slim row is the shape).
+            div { class: "ux-product-header",
+                ProductIdentity { product: preview.clone() }
+                span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                    SlotDetailButton {
+                        label: preview.name.clone(),
+                        aspects: preview.visible_aspects(),
+                        initially_open: output_detail_initially_open,
+                        on_action,
+                        authoring: preview.authoring.clone(),
+                    }
+                }
+            }
             ProductPreview {
                 kind: preview.kind,
                 preview: preview.preview.clone(),

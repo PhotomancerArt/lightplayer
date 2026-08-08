@@ -18,9 +18,9 @@
 //! The experiment repo's runner carries exactly one `u32` per payload and costs
 //! a board reboot on every fault. Tens of thousands of `(result, FSR)` pairs
 //! plus a 2²³ table sweep do not fit that channel, and lp2025 already has the
-//! shape that does: a `test_*` feature on this crate, flashed with
+//! shape that does: a `test_*` feature on the *firmware* crate, flashed with
 //! `espflash flash --monitor`, printing results the host captures to a file
-//! (M6 D1, D4). See `just fwtest-xt-fp-esp32s3`.
+//! (M6 D1, D4). See `just fwtest-xt-fp-esp32s3` and `just fwtest-xt-fp-esp32v3`.
 //!
 //! # The vectors are data, not code
 //!
@@ -51,9 +51,52 @@
 //! sequences M7's codegen will face — so their end-to-end results are both a
 //! conformance surface and the independent oracle that keeps the helper-probe
 //! characterization honest.
+//!
+//! Those transcriptions are **chip-independent**, which is what lets one crate
+//! serve both Xtensa boards. Verified 2026-08-06 by disassembling both multilibs
+//! of the same esp-14.2.0 toolchain: `__divsf3` (libgcc) is 31 instructions and
+//! byte-identical between `esp32/` and `esp32s3/`, and `sqrtf` (newlib libm) is
+//! identical across the same pair. A future chip is not assumed to inherit that
+//! — re-run the diff before adding one.
+//!
+//! # This crate knows nothing about the board
+//!
+//! Chip identity and build provenance arrive as [`BoardId`], supplied by the
+//! firmware. That is not decoration: `env!` and `option_env!` expand in the
+//! crate that *names* them, so a build stamp read here would describe this
+//! crate's compilation rather than the firmware's. The `LP_FP_*` switches below
+//! are read here on purpose and are tracked by this crate's own `build.rs`.
+
+#![no_std]
+// The FP kernels, the `CPENABLE` arming and the FCR/FSR reads are all textual
+// Xtensa assembly — there is no stable path to them, and no float register
+// class in Rust's Xtensa inline-asm support. This travelled with the code from
+// `fw-esp32s3/src/main.rs`, which declared it for the same reason; a crate that
+// contains `global_asm!` for this target has to name it itself.
+#![feature(asm_experimental_arch)]
+#![allow(
+    unstable_features,
+    reason = "asm_experimental_arch is required for the Xtensa FP kernels this \
+              crate exists to execute, and for reading CPENABLE/FCR/FSR"
+)]
 
 use esp_println::println;
 use lp_xt_fp_vectors::{Family, OpCode, Vector, count, fingerprint, vector};
+
+/// Who is running the corpus. Supplied by the firmware because this crate
+/// cannot learn any of it for itself — see the crate docs on `env!` expansion.
+pub struct BoardId {
+    /// Printed as `chip=<name>`. The arch is not a field: this crate is Xtensa
+    /// by construction, and a second value would imply a choice that does not
+    /// exist.
+    pub chip: &'static str,
+    /// `LP_BUILD_COMMIT` from the firmware's build script.
+    pub build_commit: &'static str,
+    /// `LP_BUILD_DIRTY` from the firmware's build script.
+    pub build_dirty: &'static str,
+    /// `LP_BUILD_PROFILE` from the firmware's build script.
+    pub build_profile: &'static str,
+}
 
 /// Marker every line carries, so a transcript can be grepped and the host
 /// parser can ignore anything else the boot chain prints.
@@ -67,8 +110,8 @@ const PER_LINE: usize = 8;
 /// What to run, chosen at build time (see `build.rs` and the `just` recipe).
 ///
 /// A build-time switch rather than a runtime one because this harness has no
-/// input channel — it prints and never reads. `just fwtest-xt-fp-esp32s3`
-/// rebuilds anyway, so the distinction costs nothing.
+/// input channel — it prints and never reads. The `just fwtest-xt-fp-*` recipes
+/// rebuild anyway, so the distinction costs nothing.
 const MODE: &str = match option_env!("LP_FP_MODE") {
     Some(m) => m,
     None => "families",
@@ -144,15 +187,13 @@ const TABLE_SWEEPS: [(u32, u32); 15] = [
 /// complete table.
 const RUN_CAP: u32 = 2048;
 
-pub fn run_all() -> ! {
+pub fn run_all(board: BoardId) -> ! {
     println!("{TAG} BEGIN");
     println!(
         "{TAG} build commit={} dirty={} profile={}",
-        env!("LP_BUILD_COMMIT"),
-        env!("LP_BUILD_DIRTY"),
-        env!("LP_BUILD_PROFILE"),
+        board.build_commit, board.build_dirty, board.build_profile,
     );
-    println!("{TAG} chip=esp32s3 arch=xtensa");
+    println!("{TAG} chip={} arch=xtensa", board.chip);
 
     // Arm coprocessor 0 explicitly and print both sides of it. P1 found the
     // FPU already enabled under this boot chain with the provenance unpinned —
@@ -163,6 +204,10 @@ pub fn run_all() -> ! {
     // coprocessor arrives enabled, not just the FPU's bit 0. Arming anyway
     // narrows it to bit 0, which is what M7's JIT context will do — and the
     // printed pair is what makes that a measurement rather than a belief.
+    //
+    // That `0xff` is the **S3's** boot chain. Another board's is a separate
+    // measurement, which is exactly why this pair is printed rather than
+    // assumed — read it off the capture per chip.
     let before = unsafe { kernels::lp_fp_get_cpenable() };
     let after = unsafe { kernels::lp_fp_arm_cpenable() };
     println!("{TAG} cpenable before={before:#010x} after={after:#010x}");

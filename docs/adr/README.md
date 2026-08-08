@@ -162,6 +162,10 @@ holds the full context.
 | Transport UI over the breakpoint log (play/pause/scrub as a first-class surface) | `2026-08-04-time-is-a-product` | `docs/debt/clock-transport-has-no-transport-ui.md` exit criteria |
 | v1–v3 project-format migration (below `lpa-upgrade`'s floor; types are deleted, corpus is `schemas/history/` snapshots only) | `2026-08-04-project-format-migration-architecture` | A real holder of pre-v4 project data appears |
 | Safe-mode board rescue hole (upload cannot reach a safe-mode board, so pull→migrate→push cannot run on one) | `2026-08-04-project-format-migration-architecture` | `docs/debt/safe-mode-board-rescue-hole.md` — first field occurrence |
+| Server session-set switching (several concurrently-valid sessions per browser, switched without a re-auth round trip) | `2026-08-07-provider-based-auth` | Switch-account usage or complaints show the lean re-auth round trip is the friction point |
+| Local password method for self-host (the `local` connection's password method, sibling to the dev picker) | `2026-08-07-provider-based-auth` | A self-host deployment target is prioritized |
+| Identities link table `(connection, subject) → user` for multi-provider accounts on one user | `2026-08-07-provider-based-auth` | A second connection type ships and accounts need to merge across them |
+| Old-format (`prj_…` base-62) uids on the live cloud dev store — wipe or re-mint | `2026-08-07-uid-format-single-token-base32` | Next lightplayer.app deploy |
 
 ## Relationship To Shared Planning
 

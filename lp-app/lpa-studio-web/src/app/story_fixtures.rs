@@ -49,7 +49,7 @@ pub(crate) fn simulator_lens_card() -> UiDeviceCard {
         transport: String::new(),
         state: RosterCardState::RunningUpToDate,
         project: Some(UiDeviceProjectChip {
-            uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             name: "demo-project".to_string(),
         }),
         fw: None,
@@ -389,7 +389,7 @@ pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
 pub(crate) fn project_manifest() -> lpa_studio_core::UiProjectManifest {
     lpa_studio_core::UiProjectManifest {
         format: Some(3),
-        uid: Some("prj_7k2mQx4vN8pL".to_string()),
+        uid: Some("prj7k2mQx4vN8pL".to_string()),
         name: Some("Demo".to_string()),
         kind: "General".to_string(),
     }

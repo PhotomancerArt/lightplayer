@@ -113,7 +113,7 @@ pub struct ServerHello {
     pub build: BuildFacts,
     /// What this unit has wired.
     pub hardware: HardwareFacts,
-    /// Device identity uid (`dev_…`) if the device is stamped.
+    /// Device identity uid (`dev…`) if the device is stamped.
     ///
     /// Sourced from `/.lp/device.json` at the device's fs ROOT (the
     /// lpa-server base fs): embedders read it at boot for the unsolicited
@@ -180,7 +180,7 @@ pub struct HardwareFacts {
     /// The chip's factory MAC, lowercase colon hex (`aa:bb:cc:dd:ee:ff`).
     ///
     /// THE permanent identity of this unit: burned into efuse at
-    /// manufacture, unique per chip, and — unlike the `dev_…` uid Studio
+    /// manufacture, unique per chip, and — unlike the `dev…` uid Studio
     /// stamps into the filesystem — it survives an erase. `None` from
     /// embedders with no efuse to read (the host server, the browser
     /// worker, `lp-cli`).
@@ -313,7 +313,7 @@ mod tests {
                 board_id: None,
                 ..Default::default()
             },
-            device_uid: Some("dev_0000000000000001".to_string()),
+            device_uid: Some("dev0000000000000001".to_string()),
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -405,9 +405,9 @@ mod tests {
         let scripted = identity
             .clone()
             .with_proto(WIRE_PROTO_VERSION + 999)
-            .with_device_uid(Some("dev_1".to_string()));
+            .with_device_uid(Some("dev1".to_string()));
         assert_eq!(scripted.proto, WIRE_PROTO_VERSION + 999);
-        assert_eq!(scripted.device_uid.as_deref(), Some("dev_1"));
+        assert_eq!(scripted.device_uid.as_deref(), Some("dev1"));
         assert_eq!(identity.proto, WIRE_PROTO_VERSION);
     }
 }

@@ -28,7 +28,7 @@ pub(crate) enum ExportForm {
 /// the editor popup supplies them from the open project.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ExportTarget {
-    /// `prj_…` uid or slug — anything `LibraryStore::resolve_key` takes.
+    /// `prj…` uid or slug — anything `LibraryStore::resolve_key` takes.
     pub uid: String,
     /// Human-facing slug, used for the download filename.
     pub slug: String,
