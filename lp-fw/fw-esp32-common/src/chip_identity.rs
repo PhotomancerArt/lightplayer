@@ -18,7 +18,7 @@
 //! wired, the same rule the rest of `HardwareFacts` follows.
 //!
 //! The base MAC matters beyond display: it is the only identity of a
-//! board that survives an erase. The `dev_…` uid Studio stamps lives in
+//! board that survives an erase. The `dev…` uid Studio stamps lives in
 //! the device filesystem and dies with it.
 
 extern crate alloc;

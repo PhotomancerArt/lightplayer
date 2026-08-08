@@ -59,5 +59,5 @@ pub use lineage::project_history::ProjectHistory;
 pub use lineage::sync_relation::SyncRelation;
 pub use snapshot::blob_store::BlobStore;
 pub use snapshot::snapshot_store::SnapshotStore;
-pub use uid::prefixed_uid::{PrefixedUid, UidParseError};
+pub use uid::prefixed_uid::{PrefixedUid, UID_BODY_LEN, UidParseError};
 pub use uid::uid_prefix::UidPrefix;

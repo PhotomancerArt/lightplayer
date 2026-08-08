@@ -82,7 +82,7 @@ impl RuntimePayload {
 /// lens (the sim keeps running detached) and dies with the session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimLoadedProject {
-    /// `prj_…` uid — thumbnail seed and the project-card pairing key.
+    /// `prj…` uid — thumbnail seed and the project-card pairing key.
     pub uid: String,
     /// Display name (the library slug at open time).
     pub name: String,
@@ -360,7 +360,7 @@ impl RuntimeSession {
         }
     }
 
-    /// The `dev_` uid this session is associated with, once known.
+    /// The `dev` uid this session is associated with, once known.
     ///
     /// A device session's identity rides the wire hello: the association
     /// exists exactly from the moment the hello lands (the session state

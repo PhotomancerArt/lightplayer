@@ -415,7 +415,7 @@ mod tests {
     fn input<'a>(state: &'a RosterCardState) -> DeviceRichInput<'a> {
         DeviceRichInput {
             state,
-            uid: Some("dev_7pQr5St89uVwXy2C"),
+            uid: Some("dev7pQr5St89uVwXy2C"),
             transport: "USB",
             project_name: Some("porch-sign"),
             fw: Some(&DEVICE_FW),

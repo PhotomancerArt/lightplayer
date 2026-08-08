@@ -40,7 +40,7 @@ Two sharing subtleties encoded here:
 ```
 <opfs root>/lightplayer-library/
   packages/<dir>/       package directories (projects, later modules)
-  history/<prj_uid>/    lpc-history roots — beside, never inside, packages
+  history/<prj-uid>/    lpc-history roots — beside, never inside, packages
 ```
 
 ## Who mounts it

@@ -303,7 +303,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
     ) -> Result<ProjectInfo, CloudError> {
         let user = self.require_user(actor)?;
         if uid.prefix() != UidPrefix::Project {
-            return Err(invalid("project uid must be a prj_ uid"));
+            return Err(invalid("project uid must be a prj uid"));
         }
         validate_slug(&slug)?;
 

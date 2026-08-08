@@ -51,7 +51,7 @@ mod tests {
         let uid = PrefixedUid::mint(UidPrefix::Device, &[0u8; 16]);
         assert_eq!(
             serde_json::to_string(&Actor::User(uid)).unwrap(),
-            "{\"user\":\"dev_0000000000000000\"}"
+            "{\"user\":\"dev0000000000000000\"}"
         );
     }
 }

@@ -26,7 +26,7 @@ pub fn example_deploy_files(id: &str) -> Result<Vec<ProjectDeployFile>, String> 
 }
 
 /// Deploy files for a library package, from a **read-only catalog
-/// snapshot** fs (`LibraryHost::catalog_snapshot`). `key` is a `prj_…`
+/// snapshot** fs (`LibraryHost::catalog_snapshot`). `key` is a `prj…`
 /// uid or a slug. The payload matches the device-push path: every package
 /// file, byte for byte.
 pub fn catalog_deploy_files(

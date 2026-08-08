@@ -5,7 +5,7 @@ use lp_cloud_domain::{IdMint, SESSION_TOKEN_LEN};
 /// A deterministic [`IdMint`]: a counter, not an rng.
 ///
 /// Every call returns different bytes, and the same program run twice
-/// returns the same bytes — which is what makes a minted `usr_` uid
+/// returns the same bytes — which is what makes a minted `usr` uid
 /// assertable in a test.
 ///
 /// **Never use this in production.** Session tokens are bearer credentials;

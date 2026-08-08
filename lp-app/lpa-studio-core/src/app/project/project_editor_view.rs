@@ -40,7 +40,7 @@ pub struct ProjectEditorView {
     /// open project. `None` for the storeless demo path and device-hosted
     /// projects — those popups skip the identity rows.
     pub manifest: Option<UiProjectManifest>,
-    /// The open project's library identity (`prj_…` uid, slug), when a
+    /// The open project's library identity (`prj…` uid, slug), when a
     /// library package backs it. Drives the popup's share affordances,
     /// which read the library snapshot rather than the runtime. `None` for
     /// the storeless demo path and for a device-hosted project this

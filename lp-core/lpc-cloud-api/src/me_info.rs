@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeInfo {
-    /// The account's uid (`usr_…`).
+    /// The account's uid (`usr…`).
     pub uid: PrefixedUid,
     /// The account's login email.
     pub email: String,
@@ -88,7 +88,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&info).unwrap(),
-            r#"{"uid":"usr_0000000000000000","email":"yona@example.com","displayName":"Yona","givenName":null,"familyName":null,"pictureUrl":null,"providerLabel":"Google","createdAt":0.0}"#
+            r#"{"uid":"usr0000000000000000","email":"yona@example.com","displayName":"Yona","givenName":null,"familyName":null,"pictureUrl":null,"providerLabel":"Google","createdAt":0.0}"#
         );
     }
 }
