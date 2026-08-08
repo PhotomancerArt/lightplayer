@@ -16,7 +16,7 @@ struct Params {
 
 uniform Params params;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(params.gradient, vec2(pos.x, 0.0)) * params.amount;
 }
 ```
