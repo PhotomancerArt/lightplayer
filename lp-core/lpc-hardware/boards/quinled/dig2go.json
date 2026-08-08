@@ -95,10 +95,7 @@
       "open_drain": false,
       "settle_ms": 25,
       "off_debounce_ms": 5000,
-      "feeds": [
-        "/rmt/ws281x0"
-      ],
-      "note": "Pre-walk placeholders, both to be measured and confirmed on the bench before this board ships to users: active-high is inferred from the vendor calling GPIO12 the \"LED Relay enable pin\" of a solid-state \"custom relay\" circuit (assert to enable), and 25 ms is a chosen settle time, not a measured one. Rail-off is also the strap-safe boot state, since GPIO12 is MTDI and must be low at reset."
+      "note": "Feeds is deliberately empty: this gate switches the board's only LED supply, so it gates every output. Pre-walk placeholders, both to be measured and confirmed on the bench before this board ships to users: active-high is inferred from the vendor calling GPIO12 the \"LED Relay enable pin\" of a solid-state \"custom relay\" circuit (assert to enable), and 25 ms is a chosen settle time, not a measured one. Rail-off is also the strap-safe boot state, since GPIO12 is MTDI and must be low at reset."
     }
   ]
 }
