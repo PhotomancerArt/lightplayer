@@ -13,7 +13,7 @@
       "type": "string"
     },
     "format": {
-      "const": 5,
+      "const": 6,
       "title": "Authored format version"
     },
     "license": {
