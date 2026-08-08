@@ -29,15 +29,18 @@ pub enum ProjectProductSubscriptionIntent {
 }
 
 /// Local Studio state owned by a project node controller.
+///
+/// The card's COLLAPSE bit is deliberately not here: it lives in the
+/// address-keyed [`crate::NodeCardUiState`] store on the project
+/// controller (G1 R-B), alongside the drawers it folds away.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeControllerState {
-    pub collapsed: bool,
     pub focused: bool,
     pub product_subscription_intent: ProjectProductSubscriptionIntent,
 }
 
 impl NodeControllerState {
-    /// Default expanded, unfocused node state.
+    /// Default unfocused node state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -46,7 +49,6 @@ impl NodeControllerState {
 impl Default for NodeControllerState {
     fn default() -> Self {
         Self {
-            collapsed: false,
             focused: false,
             product_subscription_intent: ProjectProductSubscriptionIntent::Default,
         }
@@ -282,7 +284,6 @@ impl NodeController {
             .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
-        view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
         view.face = face;
         view.add_node_menu = self.add_node_menu();

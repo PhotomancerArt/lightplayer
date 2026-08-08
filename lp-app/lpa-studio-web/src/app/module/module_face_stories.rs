@@ -227,6 +227,23 @@ fn child_grouping_error() -> Element {
 }
 
 #[story(
+    description = "The long-column remedy (G1 R-B): the same grouped pattern column with everything but `fire` FOLDED to its header — noise_party under the sage exports header, the whole rig under its own. A folded card keeps its identity row intact (select control, name, export chip, kind label, ⓘ) and only the chevron flips; the section headers still say where each card sits, so the shipped/stays-home split survives the fold. The fold is core-owned per node address, so it holds across re-renders — and under the sim lens a folded card stops streaming its previews. Judged: does a mostly-folded column still read as the same grammar, and does the one open card carry the scene without the folded ones going mute?"
+)]
+fn child_grouping_folded() -> Element {
+    let mut view = clean_exports_view();
+    for child in view.children.iter_mut() {
+        if child.label != "fire" {
+            child.card_ui.collapsed = true;
+        }
+    }
+    rsx! {
+        WorkspaceCanvas {
+            NodePane { view, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
     description = "The chip alone, four ways, on cards out of any column: clean (sage), warning, error, and undesignated. The chip is DISPLAY only (D12 — it never toggles anything; the gesture lives in the popup behind the ⓘ), and its tone is this export's own lint verdict, so a card that would ship badly says so where you can see it. Read top to bottom: the chip has to be findable without being loud, and the three tones have to be distinguishable at chip size."
 )]
 fn child_card_export_chip() -> Element {

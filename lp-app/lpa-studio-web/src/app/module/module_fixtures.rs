@@ -17,10 +17,10 @@
 //!   the authored default is bright.
 
 use lpa_studio_core::{
-    ExportFinding, LpValue, ModuleHeroProduct, ProjectNodeAddress, ProjectSlotAddress,
-    ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview, UiBusChannelView,
-    UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace,
-    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    ExportFinding, LpValue, ModuleHeroProduct, NodeUiOp, ProjectEditorOp, ProjectNodeAddress,
+    ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath, UiAction, UiBusChannelPreview,
+    UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportsGroup, UiModuleExport,
+    UiModuleFace, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
     UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
     UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
@@ -1310,6 +1310,20 @@ impl PanelWalk {
     /// its panel writer and captures the channel (panel.md P2 — Latch, not
     /// Touch), and every later drag just moves the held value.
     pub fn apply_action(&mut self, action: &UiAction) {
+        // The card fold rides the action seam like every core-owned
+        // card-UI bit; the walkable fixture mirrors what the project
+        // controller's address-keyed store does, so the collapse rail
+        // stays live in stories — on the root card and the children.
+        if let Some(ProjectEditorOp::NodeUi(NodeUiOp::SetCollapsed { node, collapsed })) =
+            action.op_as::<ProjectEditorOp>()
+        {
+            let (node, collapsed) = (node.clone(), *collapsed);
+            if self.view.header.path == node {
+                self.view.card_ui.collapsed = collapsed;
+            }
+            fold_child_cards(&mut self.view.children, &node, collapsed);
+            return;
+        }
         let Some(SlotEditOp::SetValue { address, value }) = action.op_as::<SlotEditOp>() else {
             return;
         };
@@ -1395,6 +1409,18 @@ fn hold(view: &mut UiPanelControlView, value: f32) {
     view.state = UiPanelControlState::Engaged;
     if let Some(target) = view.control.panel_target.as_mut() {
         target.engaged = true;
+    }
+}
+
+/// Land a card fold on the child whose address matches, wherever it sits
+/// in the nested column (children key their card UI by `detail`, exactly
+/// like the controller's store).
+fn fold_child_cards(children: &mut [UiNodeChild], node: &str, collapsed: bool) {
+    for child in children {
+        if child.detail == node {
+            child.card_ui.collapsed = collapsed;
+        }
+        fold_child_cards(&mut child.children, node, collapsed);
     }
 }
 

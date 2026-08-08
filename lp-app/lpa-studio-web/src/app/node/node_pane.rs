@@ -50,7 +50,13 @@ pub fn NodePane(
     module_panel: Option<EventHandler<crate::app::module::PanelGesture>>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
-    let mut collapsed = use_signal(|| view.collapsed);
+    // The whole-card fold is CORE-OWNED (`NodeCardUiState::collapsed`, G1
+    // R-B) — not a `use_signal`: the fold must survive re-renders and
+    // remounts, follow the node rather than the widget, and feed the
+    // sim-lens subscription gate so a folded card stops streaming
+    // previews. The rail's toggle dispatches the op like every drawer.
+    let collapsed = view.card_ui.collapsed;
+    let collapse_node = view.header.path.clone();
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
@@ -121,10 +127,17 @@ pub fn NodePane(
             div { class: surface_class,
                 RichObjectPane {
                     collapse: PaneCollapse {
-                        collapsed: collapsed(),
+                        collapsed,
                         expand_label: "Expand node".to_string(),
                         collapse_label: "Collapse node".to_string(),
-                        on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
+                        on_toggle: EventHandler::new(move |()| {
+                            if let Some(handler) = on_action {
+                                handler.call(node_ui_action(NodeUiOp::SetCollapsed {
+                                    node: collapse_node.clone(),
+                                    collapsed: !collapsed,
+                                }));
+                            }
+                        }),
                     },
                     primary: rsx! {
                         if let Some(action) = select_action {
@@ -248,7 +261,7 @@ pub fn NodePane(
             // the playlist face included: its view carries exactly the
             // ACTIVE child (the face derivation enforces the invariant —
             // one rendering of the active child, zero of the others).
-            if !collapsed() && !view.children.is_empty() {
+            if !collapsed && !view.children.is_empty() {
                 NodeChildren {
                     items: view.children.clone(),
                     on_action,
