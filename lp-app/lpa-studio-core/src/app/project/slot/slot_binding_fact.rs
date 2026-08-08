@@ -13,10 +13,13 @@ use crate::{
 /// Facts are extracted from the def root's `bindings` child and applied to
 /// the sibling slots they name — consumed/config slots on the def root and
 /// produced slots on the state root. Since M0 (bindings-at-node-roots ADR),
-/// binding keys always name root-level slots.
+/// binding keys always name slots reachable from a root by record fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlotBindingFact {
-    /// Local slot name the binding is keyed by.
+    /// Local slot name the binding is keyed by — a bare top-level field
+    /// (`brightness`), or a DOTTED chain of record fields for a leaf
+    /// nested in a record (`transport.rate`, the clock's three transport
+    /// leaves). See [`binding_fact_slot_key`].
     pub slot: String,
     /// Which side of the binding the endpoint supplies.
     pub kind: SlotBindingFactKind,
@@ -107,6 +110,34 @@ impl BindingFactOverrides {
     }
 }
 
+/// The fact key a graph binding's slot path names: its leading chain of
+/// record FIELD segments, dotted.
+///
+/// `brightness` → `"brightness"`, `transport.rate` → `"transport.rate"`.
+/// A non-field segment ends the chain — `consumed[speed].default` keys as
+/// `"consumed"`, which is the top-level row that has always carried that
+/// wiring — so widening this to dotted keys changed nothing for map- or
+/// option-shaped paths.
+///
+/// The dotted form is what a `default_bind` declared on a leaf INSIDE a
+/// promoted record produces (clock-tape-hero P6). Keying those by their
+/// first segment alone collapsed all three transport leaves onto the one
+/// `transport` row, and the grouped control could not then tell which
+/// dimension was wired.
+pub(in crate::app::project) fn binding_fact_slot_key(slot: &SlotPath) -> Option<String> {
+    let mut key = String::new();
+    for segment in slot.segments() {
+        let SlotPathSegment::Field(name) = segment else {
+            break;
+        };
+        if !key.is_empty() {
+            key.push('.');
+        }
+        key.push_str(name.as_str());
+    }
+    (!key.is_empty()).then_some(key)
+}
+
 /// Fold one pending `bindings[…]` edit into the authored fact list. Only the
 /// shapes the binding editors produce are meaningful; anything deeper or
 /// oddly-shaped changes nothing (the next project read reconciles it).
@@ -178,5 +209,40 @@ fn binding_edit_endpoint(value: &LpValue) -> UiBindingEndpoint {
         LpValue::String(endpoint) => UiBindingEndpoint::new(endpoint.clone()),
         other => UiBindingEndpoint::new(UiSlotValue::from_lp_value(other).display)
             .with_detail("literal value"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpc_model::SlotPath;
+
+    use super::binding_fact_slot_key;
+
+    /// A leaf `default_bind` inside a promoted record keys by its DOTTED
+    /// field chain, so all three of the clock's transport leaves get their
+    /// own row instead of collapsing onto `transport` (P8).
+    #[test]
+    fn a_record_leaf_keys_by_its_dotted_field_chain() {
+        let key = |path: &str| binding_fact_slot_key(&SlotPath::parse(path).expect("valid path"));
+
+        assert_eq!(key("transport.rate").as_deref(), Some("transport.rate"));
+        assert_eq!(
+            key("transport.scrub_offset_seconds").as_deref(),
+            Some("transport.scrub_offset_seconds")
+        );
+    }
+
+    /// Everything that was keyed by its first segment before still is: a
+    /// bare top-level field, and any path whose next step leaves the record
+    /// world (a map key). An option's `some` reads as a field here and is
+    /// resolved back to its row by the slot-side descent, which only walks
+    /// records.
+    #[test]
+    fn ordinary_wiring_keys_exactly_as_it_always_did() {
+        let key = |path: &str| binding_fact_slot_key(&SlotPath::parse(path).expect("valid path"));
+
+        assert_eq!(key("brightness").as_deref(), Some("brightness"));
+        assert_eq!(key("consumed[speed]").as_deref(), Some("consumed"));
+        assert_eq!(key("consumed[speed].default").as_deref(), Some("consumed"));
     }
 }
