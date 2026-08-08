@@ -16,7 +16,6 @@
       "source": "bus:palette"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "scale": {
       "kind": "value",

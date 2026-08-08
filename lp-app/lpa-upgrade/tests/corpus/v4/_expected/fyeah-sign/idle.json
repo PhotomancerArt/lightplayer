@@ -2,7 +2,6 @@
   "kind": "Shader",
   "source": "idle.glsl",
   "render_order": 0,
-  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "seconds",

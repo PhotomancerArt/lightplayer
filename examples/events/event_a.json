@@ -6,7 +6,6 @@
       "target": "bus:trigger"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "seconds",
