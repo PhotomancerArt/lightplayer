@@ -86,7 +86,9 @@ pub(crate) fn action_replaces_loaded_project(action: &lpa_studio_core::UiAction)
 
     matches!(
         action.op_as::<HomeOp>(),
-        Some(HomeOp::OpenPackage { .. } | HomeOp::OpenExample { .. } | HomeOp::CreateProject)
+        Some(
+            HomeOp::OpenPackage { .. } | HomeOp::OpenExample { .. } | HomeOp::CreateProject { .. }
+        )
     )
 }
 
@@ -125,7 +127,18 @@ mod tests {
         assert!(action_replaces_loaded_project(&home(HomeOp::OpenExample {
             id: "basic".to_string(),
         })));
-        assert!(action_replaces_loaded_project(&home(HomeOp::CreateProject)));
+        // Every template creates AND opens, so all three replace the
+        // loaded project — a new arm on `ProjectTemplate` must not be able
+        // to slip past the discard prompt.
+        for template in [
+            lpa_studio_core::ProjectTemplate::Blank,
+            lpa_studio_core::ProjectTemplate::Pattern1d,
+            lpa_studio_core::ProjectTemplate::Pattern2d,
+        ] {
+            assert!(action_replaces_loaded_project(&home(
+                HomeOp::CreateProject { template }
+            )));
+        }
     }
 
     #[test]

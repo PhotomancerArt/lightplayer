@@ -16,6 +16,9 @@ pub(crate) mod gallery_preview;
 #[cfg(feature = "stories")]
 pub(crate) mod home_gallery_stories;
 pub mod home_landing;
+pub(crate) mod new_project_menu;
+#[cfg(feature = "stories")]
+pub(crate) mod new_project_menu_stories;
 pub(crate) mod package_card;
 pub(crate) mod package_export;
 pub mod project_opening_frame;

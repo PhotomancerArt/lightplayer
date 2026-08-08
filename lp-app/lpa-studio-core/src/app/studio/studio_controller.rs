@@ -4021,15 +4021,18 @@ impl StudioController {
             HomeOp::OpenExample { id } => {
                 return self.open_from_home(PendingOpen::Example(id), updates).await;
             }
-            HomeOp::CreateProject => {
-                // Create-and-open (the D17 deviation, 2026-07-27): a pure
-                // blank one-file package lands in the library — "Project",
-                // slugged/dated/deduped by the store; rename lives on the
+            HomeOp::CreateProject { template } => {
+                // Create-and-open (the D17 deviation, 2026-07-27): the
+                // package lands in the library — slugged/dated/deduped by
+                // the store from the template's label; rename lives on the
                 // card kebab — then opens like any card, so the user lands
-                // in the empty editor with the add-node picker.
+                // in the editor with something to do next. `Blank` sends no
+                // files at all, so the historical path is untouched.
+                let files = crate::app::home::template_project_files(template)?;
                 let outcome = self
                     .run_catalog_op(CatalogOp::Create {
-                        name: "Project".to_string(),
+                        name: template.default_project_name().to_string(),
+                        files,
                     })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
@@ -8574,8 +8577,10 @@ mod tests {
         // the dispatch errs — the successful create-and-open round-trip is
         // the edit-e2e test's. The packages stick either way.
         for _ in 0..2 {
-            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject)))
-                .expect_err("host test builds have no sim runtime to open into");
+            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+                template: crate::ProjectTemplate::Blank,
+            })))
+            .expect_err("host test builds have no sim runtime to open into");
         }
         studio.request_library_refresh();
         block_on_ready(studio.settle_library());
