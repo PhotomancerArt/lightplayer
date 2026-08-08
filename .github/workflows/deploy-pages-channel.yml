@@ -31,6 +31,12 @@ env:
   RUST_BACKTRACE: 1
   RISC_V_TARGET: riscv32imac-unknown-none-elf
   RUSTUP_PERMIT_COPY_RENAME: 1
+  # Same compile-reuse shape as pre-merge.yml and deploy-cloud.yml: sccache
+  # (GHA backend) caches individual rustc invocations content-addressed.
+  # CARGO_INCREMENTAL=0 because sccache cannot cache incremental compiles.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 jobs:
   deploy:
@@ -84,31 +90,35 @@ jobs:
           default: false
           ldproxy: false
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      # target/ is deliberately NOT cached (cache-targets: false): multi-GB
+      # target payloads get LRU-evicted from the repo's 10 GB Actions-cache
+      # budget before they are ever restored (see deploy-cloud.yml). sccache
+      # re-materializes crate compiles content-addressed instead. `shared-key`
+      # is shared with deploy-cloud.yml on purpose: the two build the same
+      # artifact from the same tree.
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ runner.arch }}-pages-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
+          cache-targets: false
+          shared-key: deploy
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked --force
+      # Prebuilt binaries, not `cargo install` — see deploy-cloud.yml for the
+      # full rationale (source builds cost ~11 min per run, dx alone ~8).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
 
-      - name: Install dioxus-cli
-        run: cargo install dioxus-cli --version 0.7.9 --locked --force
+      - name: Install web build tools (prebuilt)
+        run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9
 
-      - name: Install espflash
+      - name: Install espflash (prebuilt)
         if: inputs.channel == 'beta'
-        run: cargo install espflash --version 3.3.0 --locked --force
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Build beta artifact
         if: inputs.channel == 'beta'
@@ -125,6 +135,14 @@ jobs:
       - name: Smoke-check demo artifact
         if: inputs.channel == 'demo'
         run: just web-demo-smoke target/pages/channel
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Create Pages App token
         if: ${{ inputs.dry_run == false }}
