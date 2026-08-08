@@ -357,9 +357,9 @@ fn BusSiteChip(
     } = site;
     let panel_writer = origin == UiBusSiteOrigin::Panel;
 
-    // NOTE: font-size classes live on the inner spans, not the button —
-    // style.css's unlayered `button { font: inherit }` beats layered
-    // Tailwind utilities on the element itself.
+    // NOTE: font-size classes live on the inner spans, not the button;
+    // the button's `font: inherit` reset (style.css, base layer) lets
+    // each span size its own text.
     let mut class = String::from(
         "tw:inline-flex tw:h-[22px] tw:max-w-full tw:min-w-0 tw:flex-none tw:items-center \
          tw:gap-1 tw:rounded-xs tw:border tw:px-1.5",
