@@ -80,14 +80,14 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
         lps_glsl::compile(glsl, &options).map_err(|e| format!("frontend: {}", e.render(glsl)))?;
     let (mut ir, mut meta) = (output.ir, output.meta);
 
-    // The px pipeline validates `render` and synthesises wrappers around it.
-    // A shader with no `render` (a compute shader) is not a px shader and is
-    // reported as skipped, not failed.
+    // The px pipeline validates `render_2d` and synthesises wrappers around
+    // it. A shader with no `render_2d` (a compute shader) is not a px
+    // shader and is reported as skipped, not failed.
     let render_fn_index = meta
         .functions
         .iter()
-        .position(|f| f.name == "render")
-        .ok_or_else(|| "no `render` fn (compute shader)".to_string())?;
+        .position(|f| f.name == "render_2d")
+        .ok_or_else(|| "no `render_2d` fn (compute shader)".to_string())?;
     // Output format follows the render return type — the same pairing
     // `expected_return_type` enforces in the engine.
     let format = match meta.functions[render_fn_index].return_type {
@@ -108,6 +108,7 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
         render_fn_index,
         format,
         FloatMode::Q32,
+        lp_shader::ShaderEntrySpace::TwoD,
     )
     .map_err(|e| format!("synth render_texture: {e:?}"))?;
     if format == TextureStorageFormat::Rgba16Unorm {
@@ -116,6 +117,7 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
             &mut meta,
             render_fn_index,
             FloatMode::Q32,
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .map_err(|e| format!("synth render_samples: {e:?}"))?;
     }
@@ -178,7 +180,7 @@ fn an_oversized_shader_is_a_clean_toolarge_not_a_wild_write() {
             i + 4
         ));
     }
-    body.push_str("vec3 render(vec2 pos) {\n    float acc = pos.x + pos.y;\n");
+    body.push_str("vec3 render_2d(vec2 pos) {\n    float acc = pos.x + pos.y;\n");
     for i in 0..HELPERS {
         body.push_str(&format!("    acc += h{i}(acc);\n"));
     }

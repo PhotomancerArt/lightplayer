@@ -1839,7 +1839,7 @@ mod tests {
     use lps_shared::TextureBuffer as _;
     use lps_shared::TextureStorageFormat;
 
-    const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
+    const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render_2d(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
     fn shader_def_with_time() -> ShaderDef {
         let mut consumed_slots = VecMap::new();
@@ -1981,7 +1981,7 @@ mod tests {
     /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
     #[test]
     fn unbound_uniform_runs_on_its_authored_default_without_warning() {
-        let source = "layout(binding = 0) uniform float time;\nvec4 render(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nvec4 render_2d(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -2058,7 +2058,7 @@ mod tests {
         // map-entry gesture) produces after load. The key-set reconcile
         // must pick the record up from the authored view; without it the
         // render fails with "missing uniform field `speed`".
-        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -2127,7 +2127,7 @@ mod tests {
         // only update an existing one: `default` is engine-read, so
         // `materialize_value_input` otherwise keeps falling back to the
         // stale `none`'s 0.0 until the project reloads.
-        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -2267,7 +2267,7 @@ mod tests {
         let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+             vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
         let mut node = ShaderNode::new(
             NodeId::new(1),
@@ -2318,7 +2318,7 @@ mod tests {
         let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+             vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
         let mut node = ShaderNode::new(
             NodeId::new(1),

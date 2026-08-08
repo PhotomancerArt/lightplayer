@@ -22,6 +22,7 @@
 //! then read every line of `git diff` before committing it.
 
 use lpa_upgrade::{ProjectFiles, UpgradeReport, upgrade_to_current};
+use lpc_model::PROJECT_FORMAT_VERSION;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -40,7 +41,7 @@ fn every_corpus_project_matches_its_golden() {
             .unwrap_or_else(|e| panic!("{project}: upgrade failed: {e}"));
 
         assert_eq!(report.from, 4, "{project}");
-        assert_eq!(report.to, 5, "{project}");
+        assert_eq!(report.to, PROJECT_FORMAT_VERSION, "{project}");
         assert_eq!(
             report.changed_files,
             differing_paths(&input, &migrated),

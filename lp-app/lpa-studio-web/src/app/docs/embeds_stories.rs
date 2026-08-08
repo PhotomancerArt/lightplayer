@@ -57,7 +57,7 @@ layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
 layout(binding = 2) uniform float scale;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     float v = sin((uv.x * scale + phase * 13.0) * 6.2831853)
         + sin((uv.y * scale + phase * 9.0) * 6.2831853);

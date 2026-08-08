@@ -205,7 +205,7 @@ mod tests {
         let err = NodeDef::from_json_str(
             r#"{
   "kind": "Shader",
-  "source": { "glsl": "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }" }
+  "source": { "glsl": "vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }" }
 }"#,
         )
         .expect_err("inline glsl bodies are not supported");

@@ -484,7 +484,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":5,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":6,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -613,7 +613,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":5,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":6,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2372,7 +2372,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     // lazily on render, so tick before and after.
     server.borrow_mut().advance_frame(16).expect("tick");
     handle.tx.send(StudioCommand::Action(tab.apply_action(
-        "vec4 render(vec2 pos) { return vec4(first_bad, 0.0, 0.0, 1.0); }",
+        "vec4 render_2d(vec2 pos) { return vec4(first_bad, 0.0, 0.0, 1.0); }",
     )));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv();
@@ -2396,7 +2396,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     handle
         .tx
         .send(StudioCommand::Action(snapshot_tab.apply_action(
-            "vec4 render(vec2 pos) { return vec4(second_bad, 0.0, 0.0, 1.0); }",
+            "vec4 render_2d(vec2 pos) { return vec4(second_bad, 0.0, 0.0, 1.0); }",
         )));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv();
@@ -2432,10 +2432,9 @@ fn successive_shader_applies_each_reach_the_engine() {
     );
 }
 
-pub(crate) const ASSET_SHADER_V1: &str =
-    "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
-const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
-const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
+pub(crate) const ASSET_SHADER_V1: &str = "uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
+const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
+const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
 
 /// Find the shader node's inline asset editor anywhere in the editor DTO
 /// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
@@ -2546,7 +2545,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2625,7 +2624,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 5\n}\n"),
+        ("project.json", "{\n  \"format\": 6\n}\n"),
         (
             "module.json",
             r#"{

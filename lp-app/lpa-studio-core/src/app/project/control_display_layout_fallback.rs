@@ -342,7 +342,7 @@ mod tests {
             ("README.md".to_string(), b"not json".to_vec()),
             (
                 "project.json".to_string(),
-                br#"{"format": 5, "name": "test"}"#.to_vec(),
+                br#"{"format": 6, "name": "test"}"#.to_vec(),
             ),
             (fixture_path.to_string(), fixture_json.as_bytes().to_vec()),
             (map_path.to_string(), doc.to_json().into_bytes()),

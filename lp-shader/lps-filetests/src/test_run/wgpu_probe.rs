@@ -592,8 +592,8 @@ fn zero_value(ty: &LpsType) -> Result<LpsValueF32, String> {
     })
 }
 
-/// Word-boundary identifier rename (used to move an authored `render`
-/// definition out of the generated wrapper's way).
+/// Word-boundary identifier rename (used to move an authored `render_2d`/
+/// `render_1d` definition out of the generated wrapper's way).
 fn rename_word(src: &str, from: &str, to: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = String::with_capacity(src.len());
@@ -664,11 +664,11 @@ mod tests {
     fn rename_word_respects_boundaries() {
         assert_eq!(
             rename_word(
-                "vec4 render(vec2 p) { rendered(); render(); }",
-                "render",
+                "vec4 render_2d(vec2 p) { rendered_2d(); render_2d(); }",
+                "render_2d",
                 "__r"
             ),
-            "vec4 __r(vec2 p) { rendered(); __r(); }"
+            "vec4 __r(vec2 p) { rendered_2d(); __r(); }"
         );
     }
 

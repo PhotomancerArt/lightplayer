@@ -12,7 +12,7 @@ use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -68,12 +68,12 @@ fn project_fs() -> LpFsMemory {
     .expect("active.json");
     fs.write_file(
         "/idle.glsl".as_path(),
-        b"vec4 render(vec2 p) { return vec4(1.0); }",
+        b"vec4 render_2d(vec2 p) { return vec4(1.0); }",
     )
     .expect("idle.glsl");
     fs.write_file(
         "/active.glsl".as_path(),
-        b"vec4 render(vec2 p) { return vec4(0.5); }",
+        b"vec4 render_2d(vec2 p) { return vec4(0.5); }",
     )
     .expect("active.glsl");
     fs
@@ -318,7 +318,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     // pinned: writer accounting that omits module publishes works at
     // depth 1 by coincidence and resolves C to ROOT's visual at depth 2.
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -340,7 +340,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     .expect("root shader");
     fs.write_file(
         "/root.glsl".as_path(),
-        b"vec4 render(vec2 p) { return vec4(1.0); }",
+        b"vec4 render_2d(vec2 p) { return vec4(1.0); }",
     )
     .expect("root glsl");
     fs.write_file(
@@ -375,7 +375,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     .expect("plasma shader");
     fs.write_file(
         "/outer/inner/plasma.glsl".as_path(),
-        b"vec4 render(vec2 p) { return vec4(0.5); }",
+        b"vec4 render_2d(vec2 p) { return vec4(0.5); }",
     )
     .expect("plasma glsl");
     fs.write_file(
@@ -438,7 +438,7 @@ fn r7_authored_export_and_root_module_runtime() {
     // the export's name; the root wears a real module runtime (its output
     // interface exists like any module's).
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),

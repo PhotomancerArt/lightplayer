@@ -72,7 +72,7 @@ It lands in your projects and it's yours to keep, break, and rebuild.
 You don't need any of this yet — come back when you want the machinery.
 
 **The dialect.** Shaders are GLSL with one entry point:
-`vec4 render(vec2 pos)` returns the color at `pos`, called for every
+`vec4 render_2d(vec2 pos)` returns the color at `pos`, called for every
 position each frame. Inputs arrive as `layout(binding = N) uniform`
 declarations. No `main()`, no varyings, no version pragma.
 

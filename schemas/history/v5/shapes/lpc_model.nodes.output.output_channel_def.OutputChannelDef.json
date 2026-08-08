@@ -1,0 +1,38 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "endpoint",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 397552907,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "count",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3065358156,
+                  "meta": {},
+                  "ty": "u32"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

@@ -472,8 +472,8 @@ mod tests {
     use crate::tool::iterate_host::{HostError, HostFuture, ShaderContext};
     use crate::tool::tool_phase::ToolPhase;
 
-    const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
-    const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
+    const RED: &str = "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
+    const GREEN: &str = "vec4 render_2d(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
 
     #[test]
     fn text_only_turn_completes_the_session() {
@@ -838,7 +838,7 @@ mod tests {
             },
             TurnEvent::ToolInputDelta {
                 id: "tu_1".into(),
-                json_fragment: "{\"source\": \"vec4 render(".into(),
+                json_fragment: "{\"source\": \"vec4 render_2d(".into(),
             },
             turn_done(StopReason::MaxTokens, 10, 8192),
         ]]);

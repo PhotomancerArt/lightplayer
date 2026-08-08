@@ -335,7 +335,7 @@ mod error_line_remap_tests {
 
     #[test]
     fn parse_error_reports_user_snippet_line() {
-        let src = "vec4 render(vec2 pos) {\n    return vec4(pos, 0.0, 1.0);\n}\nfloat bad = ;\n";
+        let src = "vec4 render_2d(vec2 pos) {\n    return vec4(pos, 0.0, 1.0);\n}\nfloat bad = ;\n";
         let Err(err) = compile(src) else {
             panic!("`= ;` must not parse");
         };
@@ -498,7 +498,7 @@ mod generated_palette_header_compiles_tests {
     fn generated_palette_header_compiles_through_naga() {
         let glsl = "layout(binding = 0) uniform vec2 outputSize;\n\
              layout(binding = 1) uniform sampler2D palette;\n\
-             vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
+             vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
         compile(glsl).expect("generated palette header compiles");
     }
 
@@ -512,7 +512,7 @@ mod generated_palette_header_compiles_tests {
         let glsl = "layout(binding = 0) uniform float speed;\n\
              layout(binding = 1) uniform sampler2D palette;\n\
              layout(binding = 2) uniform float bright;\n\
-             vec4 render(vec2 pos) { return texture(palette, vec2(pos.x * speed, 0.0)) * bright; }";
+             vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x * speed, 0.0)) * bright; }";
         compile(glsl).expect("palette between slots compiles");
     }
 }

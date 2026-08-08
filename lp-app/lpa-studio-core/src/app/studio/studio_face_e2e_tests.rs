@@ -1388,7 +1388,7 @@ fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
 const PROJECT_DIR: &str = "/projects/face-e2e";
 
 /// The shader uses the panel uniform so its compile stays honest.
-const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
 
 /// The face fixture's mapping document — 16 lamps, small enough that the
 /// engine sends its display layout outright, which makes it the parity
@@ -1413,7 +1413,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1513,7 +1513,7 @@ const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
 /// The fyeah-sign shape: `glow` bound to `bus:glow`, `speed` unbound (and
 /// therefore, since Q13, not on any panel). Both uniforms feed the shader so the
 /// compile stays honest.
-const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
+const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
 
 fn bound_glow_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
@@ -1528,7 +1528,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -1622,7 +1622,7 @@ fn bound_glow_e2e_server() -> LpServer {
 
 const PALETTE_E2E_DIR: &str = "/projects/palette-e2e";
 
-const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform sampler2D palette;\n\nvec4 render(vec2 pos) {\n    return texture(palette, vec2(pos.x * speed, 0.0));\n}\n";
+const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform sampler2D palette;\n\nvec4 render_2d(vec2 pos) {\n    return texture(palette, vec2(pos.x * speed, 0.0));\n}\n";
 
 /// The Palette Plasma shape (M4 D5): a `palette` slot promoted to the panel
 /// by `default_bind: bus:palette` + `panel: "show"` — no authored binding.
@@ -1639,7 +1639,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1951,7 +1951,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2063,7 +2063,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2098,7 +2098,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
     );
     let idle_json = r#"{ "kind": "Shader", "source": "idle.glsl" }"#;
     let active_json = r#"{ "kind": "Shader", "source": "active.glsl" }"#;
-    let entry_glsl = "vec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
+    let entry_glsl = "vec4 render_2d(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
     let fixture_json = r#"{
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
@@ -2163,7 +2163,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {

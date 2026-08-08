@@ -694,7 +694,7 @@ fn boot_crash_loop_enters_safe_mode_and_recovers() {
 const LOOPING_SHADER_GLSL: &str = "\
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float x = 0.0;
     while (true) {
         x = x + 1.0;

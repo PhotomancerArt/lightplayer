@@ -66,7 +66,7 @@ pub(crate) fn evaluate_health(
 
     for site in health_sites(spec) {
         let pos = [site[0] * spec.size[0] as f32, site[1] * spec.size[1] as f32];
-        let rgba = match instance.call("render", &[LpsValueF32::Vec2(pos)]) {
+        let rgba = match instance.call("render_2d", &[LpsValueF32::Vec2(pos)]) {
             Ok(LpsValueF32::Vec4(v)) => v,
             Ok(other) => {
                 warnings.push(format!("health: render returned {other:?}, expected vec4"));

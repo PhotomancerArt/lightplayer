@@ -27,6 +27,12 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
+/// - `6` — shader GLSL entry points are dimension-explicit: the 2D entry is
+///   `vec4 render_2d(vec2 pos)` (a bare `vec4 render(vec2 pos)` is now a
+///   hard compile error — the D19/Q11 ruling). No 1D entry pre-dates this
+///   format. Version-5 GLSL assets author the bare `render` signature and
+///   are refused rather than migrated as JSON; the upgrader rewrites the
+///   `.glsl` asset text itself (the entry function definition only).
 /// - `5` — `bus:time` carries a **time product**, not raw seconds:
 ///   `ClockState` publishes a new `product` output on the channel (its
 ///   `seconds`/`delta_seconds` stay produced-but-unbound), `FluidDef.time`
@@ -60,7 +66,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 5;
+pub const PROJECT_FORMAT_VERSION: u32 = 6;
 
 /// Parsed `project.json` container manifest.
 ///
