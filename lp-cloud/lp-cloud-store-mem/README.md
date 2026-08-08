@@ -25,7 +25,7 @@ is then asserting on the store's contract rather than on a hash seed.
 `MemClock` stands still until something moves it — `advance(&self, …)` takes
 `&self` so a test can expire a session while the service still owns the
 clock. `MemIdMint` is a counter, not an rng: every draw differs and the same
-program run twice draws the same bytes, which is what makes a minted `usr_`
+program run twice draws the same bytes, which is what makes a minted `usr`
 uid assertable.
 
 **`MemIdMint` must never back a real deployment.** Session tokens are bearer

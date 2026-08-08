@@ -39,7 +39,7 @@ mod tests {
         assert!(is_hashed_path(LpPath::new("/project.json")));
         assert!(is_hashed_path(LpPath::new("/shader.glsl")));
         assert!(is_hashed_path(LpPath::new(
-            "/modules/plasma-mod_x/module.json"
+            "/modules/plasma-modx/module.json"
         )));
         // similar-looking but not the reserved dir
         assert!(is_hashed_path(LpPath::new("/.lpx")));
