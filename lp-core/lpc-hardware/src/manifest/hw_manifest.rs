@@ -1,6 +1,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{HardwareTarget, HwAddress, HwCapability, HwResource, HwSoftLimits};
 
 /// In-memory hardware profile for one board or virtual target.
@@ -19,6 +21,7 @@ pub struct HwManifest {
     url: Option<String>,
     soft_limits: Option<HwSoftLimits>,
     resources: Vec<HwResource>,
+    power_gates: Vec<HwPowerGate>,
 }
 
 impl HwManifest {
@@ -37,6 +40,7 @@ impl HwManifest {
             url: None,
             soft_limits: None,
             resources: resources.into(),
+            power_gates: Vec::new(),
         }
     }
 
@@ -159,6 +163,13 @@ impl HwManifest {
         &self.resources
     }
 
+    /// Board-level power-gate descriptors, if this board carries any (empty
+    /// slice when absent). Metadata only: see [`HwPowerGate`] for what a
+    /// driver is expected to do with one.
+    pub fn power_gates(&self) -> &[HwPowerGate] {
+        &self.power_gates
+    }
+
     pub fn with_target(mut self, target: HardwareTarget) -> Self {
         self.target = Some(target);
         self
@@ -189,6 +200,11 @@ impl HwManifest {
         self
     }
 
+    pub fn with_power_gates(mut self, power_gates: impl Into<Vec<HwPowerGate>>) -> Self {
+        self.power_gates = power_gates.into();
+        self
+    }
+
     pub fn resource(&self, address: &HwAddress) -> Option<&HwResource> {
         self.resources
             .iter()
@@ -210,6 +226,109 @@ impl HwManifest {
     pub fn map_resources(mut self, map_fn: impl Fn(HwResource) -> HwResource) -> Self {
         self.resources = self.resources.into_iter().map(map_fn).collect();
         self
+    }
+}
+
+/// Which logic level asserts a [`HwPowerGate`]. Polarity varies by install —
+/// the Dig-Quad's Q1R drives a user-supplied external relay board, which may
+/// invert relative to a solid-state gate — so it lives in metadata, never in
+/// code. See docs/future/2026-08-06-quinled-board-metadata-prep.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum HwGateLevel {
+    High,
+    Low,
+}
+
+/// "Assert this pin or these outputs are dead" — board metadata, not a
+/// claimable resource. See docs/future/2026-08-06-quinled-board-metadata-prep.md.
+///
+/// Deliberately not a [`HwCapability`] and not an endpoint: a capability says
+/// "this resource can do X"; this says the outputs are dead until it is
+/// asserted. The output provider owns the assert/settle/transmit and
+/// debounce/deassert state machine — this type carries only the constants
+/// that state machine needs, not the state itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HwPowerGate {
+    gpio: HwAddress,
+    active_level: HwGateLevel,
+    open_drain: bool,
+    settle_ms: u32,
+    off_debounce_ms: u32,
+    feeds: Vec<HwAddress>,
+    note: Option<String>,
+}
+
+impl HwPowerGate {
+    /// Default trailing all-black debounce before deassert. Tuned as a
+    /// power-saving heuristic driven by content, not a UI-responsiveness one
+    /// — it wants seconds, not the ~600 ms a manual toggle would use.
+    pub const DEFAULT_OFF_DEBOUNCE_MS: u32 = 5_000;
+
+    pub fn new(gpio: HwAddress, active_level: HwGateLevel, settle_ms: u32) -> Self {
+        Self {
+            gpio,
+            active_level,
+            open_drain: false,
+            settle_ms,
+            off_debounce_ms: Self::DEFAULT_OFF_DEBOUNCE_MS,
+            feeds: Vec::new(),
+            note: None,
+        }
+    }
+
+    pub fn with_open_drain(mut self, open_drain: bool) -> Self {
+        self.open_drain = open_drain;
+        self
+    }
+
+    pub fn with_off_debounce_ms(mut self, off_debounce_ms: u32) -> Self {
+        self.off_debounce_ms = off_debounce_ms;
+        self
+    }
+
+    pub fn with_feeds(mut self, feeds: impl Into<Vec<HwAddress>>) -> Self {
+        self.feeds = feeds.into();
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    /// `/gpio/N` of the gate pin. Profiles should also reserve this GPIO on
+    /// the board's own resource entry so no driver claims it as a wire.
+    pub fn gpio(&self) -> &HwAddress {
+        &self.gpio
+    }
+
+    pub fn active_level(&self) -> HwGateLevel {
+        self.active_level
+    }
+
+    pub fn open_drain(&self) -> bool {
+        self.open_drain
+    }
+
+    /// Rail-up settling time before the first frame may transmit.
+    pub fn settle_ms(&self) -> u32 {
+        self.settle_ms
+    }
+
+    pub fn off_debounce_ms(&self) -> u32 {
+        self.off_debounce_ms
+    }
+
+    /// Wire addresses this gate feeds. Empty means all outputs.
+    pub fn feeds(&self) -> &[HwAddress] {
+        &self.feeds
+    }
+
+    /// Provenance for the timing constants (who measured, when).
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 }
 
