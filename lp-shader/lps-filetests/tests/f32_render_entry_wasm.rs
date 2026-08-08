@@ -61,7 +61,8 @@ fn no_uniforms() -> LpsValueF32 {
 /// `pos` straight out to RGB: the assertion is entirely about how the
 /// synthesised entry decoded the Q16.16 `points` buffer and re-encoded the
 /// channels.
-const COORD_PASSTHROUGH: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
+const COORD_PASSTHROUGH: &str =
+    "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
 
 /// Q16.16 `[x, y]` pairs: (0, 0), (0.5, 1.0), (0.25, 0.75).
 const POINTS_Q16: [i32; 6] = [0, 0, 32768, 65536, 16384, 49152];
