@@ -1,0 +1,79 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
+    },
+    "span": {
+      "source": "bus:scale"
+    },
+    "depth": {
+      "source": "bus:depth"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 30.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Phase",
+      "description": "Base cycle position (0-1); the hue drift and the brightness swell each ride a whole multiple of it"
+    },
+    "span": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1.5,
+      "min": 0.25,
+      "max": 6,
+      "label": "Span",
+      "description": "How many palette turns the strip holds at once"
+    },
+    "depth": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.6,
+      "min": 0,
+      "max": 1,
+      "label": "Depth",
+      "description": "How deep the brightness swell dips between crests"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp the waves read their colors from",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "srgb",
+            "method": "linear",
+            "stops": "#12043a #4a108c #9b1fa8 #e0468c #ff8f5a #ffd98a"
+          }
+        ]
+      }
+    }
+  },
+  "space": {
+    "kind": "OneD",
+    "in_2d": {
+      "kind": "Radial"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "provenance": {
+    "author": "WLED contributors / Photomancer port",
+    "version": "1",
+    "license": "MIT"
+  }
+}
