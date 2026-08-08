@@ -9,7 +9,17 @@
   measured behaviour of this FPU), `2026-08-01-host-emulator-models-flash.md`
   (why the builtins the float path calls are reachable at all), and
   `docs/design/float.md` (normative float semantics).
-- **Superseded by:** None
+- **Superseded by:** None. **Amended 2026-08-08** by
+  `2026-08-08-float-semantics-per-target-representation.md`: the third
+  follow-up below ("Native f32 on the wasm CPU preview tier") is closed, and
+  its stated blocker was wrong twice over — see the dated note there. The
+  mechanism this ADR decides is untouched, and its observation that a
+  runtime-matched `FloatMode` keeps LTO from dropping unused arms is the *why*
+  of that ADR's deferred per-image mode sets. What changes above the compiler
+  is standing, not mechanism: float is the product's one authored semantics and
+  Q32 is a per-target execution representation, so decision 3's "two numeric
+  tiers that differ by board" is now read as one semantics with two
+  representations.
 
 ## Context
 
@@ -268,11 +278,28 @@ What is **not** retired, and is deliberately carried forward unchanged:
   targeting an unsupporting board is handled *before* it black-frames. The
   compile-error backstop exists; the shader card's face should stop offering
   Float on a board that cannot run it, which needs the firmware manifest.
-- **Native f32 on the wasm CPU preview tier.** The browser/host preview refuses
+- ~~**Native f32 on the wasm CPU preview tier.** The browser/host preview refuses
   Float rather than compiling it, so a Float shader authored in Studio has no
   CPU preview (the GPU tier previews it fine). The blocker is that `lpvm-wasm`'s
   f32 emit path still resolves `@lpfn`/`@glsl` imports to Q32 builtin ids — the
-  same reason `wasm.f32` is not in `DEFAULT_TARGETS`.
+  same reason `wasm.f32` is not in `DEFAULT_TARGETS`.~~
+
+  > **⚠️ Dated correction — 2026-08-08. Done, and the stated blocker was wrong
+  > twice.** The wasm CPU preview tier renders Float: the `FloatMode::Q32`
+  > guards are gone from both frame entry points on `rt_wasmtime` and
+  > `rt_browser`, and both engines honour a per-compile `float_mode`.
+  >
+  > The builtin-id claim above was already false when written — M5 (PR #224)
+  > added `resolve_builtin_id_for_mode`, and `wasm.f32` joined `DEFAULT_TARGETS`
+  > on 2026-08-02 at 850/850 files. The *second* diagnosis, that the frame path
+  > disagreed with the rv32 oracle by the known wasmtime last bit, was also
+  > false: `lpvm-wasm`'s inline f32 unorm lowering used the GPU `v × 65535`
+  > scale instead of the product's `floor(v × 65536)` clamped convention
+  > (`docs/design/float.md` §7). A Guaranteed-class bug, one line, invisible to
+  > a green corpus because `LpirOp::FtoUnorm16` is emitted only by the
+  > synthesised frame wrappers no filetest drives. See
+  > `docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md` and
+  > `2026-08-08-float-semantics-per-target-representation.md` §5.
 - **M8**: `xtn.f32` / `xtlpn.f32` filetest targets and corpus triage.
 
 ## Remains unverified

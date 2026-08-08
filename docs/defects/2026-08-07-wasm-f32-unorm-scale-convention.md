@@ -8,6 +8,7 @@ related:
   - 2026-08-02-f32-shader-cannot-render-a-frame.md
   - 2026-07-30-q32-native-vs-wasmtime-last-bit.md
   - ../design/float.md
+  - ../adr/2026-08-08-float-semantics-per-target-representation.md
 ---
 # The wasm f32 unorm lowering used the GPU scale convention, so every frame channel read one count low
 

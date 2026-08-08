@@ -151,6 +151,12 @@ genuinely fits none of these, and define it here in one line.
   allocation. The design's load-bearing claim is about *ordering*, and the
   tests around it pin the protocol (it fired, output is unchanged) rather
   than the ordering, so a mechanism that does nothing passes everything.
+- **`timeout-scoped-to-sub-phase`** — a bound named for the whole operation
+  actually guards one phase of it, so any *other* phase can wedge forever
+  behind an option the caller reasonably believes covers them. The name is the
+  defect: the flag advertises the operation, the code scopes it to the step it
+  was written next to. Presents as "my timeout did nothing", and the fix shape
+  is to bound the command and let sub-phases refine, never the reverse.
 
 ## Index
 
@@ -297,6 +303,8 @@ matrix".
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
 | silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | silent-drop | 2026-08-03 | [dev-file-sync-drops-on-uart-rx-overflow](2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md) | **open** | lp-cli/src/commands/dev (fs sync) + fw-esp32v3 UART0 RX |
+| silent-drop | 2026-08-07 | [boot-compile-oom-crash-loop](2026-08-07-boot-compile-oom-crash-loop.md) | **open** | fw-esp32v3 boot-compile + lp-cli upload + lpfs partition |
+| timeout-scoped-to-sub-phase | 2026-08-07 | [upload-wait-timeout-unbounded-deploy](2026-08-07-upload-wait-timeout-unbounded-deploy.md) | **open** | lp-cli upload (deploy wait) |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |

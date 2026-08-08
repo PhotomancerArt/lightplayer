@@ -168,7 +168,17 @@ between `float` and `fixed`:
 | `float` | `float=hardware-f32`, 502 inst / 2,008 B, 52 ms | **fps=29, tick=32ms** |
 | `fixed` (control) | `float=fixed`, 508 inst / 2,032 B, 48 ms | fps=29, tick=32ms |
 
-The f32 build renders; the Q32 build is not slower. One residual per-project
+The f32 build renders; the Q32 build is not slower.
+
+> **Note, 2026-08-08 — do not generalize that second clause.** "The Q32 build
+> is not slower" is true of *this* fixture and is the origin of the
+> "the S3 is fps-neutral" belief. `quad-strips-v3` is a small fixture and the
+> 2026-08-07 dome-scale bench falsified the generalization: at 1500 LEDs the
+> S3 pays the same ~20% f32 penalty as the classic, dominated by FPU
+> dependent-chain latency in the shader interior. Measured decomposition:
+> `../design/float.md` §4.
+
+One residual per-project
 `tick error` remains in **both** modes and is unrelated: `quad-strips-v3`
 names classic-ESP32 output endpoints (`ws281x:rmt:IO18` and friends) the S3
 does not have. It was always there — the shader error simply fired first and
