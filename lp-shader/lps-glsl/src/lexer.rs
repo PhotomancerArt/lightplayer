@@ -17,7 +17,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_all(mut self) -> Result<Vec<Token>, Diagnostic> {
-        let mut tokens = Vec::new();
+        // Measured on the filetest corpus: ~1 token per 3 source bytes.
+        // Under-estimating just costs a re-grow; this only avoids the first
+        // few doublings for the common case.
+        let mut tokens = Vec::with_capacity(self.source.len() / 3);
         loop {
             self.skip_trivia()?;
             let start = self.pos;

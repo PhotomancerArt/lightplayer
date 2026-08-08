@@ -93,7 +93,7 @@ pub struct StructSymbol {
 pub fn analyze_symbols(source: &str) -> Result<SymbolAnalysis, Diagnostic> {
     let tokens = lex(source)?;
     let index = index_tokens(source, &tokens)?;
-    let array_size_consts = build_array_size_consts(source, &tokens, &index)?;
+    let (array_size_consts, _const_init_cache) = build_array_size_consts(source, &tokens, &index)?;
     let structs = build_struct_types(&index, &array_size_consts)?;
     let (uniforms, _uniforms_type, uniforms_size) =
         build_uniforms(&index, &structs, &array_size_consts)?;
