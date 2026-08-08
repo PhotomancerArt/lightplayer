@@ -4143,6 +4143,8 @@ mod tests {
                         width: 16,
                         height: 16,
                         format: WireTextureFormat::Srgb8,
+                        space: None,
+                        policy: None,
                     },
                 )],
             },

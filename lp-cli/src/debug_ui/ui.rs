@@ -407,6 +407,8 @@ fn debug_ui_project_read(
                 width: 32,
                 height: 32,
                 format: WireTextureFormat::Srgb8,
+                space: None,
+                policy: None,
             },
         )])
     });

@@ -8030,7 +8030,8 @@ mod tests {
     use lpc_wire::{
         NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
         ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
-        RenderProductProbeRequest, RenderProductProbeResult, WireEntryState, WireTextureFormat,
+        RenderProductProbeRequest, RenderProductProbeResult, WireConsumerPolicy, WireEntryState,
+        WireTextureFormat, WireVisualSpace,
     };
 
     use crate::{
@@ -10058,6 +10059,10 @@ mod tests {
                             height: 2,
                             format: WireTextureFormat::Srgb8,
                             bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
                         },
                     )),
                 },
@@ -10901,6 +10906,8 @@ mod tests {
                     width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
+                    space: Some(WireVisualSpace::TwoD),
+                    policy: Some(WireConsumerPolicy::AUTO),
                 }),
                 // The binding-graph probe rides along on every
                 // loaded-project read — module faces cannot derive without it.
@@ -10926,6 +10933,10 @@ mod tests {
                             height: 2,
                             format: WireTextureFormat::Srgb8,
                             bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
                         },
                     )),
                 },

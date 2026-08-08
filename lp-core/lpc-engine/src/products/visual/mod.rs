@@ -18,7 +18,10 @@ pub use sample_request::{
     TextureSampleBatch, TextureUvSamplePoint, VisualSampleBufferRequest, VisualSampleTarget,
 };
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
-pub use space::{CellProjection, ConsumerPolicy, ProductSpaceInfo, VisualSpace, resolve_1d_to_2d};
+pub use space::{
+    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, VisualSpace,
+    resolve_1d_to_2d, resolve_1d_to_2d_with_origin,
+};
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 #[cfg(test)]
 mod tests {

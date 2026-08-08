@@ -863,6 +863,8 @@ async fn probe_render(
                         width: 4,
                         height: 4,
                         format: WireTextureFormat::Rgba16,
+                        space: None,
+                        policy: None,
                     },
                 )],
             },

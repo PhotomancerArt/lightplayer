@@ -206,6 +206,56 @@ pub struct UiControlProductPreview {
     pub bytes: Rc<[u8]>,
 }
 
+/// UI mirror of `lpc_wire::WireVisualSpace` — which coordinate space a
+/// visual producer renders in, or a preview probe asked for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiVisualSpace {
+    OneD,
+    TwoD,
+}
+
+/// UI mirror of `lpc_wire::WireCellProjection` — one cell of the 1D→2D
+/// projection matrix.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiCellProjection {
+    Extrude,
+    Radial,
+    Angular,
+    Mirror,
+}
+
+/// UI mirror of `lpc_wire::WireProjectionOrigin` — which precedence arm
+/// decided a resolved [`UiCellProjection`] (plan D15 preview captions, e.g.
+/// `in 2D · radial (declared)`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiProjectionOrigin {
+    Declared,
+    ConsumerDefault,
+    Forced,
+}
+
+/// Space metadata a render-product probe answered alongside its preview
+/// bytes.
+///
+/// Cached separately from [`UiProductPreview`] (mirroring how a clock's
+/// `UiTimebaseRead` rides beside the preview cache in `ProjectSync` rather
+/// than inside it) so a future per-card space request (P3) can read "what
+/// did the producer answer" without widening every
+/// [`UiProductPreview::VisualSrgb8`] construction site — most of which are
+/// hand-built story/test fixtures with no probe behind them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiVisualProductSpace {
+    /// The space this probe actually rendered in (the effective request
+    /// space).
+    pub space: UiVisualSpace,
+    /// The 1D→2D cell applied to fill this frame, when one applied.
+    pub projection: Option<UiCellProjection>,
+    /// Why `projection` was chosen. Present exactly when `projection` is.
+    pub origin: Option<UiProjectionOrigin>,
+    /// The producer's own native space, independent of what was requested.
+    pub primary: UiVisualSpace,
+}
+
 /// Small, serializable-enough preview state for a produced product.
 ///
 /// Browser-specific DOM/canvas state belongs in the web crate. This DTO only

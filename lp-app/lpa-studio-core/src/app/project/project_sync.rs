@@ -12,12 +12,14 @@ use lpc_wire::{
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingGraph, WireChannelSampleFormat, WireTextureFormat,
+    TimebaseProbeResult, WireBindingGraph, WireCellProjection, WireChannelSampleFormat,
+    WireConsumerPolicy, WireProjectionOrigin, WireTextureFormat, WireVisualSpace,
 };
 
 use crate::{
-    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiControlProductPreview,
-    UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
+    UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue, UiProductPreview,
+    UiProductPreviewFrame, UiProductRef, UiProjectionOrigin, UiVisualProductSpace, UiVisualSpace,
 };
 
 pub struct ProjectSync {
@@ -34,6 +36,13 @@ pub struct ProjectSync {
     /// asks for its listing exactly while it is subscribed for products, so
     /// the debug surface costs nothing on an unfocused clock.
     timebases: BTreeMap<UiProductRef, UiTimebaseRead>,
+    /// Latest space metadata a render-product probe answered, per visual
+    /// product (plan-B P2). Keyed and filled like `timebases`: it rides
+    /// beside `product_previews` rather than inside it, so the metadata is
+    /// available (P3 reads it for the preview checkboxes' captions)
+    /// without widening the `VisualSrgb8` DTO every hand-built preview
+    /// fixture constructs.
+    product_spaces: BTreeMap<UiProductRef, UiVisualProductSpace>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -62,6 +71,7 @@ impl ProjectSync {
             visual_preview_frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             product_previews: BTreeMap::new(),
             timebases: BTreeMap::new(),
+            product_spaces: BTreeMap::new(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -286,6 +296,15 @@ impl ProjectSync {
         self.timebases.get(product)
     }
 
+    /// Latest cached space metadata for a visual product's render-product
+    /// probe (plan-B P2) — the resolved space/projection/origin and the
+    /// producer's own primary space. `None` means no probe result with
+    /// space metadata has landed yet (e.g. still `Pending`, or the last
+    /// result was `Unsupported`/`Error`).
+    pub fn product_space(&self, product: &UiProductRef) -> Option<&UiVisualProductSpace> {
+        self.product_spaces.get(product)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.phase == ProjectSyncPhase::Ready
     }
@@ -373,6 +392,7 @@ impl ProjectSync {
         self.view = ProjectView::new();
         self.product_previews.clear();
         self.timebases.clear();
+        self.product_spaces.clear();
         self.binding_graph = None;
     }
 
@@ -438,6 +458,11 @@ impl ProjectSync {
                                 width: self.visual_preview_frame.width,
                                 height: self.visual_preview_frame.height,
                                 format: WireTextureFormat::Srgb8,
+                                // Explicit fields, but still today's 2D
+                                // default — P3 makes this per-card dynamic
+                                // (the space section's checkbox state).
+                                space: Some(WireVisualSpace::TwoD),
+                                policy: Some(WireConsumerPolicy::AUTO),
                             },
                         ));
                     }
@@ -479,6 +504,9 @@ impl ProjectSync {
             }
             if let Some((product, read)) = timebase_from_probe(probe) {
                 self.timebases.insert(product, read);
+            }
+            if let Some((product, space)) = product_space_from_probe(probe) {
+                self.product_spaces.insert(product, space);
             }
         }
     }
@@ -747,6 +775,7 @@ fn product_preview_from_probe(
             height,
             format: WireTextureFormat::Srgb8,
             bytes,
+            ..
         }) => Some((
             UiProductRef::from_visual_product(*product),
             UiProductPreview::VisualSrgb8 {
@@ -847,6 +876,65 @@ fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTi
             UiTimebaseRead::Unknown,
         )),
         _ => None,
+    }
+}
+
+/// Space metadata riding a render-product probe result (plan-B P2). `None`
+/// for `Unsupported`/`Error` results — those carry no space to cache, and
+/// the previous cached answer (if any) is left as the last known one.
+fn product_space_from_probe(
+    probe: &ProjectProbeResult,
+) -> Option<(UiProductRef, UiVisualProductSpace)> {
+    match probe {
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            product,
+            space,
+            projection,
+            origin,
+            primary,
+            ..
+        })
+        | ProjectProbeResult::RenderProduct(RenderProductProbeResult::GpuResident {
+            product,
+            space,
+            projection,
+            origin,
+            primary,
+            ..
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiVisualProductSpace {
+                space: ui_visual_space(*space),
+                projection: projection.map(ui_cell_projection),
+                origin: origin.map(ui_projection_origin),
+                primary: ui_visual_space(*primary),
+            },
+        )),
+        _ => None,
+    }
+}
+
+fn ui_visual_space(space: WireVisualSpace) -> UiVisualSpace {
+    match space {
+        WireVisualSpace::OneD => UiVisualSpace::OneD,
+        WireVisualSpace::TwoD => UiVisualSpace::TwoD,
+    }
+}
+
+fn ui_cell_projection(cell: WireCellProjection) -> UiCellProjection {
+    match cell {
+        WireCellProjection::Extrude => UiCellProjection::Extrude,
+        WireCellProjection::Radial => UiCellProjection::Radial,
+        WireCellProjection::Angular => UiCellProjection::Angular,
+        WireCellProjection::Mirror => UiCellProjection::Mirror,
+    }
+}
+
+fn ui_projection_origin(origin: WireProjectionOrigin) -> UiProjectionOrigin {
+    match origin {
+        WireProjectionOrigin::Declared => UiProjectionOrigin::Declared,
+        WireProjectionOrigin::ConsumerDefault => UiProjectionOrigin::ConsumerDefault,
+        WireProjectionOrigin::Forced => UiProjectionOrigin::Forced,
     }
 }
 
@@ -1112,6 +1200,8 @@ mod tests {
                 width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                 height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                 format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy::AUTO),
             })
         );
         assert_eq!(
@@ -1136,6 +1226,8 @@ mod tests {
                 width: UiProductPreviewFrame::VISUAL_DEVICE.width,
                 height: UiProductPreviewFrame::VISUAL_DEVICE.height,
                 format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy::AUTO),
             })
         );
     }
@@ -1234,6 +1326,10 @@ mod tests {
                     height: 2,
                     format: WireTextureFormat::Srgb8,
                     bytes: bytes.clone(),
+                    space: WireVisualSpace::TwoD,
+                    projection: Some(WireCellProjection::Radial),
+                    origin: Some(WireProjectionOrigin::Declared),
+                    primary: WireVisualSpace::OneD,
                 },
             )],
         ))
@@ -1246,6 +1342,17 @@ mod tests {
                 height: 2,
                 revision: 8,
                 bytes: Rc::from(bytes.as_slice()),
+            })
+        );
+        // P2 carries the result's space metadata into its own cache
+        // (P3 wires it into the preview checkboxes' captions).
+        assert_eq!(
+            sync.product_space(&UiProductRef::from_visual_product(product)),
+            Some(&UiVisualProductSpace {
+                space: UiVisualSpace::TwoD,
+                projection: Some(UiCellProjection::Radial),
+                origin: Some(UiProjectionOrigin::Declared),
+                primary: UiVisualSpace::OneD,
             })
         );
     }

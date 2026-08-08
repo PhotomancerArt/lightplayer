@@ -76,6 +76,20 @@ pub enum CellProjection {
     Mirror,
 }
 
+impl CellProjection {
+    /// Short human label used in diagnostics and preview captions (mirrors
+    /// [`VisualSpace::label`]).
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Extrude => "extrude",
+            Self::Radial => "radial",
+            Self::Angular => "angular",
+            Self::Mirror => "mirror",
+        }
+    }
+}
+
 /// The consumer half of the negotiation, carried on every space-tagged
 /// request: which projection this consumer prefers for a 1D source landing
 /// on a 2D request, and whether that preference beats the producer's.
@@ -136,18 +150,52 @@ impl ProductSpaceInfo {
     }
 }
 
+/// Which precedence arm decided a 1D→2D projection (vision D14, plan D18) —
+/// the "why" a preview caption needs alongside the "what"
+/// ([`CellProjection`]), e.g. `in 2D · radial (declared)` (plan D15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectionOrigin {
+    /// The producer's own authored `in_2d` opinion won.
+    Declared,
+    /// Neither side had an opinion strong enough to win outright — the
+    /// consumer's default filled the silence.
+    ConsumerDefault,
+    /// The consumer forced its default over an authored opinion.
+    Forced,
+}
+
+/// The 1D→2D precedence ladder (vision D14, plan D18), resolved by the
+/// **producer** because the producer is what executes the map — origin-
+/// aware form, for callers (preview captions, D15) that need to know which
+/// arm fired and not just the resulting cell.
+///
+/// `force` ⇒ the consumer's default wins ([`ProjectionOrigin::Forced`]);
+/// else the producer's own non-Default opinion
+/// ([`ProjectionOrigin::Declared`]); else the consumer's default
+/// ([`ProjectionOrigin::ConsumerDefault`]). "Opinion → default", with the
+/// consumer able to take the wheel.
+#[must_use]
+pub fn resolve_1d_to_2d_with_origin(
+    source: ProductSpaceInfo,
+    policy: ConsumerPolicy,
+) -> (CellProjection, ProjectionOrigin) {
+    if policy.force {
+        return (policy.default_1d_to_2d, ProjectionOrigin::Forced);
+    }
+    match source.in_2d {
+        Some(cell) => (cell, ProjectionOrigin::Declared),
+        None => (policy.default_1d_to_2d, ProjectionOrigin::ConsumerDefault),
+    }
+}
+
 /// The 1D→2D precedence ladder (vision D14, plan D18), resolved by the
 /// **producer** because the producer is what executes the map.
 ///
-/// `force` ⇒ the consumer's default wins; else the producer's own non-Default
-/// opinion; else the consumer's default. "Opinion → default", with the
-/// consumer able to take the wheel.
+/// A thin wrapper over [`resolve_1d_to_2d_with_origin`] for callers that
+/// only need the resulting cell.
 #[must_use]
 pub fn resolve_1d_to_2d(source: ProductSpaceInfo, policy: ConsumerPolicy) -> CellProjection {
-    if policy.force {
-        return policy.default_1d_to_2d;
-    }
-    source.in_2d.unwrap_or(policy.default_1d_to_2d)
+    resolve_1d_to_2d_with_origin(source, policy).0
 }
 
 #[cfg(test)]
@@ -189,5 +237,52 @@ mod tests {
             force: true,
         };
         assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Extrude);
+    }
+
+    #[test]
+    fn origin_reports_declared_for_an_authored_opinion() {
+        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: CellProjection::Mirror,
+            force: false,
+        };
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (CellProjection::Radial, ProjectionOrigin::Declared)
+        );
+    }
+
+    #[test]
+    fn origin_reports_consumer_default_for_a_silent_source() {
+        let source = ProductSpaceInfo::one_d(None);
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: CellProjection::Angular,
+            force: false,
+        };
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (CellProjection::Angular, ProjectionOrigin::ConsumerDefault)
+        );
+    }
+
+    #[test]
+    fn origin_reports_forced_even_over_an_authored_opinion() {
+        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: CellProjection::Extrude,
+            force: true,
+        };
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (CellProjection::Extrude, ProjectionOrigin::Forced)
+        );
+    }
+
+    #[test]
+    fn cell_projection_labels_are_lowercase_diagnostics() {
+        assert_eq!(CellProjection::Extrude.label(), "extrude");
+        assert_eq!(CellProjection::Radial.label(), "radial");
+        assert_eq!(CellProjection::Angular.label(), "angular");
+        assert_eq!(CellProjection::Mirror.label(), "mirror");
     }
 }

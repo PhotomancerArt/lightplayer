@@ -232,6 +232,124 @@ pub static METEOR_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/fire2012` — a WLED port (`mode_fire_2012`) re-authored as a
+/// STATELESS 1D shader: upstream's per-cell heat simulation is not ported
+/// (the engine cannot express a compute-produced dense scalar array), so
+/// the closed form writes down what that simulation settles into. Publishes
+/// `speed`, `reach`, `sparks` and `palette`.
+pub static FIRE2012_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/fire2012/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/fire2012/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/fire2012/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/fire2012/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/fire2012/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/fire2012/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/fire2012/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/fire2012/fixture.map2d.json"),
+    ),
+];
+
+/// `examples/comet` — a WLED port ("Lighthouse", `mode_comet`) authored as
+/// a true 1D shader: `vec4 render_1d(float)` and a `OneD { in_2d: Default }`
+/// declaration, so a 2D consumer gets the extrude the CONSUMER picks.
+/// Publishes `speed`, `tail` and `palette`.
+pub static COMET_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/comet/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/comet/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/comet/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/comet/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/comet/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/comet/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/comet/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/comet/fixture.map2d.json"),
+    ),
+];
+
+/// `examples/palette-waves` — a WLED port (`mode_colorwaves`) and the
+/// declared-projection example: `OneD { in_2d: Radial }` on a disc fixture,
+/// so the strip the shader is written along arrives as rings. Publishes
+/// `speed`, `scale`, `depth` and `palette`.
+pub static PALETTE_WAVES_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/palette-waves/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/palette-waves/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/palette-waves/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/palette-waves/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/palette-waves/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/palette-waves/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/palette-waves/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/palette-waves/fixture.map2d.json"),
+    ),
+];
+
 /// `examples/zook-dome` — a real 16' geodesic dome: 1500 LEDs as five
 /// 300-lamp channels, mapped top-down from the builder's wiring sketch
 /// (`scripts/zook-dome/`). The mapping-scale example: rings from the apex
@@ -291,6 +409,24 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Meteor",
         kind: "Module",
         files: METEOR_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/comet",
+        name: "Comet",
+        kind: "Module",
+        files: COMET_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/palette-waves",
+        name: "Palette Waves",
+        kind: "Module",
+        files: PALETTE_WAVES_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/fire2012",
+        name: "Fire 2012",
+        kind: "Module",
+        files: FIRE2012_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma-duo",

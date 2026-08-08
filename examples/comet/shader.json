@@ -1,0 +1,67 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "sweep": {
+      "source": "bus:speed"
+    },
+    "tail": {
+      "source": "bus:tail"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "sweep": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 4.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Sweep",
+      "description": "Where the comet head sits on the strip (0-1); one ramp is one lap"
+    },
+    "tail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.12,
+      "min": 0.01,
+      "max": 0.5,
+      "label": "Tail",
+      "description": "How far the trail reaches behind the head, as a fraction of the strip"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp the strip holds; the comet lights it where it passes",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "srgb",
+            "method": "linear",
+            "stops": "#0a0a2e #1b4fd8 #37b6f0 #9fe8ff #ffe9b5 #ffffff"
+          }
+        ]
+      }
+    }
+  },
+  "space": {
+    "kind": "OneD",
+    "in_2d": {
+      "kind": "Default"
+    }
+  }
+}

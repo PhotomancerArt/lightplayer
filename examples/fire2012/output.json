@@ -1,0 +1,23 @@
+{
+  "kind": "Output",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
+  "bindings": {
+    "input": {
+      "source": "bus:control.out"
+    }
+  },
+  "options": {
+    "white_point": [
+      0.9,
+      1,
+      1
+    ],
+    "interpolation_enabled": true,
+    "dithering_enabled": false,
+    "lut_enabled": true
+  }
+}

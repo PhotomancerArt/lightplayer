@@ -4855,6 +4855,51 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
+    /// The texture path's 2D→1D fill: a 1D-only consumer that materializes
+    /// a frame gets the centre scanline (vision D8), the same map the
+    /// direct path's `a_2d_source_answers_a_1d_request_on_the_centre_scanline`
+    /// exercises — this is the texture-request counterpart, and the arm
+    /// this test targets errored before P2 (`shader_node.rs`
+    /// `render_projected_texture`).
+    #[test]
+    fn a_2d_source_fills_a_1d_texture_through_the_centre_scanline() {
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::TwoD {
+                in_1d: EnumSlot::default(),
+            },
+            RAMP_2D,
+        );
+        let product = producer.product();
+        let graphics = producer.graphics.clone();
+        const WIDTH: u32 = 8;
+        let request = RenderTextureRequest {
+            width: WIDTH,
+            height: 1,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+            space: VisualSpace::OneD,
+            policy: ConsumerPolicy::AUTO,
+        };
+        let mut texture = graphics.create_render_target(WIDTH, 1).expect("target");
+        {
+            let mut ctx = producer.ctx();
+            producer
+                .node
+                .render_texture_into(product, &request, &mut texture, &mut ctx)
+                .expect("scanline texture fill");
+        }
+        let data = graphics.read_back(&texture).expect("read back");
+        let bytes = data.bytes();
+        for x in 0..WIDTH {
+            let base = (x * 8) as usize;
+            let red = u16::from_le_bytes([bytes[base], bytes[base + 1]]);
+            let green = u16::from_le_bytes([bytes[base + 2], bytes[base + 3]]);
+            let t = (x as f32 + 0.5) / WIDTH as f32;
+            assert_near(red, t, &alloc::format!("texel {x} u"));
+            assert_near(green, 0.5, &alloc::format!("texel {x} v is the centre row"));
+        }
+    }
+
     /// The forwarding rule: a shader that never declared anything answers
     /// the query with 2D-and-no-opinion, which is what keeps every
     /// pre-plan project meaning-identical.

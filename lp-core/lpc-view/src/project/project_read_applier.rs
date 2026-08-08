@@ -1637,6 +1637,10 @@ mod tests {
             width: 2,
             height: 1,
             format: lpc_wire::WireTextureFormat::Rgba16,
+            space: lpc_wire::WireVisualSpace::TwoD,
+            projection: None,
+            origin: None,
+            primary: lpc_wire::WireVisualSpace::TwoD,
         })
     }
 

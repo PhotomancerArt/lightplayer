@@ -14,7 +14,8 @@ use lpc_wire::{
     OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
     RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireChannelSampleFormat, WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow,
+    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
+    WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -29,7 +30,10 @@ use crate::products::visual::RenderTextureRequest;
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
-use crate::products::visual::{ConsumerPolicy, VisualSpace};
+use crate::products::visual::{
+    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, VisualSpace,
+    resolve_1d_to_2d_with_origin,
+};
 
 /// One output node found by the published-frame tree walk, snapshotted so the
 /// layout pass can take `&mut Engine` without holding a tree borrow.
@@ -46,16 +50,28 @@ impl Engine {
         registry: &ProjectRegistry,
         request: RenderProductProbeRequest,
     ) -> RenderProductProbeResult {
+        let space = request.space.map_or(VisualSpace::TwoD, engine_visual_space);
+        let policy = request
+            .policy
+            .map_or(ConsumerPolicy::AUTO, engine_consumer_policy);
         let texture_request = RenderTextureRequest {
             width: request.width,
             height: request.height,
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: self.frame_time().total_ms as f32 / 1000.0,
-            space: VisualSpace::TwoD,
-            policy: ConsumerPolicy::default(),
+            space,
+            policy,
         };
         let revision = self.revision();
         let product = request.product;
+        // Best-effort: a producer that cannot answer the space query still
+        // renders (or fails) through the normal path below; `two_d()` is
+        // the same "no opinion" fallback an undeclared shader answers with.
+        let space_info = self
+            .visual_product_space(registry, product)
+            .unwrap_or_else(|_| ProductSpaceInfo::two_d());
+        let (projection, origin) = projection_and_origin(space_info, space, policy);
+        let primary = wire_visual_space(space_info.primary);
         match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
                 let Some(bytes) = texture.try_raw_bytes() else {
@@ -68,6 +84,10 @@ impl Engine {
                         revision,
                         width: texture.width(),
                         height: texture.height(),
+                        space: wire_visual_space(space),
+                        projection,
+                        origin,
+                        primary,
                     };
                 };
                 let bytes = match request.format {
@@ -81,6 +101,10 @@ impl Engine {
                     height: texture.height(),
                     format: request.format,
                     bytes,
+                    space: wire_visual_space(space),
+                    projection,
+                    origin,
+                    primary,
                 }
             }
             Err(error) => RenderProductProbeResult::Error {
@@ -552,6 +576,74 @@ fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
 /// exhaustive test below).
 fn linear_unorm16_to_srgb8(value: u16) -> u8 {
     super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
+}
+
+/// The render-product probe's `(projection, origin)` pair: `Some` exactly
+/// when the request actually crossed a 1D→2D projection — a 2D request
+/// against a 1D-primary producer. Every other combination (native space, or
+/// the fixed 2D→1D centre scanline, which carries no [`CellProjection`]
+/// choice) answers `(None, None)`.
+fn projection_and_origin(
+    space_info: ProductSpaceInfo,
+    space: VisualSpace,
+    policy: ConsumerPolicy,
+) -> (Option<WireCellProjection>, Option<WireProjectionOrigin>) {
+    if space_info.primary == VisualSpace::OneD && space == VisualSpace::TwoD {
+        let (cell, origin) = resolve_1d_to_2d_with_origin(space_info, policy);
+        (
+            Some(wire_cell_projection(cell)),
+            Some(wire_projection_origin(origin)),
+        )
+    } else {
+        (None, None)
+    }
+}
+
+fn wire_visual_space(space: VisualSpace) -> WireVisualSpace {
+    match space {
+        VisualSpace::OneD => WireVisualSpace::OneD,
+        VisualSpace::TwoD => WireVisualSpace::TwoD,
+    }
+}
+
+fn engine_visual_space(space: WireVisualSpace) -> VisualSpace {
+    match space {
+        WireVisualSpace::OneD => VisualSpace::OneD,
+        WireVisualSpace::TwoD => VisualSpace::TwoD,
+    }
+}
+
+fn wire_cell_projection(cell: CellProjection) -> WireCellProjection {
+    match cell {
+        CellProjection::Extrude => WireCellProjection::Extrude,
+        CellProjection::Radial => WireCellProjection::Radial,
+        CellProjection::Angular => WireCellProjection::Angular,
+        CellProjection::Mirror => WireCellProjection::Mirror,
+    }
+}
+
+fn engine_cell_projection(cell: WireCellProjection) -> CellProjection {
+    match cell {
+        WireCellProjection::Extrude => CellProjection::Extrude,
+        WireCellProjection::Radial => CellProjection::Radial,
+        WireCellProjection::Angular => CellProjection::Angular,
+        WireCellProjection::Mirror => CellProjection::Mirror,
+    }
+}
+
+fn wire_projection_origin(origin: ProjectionOrigin) -> WireProjectionOrigin {
+    match origin {
+        ProjectionOrigin::Declared => WireProjectionOrigin::Declared,
+        ProjectionOrigin::ConsumerDefault => WireProjectionOrigin::ConsumerDefault,
+        ProjectionOrigin::Forced => WireProjectionOrigin::Forced,
+    }
+}
+
+fn engine_consumer_policy(policy: WireConsumerPolicy) -> ConsumerPolicy {
+    ConsumerPolicy {
+        default_1d_to_2d: engine_cell_projection(policy.default_1d_to_2d),
+        force: policy.force,
+    }
 }
 
 /// Project one runtime binding entry onto the wire.

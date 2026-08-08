@@ -36,7 +36,7 @@ use crate::node::{
 };
 use crate::products::visual::{
     CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSpace, coordinates, resolve_1d_to_2d,
+    VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
 };
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
@@ -541,7 +541,8 @@ impl ShaderNode {
 
         match (self.declared_space(), request.space) {
             (VisualSpace::OneD, VisualSpace::TwoD) => {
-                let cell = resolve_1d_to_2d(self.space_info(), request.policy);
+                let (cell, _origin) =
+                    resolve_1d_to_2d_with_origin(self.space_info(), request.policy);
                 let mut mapped = Vec::with_capacity(count);
                 for index in 0..count {
                     let x = source.get(index * 2).copied().unwrap_or(0);
@@ -612,8 +613,14 @@ impl ShaderNode {
     /// program (plan P4 §4): one sample point per target pixel, mapped
     /// through the same coordinate library the direct path uses, so there
     /// is exactly one definition of every projection. The cost is one
-    /// point + one RGBA16 sample per pixel — paid only when a 1D source
-    /// meets a 2D-only consumer through the texture path.
+    /// point + one RGBA16 sample per pixel — paid only when a producer's
+    /// declared space and the request's space disagree.
+    ///
+    /// Two arms mirror `sample_projected`'s: a 1D producer filling a 2D
+    /// request applies the negotiated [`CellProjection`]; a 2D producer
+    /// filling a 1D request samples its own space along the centre
+    /// scanline (vision D8) — there is no projection *choice* in that
+    /// direction, so no [`CellProjection`]/origin applies.
     fn render_projected_texture(
         &mut self,
         request: &RenderTextureRequest,
@@ -621,13 +628,6 @@ impl ShaderNode {
         uniforms: &LpsValueF32,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
-        if self.declared_space() != VisualSpace::OneD || request.space != VisualSpace::TwoD {
-            return Err(NodeError::msg(format!(
-                "no texture projection from {} shader to {} request",
-                self.declared_space().label(),
-                request.space.label()
-            )));
-        }
         if request.format != lps_shared::TextureStorageFormat::Rgba16Unorm {
             return Err(NodeError::msg(format!(
                 "projected texture fill needs an Rgba16Unorm target, got {:?}",
@@ -640,23 +640,57 @@ impl ShaderNode {
         let pixels = (request.width as usize).saturating_mul(request.height as usize);
         let pixel_count = u32::try_from(pixels)
             .map_err(|_| NodeError::msg("projected texture fill target is too large"))?;
-        let cell = resolve_1d_to_2d(self.space_info(), request.policy);
 
-        // Pixel centres, matching the CPU texture synth's own convention.
-        let mut mapped = Vec::with_capacity(pixels);
-        for y in 0..request.height {
-            for x in 0..request.width {
-                let u = (x as f32 + 0.5) / request.width as f32;
-                let v = (y as f32 + 0.5) / request.height as f32;
-                let t = coordinates::project_2d_to_1d(cell, u, v);
-                mapped.push(normalized_f32_to_pixel_q16(t, request.width));
+        match (self.declared_space(), request.space) {
+            (VisualSpace::OneD, VisualSpace::TwoD) => {
+                let (cell, _origin) =
+                    resolve_1d_to_2d_with_origin(self.space_info(), request.policy);
+                // Pixel centres, matching the CPU texture synth's own convention.
+                let mut mapped = Vec::with_capacity(pixels);
+                for y in 0..request.height {
+                    for x in 0..request.width {
+                        let u = (x as f32 + 0.5) / request.width as f32;
+                        let v = (y as f32 + 0.5) / request.height as f32;
+                        let t = coordinates::project_2d_to_1d(cell, u, v);
+                        mapped.push(normalized_f32_to_pixel_q16(t, request.width));
+                    }
+                }
+                let points =
+                    ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
+                graphics
+                    .write_sample_points_1d(points, &mapped)
+                    .map_err(err_ctx("write projected texture points"))?;
+            }
+            (VisualSpace::TwoD, VisualSpace::OneD) => {
+                // Centre scanline (vision D8): fill the 1D strip by sampling
+                // this shader's native 2D space along `centre_scanline(t)` —
+                // the same map `sample_projected`'s TwoD→OneD arm uses.
+                let mut mapped = Vec::with_capacity(pixels * 2);
+                // `v` from `centre_scanline` never depends on the target row
+                // (a 1D request is one strip, `(N, 1)`), so every row of the
+                // request (normally just one) gets the same scanline.
+                for _y in 0..request.height {
+                    for x in 0..request.width {
+                        let t = (x as f32 + 0.5) / request.width as f32;
+                        let (u, v) = coordinates::centre_scanline(t);
+                        mapped.push(normalized_f32_to_pixel_q16(u, request.width));
+                        mapped.push(normalized_f32_to_pixel_q16(v, request.height));
+                    }
+                }
+                let points =
+                    ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
+                graphics
+                    .write_sample_points(points, &mapped)
+                    .map_err(err_ctx("write scanline texture points"))?;
+            }
+            (native, requested) => {
+                return Err(NodeError::msg(format!(
+                    "no texture projection from {} shader to {} request",
+                    native.label(),
+                    requested.label()
+                )));
             }
         }
-
-        let points = ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
-        graphics
-            .write_sample_points_1d(points, &mapped)
-            .map_err(err_ctx("write projected texture points"))?;
         ensure_projected_samples(&mut self.projected_samples, graphics, pixel_count)?;
 
         {
