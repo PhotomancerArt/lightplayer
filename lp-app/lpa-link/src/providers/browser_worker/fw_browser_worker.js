@@ -200,6 +200,7 @@ function previewFrame(message) {
       },
       [pixels.buffer],
     );
+    postOutputFrame(message, runtimeId, frameId);
   } catch (error) {
     if (handleIfInstanceFatal(error)) {
       return;
@@ -211,6 +212,32 @@ function previewFrame(message) {
       message: String(error?.stack || error),
     });
   }
+}
+
+// Output-frame delivery, riding the preview frame the host already scheduled.
+// The tick above published the frame, so a card that draws lamps reads those
+// buffers here instead of paying for a second render, and cadence is the
+// slot's by construction. Posted AFTER the visual answer so the host's frame
+// completes (and its backpressure clears) first.
+//
+// `output_frame` is absent whenever the host is not reading the output side —
+// which is every tick of a shader-only slot after the worker's first answer —
+// so those cards carry no extra traffic. When present it is the serialized
+// display-layout gate (`always` / `if_changed` / `none`), which is what keeps
+// geometry off the per-frame path.
+function postOutputFrame(message, runtimeId, frameId) {
+  if (message.output_frame == null) {
+    return;
+  }
+  self.postMessage(
+    JSON.parse(
+      fwBrowser.read_output_frame_json(
+        runtimeId,
+        frameId,
+        JSON.stringify(message.output_frame),
+      ),
+    ),
+  );
 }
 
 // Runtime disposal: release a preview lease so the worker can be recycled.
@@ -282,6 +309,7 @@ function presentFrame(message) {
       posted_epoch_ms: performance.timeOrigin + performance.now(),
       wasm_memory_bytes: wasmExports?.memory?.buffer?.byteLength || 0,
     });
+    postOutputFrame(message, runtimeId, frameId);
   } catch (error) {
     if (handleIfInstanceFatal(error)) {
       return;

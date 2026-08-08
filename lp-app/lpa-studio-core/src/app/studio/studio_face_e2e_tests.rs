@@ -1216,6 +1216,154 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
     }
 }
 
+#[test]
+fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
+    // The face-e2e project resolves BOTH primaries in its root scope (the
+    // shader writes `bus:visual.out`, the fixture writes `bus:control.out`),
+    // which is exactly the shape Yona's 2026-08-07 ruling is about: the
+    // project's output is the LAMPS, so they lead, and the raster the
+    // shader painted is one toggle away.
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    // The connect read arms the product subscriptions; the probe answers on
+    // the next read, so the hero has real bytes to show.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+    let root_path = project_editor(&snapshot).nodes[0].header.path.clone();
+    let face = module_face(&snapshot);
+    assert_eq!(
+        face.hero_choice,
+        Some(crate::ModuleHeroProduct::Control),
+        "both products resolve, so the hero is a choice — and the card's \
+         default one is the lamps"
+    );
+    let hero = face.preview.clone().expect("the root module's hero");
+    assert_eq!(hero.kind, crate::UiProductKind::Control);
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::ControlNative(_)),
+        "the default hero draws the fixture's lamps, got {:?}",
+        hero.preview
+    );
+    assert_eq!(
+        hero.tracking,
+        crate::UiProductTrackingState::Tracking,
+        "the control product is always-live, so the borrowed hero says so"
+    );
+
+    // -- the upper-right toggle: one op, per card ---------------------------
+    handle.tx.send(node_ui_command(NodeUiOp::SetHeroProduct {
+        node: root_path.clone(),
+        product: crate::ModuleHeroProduct::Visual,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the hero toggle emits a snapshot");
+    let face = module_face(&snapshot);
+    assert_eq!(face.hero_choice, Some(crate::ModuleHeroProduct::Visual));
+    let hero = face.preview.clone().expect("the root module's hero");
+    assert_eq!(hero.kind, crate::UiProductKind::Visual);
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::VisualSrgb8 { .. }),
+        "flipped, the hero is the R7 mirror's raster, got {:?}",
+        hero.preview
+    );
+
+    // -- and it is core-owned, so a full rebuild keeps it -------------------
+    // A refresh rebuilds every card DTO from the server's read: view-local
+    // state would be back on the lamps here.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+    let face = module_face(&snapshot);
+    assert_eq!(
+        face.hero_choice,
+        Some(crate::ModuleHeroProduct::Visual),
+        "the preference is keyed by the node's address, so it survives the \
+         card's remount"
+    );
+    assert_eq!(
+        face.preview.expect("the root module's hero").kind,
+        crate::UiProductKind::Visual
+    );
+
+    // -- back again: the toggle is two states of one control ---------------
+    handle.tx.send(node_ui_command(NodeUiOp::SetHeroProduct {
+        node: root_path,
+        product: crate::ModuleHeroProduct::Control,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the hero toggle emits a snapshot");
+    assert_eq!(
+        module_face(&snapshot)
+            .preview
+            .expect("the root module's hero")
+            .kind,
+        crate::UiProductKind::Control
+    );
+}
+
+#[test]
+fn a_one_product_module_falls_back_to_whichever_product_it_has() {
+    // The preference names a kind the scope does not resolve: the hero
+    // falls back to the other one, in both directions, and no toggle is
+    // offered — a one-product module has no choice to make. Neither
+    // project routes its primaries any differently from a real one; each
+    // simply leaves one primary channel unwritten.
+    for visual_only in [false, true] {
+        let server = Rc::new(RefCell::new(single_product_e2e_server(visual_only)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+        let face = module_face(&snapshot);
+        assert_eq!(
+            face.hero_choice, None,
+            "visual_only={visual_only}: one product is not a choice"
+        );
+        let want = if visual_only {
+            crate::UiProductKind::Visual
+        } else {
+            crate::UiProductKind::Control
+        };
+        assert_eq!(
+            face.preview.expect("the root module's hero").kind,
+            want,
+            "visual_only={visual_only}: the hero falls back to the product \
+             the scope actually resolves"
+        );
+    }
+}
+
 /// The phase's oracle: what Studio synthesizes client-side must be what the
 /// engine would have sent, field for field.
 ///
@@ -1504,6 +1652,119 @@ fn face_e2e_server() -> LpServer {
     server
         .load_project(PROJECT_DIR.as_path())
         .expect("load face-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+const SINGLE_PRODUCT_PROJECT_DIR: &str = "/projects/single-product-e2e";
+
+/// A whole project — clock, shader, fixture, output — whose root scope
+/// resolves exactly ONE primary product, for the hero's fallback rules.
+///
+/// Nothing is left dangling: the chain still runs end to end, one link of
+/// it just rides a privately named channel instead of a primary one.
+/// `visual_only` hands the fixture's lamps to `bus:lamps`, so nothing
+/// writes `control.out`; otherwise the shader paints `bus:raster`, so
+/// nothing writes `visual.out`.
+fn single_product_e2e_server(visual_only: bool) -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let (visual_channel, control_channel) = if visual_only {
+        ("bus:visual.out", "bus:lamps")
+    } else {
+        ("bus:raster", "bus:control.out")
+    };
+    let project_json = "{\n  \"format\": 5\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "transport": { "running": true, "rate": 1.0 }
+}"#;
+    let shader_json = format!(
+        r#"{{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {{
+    "speed": {{ "source": "bus:speed" }},
+    "output": {{ "target": "{visual_channel}" }}
+  }},
+  "consumed": {{
+    "speed": {{
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "label": "Speed",
+      "description": "Gradient speed multiplier"
+    }}
+  }}
+}}"#
+    );
+    let fixture_json = format!(
+        r#"{{
+  "kind": "Fixture",
+  "render_size": {{ "width": 4, "height": 4 }},
+  "brightness": 0.8,
+  "mapping": {{ "kind": "Map2d", "source": "sign.map2d.json" }},
+  "bindings": {{
+    "input": {{ "source": "{visual_channel}" }},
+    "output": {{ "target": "{control_channel}" }}
+  }}
+}}"#
+    );
+    let output_json = format!(
+        r#"{{
+  "kind": "Output",
+  "channels": {{
+    "0": {{ "endpoint": "ws281x:local:D10" }}
+  }},
+  "bindings": {{
+    "input": {{ "source": "{control_channel}" }}
+  }}
+}}"#
+    );
+    let single_product_shader = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("shader.json", &shader_json),
+        ("fixture.json", &fixture_json),
+        ("sign.map2d.json", FACE_MAP2D),
+        ("output.json", &output_json),
+        ("shader.glsl", single_product_shader),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{SINGLE_PRODUCT_PROJECT_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(SINGLE_PRODUCT_PROJECT_DIR.as_path())
+        .expect("load single-product-e2e project");
     server.advance_frame(16).expect("tick");
     server
 }
