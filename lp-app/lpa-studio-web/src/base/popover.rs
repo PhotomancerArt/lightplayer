@@ -205,6 +205,15 @@ pub fn PopoverButton(
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());
+    // Viewport-clamped case: the panel slid back across its own trigger and
+    // covers it entirely. The top-layer trigger copy is skipped then — the
+    // panel is on top, and painting the copy over the panel's rows would
+    // interleave two surfaces' text.
+    let trigger_covered = attached
+        && trigger_rect().is_some_and(|anchor| {
+            let panel = panel_size().unwrap_or_else(SizeSnapshot::fallback);
+            panel_covers_trigger(anchor, panel, current_position)
+        });
     let layer_layout_class = if layer_keeps_layout {
         "ux-popover-open-trigger-boxed"
     } else {
@@ -442,7 +451,7 @@ pub fn PopoverButton(
                     // clicking closes, focus stays on the in-flow placeholder
                     // button. An anchored visual hosts interactive controls,
                     // so its clicks do NOT dismiss — the backdrop still does.
-                    if attached && anchored {
+                    if attached && anchored && !trigger_covered {
                         div {
                             class: "ux-popover-open-trigger",
                             style: "{trigger_visual_style}",
@@ -451,7 +460,7 @@ pub fn PopoverButton(
                             },
                             {trigger_for_layer}
                         }
-                    } else if attached {
+                    } else if attached && !trigger_covered {
                         div {
                             class: "ux-popover-open-trigger {layer_layout_class} {open_class}",
                             style: "{trigger_visual_style}",
@@ -1160,6 +1169,22 @@ fn trigger_placeholder_style(attached: bool, anchored: bool, rect: Option<RectSn
     }
 }
 
+/// The settled panel rect fully covers the trigger's visible (inflated)
+/// footprint. Only the viewport-clamped case can get here: an unclamped
+/// panel starts at the trigger's seam edge, which always leaves the trigger
+/// body outside the panel.
+fn panel_covers_trigger(anchor: RectSnapshot, panel: SizeSnapshot, position: PopoverPosition) -> bool {
+    // Half-pixel slack: a welded panel edge lands EXACTLY on the inflated
+    // trigger edge (`snap_to_trigger_edges` welds it), so strict comparisons
+    // would flip coverage on sub-pixel measurement noise.
+    const SLACK_PX: f64 = 0.5;
+    let visible = anchor.inflate(TRIGGER_INFLATE_PX);
+    position.left <= visible.x + SLACK_PX
+        && position.top <= visible.y + SLACK_PX
+        && position.left + panel.width >= visible.x + visible.width - SLACK_PX
+        && position.top + panel.height >= visible.y + visible.height - SLACK_PX
+}
+
 /// Fixed-position style for the top-layer trigger visual.
 fn open_trigger_style(rect: Option<RectSnapshot>) -> String {
     rect.map(|rect| {
@@ -1221,13 +1246,21 @@ fn animated_outline(
 /// The panel's input rect at animation time `t`: a sliver at the trigger's
 /// seam edge growing out to its final rect. The seam edge overlaps the
 /// (inflated) trigger by the border width so the union always merges.
+///
+/// The seam edge lerps to the FINAL rect's edge, not the trigger's: when the
+/// panel fits on its side the two are the same value (the lerp is the
+/// identity), but a viewport-clamped position (`panel_top` slid the panel
+/// back across its own trigger because it fits neither side) puts them
+/// apart — the drawn box must land on the panel's actual rect, or the
+/// chrome detaches from its content.
 fn panel_rect_at(t: f64, anchor: OutlineRect, fin: OutlineRect, side: PopoverSide) -> OutlineRect {
     let eased = ease_out_cubic(t);
     let left = lerp(anchor.x, fin.x, eased);
     let right = lerp(anchor.x + anchor.w, fin.x + fin.w, eased);
     match side {
         PopoverSide::Below => {
-            let top = anchor.y + anchor.h - POPOVER_BORDER_WIDTH_PX;
+            let seam = anchor.y + anchor.h - POPOVER_BORDER_WIDTH_PX;
+            let top = lerp(seam, fin.y, eased);
             let bottom = lerp(anchor.y + anchor.h, fin.y + fin.h, eased);
             OutlineRect {
                 x: left,
@@ -1237,7 +1270,8 @@ fn panel_rect_at(t: f64, anchor: OutlineRect, fin: OutlineRect, side: PopoverSid
             }
         }
         PopoverSide::Above => {
-            let bottom = anchor.y + POPOVER_BORDER_WIDTH_PX;
+            let seam = anchor.y + POPOVER_BORDER_WIDTH_PX;
+            let bottom = lerp(seam, fin.y + fin.h, eased);
             let top = lerp(anchor.y, fin.y, eased);
             OutlineRect {
                 x: left,
@@ -1801,6 +1835,125 @@ mod tests {
         };
         assert!(base.approx_eq(noise));
         assert!(!base.approx_eq(grown));
+    }
+
+    #[test]
+    fn settled_outline_follows_an_unclamped_panel_exactly() {
+        // The normal case: the panel fits below, so the final rect's top IS
+        // the trigger's seam edge, and the seam lerp must be the identity at
+        // every t (the box top never leaves the seam while growing).
+        let anchor_rect = OutlineRect {
+            x: 100.0,
+            y: 100.0,
+            w: 40.0,
+            h: 24.0,
+        };
+        let fin = OutlineRect {
+            x: 100.0,
+            y: 100.0 + 24.0 - POPOVER_BORDER_WIDTH_PX,
+            w: 300.0,
+            h: 200.0,
+        };
+        for t in [0.0, 0.3, 0.7, 1.0] {
+            let rect = panel_rect_at(t, anchor_rect, fin, PopoverSide::Below);
+            assert_eq!(
+                rect.y,
+                anchor_rect.y + anchor_rect.h - POPOVER_BORDER_WIDTH_PX,
+                "unclamped seam edge must stay welded at t={t}"
+            );
+        }
+    }
+
+    #[test]
+    fn settled_outline_follows_a_clamped_panel() {
+        // The short-viewport case: `panel_top` clamped the panel back across
+        // its own trigger (fin.y is ABOVE the seam). The settled box must
+        // land on the panel's actual rect — a box pinned at the seam draws
+        // the chrome detached from its content (the add-node-picker story
+        // artifact under the 760px capture viewport).
+        let anchor_rect = OutlineRect {
+            x: 130.0,
+            y: 310.0,
+            w: 120.0,
+            h: 28.0,
+        };
+        let fin = OutlineRect {
+            x: 135.0,
+            y: 281.0,
+            w: 320.0,
+            h: 467.0,
+        };
+        let settled = panel_rect_at(1.0, anchor_rect, fin, PopoverSide::Below);
+        assert_eq!(settled.y, fin.y, "box top must follow the clamped panel");
+        assert_eq!(settled.y + settled.h, fin.y + fin.h);
+        let sliver = panel_rect_at(0.0, anchor_rect, fin, PopoverSide::Below);
+        assert_eq!(
+            sliver.y,
+            anchor_rect.y + anchor_rect.h - POPOVER_BORDER_WIDTH_PX,
+            "the animation still starts as a sliver at the seam"
+        );
+        assert!(sliver.h <= POPOVER_BORDER_WIDTH_PX + 1e-9);
+    }
+
+    #[test]
+    fn clamped_above_outline_follows_the_panel_downward() {
+        // Above-side twin: the panel clamped down across the trigger; the
+        // settled bottom edge must be the panel's, not the trigger's top.
+        let anchor_rect = OutlineRect {
+            x: 130.0,
+            y: 40.0,
+            w: 120.0,
+            h: 28.0,
+        };
+        let fin = OutlineRect {
+            x: 135.0,
+            y: 12.0,
+            w: 320.0,
+            h: 467.0,
+        };
+        let settled = panel_rect_at(1.0, anchor_rect, fin, PopoverSide::Above);
+        assert_eq!(settled.y, fin.y);
+        assert_eq!(settled.y + settled.h, fin.y + fin.h);
+    }
+
+    #[test]
+    fn covered_trigger_is_detected_only_when_fully_inside_the_panel() {
+        // The measured add-node-picker clamp case: trigger raw rect
+        // (137.9, 311)–(250.2, 336); panel (134.9, 281)–(454.9, 748). The
+        // panel's left edge welds EXACTLY onto the inflated trigger edge
+        // (134.9 = 137.9 − 3), which the slack must treat as covered.
+        let trigger = RectSnapshot {
+            x: 137.9,
+            y: 311.0,
+            width: 112.3,
+            height: 25.0,
+        };
+        let panel = SizeSnapshot {
+            width: 320.0,
+            height: 467.0,
+        };
+        let clamped = PopoverPosition {
+            left: 134.9,
+            top: 281.0,
+            visible: true,
+            side: PopoverSide::Below,
+        };
+        assert!(panel_covers_trigger(trigger, panel, clamped));
+        // A panel whose left edge sits a few px INSIDE the trigger footprint
+        // leaves trigger showing — not covered.
+        let offset = PopoverPosition {
+            left: 140.0,
+            ..clamped
+        };
+        assert!(!panel_covers_trigger(trigger, panel, offset));
+        // The ordinary welded panel below the trigger never covers it.
+        let welded = PopoverPosition {
+            left: 134.9,
+            top: trigger.y + trigger.height - POPOVER_BORDER_WIDTH_PX,
+            visible: true,
+            side: PopoverSide::Below,
+        };
+        assert!(!panel_covers_trigger(trigger, panel, welded));
     }
 
     #[test]
