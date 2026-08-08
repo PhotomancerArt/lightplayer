@@ -390,12 +390,13 @@ impl LibraryStore {
         }
     }
 
-    /// Resolve a card/URL key — a `prj_…` uid or a slug — to the uid.
+    /// Resolve a card/URL key — a `prj…` uid or a slug — to the uid.
     pub fn resolve_key(&self, key: &str) -> Result<PrefixedUid, LibraryError> {
-        if key.starts_with("prj_") {
-            return key
-                .parse()
-                .map_err(|e| LibraryError::Manifest(format!("invalid uid {key:?}: {e}")));
+        // A key that parses strictly IS a uid (a slug can't collide: the
+        // whole key would have to be `prj` + exactly 16 base-32 chars);
+        // anything else is treated as a slug.
+        if let Ok(uid) = key.parse::<PrefixedUid>() {
+            return Ok(uid);
         }
         if !self.package_slugs()?.iter().any(|slug| slug == key) {
             return Err(LibraryError::NotFound(key.to_string()));
@@ -1039,7 +1040,7 @@ mod tests {
         // the card, `resolve_key` and `delete` would name different things.
         assert_eq!(derived_uid("porch-sign"), derived_uid("porch-sign"));
         assert_ne!(derived_uid("porch-sign"), derived_uid("porch-sign-2"));
-        assert!(derived_uid("porch-sign").to_string().starts_with("prj_"));
+        assert!(derived_uid("porch-sign").to_string().starts_with("prj"));
     }
 
     #[test]

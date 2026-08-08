@@ -52,6 +52,17 @@ pub fn init_board() -> (
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
+    // Arm coprocessor 0 on the PRO core before anything can compile or run a
+    // `FloatMode::F32` shader. Compiled float code arms nothing itself, and an
+    // unarmed core takes `EXCCAUSE=32` on its first FP instruction.
+    //
+    // The embassy tasks share this context, so one call covers the shader task.
+    // ⚠️ The APP core does NOT share it — it runs the RMT refill ISR and has its
+    // own `CPENABLE`. That is fine because it runs no LPVM code; see
+    // `super::fpu`'s module docs if that ever changes.
+    let cpenable = super::fpu::arm();
+    log::debug!("FPU armed (PRO core): CPENABLE = {cpenable:#010x}");
+
     let flash = peripherals.FLASH;
     // Handed on untouched: `main.rs` builds the `Rmt` driver at the WS281x
     // clock rate and registers the driver, so an RMT failure costs the board

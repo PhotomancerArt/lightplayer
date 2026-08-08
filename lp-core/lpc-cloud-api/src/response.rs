@@ -18,9 +18,13 @@ use alloc::vec::Vec;
 use lpc_history::{ContentHash, HistoryEvent};
 use serde::{Deserialize, Serialize};
 
+use crate::ack::Ack;
 use crate::actor::Actor;
 use crate::head_info::{HeadInfo, PushOutcome};
+use crate::login_options::LoginOptionsInfo;
+use crate::me_info::MeInfo;
 use crate::project_meta::ProjectMeta;
+use crate::session_info::SessionList;
 use crate::sidecar_meta::SidecarMeta;
 
 /// A service→client response, carried inside a
@@ -42,6 +46,14 @@ pub enum CloudResponse {
     PushResult(PushResult),
     /// See [`Events`].
     Events(Events),
+    /// See [`crate::me_info::MeInfo`].
+    MeInfo(MeInfo),
+    /// See [`crate::session_info::SessionList`].
+    SessionList(SessionList),
+    /// See [`crate::ack::Ack`].
+    Ack(Ack),
+    /// See [`crate::login_options::LoginOptionsInfo`].
+    LoginOptionsInfo(LoginOptionsInfo),
 }
 
 /// Answers [`crate::request::WhoAmI`].
@@ -150,6 +162,30 @@ impl From<Events> for CloudResponse {
     }
 }
 
+impl From<MeInfo> for CloudResponse {
+    fn from(response: MeInfo) -> Self {
+        CloudResponse::MeInfo(response)
+    }
+}
+
+impl From<SessionList> for CloudResponse {
+    fn from(response: SessionList) -> Self {
+        CloudResponse::SessionList(response)
+    }
+}
+
+impl From<Ack> for CloudResponse {
+    fn from(response: Ack) -> Self {
+        CloudResponse::Ack(response)
+    }
+}
+
+impl From<LoginOptionsInfo> for CloudResponse {
+    fn from(response: LoginOptionsInfo) -> Self {
+        CloudResponse::LoginOptionsInfo(response)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +281,53 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&resp).unwrap(),
             r#"{"events":{"events":[],"next_since":7}}"#
+        );
+    }
+
+    #[test]
+    fn serde_round_trip_me_info() {
+        let resp = CloudResponse::MeInfo(crate::me_info::MeInfo {
+            uid: PrefixedUid::mint(UidPrefix::User, &[4u8; 16]),
+            email: "yona@example.com".to_string(),
+            display_name: "Yona".to_string(),
+            given_name: None,
+            family_name: None,
+            picture_url: None,
+            provider_label: "Google".to_string(),
+            created_at: 1.0,
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    #[test]
+    fn serde_round_trip_ack() {
+        let resp = CloudResponse::Ack(crate::ack::Ack);
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
+    }
+
+    /// The `Ack` family pinned: a unit-struct payload wraps to `null`, not
+    /// `{}`, inside the newtype variant.
+    #[test]
+    fn pinned_json_literal_ack() {
+        let resp = CloudResponse::Ack(crate::ack::Ack);
+        assert_eq!(serde_json::to_string(&resp).unwrap(), r#"{"ack":null}"#);
+    }
+
+    /// The `LoginOptionsInfo` family pinned: multi-word variant name
+    /// (`loginOptionsInfo`) alongside its own multi-field payload.
+    #[test]
+    fn pinned_json_literal_login_options_info() {
+        let resp = CloudResponse::LoginOptionsInfo(crate::login_options::LoginOptionsInfo {
+            oidc: vec![],
+            dev_picker: None,
+        });
+        assert_eq!(
+            serde_json::to_string(&resp).unwrap(),
+            r#"{"loginOptionsInfo":{"oidc":[],"devPicker":null}}"#
         );
     }
 }

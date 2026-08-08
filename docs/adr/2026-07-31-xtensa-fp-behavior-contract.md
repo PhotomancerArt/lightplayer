@@ -220,7 +220,30 @@ behavior fails `fp_silicon_replay` immediately.
 
 Stated, not implied away:
 
-- **LX6 (classic ESP32) FPU** — untouched (plan Q5, future work).
+- ~~**LX6 (classic ESP32) FPU** — untouched (plan Q5, future work).~~
+  **Amended 2026-08-06: measured, and it agrees. This contract now covers both
+  Xtensa FPUs in this project.** The same rig (lifted to `lp-xt-fp-harness`) ran
+  the same corpus on a classic ESP32 rev v3.1 (MAC `30:76:f5:ec:f6:34`):
+  **5 630 / 5 630 AGREE, 0 DIVERGE** against the predictions committed and
+  fitted for the S3, on the same corpus fingerprint `0xa0a36dc3`.
+
+  The stronger half is the estimate ROMs. `tables-esp32v3.txt` is
+  **byte-identical** to the S3's `tables.txt` across all 1 570 sweep rows
+  (369 865 bytes each) — the full 2²³ significand space over 15
+  `(sign, exponent)` planes for each of `recip0.s` / `rsqrt0.s` / `sqrt0.s` /
+  `div0.s`. Those tables are implementation-defined, so §5's characterization
+  had no host oracle and could not have one; with a second part it does, and the
+  answer is that both parts carry the same lookup silicon.
+
+  So everything in this document — including the fitted `divn.s` model whose
+  limits the entry below quantifies — applies to the LX6 without a per-chip arm.
+  Captures and full provenance:
+  `lp-xt/lp-xt-emu/tests/fixtures/fp/captures/README.md`.
+
+  ⚠️ **This is a numeric-behavior result, not a performance one.** An f32 shader
+  on the classic renders ~17 % *slower* than the same shader in Q32 (20 fps vs
+  24 fps at 1500 LEDs) — see `docs/design/float.md`. Agreement to the bit says
+  nothing about time, and §10 still excludes cycle behavior repo-wide.
 - **Cycle/timing behavior** — out of scope repo-wide.
 - `divn.s` off the sequence envelope — **measured 2026-08-01, and it is worse
   than the round-1 number suggested.** Round 2 (`helpers::probe2`, 7 073

@@ -582,7 +582,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":5,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":5,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -597,7 +597,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         .unwrap();
         fs.write_file(
             "/.lp/device.json".as_path(),
-            br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
+            br#"{"uid":"devaaaaaaaaaaaaaaaa","name":"Bench board"}"#,
         )
         .unwrap();
     }
@@ -639,9 +639,9 @@ fn device_connect_pulls_classifies_and_adopts() {
     else {
         panic!("unknown project adopts, got {:?}", sync.content);
     };
-    assert_eq!(project_uid, "prj_devicedevicedevi");
+    assert_eq!(project_uid, "prjdev1cedev1cedev1");
     assert_eq!(slug, "2026-07-10-1000-porch-wild");
-    let adopted = store.open("prj_devicedevicedevi".parse().unwrap()).unwrap();
+    let adopted = store.open("prjdev1cedev1cedev1".parse().unwrap()).unwrap();
     assert!(matches!(
         adopted.history.events().first().unwrap().kind,
         lpc_history::EventKind::PulledFromDevice { .. }
@@ -684,7 +684,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         panic!("known project classifies, got {:?}", sync.content);
     };
     assert_eq!(*relation, SyncRelation::Diverged);
-    let handle = store.open("prj_devicedevicedevi".parse().unwrap()).unwrap();
+    let handle = store.open("prjdev1cedev1cedev1".parse().unwrap()).unwrap();
     assert!(
         handle.history.knows(*observed),
         "diverged device copy is banked at connect (push never destroys)"
@@ -711,7 +711,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":5,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":5,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -726,7 +726,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         .unwrap();
         fs.write_file(
             "/.lp/device.json".as_path(),
-            br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
+            br#"{"uid":"devaaaaaaaaaaaaaaaa","name":"Bench board"}"#,
         )
         .unwrap();
     }
@@ -845,7 +845,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
         crate::app::runtime_pool::runtime_session::ready_state_for_test(),
     );
     // the shell-injected randomness (crypto bytes on the web) is what
-    // mints `dev_` uids — install a fixed generator to pin the wiring
+    // mints `dev` uids — install a fixed generator to pin the wiring
     controller.set_random(|| [7u8; 16]);
 
     // a library with one pushable project (the edit-e2e node graph)

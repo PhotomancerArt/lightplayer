@@ -8,9 +8,23 @@
 //! through the asset pipeline (whole-body apply / project save). No
 //! separate pane.
 //!
-//! The toggle bar is stable across the flip: the pencil keeps its far-left
-//! spot (click again to leave edit mode) and the shared view state feeds
-//! whichever renderer is showing, including live output colors. What the
+//! The bar above that hero carries the product's own chrome at its head —
+//! name, the publish chip when the control output is wired to a bus
+//! channel, and, at the far end, the same "i" detail affordance every slot
+//! surface has (the clock face's product header, established at the
+//! transport-hero G1 gate). A custom hero replaces the boxed
+//! [`ProducedProductView`](crate::app::node::ProducedProductView) pane, and
+//! the pane is what used to carry that chrome; without it the fixture's
+//! output was the one produced product in Studio you could not inspect or
+//! see the link status of ("we don't show the output detail / link status
+//! either" — 2026-08-05). It shares the toggle bar rather than taking a
+//! header row of its own: two near-empty bars stacked over the lamp field
+//! is precisely the chrome two words and two buttons have not earned.
+//!
+//! The toggle bar is stable across the flip: the pencil keeps its spot at
+//! the head of the instrument cluster (click again to leave edit mode) and
+//! the shared view state feeds whichever renderer is showing, including
+//! live output colors. What the
 //! bar *offers* is not stable, and should not be: the wiring instruments
 //! (numbers, arrows, universe colors) are authoring tools, so they appear
 //! only in edit mode, and view mode's bar carries the live toggle alone.
@@ -33,8 +47,9 @@ use crate::app::node::face::node_ui_action;
 use crate::app::node::lamp_view::control_live_lamp_colors;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
-use crate::app::node::produced_product_view::ProductPreview;
-use crate::app::node::{NodeCardSection, PanelControl};
+use crate::app::node::{
+    NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -44,6 +59,10 @@ pub fn FixtureFace(
     /// (stories).
     #[props(default = false)]
     detail_initially_open: bool,
+    /// Open the produced output's header detail popover on first render
+    /// (stories).
+    #[props(default = false)]
+    output_detail_initially_open: bool,
     /// Initial map view options (stories render deterministic states).
     #[props(default)]
     initial_map_view: Option<MapViewOptions>,
@@ -85,62 +104,73 @@ pub fn FixtureFace(
     rsx! {
         NodeCardSection { label: "output", first: true,
             div { class: if full { "ux-map-home ux-map-home-full" } else { "ux-map-home" },
-                if show_toggles || editable {
-                    div { class: "ux-map-toggle-bar",
-                        if editable {
-                            button {
-                                class: if edit_open { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
-                                title: if edit_open { "close the mapping editor" } else { "edit the mapping here" },
-                                onclick: move |_| {
-                                    let now = *editing.peek();
-                                    editing.set(!now);
-                                    if now {
-                                        expanded.set(false);
-                                    }
-                                },
-                                Pencil { size: 13 }
-                            }
-                        }
-                        if edit_open {
-                            button {
-                                class: if view().fit_preview { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
-                                title: "texture-frame preview — how the doc fits shader space (F)",
-                                onclick: move |_| {
-                                    let now = view.peek().fit_preview;
-                                    view.write().fit_preview = !now;
-                                },
-                                Scan { size: 13 }
-                            }
-                            button {
-                                class: "ux-map-toggle",
-                                title: if full { "back to the card" } else { "expand the editor to the full page" },
-                                onclick: move |_| {
-                                    let now = *expanded.peek();
-                                    expanded.set(!now);
-                                    let bump = *refit.peek() + 1;
-                                    refit.set(bump);
-                                },
-                                if full {
-                                    Minimize2 { size: 13 }
-                                } else {
-                                    Maximize2 { size: 13 }
+                div { class: "ux-map-toggle-bar",
+                    // The product's own chrome, at the head of the bar the
+                    // hero already had: name, publish chip, and (at the far
+                    // end) the detail popover. One chrome row, not two —
+                    // two near-empty bars stacked over the lamp field is
+                    // exactly the chrome the style rules refuse.
+                    ProductIdentity { product: preview.clone() }
+                    div { class: "lpme-spacer" }
+                    if editable {
+                        button {
+                            class: if edit_open { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                            title: if edit_open { "close the mapping editor" } else { "edit the mapping here" },
+                            onclick: move |_| {
+                                let now = *editing.peek();
+                                editing.set(!now);
+                                if now {
+                                    expanded.set(false);
                                 }
+                            },
+                            Pencil { size: 13 }
+                        }
+                    }
+                    if edit_open {
+                        button {
+                            class: if view().fit_preview { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                            title: "texture-frame preview — how the doc fits shader space (F)",
+                            onclick: move |_| {
+                                let now = view.peek().fit_preview;
+                                view.write().fit_preview = !now;
+                            },
+                            Scan { size: 13 }
+                        }
+                        button {
+                            class: "ux-map-toggle",
+                            title: if full { "back to the card" } else { "expand the editor to the full page" },
+                            onclick: move |_| {
+                                let now = *expanded.peek();
+                                expanded.set(!now);
+                                let bump = *refit.peek() + 1;
+                                refit.set(bump);
+                            },
+                            if full {
+                                Minimize2 { size: 13 }
+                            } else {
+                                Maximize2 { size: 13 }
                             }
                         }
-                        div { class: "lpme-spacer" }
-                        if show_toggles {
-                            MapViewToggles {
-                                value: view().into(),
-                                on_change: move |next: MapViewOptions| {
-                                    next.apply_to_editor(&mut view.write());
-                                },
-                                bare: true,
-                                // The wiring instruments are authoring tools:
-                                // view mode shows the product, edit mode
-                                // inspects the wiring.
-                                wiring: edit_open,
-                            }
+                    }
+                    if show_toggles {
+                        MapViewToggles {
+                            value: view().into(),
+                            on_change: move |next: MapViewOptions| {
+                                next.apply_to_editor(&mut view.write());
+                            },
+                            bare: true,
+                            // The wiring instruments are authoring tools:
+                            // view mode shows the product, edit mode
+                            // inspects the wiring.
+                            wiring: edit_open,
                         }
+                    }
+                    SlotDetailButton {
+                        label: preview.name.clone(),
+                        aspects: preview.visible_aspects(),
+                        initially_open: output_detail_initially_open,
+                        on_action,
+                        authoring: preview.authoring.clone(),
                     }
                 }
                 if edit_open {

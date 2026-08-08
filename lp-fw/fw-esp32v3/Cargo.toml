@@ -37,7 +37,7 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["esp32", "server"]
+default = ["esp32", "server", "float-f32"]
 # Chip selection, mirroring fw-esp32s3's `esp32s3` feature: crates whose chip
 # feature is not named on their dependency line get it here, so there is one
 # place to change. `esp-rtos?/esp32` is a weak dependency feature — it must not
@@ -96,6 +96,37 @@ server = [
 #   cargo build --profile release-esp32v3 --features ws281x_telemetry
 ws281x_telemetry = []
 
+# Hardware f32 shaders on this chip's LX6 FPU.
+#
+# ON BY DEFAULT, like fw-esp32s3's feature of the same name. The C6 names no
+# such feature because it has no FPU; the classic is the first board where this
+# was a judgement rather than a capability question, and the numbers say yes:
+#
+#   flash  +63,136 B against 1,255,392 B of headroom (5%; CI's floor is 64 KB)
+#   .data  +2,312 B     .bss 0     IRAM 0
+#
+# The `.data` number is the one that mattered — `dram_seg` is 192 KB, the arena's
+# hard ceiling is ~155.9 KB, and this board has OOM'd with 360 B to spare. 2.3 KB
+# off that ceiling is real but affordable, and per-shader cost is neutral or
+# better: on the S3 the same shader built f32 was 68 B SMALLER than its Q32 build
+# and rendered at identical fps.
+#
+# Earned by measurement, not inherited from the S3: the LX6 agrees with the LX7
+# on all 5,630 conformance vectors AND on the implementation-defined estimate
+# ROMs, byte for byte. See `lp-xt-emu/tests/fixtures/fp/captures/`.
+#
+# Note what this does NOT do: it links the capability, it does not select the
+# mode. A shader compiles in F32 when its authored `float_mode` slot says Float;
+# every other shader is still Q32, and both kinds can run in one project.
+# `CPENABLE` is armed regardless — see `board::esp32v3::fpu`.
+#
+# Unlike fw-esp32s3's, this list does not name `lps-builtins?/float-f32`: that
+# crate is not a direct dependency here, and `lp-gfx-lpvm` forwards to both.
+float-f32 = [
+    "lpvm-native?/float-f32",
+    "lp-gfx-lpvm?/float-f32",
+]
+
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
 # what `scripts/m4-hardware-walk.sh --chip esp32` diffs against the host oracle
@@ -145,6 +176,22 @@ radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos", "esp-rtos/esp-radio", "esp-r
 # LIE about its wire protocol.
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
+
+# The FP conformance rig on THIS chip's FPU — the classic's LX6, where the
+# committed predictions were all measured on the S3's LX7. Answers the question
+# `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` left open at its "LX6
+# (classic ESP32) FPU — untouched" line.
+#
+# The rig itself is `lp-xt-fp-harness`, shared with fw-esp32s3; this crate
+# supplies only the entrypoint and its `BoardId`. It prints `(result, FSR)` per
+# vector and classifies nothing — `just fp-diff` does that on the host, against
+# goldens committed before any board ran.
+#
+# ⚠️ First `test_*` feature on this crate: it is what makes build.rs emit
+# `fw_harness`, which replaces the app entrypoint. Add any future one to the
+# harness loop in `just clippy-fw-esp32v3` — harness code is cfg'd out of the
+# default build, and 13 harnesses once rotted uncompiled in this repo.
+test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
@@ -306,6 +353,12 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, feat
     "xt-map-esp32-classic",
 ], optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+
+# The shared Xtensa FP conformance rig (`test_xt_fp_conformance`). Shared with
+# fw-esp32s3 rather than copied: it is a correctness oracle, and two copies that
+# drift would leave the two chips diffed against different vector sets while
+# both look healthy.
+lp-xt-fp-harness = { path = "../../lp-xt/lp-xt-fp-harness", optional = true }
 
 # The RAM probe's radio cohort (M2-P3 of the classic bring-up roadmap):
 # versions from the experiment repo's led-lab-esp32 `test_stress`, the set
