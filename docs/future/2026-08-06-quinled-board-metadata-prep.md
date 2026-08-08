@@ -409,3 +409,17 @@ Known schema gaps this lineup exposes:
 3. Early access / pinouts for **Dig-Next-4 and Dig-Next-6**.
 4. Whether he would accept **per-board metadata upstream** in some form, or
    prefers we maintain it.
+
+## Status update — 2026-08-08
+
+The dig2go half of this document shipped: `boards/quinled/dig2go.json` +
+`.display.json` (registered, drift-gated) and the power-gate mechanism
+(`docs/adr/2026-08-08-switched-power-rail-mechanism.md`), via plan
+`2026-08-07-2336-dig2go-board-support` / PR #397. One correction relative to
+the design sketch above: a gate's `feeds` names **endpoint** addresses, not
+`/rmt/ws281xK` slots — on the classic a slot is acquired per transmission and
+is not a stable identity (the dig2go's single gate simply declares no feeds =
+gates everything). `settle_ms` and active-high polarity were authored as
+marked placeholders pending the bench walk. The Dig-Quad/Octa/Next-2 halves
+remain future work, as does the GPIO21/22/23/25 dupont-header question the
+walk should settle.

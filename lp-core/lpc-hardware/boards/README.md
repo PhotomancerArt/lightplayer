@@ -155,6 +155,54 @@ Use `reserved_reason` for known-dangerous or unavailable resources:
 }
 ```
 
+## Power gates — "assert this pin or the outputs are dead"
+
+Some boards put the LED supply itself behind a GPIO: the QuinLED dig2go's
+GPIO12 cuts strip power entirely, and the Dig-Next-2 has three independently
+switched fused outputs. A board declares these with a top-level `power_gate`
+list:
+
+```json
+"power_gate": [
+  {
+    "gpio": "/gpio/12",
+    "active_level": "high",
+    "settle_ms": 25,
+    "off_debounce_ms": 5000,
+    "note": "who measured these constants, and when"
+  }
+]
+```
+
+This is deliberately **not** a capability and not a claimable resource — a
+capability says "this resource can do X"; a gate says the outputs are dead
+until it is asserted. The output provider owns the behavior: assert on the
+first lit frame, wait `settle_ms` before transmitting (clocking WS281x data
+into an unpowered strip phantom-powers the first pixel through its protection
+diode), and deassert only after `off_debounce_ms` of all-black frames with no
+transmission in flight. See
+`docs/adr/2026-08-08-switched-power-rail-mechanism.md`.
+
+Authoring rules:
+
+- **The gate GPIO must also appear in `gpio` with a `reserved_reason`** — a
+  driver claiming the pin the rail hangs on is the same physical-damage class
+  as a wrong wire. A drift test enforces this for every checked-in board.
+- **`feeds` names endpoint addresses** (the `/gpio/N` a wire resolves to),
+  never `/rmt/ws281xK` timing slots — on the classic a slot is acquired per
+  transmission and is not a stable identity. A board whose gate switches its
+  only supply should leave `feeds` empty (= gates every output); an entry
+  that matches nothing leaves the rail permanently down, which presents as a
+  dead board.
+- **Watch for strap pins.** The dig2go's gate is GPIO12 = MTDI, the
+  flash-voltage strap: it must be low at boot or the board does not come up.
+  Rail-off-at-boot is the provider's contract; the profile's `note` should
+  record the strap so nobody "fixes" the idle level.
+- `active_level` is a board fact (a user-supplied external relay may invert
+  it); `settle_ms`/`off_debounce_ms` are measured records — say who measured
+  them in `note`, and mark placeholders as placeholders until a bench
+  confirms them.
+
 ## Facts, not reviews
 
 Display copy (`blurb`, notes) states what a board IS — chip, form factor,

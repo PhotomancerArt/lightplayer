@@ -33,7 +33,10 @@ Chip facts arrive by injection instead:
 
 `boot`, `server_loop`, `transport`, `time`, `logger`, `jit_fns` (the JIT
 host-log symbol), `lp_fs` (littlefs-backed `LpFs`), `hardware::manifest_loader`,
-`output::provider` (trait-driven output provider), `serial::shared_serial`.
+`output::provider` (trait-driven output provider), `output::power_gate`
+(switched-power-rail state machine behind the manifest's `power_gate`
+descriptors — the chip crate supplies the pin and the clock; see
+`docs/adr/2026-08-08-switched-power-rail-mechanism.md`), `serial::shared_serial`.
 
 `output::rmt_state` used to sit beside the provider; it went away with its only
 consumer when `fw-esp32c6` moved onto `lp-ws281x` (2026-08-01). Per-channel RMT
