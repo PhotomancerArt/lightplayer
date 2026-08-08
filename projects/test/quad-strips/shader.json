@@ -20,6 +20,5 @@
       "label": "Phase",
       "description": "Chase cycle position (0-1)"
     }
-  },
-  "float_mode": "fixed"
+  }
 }
