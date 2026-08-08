@@ -1571,7 +1571,7 @@ fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
             .map(|(name, body)| {
                 let body = match (*name, target) {
                     ("project.json", Some(target)) => {
-                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                        format!("{{\n  \"format\": 6,\n  \"target\": \"{target}\"\n}}\n")
                     }
                     _ => body.to_string(),
                 };
@@ -1660,7 +1660,7 @@ fn an_open_in_sim_stands_the_sims_board_picker_down() {
             .map(|(name, body)| {
                 let body = match (*name, target) {
                     ("project.json", Some(target)) => {
-                        format!("{{\n  \"format\": 5,\n  \"target\": \"{target}\"\n}}\n")
+                        format!("{{\n  \"format\": 6,\n  \"target\": \"{target}\"\n}}\n")
                     }
                     _ => body.to_string(),
                 };
@@ -1769,7 +1769,7 @@ fn an_open_in_sim_that_re_attaches_stands_the_picker_down_too() {
         .map(|(name, body)| {
             let body = match *name {
                 "project.json" => {
-                    "{\n  \"format\": 5,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
+                    "{\n  \"format\": 6,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
                 }
                 _ => body.to_string(),
             };
@@ -3359,7 +3359,7 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
                 // (D-A), which would leave the device unidentified here.
                 (
                     "project.json".to_string(),
-                    br#"{"format":5,"name":"sign"}"#.to_vec(),
+                    br#"{"format":6,"name":"sign"}"#.to_vec(),
                 ),
                 (
                     "module.json".to_string(),

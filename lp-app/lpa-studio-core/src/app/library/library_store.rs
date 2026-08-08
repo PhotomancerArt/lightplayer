@@ -718,7 +718,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                br#"{"format":5,"name":"demo"}"#.to_vec(),
+                br#"{"format":6,"name":"demo"}"#.to_vec(),
             ),
             (
                 "module.json".to_string(),

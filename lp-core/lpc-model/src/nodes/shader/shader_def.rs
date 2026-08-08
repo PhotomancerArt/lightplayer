@@ -1,7 +1,7 @@
 use alloc::string::String;
 
 use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef};
-use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted, ValueSlot};
+use crate::{AssetSlot, BindingDefs, MapSlot, OptionSlot, RenderOrderSlot, Slotted, ValueSlot};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -12,8 +12,10 @@ pub struct ShaderDef {
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
     pub bindings: BindingDefs,
-    /// Numeric mode this shader is authored and compiled in.
-    pub float_mode: ValueSlot<FloatMode>,
+    /// Optional pin forcing one execution representation for this shader's
+    /// float arithmetic. Absent (the normal state) is Auto: the target's
+    /// native representation. See [`FloatMode`].
+    pub float_mode: OptionSlot<ValueSlot<FloatMode>>,
     pub param_defs: MapSlot<String, ShaderParamDef>,
     /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
     #[slot(name = "consumed")]
@@ -26,7 +28,7 @@ impl Default for ShaderDef {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::default(),
             bindings: BindingDefs::default(),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
         }
@@ -64,7 +66,7 @@ mod tests {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
         };
@@ -79,7 +81,10 @@ mod tests {
             "main.glsl"
         );
         assert_eq!(def.render_order(), 0);
-        assert_eq!(*def.float_mode.value(), FloatMode::Fixed);
+        assert!(
+            def.float_mode.is_none(),
+            "a fresh shader is unpinned (Auto)"
+        );
     }
 
     #[test]

@@ -15,6 +15,5 @@
       "label": "Time",
       "description": "Project clock time in seconds"
     }
-  },
-  "float_mode": "fixed"
+  }
 }

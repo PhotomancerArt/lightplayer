@@ -1,15 +1,20 @@
-//! Byte-exact goldens for the v4 corpus, plus the load-through-the-real-gate
-//! check that makes them mean something.
+//! Byte-exact goldens for every corpus version, plus the
+//! load-through-the-real-gate check that makes them mean something.
 //!
-//! `tests/corpus/v4/<project>/` is a real format-4 project — the two frozen
-//! `schemas/history/v4/fixtures/` snapshots (with the GLSL and SVG the
-//! snapshot recipe dropped, recovered from `f9d6981dc^`), and four gallery
-//! examples recovered whole from the same commit.
+//! `tests/corpus/v<N>/<project>/` is a real format-N project, and
+//! `tests/corpus/v<N>/_expected/<project>/` is what this crate produces from
+//! it — migrated all the way to `PROJECT_FORMAT_VERSION`, not just one step.
+//! Every corpus version is exercised, so an older entry keeps testing the
+//! whole chain rather than only the step it was authored against.
 //!
-//! `tests/corpus/v4/_expected/<project>/` is what this crate produces from
-//! them. Those trees are OUR contract, reviewed once by a human and frozen
-//! thereafter. They deliberately do **not** match today's hand-polished
-//! `examples/` and `projects/test/`: the hand migration converted several
+//! - `v4` — the two frozen `schemas/history/v4/fixtures/` snapshots (with the
+//!   GLSL and SVG the snapshot recipe dropped, recovered from `f9d6981dc^`),
+//!   and four gallery examples recovered whole from the same commit.
+//! - `v5` — the two `schemas/history/v5/fixtures/` snapshots, copied whole.
+//!
+//! The `_expected` trees are OUR contract, reviewed once by a human and
+//! frozen thereafter. They deliberately do **not** match today's hand-polished
+//! `examples/` and `projects/test/`: the v4 hand migration converted several
 //! uniforms to phasors using periods mined out of GLSL, which is authoring
 //! judgment an upgrader must not invent.
 //!
@@ -22,44 +27,54 @@
 //! then read every line of `git diff` before committing it.
 
 use lpa_upgrade::{ProjectFiles, UpgradeReport, upgrade_to_current};
+use lpc_model::PROJECT_FORMAT_VERSION;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[test]
 fn every_corpus_project_matches_its_golden() {
-    let projects = corpus_projects();
+    let versions = corpus_versions();
     assert!(
-        projects.len() >= 6,
-        "the corpus lost projects: {projects:?}"
+        versions.len() >= 2,
+        "the corpus lost a version: {versions:?}"
     );
+    let mut total = 0usize;
 
-    for project in projects {
-        let input = read_tree(&corpus_root().join(&project));
-        let mut migrated = input.clone();
-        let report = upgrade_to_current(&mut migrated)
-            .unwrap_or_else(|e| panic!("{project}: upgrade failed: {e}"));
+    for version in versions {
+        for project in corpus_projects(version) {
+            total += 1;
+            let input = read_tree(&corpus_root(version).join(&project));
+            let mut migrated = input.clone();
+            let report = upgrade_to_current(&mut migrated)
+                .unwrap_or_else(|e| panic!("v{version}/{project}: upgrade failed: {e}"));
 
-        assert_eq!(report.from, 4, "{project}");
-        assert_eq!(report.to, 5, "{project}");
-        assert_eq!(
-            report.changed_files,
-            differing_paths(&input, &migrated),
-            "{project}: changed_files must name exactly the files whose bytes moved"
-        );
+            assert_eq!(report.from, version, "v{version}/{project}");
+            assert_eq!(
+                report.to, PROJECT_FORMAT_VERSION,
+                "v{version}/{project}: every corpus project migrates all the way forward"
+            );
+            assert_eq!(
+                report.changed_files,
+                differing_paths(&input, &migrated),
+                "v{version}/{project}: changed_files must name exactly the files whose bytes moved"
+            );
 
-        let expected_dir = expected_root().join(&project);
-        if blessing() {
-            write_tree(&expected_dir, &migrated);
-            continue;
+            let expected_dir = expected_root(version).join(&project);
+            if blessing() {
+                write_tree(&expected_dir, &migrated);
+                continue;
+            }
+            assert_trees_match(&project, &read_tree(&expected_dir), &migrated);
         }
-        assert_trees_match(&project, &read_tree(&expected_dir), &migrated);
     }
+
+    assert!(total >= 8, "the corpus lost projects: {total} left");
 }
 
 #[test]
 fn untouched_files_come_back_byte_identical() {
-    for project in corpus_projects() {
-        let input = read_tree(&corpus_root().join(&project));
+    for (version, project) in every_corpus_project() {
+        let input = read_tree(&corpus_root(version).join(&project));
         let mut migrated = input.clone();
         let report = upgrade_to_current(&mut migrated).expect("upgrade");
 
@@ -70,14 +85,14 @@ fn untouched_files_come_back_byte_identical() {
             assert_eq!(
                 migrated.get(path),
                 Some(before),
-                "{project}/{path} was rewritten without being reported"
+                "v{version}/{project}/{path} was rewritten without being reported"
             );
         }
         // Nothing is added or dropped: a migration is an edit, not a rebuild.
         assert_eq!(
             input.paths().collect::<Vec<_>>(),
             migrated.paths().collect::<Vec<_>>(),
-            "{project}: the file set changed"
+            "v{version}/{project}: the file set changed"
         );
     }
 }
@@ -86,8 +101,8 @@ fn untouched_files_come_back_byte_identical() {
 fn no_migrated_project_still_mentions_the_old_time_binding() {
     // The step's own refusal valve enforces this per file; this asserts it
     // over the whole corpus, in case a rule ever stops running.
-    for project in corpus_projects() {
-        let mut files = read_tree(&corpus_root().join(&project));
+    for (version, project) in every_corpus_project() {
+        let mut files = read_tree(&corpus_root(version).join(&project));
         upgrade_to_current(&mut files).expect("upgrade");
         for (path, bytes) in files.iter() {
             if !path.ends_with(".json") {
@@ -102,7 +117,7 @@ fn no_migrated_project_still_mentions_the_old_time_binding() {
             let kind = kind_of(text);
             assert!(
                 matches!(kind.as_deref(), Some("Playlist" | "Fluid" | "Clock")),
-                "{project}/{path}: a {kind:?} artifact still references bus:time"
+                "v{version}/{project}/{path}: a {kind:?} artifact still references bus:time"
             );
         }
     }
@@ -112,8 +127,8 @@ fn no_migrated_project_still_mentions_the_old_time_binding() {
 fn every_migrated_project_loads_through_the_real_registry() {
     // A writer whose output no reader consumes is an unverified contract —
     // docs/defects/2026-07-27-created-package-unloadable.md.
-    for project in corpus_projects() {
-        let mut files = read_tree(&corpus_root().join(&project));
+    for (version, project) in every_corpus_project() {
+        let mut files = read_tree(&corpus_root(version).join(&project));
         upgrade_to_current(&mut files).expect("upgrade");
 
         let mut fs = lpfs::LpFsMemory::new();
@@ -130,7 +145,7 @@ fn every_migrated_project_loads_through_the_real_registry() {
                 lpc_model::Revision::new(1),
                 &ctx,
             )
-            .unwrap_or_else(|e| panic!("{project}: migrated project must load: {e:?}"));
+            .unwrap_or_else(|e| panic!("v{version}/{project}: migrated project must load: {e:?}"));
     }
 }
 
@@ -138,8 +153,8 @@ fn every_migrated_project_loads_through_the_real_registry() {
 fn the_unmigrated_corpus_is_refused_by_the_real_registry() {
     // Proves the goldens are not vacuous: these projects genuinely do not
     // load before the upgrade runs.
-    for project in corpus_projects() {
-        let files = read_tree(&corpus_root().join(&project));
+    for (version, project) in every_corpus_project() {
+        let files = read_tree(&corpus_root(version).join(&project));
         let mut fs = lpfs::LpFsMemory::new();
         for (path, bytes) in files.iter() {
             fs.write_file_mut(lpfs::LpPath::new(&format!("/{path}")), bytes)
@@ -155,29 +170,68 @@ fn the_unmigrated_corpus_is_refused_by_the_real_registry() {
         );
         assert!(
             result.is_err(),
-            "{project}: a format-4 project must not load at format 5"
+            "v{version}/{project}: a format-{version} project must not load at format \
+             {PROJECT_FORMAT_VERSION}"
         );
     }
 }
 
 #[test]
 fn the_report_names_what_it_did() {
-    let mut files = read_tree(&corpus_root().join("fyeah-sign"));
+    let mut files = read_tree(&corpus_root(4).join("fyeah-sign"));
     let report = upgrade_to_current(&mut files).expect("upgrade");
     assert_report_notes_cover_changes(&report);
-    assert!(
-        report
-            .notes
-            .iter()
-            .any(|note| note.starts_with("project.json: format 4 → 5")),
-        "{:?}",
-        report.notes
-    );
+    // Every hop in the chain reports its own bump, so a multi-step run reads
+    // as the sequence it was rather than as one opaque jump.
+    for hop in 4..PROJECT_FORMAT_VERSION {
+        let expected = format!("project.json: format {hop} → {}", hop + 1);
+        assert!(
+            report.notes.iter().any(|note| note.starts_with(&expected)),
+            "missing {expected:?} in {:?}",
+            report.notes
+        );
+    }
     assert!(
         report.warnings.iter().any(|w| w.contains("seconds")),
         "{:?}",
         report.warnings
     );
+}
+
+/// The v5 corpus carries the pins the v5→v6 step exists for, and the report
+/// has to name each file it rewrote for them.
+#[test]
+fn the_report_names_the_dropped_pins() {
+    let mut files = read_tree(&corpus_root(5).join("fyeah-sign"));
+    let report = upgrade_to_current(&mut files).expect("upgrade");
+    assert_report_notes_cover_changes(&report);
+    for artifact in ["idle.json", "blast.json"] {
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.starts_with(artifact) && note.contains("float_mode")),
+            "no note for {artifact} in {:?}",
+            report.notes
+        );
+    }
+}
+
+/// The point of the whole step, asserted over real projects rather than the
+/// step's own one-file fixtures.
+#[test]
+fn no_migrated_project_still_pins_fixed() {
+    for (version, project) in every_corpus_project() {
+        let mut files = read_tree(&corpus_root(version).join(&project));
+        upgrade_to_current(&mut files).expect("upgrade");
+        for (path, bytes) in files.iter() {
+            let text = String::from_utf8_lossy(bytes);
+            assert!(
+                !text.contains(r#""float_mode": "fixed""#),
+                "v{version}/{project}/{path} still pins the format-5 default"
+            );
+        }
+    }
 }
 
 fn assert_report_notes_cover_changes(report: &UpgradeReport) {
@@ -195,20 +249,53 @@ fn kind_of(text: &str) -> Option<String> {
     node.get("kind")?.as_str()
 }
 
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/v4")
+fn corpus_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
 }
 
-fn expected_root() -> PathBuf {
-    corpus_root().join("_expected")
+fn corpus_root(version: u32) -> PathBuf {
+    corpus_dir().join(format!("v{version}"))
+}
+
+fn expected_root(version: u32) -> PathBuf {
+    corpus_root(version).join("_expected")
+}
+
+/// Every `tests/corpus/v<N>` directory, oldest first.
+fn corpus_versions() -> Vec<u32> {
+    let mut versions: Vec<u32> = std::fs::read_dir(corpus_dir())
+        .expect("corpus directory")
+        .filter_map(|entry| {
+            let name = entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            name.strip_prefix('v')?.parse().ok()
+        })
+        .collect();
+    versions.sort_unstable();
+    versions
+}
+
+/// `(corpus version, project)` for every project in every corpus version.
+fn every_corpus_project() -> Vec<(u32, String)> {
+    corpus_versions()
+        .into_iter()
+        .flat_map(|version| {
+            corpus_projects(version)
+                .into_iter()
+                .map(move |project| (version, project))
+        })
+        .collect()
 }
 
 fn blessing() -> bool {
     std::env::var_os("LPA_UPGRADE_BLESS").is_some()
 }
 
-fn corpus_projects() -> Vec<String> {
-    let mut projects: Vec<String> = std::fs::read_dir(corpus_root())
+fn corpus_projects(version: u32) -> Vec<String> {
+    let mut projects: Vec<String> = std::fs::read_dir(corpus_root(version))
         .expect("corpus directory")
         .map(|entry| entry.expect("entry").file_name())
         .map(|name| name.to_string_lossy().into_owned())
