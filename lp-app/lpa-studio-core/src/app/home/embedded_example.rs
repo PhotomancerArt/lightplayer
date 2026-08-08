@@ -232,6 +232,46 @@ pub static METEOR_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/fire2012` — a WLED port (`mode_fire_2012`) re-authored as a
+/// STATELESS 1D shader: upstream's per-cell heat simulation is not ported
+/// (the engine cannot express a compute-produced dense scalar array), so
+/// the closed form writes down what that simulation settles into. Publishes
+/// `speed`, `reach`, `sparks` and `palette`.
+pub static FIRE2012_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/fire2012/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/fire2012/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/fire2012/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/fire2012/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/fire2012/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/fire2012/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/fire2012/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/fire2012/fixture.map2d.json"),
+    ),
+];
+
 /// `examples/comet` — a WLED port ("Lighthouse", `mode_comet`) authored as
 /// a true 1D shader: `vec4 render_1d(float)` and a `OneD { in_2d: Default }`
 /// declaration, so a 2D consumer gets the extrude the CONSUMER picks.
@@ -381,6 +421,12 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Palette Waves",
         kind: "Module",
         files: PALETTE_WAVES_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/fire2012",
+        name: "Fire 2012",
+        kind: "Module",
+        files: FIRE2012_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma-duo",

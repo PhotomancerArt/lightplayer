@@ -1,0 +1,79 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "rise": {
+      "source": "bus:speed"
+    },
+    "reach": {
+      "source": "bus:reach"
+    },
+    "sparks": {
+      "source": "bus:sparks"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "rise": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 16.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Rise",
+      "description": "Base cycle position (0-1); every ember layer climbs a whole multiple of it, so the fire never seams"
+    },
+    "reach": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.35,
+      "min": 0.08,
+      "max": 1,
+      "label": "Reach",
+      "description": "How far up the strip the flame climbs before it cools out"
+    },
+    "sparks": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.6,
+      "min": 0,
+      "max": 1,
+      "label": "Sparks",
+      "description": "How brightly the rare embers thrown clear of the flame burn"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The heat ramp: cell heat is the palette index, cold black to white hot",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "srgb",
+            "method": "linear",
+            "stops": "#000000 #380702 #9c1c03 #e2600d #ffab24 #ffe9a3 #ffffff"
+          }
+        ]
+      }
+    }
+  },
+  "space": {
+    "kind": "OneD",
+    "in_2d": {
+      "kind": "Default"
+    }
+  }
+}
