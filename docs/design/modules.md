@@ -624,11 +624,15 @@ somebody owes. Recorded 2026-08-03 at the close of
 - **What a module's canonical self-portrait is.** The hero draws the
   scope's resolved `visual.out` (live beats black). Yona leans
   `control.out` — the fixture view — with 3D mapping renders later.
-- **Driving time from a panel.** With `default_bind` wiring no longer
-  publicity (Q13 refinement), `bus:time` has no panel presence at all.
-  The sanctioned answer should be the CLOCK's own transport/scrub
-  controls published to the panel, not a knob materialized from a
-  default binding. See `docs/debt/clock-transport-has-no-transport-ui.md`.
+- **Driving time from a panel.** DONE 2026-08-07 — with `default_bind`
+  wiring no longer publicity (Q13 refinement), `bus:time` still has no
+  panel presence, and the sanctioned answer landed as proposed: the
+  clock's own transport, not a knob materialized from a default binding.
+  It publishes as ONE grouped Transport control (`panel = "show"` on the
+  `transport` record, three `clock.*` leaf wires) — plan
+  `2026-08-04-2355-clock-tape-hero` P6/P8,
+  `docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md`. Closes
+  `docs/debt/clock-transport-has-no-transport-ui.md`.
 - **Playlist edit-vs-play, and entry progress.** A playlist card is both
   an authoring surface and a live transport; the two readings collide,
   and an entry's progress has no presentation. Spun off at GV2.

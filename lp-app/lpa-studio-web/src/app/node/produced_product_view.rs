@@ -83,10 +83,6 @@ pub(crate) fn ProductPreview(
     /// paints the neutral lamp colour — the layout without the output.
     #[props(default = true)]
     live: bool,
-    /// The clock's live effective seconds ("42.35"), when the caller has a
-    /// reading — turns a time product's band into a counter.
-    #[props(default = None)]
-    time_seconds: Option<String>,
 ) -> Element {
     // A time product is metadata-only BY DESIGN (nothing to draw behind the
     // handle — the phasor cards below are its real face), so it never gets
