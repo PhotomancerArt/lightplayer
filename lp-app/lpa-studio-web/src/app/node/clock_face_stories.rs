@@ -26,7 +26,7 @@
 //! frame zero — see `phasor_trace`).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiTimebaseState, Waveform};
+use lpa_studio_core::{PlayState, UiTimebaseState, Waveform};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
@@ -113,7 +113,7 @@ fn paused() -> Element {
                         Waveform::Ramp,
                         0.0,
                     )],
-                    clock_transport(447.0, false, 1.0, 0.0),
+                    clock_transport(447.0, PlayState::Paused, 1.0, 0.0),
                 )),
                 on_action: move |_| {},
             }
@@ -140,7 +140,7 @@ fn scrubbed() -> Element {
                         Waveform::Ramp,
                         0.0,
                     )],
-                    clock_transport(434.6, true, 1.0, -12.4),
+                    clock_transport(434.6, PlayState::Playing, 1.0, -12.4),
                 )),
                 on_action: move |_| {},
             }
@@ -167,7 +167,7 @@ fn fast() -> Element {
                         Waveform::Ramp,
                         0.0,
                     )],
-                    clock_transport(447.0, true, 8.0, 0.0),
+                    clock_transport(447.0, PlayState::Playing, 8.0, 0.0),
                 )),
                 on_action: move |_| {},
             }
@@ -194,7 +194,7 @@ fn overridden() -> Element {
                         Waveform::Ramp,
                         0.0,
                     )],
-                    clock_transport_overridden(434.6, false, 2.0, -12.4),
+                    clock_transport_overridden(434.6, PlayState::Paused, 2.0, -12.4),
                 )),
                 on_action: move |_| {},
             }
@@ -221,7 +221,7 @@ fn long_runtime() -> Element {
                         Waveform::Ramp,
                         0.0,
                     )],
-                    clock_transport(3.0 * 3600.0 + 47.0 * 60.0, true, 1.0, 0.0),
+                    clock_transport(3.0 * 3600.0 + 47.0 * 60.0, PlayState::Playing, 1.0, 0.0),
                 )),
                 on_action: move |_| {},
             }

@@ -85,6 +85,18 @@ node:<path>#<slot.path>    path = filesystem-style; / = tree, .. = parent
   channels are created lazily by reference; the UX teaches the norm
   rather than a validator gatekeeping it.
 
+**Amendment (2026-08-07, D21 — `2026-08-07-clock-transport-is-a-panel
+-instrument.md`).** `owner.purpose` namespacing is declared legal
+alongside the bare scope-level names above: `clock.rate`,
+`clock.play_state`, `clock.scrub` name the clock transport's three leaf
+channels. A bare name suits a project-wide concept with one obvious
+referent (`time`, `brightness`); an owner-prefixed name suits a control
+that reads as "this node's own dimension" on sight, the same way
+`transport.pause` above already reads as a transport command rather than
+a generic pause. Nothing about the bare-name convention changes — this
+is additive, and the well-known channel registry documents both forms
+side by side.
+
 ## Migration
 
 One atomic commit, hard cutover (standing policy: no wire/disk compat

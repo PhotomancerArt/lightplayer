@@ -39,9 +39,16 @@ pub type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 /// model: home ops map onto these, and the ADR documents them.
 #[derive(Clone, Debug)]
 pub enum CatalogOp {
-    /// Create an empty project with a minimal manifest.
+    /// Create a project and install it.
+    ///
+    /// `files` absent is the historical blank create: the store writes the
+    /// minimal manifest and root module itself. `files` present installs a
+    /// generated template verbatim — `install_package` writes a manifest
+    /// only when the incoming files lack one, so a template's authored
+    /// `project.json` (with its `kind`/`exports`) survives untouched.
     Create {
         name: String,
+        files: Option<Vec<(String, Vec<u8>)>>,
     },
     /// Rename = slug edit = directory move (catalog structure). The final
     /// slug (slugified, collision-suffixed) rides the outcome summary.
@@ -320,7 +327,10 @@ pub fn apply_catalog_op(
     // forward before they could be installed.
     let mut upgraded_from = None;
     let summary = match op {
-        CatalogOp::Create { name } => Some(store.create(&name, now)?),
+        CatalogOp::Create { name, files } => Some(match files {
+            None => store.create(&name, now)?,
+            Some(files) => store.install_package(&name, &files, PackageProvenance::Created, now)?,
+        }),
         CatalogOp::Rename { uid, new_slug } => {
             let uid = parse_uid(&uid)?;
             store.rename(uid, &new_slug)?;

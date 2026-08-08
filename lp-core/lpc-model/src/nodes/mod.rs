@@ -5,6 +5,7 @@ pub mod fluid;
 pub mod module;
 pub mod node_def;
 pub mod output;
+pub mod pattern_project;
 pub mod playlist;
 pub mod provenance_def;
 pub mod radio;
@@ -14,7 +15,11 @@ pub mod starter_project;
 pub mod texture;
 
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
-pub use clock::{CLOCK_TRANSPORT_SHAPE_NAME, ClockDef, ClockDefView, ClockState, ClockTransport};
+pub use clock::{
+    CLOCK_PLAY_STATE_DEFAULT_BIND, CLOCK_PLAY_STATE_SHAPE_NAME, CLOCK_RATE_DEFAULT_BIND,
+    CLOCK_SCRUB_DEFAULT_BIND, CLOCK_TRANSPORT_SHAPE_NAME, ClockDef, ClockDefView, ClockState,
+    ClockTransport, PlayState,
+};
 pub use fixture::{
     Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixturePower,
     FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig, PathSpec,
@@ -28,6 +33,9 @@ pub use node_def::{
 pub use output::{
     OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView,
+};
+pub use pattern_project::{
+    PATTERN_EXPORT_FOLDER, pattern_project_files_1d, pattern_project_files_2d,
 };
 pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,

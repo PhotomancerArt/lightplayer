@@ -94,6 +94,11 @@ pub fn NodeCardSection(
 /// Divider logic: every section but the first carries the 1px top hairline
 /// (`border-strong` — `border-muted` was invisible against the card in the
 /// wired app).
+///
+/// One opt-in wash: the module PANEL's teaching treatment, a left-to-right
+/// fade marking the performable surface. (P3's sage EXPORTS wash was the
+/// second; G1's R-A took the section off the card entirely — the sage now
+/// heads a group in the workspace column instead.)
 fn section_container_class(first: bool, panel_tint: bool) -> String {
     let mut class = String::from(if first {
         "tw:grid tw:min-w-0"
@@ -157,9 +162,7 @@ fn SectionRail(
         }
     } else {
         rsx! {
-            div { class: "tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-1.5 tw:py-2 tw:text-dim-foreground",
-                {text}
-            }
+            div { class: RAIL_LABEL_CLASS, {text} }
         }
     }
 }
@@ -206,9 +209,12 @@ fn CollapsedSectionRow(
     }
 }
 
+/// The non-toggleable rail's own class: a pure, dim label.
+const RAIL_LABEL_CLASS: &str = "tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-1.5 tw:py-2 tw:text-dim-foreground";
+
 #[cfg(test)]
 mod tests {
-    use super::{SECTION_LABEL_TEXT_CLASS, section_container_class};
+    use super::{RAIL_LABEL_CLASS, SECTION_LABEL_TEXT_CLASS, section_container_class};
 
     #[test]
     fn only_non_first_sections_carry_the_divider() {
@@ -224,6 +230,20 @@ mod tests {
         // onto ordinary sections.
         assert!(section_container_class(false, true).contains("linear-gradient"));
         assert!(!section_container_class(false, false).contains("linear-gradient"));
+    }
+
+    /// No card section is sage any more (G1 R-A): the export family moved
+    /// off the card and onto the workspace column's group headers.
+    #[test]
+    fn no_card_section_wears_the_export_wash() {
+        for class in [
+            section_container_class(false, false),
+            section_container_class(false, true),
+            section_container_class(true, false),
+        ] {
+            assert!(!class.contains("--studio-status-export-bg"));
+        }
+        assert!(RAIL_LABEL_CLASS.contains("text-dim-foreground"));
     }
 
     #[test]

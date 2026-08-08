@@ -1705,25 +1705,45 @@ fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath,
 
 /// Slot-declared default bindings for a node kind: (slot name, declared
 /// direction, `bus:` endpoint) triples from the def and state shapes.
+///
+/// Nested records are walked too, emitting the DOTTED slot name
+/// (`transport.rate`) that `register_default_bind` then normalizes into an
+/// accessor path. A leaf's declaration is what wires it: a promoted record
+/// (`ClockDef::transport`, `panel = "show"`) carries no endpoint of its own
+/// — its three leaves each name their own `clock.*` channel.
 fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)> {
     let mut out = Vec::new();
-    let mut collect = |shape: Option<SlotShape>| {
-        if let Some(SlotShape::Record { fields, .. }) = shape {
-            for field in fields {
-                if let Some(endpoint) = &field.default_bind {
-                    out.push((
-                        field.name.as_str().to_string(),
-                        field.semantics.direction,
-                        endpoint.clone(),
-                    ));
-                }
-            }
-        }
-    };
     let (def_shape, state_shape) = kind_shapes(kind);
-    collect(def_shape);
-    collect(state_shape);
+    for shape in [def_shape, state_shape].into_iter().flatten() {
+        collect_default_binds("", &shape, &mut out);
+    }
     out
+}
+
+/// Depth-first walk of a record shape's declared `default_bind`s, keyed by
+/// dotted slot path. Descends into inline record fields only — a `Ref` field
+/// names a catalog shape that declares its own bindings against its own
+/// root, so following one here would attribute another shape's wiring to
+/// this node.
+fn collect_default_binds(
+    prefix: &str,
+    shape: &SlotShape,
+    out: &mut Vec<(String, SlotDirection, String)>,
+) {
+    let SlotShape::Record { fields, .. } = shape else {
+        return;
+    };
+    for field in fields {
+        let name = if prefix.is_empty() {
+            field.name.as_str().to_string()
+        } else {
+            format!("{prefix}.{}", field.name)
+        };
+        if let Some(endpoint) = &field.default_bind {
+            out.push((name.clone(), field.semantics.direction, endpoint.clone()));
+        }
+        collect_default_binds(&name, &field.shape, out);
+    }
 }
 
 /// Materialize slot-declared default bindings (ADR 2026-07-09): one generic
@@ -2265,7 +2285,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2409,7 +2429,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2507,7 +2527,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3003,7 +3023,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_product_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3165,7 +3185,7 @@ mod tests {
     #[test]
     fn a_phasor_uniform_rides_the_clocks_default_time_product_with_no_authoring() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3251,7 +3271,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3281,7 +3301,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3657,7 +3677,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3702,7 +3722,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3722,7 +3742,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3893,7 +3913,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4542,7 +4562,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4613,7 +4633,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4907,7 +4927,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5101,7 +5121,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -5156,6 +5176,207 @@ mod tests {
                     && slot == &SlotPath::parse("transport.rate").expect("path")
         )));
     }
+
+    /// P6(a): a default clock materializes THREE fallback bindings, one per
+    /// transport leaf, each sourcing from its own `clock.*` channel. The
+    /// declarations live on the leaves (nested inside the `transport`
+    /// record), so this is what the loader's record recursion buys.
+    #[test]
+    fn a_default_clock_materializes_three_transport_channels() {
+        let fs = char_project(&[("clock", r#"{ "kind": "Clock" }"#)]);
+        let rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+
+        for (slot, channel) in TRANSPORT_LEAVES {
+            assert!(
+                default_sources(&rt, clock, slot, channel),
+                "{slot} must source from {channel} at fallback priority"
+            );
+        }
+        // Exactly three — the promoted RECORD itself declares no endpoint,
+        // so nothing wires `transport` as a whole.
+        let transport_bindings = rt
+            .tree()
+            .bindings()
+            .filter(|binding| {
+                matches!(&binding.target, BindingTarget::ConsumedSlot { node, slot }
+                    if *node == clock && slot.to_string().starts_with("transport"))
+            })
+            .count();
+        assert_eq!(transport_bindings, 3, "one wire per leaf, no record wire");
+    }
+
+    /// P6(b): an authored binding on ONE leaf suppresses only that leaf's
+    /// declared default — its siblings keep their fallback wiring, and the
+    /// authored source wins on the leaf it names.
+    #[test]
+    fn an_authored_transport_leaf_suppresses_only_its_own_default() {
+        let fs = char_project(&[(
+            "clock",
+            r#"{ "kind": "Clock",
+                 "bindings": { "transport.rate": { "source": "bus:speed" } } }"#,
+        )]);
+        let rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+
+        assert!(
+            !default_sources(&rt, clock, "transport.rate", "clock.rate"),
+            "the authored binding suppresses the declared default on `rate`"
+        );
+        assert!(rt.tree().bindings().any(|binding| matches!(
+            (&binding.source, &binding.target),
+            (BindingSource::BusChannel(channel), BindingTarget::ConsumedSlot { node, slot })
+                if channel.0 == "speed"
+                    && *node == clock
+                    && slot == &SlotPath::parse("transport.rate").expect("path")
+        )));
+        assert!(default_sources(
+            &rt,
+            clock,
+            "transport.play_state",
+            "clock.play_state"
+        ));
+        assert!(default_sources(
+            &rt,
+            clock,
+            "transport.scrub_offset_seconds",
+            "clock.scrub"
+        ));
+    }
+
+    /// P6(c): the three channels the transport names are the ones the
+    /// well-known registry teaches, with the kinds it declares — nearest-fit
+    /// legacy kinds whose true ranges live in the registry's doc strings.
+    #[test]
+    fn the_transport_channels_land_with_their_registry_kinds() {
+        use lpc_model::Kind;
+        use lpc_model::bus::well_known::well_known_channel;
+
+        for (channel, kind) in [
+            ("clock.play_state", Kind::Choice),
+            ("clock.rate", Kind::Ratio),
+            ("clock.scrub", Kind::Duration),
+        ] {
+            let entry = well_known_channel(channel)
+                .unwrap_or_else(|| panic!("{channel} must be a well-known channel"));
+            assert_eq!(entry.kind, kind, "{channel}");
+            assert!(!entry.carries_product, "{channel} is a plain scalar");
+            assert!(!entry.doc.is_empty(), "{channel} needs a picker doc");
+        }
+    }
+
+    /// P6 probe: the RECORD-level `panel = "show"` on `ClockDef::transport`
+    /// reaches every leaf's binding endpoint. Nothing in the engine changed
+    /// for this — `authored_def_slot_panel_hint` already reads the hint off
+    /// the TOP-LEVEL field of a binding's path, which is the whole point of
+    /// declaring grouping on the record.
+    #[test]
+    fn the_record_panel_hint_reaches_each_transport_leaf_endpoint() {
+        let fs = char_project(&[("clock", r#"{ "kind": "Clock" }"#)]);
+        let mut rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+
+        let (engine, project_registry) = rt.read_parts();
+        let result = engine.read_project_binding_graph_probe(
+            project_registry,
+            lpc_wire::BindingGraphProbeRequest {
+                include_values: false,
+            },
+        );
+        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+            panic!("expected binding graph");
+        };
+
+        for (slot, channel) in TRANSPORT_LEAVES {
+            let binding = graph
+                .bindings
+                .iter()
+                .find(|binding| {
+                    binding.node == clock
+                        && binding
+                            .slot
+                            .as_ref()
+                            .is_some_and(|path| path == &SlotPath::parse(slot).expect("slot path"))
+                })
+                .unwrap_or_else(|| panic!("no graph binding at {slot}"));
+            assert!(
+                binding.panel_show,
+                "{slot} must inherit the record-level panel hint"
+            );
+            assert!(matches!(
+                &binding.endpoint,
+                lpc_wire::WireBindingEndpoint::Bus { channel: name, .. } if name == channel
+            ));
+        }
+    }
+
+    /// The whole P6 chain, end to end: a panel write on each `clock.*`
+    /// channel reaches the clock's own per-field read. This is what three
+    /// leaf channels buy over one record channel — each dimension is
+    /// patched on its own, with no read-modify-write anywhere.
+    #[test]
+    fn writing_the_clock_channels_drives_the_clock() {
+        use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+
+        let fs = char_project(&[("clock", r#"{ "kind": "Clock" }"#)]);
+        let mut rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+        let scope = rt.tree().node_scope(clock).expect("clock scope");
+        let read = |rt: &mut LoadedProjectRuntime, slot: &str| {
+            let key = QueryKey::ConsumedSlot {
+                node: clock,
+                slot: SlotPath::parse(slot).expect("path"),
+            };
+            rt.resolve_with_engine_host(key, ResolveLogLevel::Off)
+                .expect("resolve")
+                .0
+                .value_leaf()
+                .map(|leaf| leaf.value().clone())
+        };
+
+        // No writer: the shape defaults read through the fallback binding's
+        // writerless dead-end, exactly as fixture brightness does.
+        assert_eq!(
+            read(&mut rt, "transport.play_state"),
+            Some(LpValue::String(String::from("playing")))
+        );
+        assert_eq!(read(&mut rt, "transport.rate"), Some(LpValue::F32(1.0)));
+
+        for (channel, value) in [
+            (
+                "clock.play_state",
+                LpValue::String(String::from(lpc_model::PlayState::Paused.as_str())),
+            ),
+            ("clock.rate", LpValue::F32(2.0)),
+            ("clock.scrub", LpValue::F32(-3.5)),
+        ] {
+            rt.engine_mut()
+                .panel_write(scope, ChannelName(String::from(channel)), value, None);
+        }
+
+        assert_eq!(
+            read(&mut rt, "transport.play_state"),
+            Some(LpValue::String(String::from("paused"))),
+            "a write on clock.play_state pauses the transport"
+        );
+        assert_eq!(
+            read(&mut rt, "transport.rate"),
+            Some(LpValue::F32(2.0)),
+            "…and the rate leaf took its own channel's value, untouched by it"
+        );
+        assert_eq!(
+            read(&mut rt, "transport.scrub_offset_seconds"),
+            Some(LpValue::F32(-3.5)),
+            "…and so did scrub — three independent wires, no record RMW"
+        );
+    }
+
+    /// The clock transport's declared leaf wiring, in declaration order.
+    const TRANSPORT_LEAVES: [(&str, &str); 3] = [
+        ("transport.play_state", "clock.play_state"),
+        ("transport.rate", "clock.rate"),
+        ("transport.scrub_offset_seconds", "clock.scrub"),
+    ];
 
     /// A binding key nobody declares fails the load with a reason naming
     /// the slot — the loud replacement for the silent drop.
@@ -5572,7 +5793,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

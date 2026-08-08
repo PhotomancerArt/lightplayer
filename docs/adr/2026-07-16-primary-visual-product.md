@@ -76,3 +76,25 @@ highest-priority provider.**
 - The helper is only as fresh as the cached binding graph; consumers
   needing synchronous freshness after an edit should treat `None` /
   stale as "keep the previous frame", never as an error.
+
+## Amendment (2026-08-07): preview surfaces lead with the control product
+
+The channel convention above is unchanged — `bus:visual.out` is still
+the one definition of the project's *visual* face, and the symmetric
+`bus:control.out` its rendered lamps. What changed is which one leads
+(Yona's ruling 2026-08-07, PR #387): **a preview surface whose scope
+resolves `control.out` shows the lamps first** — a fixture project's
+output IS its lamps; the raster behind them is the intermediate.
+
+- The module-face hero defaults to the control product, with an
+  icon-only toggle back to the visual (per-card `NodeCardUiState`
+  preference; toggle only when both primaries resolve).
+- Project/Explore card thumbnails follow the same default with no
+  toggle, fed by preview-worker output-frame delivery + host-side
+  LampView (the "control.out preview story" the consequence below
+  anticipated — that empty-state consequence is now obsolete).
+- `always_live_products()` already streamed both primaries; no
+  subscription changes.
+
+See `docs/design/modules.md` R7's presentation amendment for the
+face-level rule.

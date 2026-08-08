@@ -444,6 +444,9 @@ fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
         BrowserOutputEnvelope::PreviewPresented { runtime_id, .. } => {
             format!("; last worker output presented a frame for runtime {runtime_id}")
         }
+        BrowserOutputEnvelope::PreviewOutputFrame { runtime_id, .. } => {
+            format!("; last worker output was an output frame for runtime {runtime_id}")
+        }
         BrowserOutputEnvelope::PreviewError { message, .. } => {
             format!("; last worker output was a preview error: {message}")
         }

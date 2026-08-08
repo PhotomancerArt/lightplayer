@@ -22,10 +22,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiClockTransport, UiSlotFieldState};
+use lpa_studio_core::{
+    LpValue, ProjectSlotAddress, UiAction, UiClockTransport, UiPanelTarget, UiPanelWire,
+    UiPanelWireRole, UiSlotFieldState,
+};
 
 use crate::app::node::panel::HFaderField;
-use crate::app::node::slot_edit_actions::{panel_or_slot_action, slot_clear_action};
+use crate::app::node::slot_edit_actions::{panel_write_or_slot_action, slot_clear_action};
 use crate::app::node::slot_fields::capture_field_pointer;
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -208,28 +211,81 @@ fn override_clear_slot(
     }
 }
 
-/// The `(address, handler)` pair a transport gesture needs to dispatch,
-/// present only when the row was editable (the face builder withholds the
-/// address of a read-only row — `editable_row_address`) and the conduit is
-/// wired. `field_wiring`'s contract with the DTO's own editability
-/// encoding.
-fn transport_wiring(
-    address: &Option<ProjectSlotAddress>,
-    on_action: Option<EventHandler<UiAction>>,
-) -> Option<(ProjectSlotAddress, EventHandler<UiAction>)> {
-    Some((address.clone()?, on_action?))
+/// One transport dimension's dispatch, resolved.
+///
+/// Every gesture on the tape resolves ITS OWN dimension (P8): a
+/// panel-public leaf writes its `clock.*` channel through `PanelWriteOp`,
+/// an unwired one edits its slot at its own address, and a dimension with
+/// neither renders inert. The two are not exclusive in the DTO — a wired
+/// leaf keeps its slot address as the fallback — so both ride along and
+/// [`panel_write_or_slot_action`] picks.
+#[derive(Clone)]
+struct TransportGesture {
+    panel_target: Option<UiPanelTarget>,
+    address: Option<ProjectSlotAddress>,
+    handler: EventHandler<UiAction>,
 }
 
-/// The tape transport instrument, one per clock face. Every gesture —
-/// drag-scrub, fader, run/pause, tap-to-return — dispatches through the
-/// standard slot-edit path (`panel_or_slot_action` with no panel target
-/// yet, so P6's panel exposure is a data change): the actor coalesces the
-/// flood per address, and the edit buffer's staged echo keeps the DTO
-/// stable under the finger (P2's e2e contract).
+impl TransportGesture {
+    /// Dispatch this dimension's value. Silently does nothing when the
+    /// dimension has no target and no address — the surfaces that can be
+    /// gestured are disabled in that state anyway.
+    fn send(&self, value: LpValue) {
+        if let Some(action) =
+            panel_write_or_slot_action(self.panel_target.as_ref(), self.address.as_ref(), value)
+        {
+            self.handler.call(action);
+        }
+    }
+}
+
+/// The dispatch for one transport dimension, present only when there is
+/// somewhere for its gesture to land AND a conduit to land it through.
+///
+/// `address` is the DTO's own editability encoding — the face builder
+/// withholds the address of a read-only row (`editable_row_address`) — and
+/// `wires` is the per-dimension wiring the grouping derivation attached
+/// (empty for a transport that reaches no panel, which is exactly the
+/// pre-P8 slot-edit behavior).
+fn transport_gesture(
+    role: UiPanelWireRole,
+    address: &Option<ProjectSlotAddress>,
+    wires: &[UiPanelWire],
+    on_action: Option<EventHandler<UiAction>>,
+) -> Option<TransportGesture> {
+    let panel_target = wires
+        .iter()
+        .find(|wire| wire.role == role)
+        .and_then(|wire| wire.panel_target.clone());
+    if panel_target.is_none() && address.is_none() {
+        return None;
+    }
+    Some(TransportGesture {
+        panel_target,
+        address: address.clone(),
+        handler: on_action?,
+    })
+}
+
+/// The tape transport instrument — the clock card's hero, and (since P8)
+/// the faceplate of the module panel's grouped Transport control.
+///
+/// Every gesture — drag-scrub, fader, run/pause, tap-to-return — resolves
+/// ITS OWN dimension's target-or-address: a panel-public leaf writes its
+/// `clock.*` channel (the actor coalesces per target, and the local echo
+/// reads back through the DTO's own values), an unwired one edits its slot
+/// (the actor coalesces per address, and the edit buffer's staged echo
+/// keeps the DTO stable under the finger — P2's e2e contract). The
+/// faceplate renders WHOLE either way: wiring never subtracts a dimension.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn TapeTransport(
     transport: UiClockTransport,
+    /// Per-dimension wiring from the grouped control's derivation
+    /// ([`lpa_studio_core::UiClockFace::transport_wires`]). Empty = nothing
+    /// is panel-public and every gesture is a slot edit.
+    #[props(default)]
+    wires: Vec<UiPanelWire>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let driver = use_hook(|| {
@@ -242,12 +298,29 @@ pub fn TapeTransport(
     });
     driver.sync(&transport);
 
-    let scrub_wired = transport_wiring(&transport.scrub_address, on_action);
-    let running_wired = transport_wiring(&transport.running_address, on_action);
+    let scrub_wired = transport_gesture(
+        UiPanelWireRole::Scrub,
+        &transport.scrub_address,
+        &wires,
+        on_action,
+    );
+    let play_state_wired = transport_gesture(
+        UiPanelWireRole::PlayState,
+        &transport.play_state_address,
+        &wires,
+        on_action,
+    );
+    let rate_target = wires
+        .iter()
+        .find(|wire| wire.role == UiPanelWireRole::Rate)
+        .and_then(|wire| wire.panel_target.clone());
 
     let offlive = transport.scrub_offset_seconds != 0.0;
     let return_live = transport.scrub_offset_seconds.abs() > OFFLIVE_CHIP_EPSILON_S;
-    let running = transport.running;
+    let playing = transport.play_state.is_playing();
+    // The run/pause button writes the OTHER state — a setpoint, never a
+    // verb: whoever applies it late still lands where the user asked.
+    let toggled_play_state = transport.play_state.toggled();
     let staged_scrub = transport.scrub_offset_seconds;
 
     // Scrub drag anchor: pointer x and staged scrub at pointerdown; None
@@ -276,15 +349,15 @@ pub fn TapeTransport(
     // The transport is Debug territory: a control with an ACTIVE session
     // override wears the debug family's orange tint (no hazard stripes —
     // "a bit strong" per gate feedback; the tint + Clear carry it).
-    let running_changed = transport.running_override.is_some();
+    let play_state_changed = transport.play_state_override.is_some();
     let rate_changed = transport.rate_override.is_some();
     // `button { font: inherit }` in the base sheet beats layered tw
     // utilities — the font is set explicitly here (wiring-UI lesson).
     // Changed-tint outranks the run-state accent: an overridden control
     // announces the override first (the glyph still says which state).
-    let run_class = if running_changed {
+    let run_class = if play_state_changed {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-status-attention-border tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-status-attention-foreground tw:disabled:cursor-default"
-    } else if running {
+    } else if playing {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-accent tw:disabled:cursor-default"
     } else {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default"
@@ -326,7 +399,7 @@ pub fn TapeTransport(
     let scrub_move_driver = driver.clone();
     let scrub_up_driver = driver.clone();
     let scrub_cancel_driver = driver.clone();
-    let run_wired = running_wired.clone();
+    let run_wired = play_state_wired.clone();
     let live_wired = scrub_wired.clone();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2",
@@ -358,7 +431,7 @@ pub fn TapeTransport(
                             scrub_move_driver.set_scrub_drag(None);
                             return;
                         }
-                        let Some((address, handler)) = scrub_move_wired.clone() else {
+                        let Some(gesture) = scrub_move_wired.clone() else {
                             return;
                         };
                         let dx = event.data().client_coordinates().x - anchor_x;
@@ -369,22 +442,18 @@ pub fn TapeTransport(
                             return;
                         }
                         last_sent.set(now);
-                        handler
-                            .call(panel_or_slot_action(&None, address, LpValue::F32(next)));
+                        gesture.send(LpValue::F32(next));
                     },
                     onpointerup: move |_| {
                         scrub_drag.set(None);
                         // Flush the final position: the throttle may have
                         // swallowed the last few moves, and the release
                         // must land exactly.
-                        if let (Some(next), Some((address, handler))) = (
+                        if let (Some(next), Some(gesture)) = (
                             scrub_up_driver.scrub_preview(),
                             scrub_up_wired.clone(),
                         ) {
-                            handler
-                                .call(
-                                    panel_or_slot_action(&None, address, LpValue::F32(next)),
-                                );
+                            gesture.send(LpValue::F32(next));
                         }
                         scrub_up_driver.set_scrub_drag(None);
                     },
@@ -398,26 +467,26 @@ pub fn TapeTransport(
                 button {
                     r#type: "button",
                     class: run_class,
-                    disabled: running_wired.is_none(),
-                    title: if running { "Pause the clock" } else { "Run the clock" },
+                    disabled: play_state_wired.is_none(),
+                    title: if playing { "Pause the clock" } else { "Run the clock" },
                     onclick: move |_| {
-                        if let Some((address, handler)) = run_wired.clone() {
-                            handler
-                                .call(
-                                    panel_or_slot_action(
-                                        &None,
-                                        address,
-                                        LpValue::Bool(!running),
-                                    ),
+                        if let Some(gesture) = run_wired.clone() {
+                            // A state NOUN on the wire, whichever path it
+                            // takes: the enum rides `LpValue::String` the
+                            // way `Waveform` does, so a Choice channel
+                            // needs no new emit family (P8 item 5).
+                            gesture
+                                .send(
+                                    LpValue::String(toggled_play_state.as_str().to_string()),
                                 );
                         }
                     },
                     span { class: "tw:text-xs tw:leading-none",
-                        if running { "\u{275a}\u{275a}" } else { "\u{25b6}" }
+                        if playing { "\u{275a}\u{275a}" } else { "\u{25b6}" }
                     }
                 }
                 {override_clear_slot(
-                    transport.running_override.clone(),
+                    transport.play_state_override.clone(),
                     "Clear the run/pause debug override \u{2014} session only",
                     on_action,
                 )}
@@ -434,11 +503,8 @@ pub fn TapeTransport(
                     disabled: !(return_live && live_wired.is_some()),
                     title: if return_live { "scrubbed off-live \u{2014} tap to return" } else { "" },
                     onclick: move |_| {
-                        if let Some((address, handler)) = live_wired.clone() {
-                            handler
-                                .call(
-                                    panel_or_slot_action(&None, address, LpValue::F32(0.0)),
-                                );
+                        if let Some(gesture) = live_wired.clone() {
+                            gesture.send(LpValue::F32(0.0));
                         }
                     },
                     // The driver rewrites this span's text every displayed
@@ -482,6 +548,7 @@ pub fn TapeTransport(
                             state: rate_state,
                             engaged: rate_changed,
                             address: transport.rate_address.clone(),
+                            panel_target: rate_target,
                             rate_log_detents: true,
                             on_action,
                         }

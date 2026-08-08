@@ -69,7 +69,11 @@ browser-serial-esp32 = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
+# The worker envelope speaks the wire's published-frame vocabulary
+# (`OutputFrameEntry`, `ControlDisplayLayoutRead`) so the preview host and the
+# device card feed read output frames through one set of types.
 browser-worker = [
+    "dep:lpc-wire",
     "dep:js-sys",
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",

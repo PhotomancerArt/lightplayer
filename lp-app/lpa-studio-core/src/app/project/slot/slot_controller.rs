@@ -263,27 +263,23 @@ impl SlotController {
         facts
     }
 
-    /// Apply authored binding facts to this root's top-level field slots.
+    /// Apply authored binding facts to the field slots they name.
     ///
     /// Resets binding state on every field first so removed bindings clear.
     /// `source`/`value` facts mark the named slot's value as bound; `target`
     /// facts mark it as publishing to the endpoint.
     pub(in crate::app::project) fn apply_binding_facts(&mut self, facts: &[SlotBindingFact]) {
-        for child in &mut self.children {
-            let Some(name) = child.root_field_name().map(str::to_string) else {
+        self.reset_binding_state();
+        for fact in facts {
+            let Some(child) = self.field_slot_mut(&fact.slot) else {
                 continue;
             };
-            child.source = UiSlotSourceState::Direct;
-            child.publish = None;
-            for fact in facts.iter().filter(|fact| fact.slot == name) {
-                match &fact.kind {
-                    SlotBindingFactKind::Source(endpoint)
-                    | SlotBindingFactKind::Literal(endpoint) => {
-                        child.source = UiSlotSourceState::Bound(endpoint.clone());
-                    }
-                    SlotBindingFactKind::Target(endpoint) => {
-                        child.publish = Some(endpoint.clone());
-                    }
+            match &fact.kind {
+                SlotBindingFactKind::Source(endpoint) | SlotBindingFactKind::Literal(endpoint) => {
+                    child.source = UiSlotSourceState::Bound(endpoint.clone());
+                }
+                SlotBindingFactKind::Target(endpoint) => {
+                    child.publish = Some(endpoint.clone());
                 }
             }
         }
@@ -293,41 +289,77 @@ impl SlotController {
     /// authored pass left direct/unpublished — authored bindings always win
     /// (M5 honest indicator, ADR 2026-07-09).
     pub(in crate::app::project) fn apply_default_binding_fact(&mut self, fact: &SlotBindingFact) {
-        for child in &mut self.children {
-            if child.root_field_name() != Some(fact.slot.as_str()) {
-                continue;
-            }
-            match &fact.kind {
-                SlotBindingFactKind::Source(endpoint) | SlotBindingFactKind::Literal(endpoint) => {
-                    if matches!(child.source, UiSlotSourceState::Direct) {
-                        child.source = UiSlotSourceState::Bound(endpoint.clone());
-                    }
+        let Some(child) = self.field_slot_mut(&fact.slot) else {
+            return;
+        };
+        match &fact.kind {
+            SlotBindingFactKind::Source(endpoint) | SlotBindingFactKind::Literal(endpoint) => {
+                if matches!(child.source, UiSlotSourceState::Direct) {
+                    child.source = UiSlotSourceState::Bound(endpoint.clone());
                 }
-                SlotBindingFactKind::Target(endpoint) => {
-                    if child.publish.is_none() {
-                        child.publish = Some(endpoint.clone());
-                    }
+            }
+            SlotBindingFactKind::Target(endpoint) => {
+                if child.publish.is_none() {
+                    child.publish = Some(endpoint.clone());
                 }
             }
         }
     }
 
-    /// Attach a consumed channel's live reading to the named top-level
-    /// field's bound endpoint (display-only; P6 item 1). No-op when the
-    /// field is not bound — live readings only decorate existing wiring.
+    /// Attach a consumed channel's live reading to the named field's bound
+    /// endpoint (display-only; P6 item 1). No-op when the field is not
+    /// bound — live readings only decorate existing wiring.
     pub(in crate::app::project) fn apply_bound_live_value(
         &mut self,
         slot_name: &str,
         live: Option<&str>,
         gradient: Option<&lpc_model::GradientConfig>,
     ) {
-        for child in &mut self.children {
-            if child.root_field_name() != Some(slot_name) {
-                continue;
+        let Some(child) = self.field_slot_mut(slot_name) else {
+            return;
+        };
+        if let UiSlotSourceState::Bound(endpoint) = &mut child.source {
+            endpoint.live_value = live.map(str::to_string);
+            endpoint.live_gradient = gradient.cloned();
+        }
+    }
+
+    /// The field slot a binding-fact key names, descending RECORD fields:
+    /// `brightness` is a top-level field, `transport.rate` a leaf inside
+    /// the `transport` record (the shape a `default_bind` declared on a
+    /// leaf of a promoted record produces — clock-tape-hero P6/P8).
+    ///
+    /// Only a record's fields are addressable this way. A dotted key whose
+    /// next step leaves a record — `brightness.some`, the interior of an
+    /// `OptionSlot`, which is how nearly every wired scalar's path reads —
+    /// stops at the row itself, which is where its fact has always landed
+    /// and where the row's own presentation reads it from.
+    fn field_slot_mut(&mut self, key: &str) -> Option<&mut SlotController> {
+        let (head, tail) = match key.split_once('.') {
+            Some((head, tail)) => (head, Some(tail)),
+            None => (key, None),
+        };
+        let child = self
+            .children
+            .iter_mut()
+            .find(|child| child.last_field_name() == Some(head))?;
+        match tail {
+            Some(tail) if matches!(child.body, SlotControllerBody::Record) => {
+                child.field_slot_mut(tail)
             }
-            if let UiSlotSourceState::Bound(endpoint) = &mut child.source {
-                endpoint.live_value = live.map(str::to_string);
-                endpoint.live_gradient = gradient.cloned();
+            _ => Some(child),
+        }
+    }
+
+    /// Clear every field slot's binding presentation, so wiring that is no
+    /// longer effective stops showing. Descends into RECORD children only,
+    /// matching how deep [`Self::field_slot_mut`] can reach.
+    fn reset_binding_state(&mut self) {
+        for child in &mut self.children {
+            child.source = UiSlotSourceState::Direct;
+            child.publish = None;
+            if matches!(child.body, SlotControllerBody::Record) {
+                child.reset_binding_state();
             }
         }
     }
