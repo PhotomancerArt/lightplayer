@@ -20,7 +20,7 @@ pub enum UiLensRuntime {
     /// address the same document; `None` while nothing library-backed is
     /// loaded (the storeless demo path). The slug that decorates the
     /// address is cosmetic and comes from
-    /// [`UiStudioView::open_project_slug`], which tracks renames live.
+    /// [`UiStudioView::open_project_name`], which tracks renames live.
     Sim { project_uid: Option<String> },
     /// The lens is on the hardware device session. `uid` is the stamped
     /// `dev…` identity (the D37 route key) once the hello or the
@@ -103,11 +103,13 @@ pub struct UiStudioView {
     /// The `prj…` uid of the open library package, when one backs the
     /// running project (identity for route↔view comparisons).
     pub open_project_uid: Option<String>,
-    /// The open package's slug — the user-facing identifier the web shell
-    /// mirrors into the cosmetic half of `/p/<slug>-<uid>` (URL follows
-    /// the view, covering example opens and clearing on disconnect without
-    /// action plumbing).
-    pub open_project_slug: Option<String>,
+    /// The open package's user-facing display name (manifest `name`,
+    /// falling back to the library slug) — the web shell slugifies it into
+    /// the cosmetic half of `/p/<slug>-<uid>`, so the address bar agrees
+    /// with the cloud sidecar's name and the service's canonical URL. URL
+    /// follows the view, covering example opens and clearing on disconnect
+    /// without action plumbing.
+    pub open_project_name: Option<String>,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
     /// D22): identity + content classification. Feeds the device pane,
     /// gallery cards, and the device-push verbs (M5/M8′).
@@ -140,7 +142,7 @@ impl UiStudioView {
             home: None,
             lens: None,
             open_project_uid: None,
-            open_project_slug: None,
+            open_project_name: None,
             device_sync: None,
             lens_card: None,
             sessions: Vec::new(),
@@ -161,7 +163,7 @@ impl UiStudioView {
 
     pub fn with_open_project(mut self, uid: Option<String>, slug: Option<String>) -> Self {
         self.open_project_uid = uid;
-        self.open_project_slug = slug;
+        self.open_project_name = slug;
         self
     }
 

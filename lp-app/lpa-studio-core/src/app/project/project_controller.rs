@@ -3696,10 +3696,24 @@ impl ProjectController {
         )
     }
 
-    /// The open library package's slug (the cosmetic half of the web
-    /// shell's `/p/<slug>-<uid>` URL).
+    /// The open library package's slug (the library's directory key —
+    /// dated, e.g. `2026-08-07-2302-project`).
     pub fn active_library_slug(&self) -> Option<String> {
         Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
+    }
+
+    /// The open package's user-facing display name — the manifest `name`
+    /// (the same fact the cloud sidecar publishes, so the address bar's
+    /// cosmetic slug and the service's canonical URL agree), falling back
+    /// to the library slug for a manifest that carries none.
+    pub fn active_library_display_name(&self) -> Option<String> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        let name = crate::app::library::package_manifest::read_manifest(&*view)
+            .ok()
+            .and_then(|fields| fields.name)
+            .filter(|name| !name.trim().is_empty());
+        Some(name.unwrap_or_else(|| active.handle.slug.clone()))
     }
 
     /// Install the runtime-node-id → def-artifact map.

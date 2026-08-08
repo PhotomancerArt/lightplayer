@@ -1324,7 +1324,7 @@ impl StudioController {
             .with_lens(self.lens_runtime())
             .with_open_project(
                 self.project.active_library_uid(),
-                self.project.active_library_slug(),
+                self.project.active_library_display_name(),
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
