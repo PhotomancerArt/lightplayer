@@ -234,7 +234,7 @@ mod tests {
                 &[
                     (
                         "project.json".to_string(),
-                        br#"{"format":5,"name":"demo"}"#.to_vec(),
+                        br#"{"format":6,"name":"demo"}"#.to_vec(),
                     ),
                     ("module.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
                     ("shader.glsl".to_string(), b"void main() {}".to_vec()),
@@ -439,10 +439,14 @@ mod tests {
         let after = files.iter().find(|(p, _)| p == "shader.json").unwrap();
         assert_ne!(before.1, after.1, "the shader slot was not migrated");
 
-        // ...and a file with nothing to migrate is byte-identical.
+        // ...and the v5→v6 step renames the GLSL entry, so the shader asset
+        // moves too — to the explicit entry name, with the bare one gone.
         let before = source.iter().find(|(p, _)| p == "shader.glsl").unwrap();
         let after = files.iter().find(|(p, _)| p == "shader.glsl").unwrap();
-        assert_eq!(before.1, after.1, "GLSL must pass through untouched");
+        assert_ne!(before.1, after.1, "the GLSL entry was not migrated");
+        let text = core::str::from_utf8(&after.1).expect("utf8 glsl");
+        assert!(text.contains("vec4 render_2d("), "explicit entry expected");
+        assert!(!text.contains("vec4 render("), "bare entry must be gone");
     }
 
     #[test]

@@ -113,7 +113,7 @@ impl ProjectBuilder {
         ShaderBuilder {
             _texture_path: texture_path.clone(),
             glsl_source: String::from(
-                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float phase; vec4 render(vec2 pos) { return vec4(phase, 0.0, 0.0, 1.0); }",
+                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float phase; vec4 render_2d(vec2 pos) { return vec4(phase, 0.0, 0.0, 1.0); }",
             ),
             render_order: 0,
             visual_bus: String::from("visual.out"),

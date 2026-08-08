@@ -45,7 +45,7 @@ vec2 movingNoise(vec2 coord, float t) {
     return vec2(hue, value);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 uv = pos / outputSize;
     vec2 virtCoord = pos * REF_SIZE / outputSize;

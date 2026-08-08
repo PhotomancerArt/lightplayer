@@ -529,7 +529,7 @@ fn server_with_palette_shader_project(name: &str) -> (LpServer, LpPathBuf) {
             project_path.join("tint.glsl").as_path(),
             b"layout(binding = 0) uniform vec2 outputSize;\n\
               layout(binding = 1) uniform sampler2D palette;\n\
-              vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }",
+              vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }",
         )
         .expect("write glsl");
     (server, project_path)

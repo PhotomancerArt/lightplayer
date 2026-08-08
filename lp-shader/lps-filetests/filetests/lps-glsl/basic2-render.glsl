@@ -3,7 +3,7 @@ layout(binding = 1) uniform float time;
 
 vec4 worley_demo(vec2 scaledCoord, float time);
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Pan through noise using time with oscillation to stay bounded
     // Oscillate between minZoom and maxZoom to avoid unbounded growth
     float panSpeed = .3;
@@ -37,7 +37,7 @@ vec4 worley_demo(vec2 scaledCoord, float time) {
 // set_uniform lines attach to the next run directive only, so each mode channel repeats them.
 // set_uniform: outputSize = vec2(32.0, 32.0)
 // set_uniform: time = 1.25
-// run[q32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14434814, 1.0, 1.0) (tolerance: 0.002)
+// run[q32]: render_2d(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14434814, 1.0, 1.0) (tolerance: 0.002)
 // set_uniform: outputSize = vec2(32.0, 32.0)
 // set_uniform: time = 1.25
-// run[f32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14105844, 1.0, 1.0) (tolerance: 0.002)
+// run[f32]: render_2d(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14105844, 1.0, 1.0) (tolerance: 0.002)
