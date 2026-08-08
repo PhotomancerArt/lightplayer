@@ -984,9 +984,9 @@ fn export_child(
 }
 
 /// The scaffolding that stays home: the clock every effect reads, the
-/// shared `common` module that is NOT exported, and the fixture the rig
-/// actually drives. This is the "rig" half of the column — D17's word for
-/// composition-as-context.
+/// shared `common` module that is NOT exported, and the fixture the
+/// project actually drives. This is the unlabeled half of the column —
+/// the nodes below the bare hairline.
 fn rig_children() -> Vec<UiNodeChild> {
     let mut common = plasma_face(plasma_read_panel(COMMON_SCOPE), 5.7);
     common.wiring = None;
