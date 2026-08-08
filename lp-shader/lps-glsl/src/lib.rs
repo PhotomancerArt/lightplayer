@@ -20,6 +20,7 @@ mod job;
 mod lexer;
 mod lower;
 mod lvalue;
+mod small;
 mod source;
 mod syntax;
 mod token;

@@ -6,7 +6,7 @@ use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureW
 use crate::hir::{ExprId, HirTextureOperand, ImportKey};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue, lower_expr};
+use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
 
 struct TextureDescriptorVRegs {
     ptr: VReg,
@@ -132,7 +132,7 @@ pub(in crate::lower) fn lower_texture_sample(
     }
 
     ctx.fb.push_call(callee, &args, &[]);
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for i in 0..4u32 {
         let raw = ctx.fb.alloc_vreg(IrType::I32);
         ctx.fb.push(LpirOp::Load {
@@ -289,26 +289,26 @@ fn emit_texel_fetch_vec4_unorm(
     ctx: &mut LowerCtx<'_>,
     texel_addr: VReg,
     format: TextureStorageFormat,
-) -> Vec<VReg> {
+) -> Lanes {
     match format {
-        TextureStorageFormat::R16Unorm => alloc::vec![
+        TextureStorageFormat::R16Unorm => Lanes::from_slice(&[
             emit_unorm16_channel_load(ctx, texel_addr, 0),
             f32_const(ctx, 0.0),
             f32_const(ctx, 0.0),
             f32_const(ctx, 1.0),
-        ],
-        TextureStorageFormat::Rgb16Unorm => alloc::vec![
+        ]),
+        TextureStorageFormat::Rgb16Unorm => Lanes::from_slice(&[
             emit_unorm16_channel_load(ctx, texel_addr, 0),
             emit_unorm16_channel_load(ctx, texel_addr, 1),
             emit_unorm16_channel_load(ctx, texel_addr, 2),
             f32_const(ctx, 1.0),
-        ],
-        TextureStorageFormat::Rgba16Unorm => alloc::vec![
+        ]),
+        TextureStorageFormat::Rgba16Unorm => Lanes::from_slice(&[
             emit_unorm16_channel_load(ctx, texel_addr, 0),
             emit_unorm16_channel_load(ctx, texel_addr, 1),
             emit_unorm16_channel_load(ctx, texel_addr, 2),
             emit_unorm16_channel_load(ctx, texel_addr, 3),
-        ],
+        ]),
     }
 }
 

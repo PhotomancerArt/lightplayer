@@ -12,7 +12,7 @@ use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::jit_symbol_sizes::{derive_sizes, sort_by_offset};
 #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
-use crate::link::link_jit;
+use crate::link::link_jit_taking;
 use crate::native_options::NativeCompileOptions;
 use lp_perf::{EVENT_SHADER_LINK, JitSymbolEntry, emit_jit_map_load};
 
@@ -74,9 +74,14 @@ pub(crate) fn link_compiled_module_jit(
 
     #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
     {
-        // 2. Link JIT image with builtin resolution
+        let mut compiled = compiled;
+        // 2. Link JIT image with builtin resolution. `_taking` empties each
+        //    function's code into the image as it goes: nothing here reads
+        //    `compiled` afterwards, and the alternative is holding the whole
+        //    module beside a full second copy of its code at the compile's
+        //    peak heap moment.
         lp_perf::emit_begin!(EVENT_SHADER_LINK);
-        let link_result = link_jit(&compiled, isa, |sym| {
+        let link_result = link_jit_taking(&mut compiled, isa, |sym| {
             // First check builtins
             if let Some(addr) = builtin_table.lookup(sym) {
                 return Some(addr as u32);
@@ -110,12 +115,14 @@ pub(crate) fn link_compiled_module_jit(
 /// as a compile error, never a wild write.
 #[cfg(all(feature = "xt-placed-code", target_arch = "xtensa"))]
 fn link_compiled_module_jit_placed_global(
-    compiled: CompiledModule,
+    mut compiled: CompiledModule,
     builtin_table: &BuiltinTable,
     isa: IsaTarget,
 ) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
     use crate::codemem_esp32::{self, DeviceCodeSink, global};
 
+    // Sized before linking: `link_jit_at_taking` empties the functions' code
+    // into the staging image, so this sum has to be taken while it is there.
     let total: usize = compiled.functions.iter().map(|f| f.code.len()).sum();
     let total_u32 = u32::try_from(total)
         .map_err(|_| NativeError::Internal("JIT image length does not fit u32".into()))?;
@@ -126,11 +133,12 @@ fn link_compiled_module_jit_placed_global(
                 .alloc(total_u32)
                 .map_err(|e| NativeError::Internal(format!("JIT code placement failed: {e}")))?;
 
-            let place = |arena: &mut codemem_esp32::CodeArena| {
+            let mut place = |arena: &mut codemem_esp32::CodeArena| {
                 lp_perf::emit_begin!(EVENT_SHADER_LINK);
-                let link_result = crate::link::link_jit_at(&compiled, isa, exec_base, |sym| {
-                    builtin_table.lookup(sym).map(|addr| addr as u32)
-                });
+                let link_result =
+                    crate::link::link_jit_at_taking(&mut compiled, isa, exec_base, |sym| {
+                        builtin_table.lookup(sym).map(|addr| addr as u32)
+                    });
                 lp_perf::emit_end!(EVENT_SHADER_LINK);
                 let linked = link_result
                     .map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
@@ -178,8 +186,10 @@ pub fn compile_module_jit_placed(
     arena: &mut crate::codemem_esp32::CodeArena,
     sink: &mut impl crate::codemem_esp32::CodeSink,
 ) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
-    let compiled = compile_module(ir, sig, options.float_mode, options.clone(), isa)?;
+    let mut compiled = compile_module(ir, sig, options.float_mode, options.clone(), isa)?;
 
+    // Sized before linking: `link_jit_at_taking` empties the functions' code
+    // into the staging image, so this sum has to be taken while it is there.
     let total: usize = compiled.functions.iter().map(|f| f.code.len()).sum();
     let total_u32 = u32::try_from(total)
         .map_err(|_| NativeError::Internal("JIT image length does not fit u32".into()))?;
@@ -189,7 +199,7 @@ pub fn compile_module_jit_placed(
 
     let mut place = || -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
         lp_perf::emit_begin!(EVENT_SHADER_LINK);
-        let link_result = crate::link::link_jit_at(&compiled, isa, exec_base, |sym| {
+        let link_result = crate::link::link_jit_at_taking(&mut compiled, isa, exec_base, |sym| {
             builtin_table.lookup(sym).map(|addr| addr as u32)
         });
         lp_perf::emit_end!(EVENT_SHADER_LINK);

@@ -195,6 +195,14 @@ pub(crate) fn compile_function_emit_stage(
         state.name
     );
     state.emitted = Some(emitted);
+    // Debug off: the VInst stream, region tree and vreg pool have no reader
+    // left — the Debug stage only touches `lowered` to build sections. Release
+    // them here rather than at `release_intermediates` (one stage later) so the
+    // emitted code and the lowering that produced it are never both resident.
+    // Debug on, they stay exactly as long as they always did.
+    if !session.options.debug_info {
+        state.lowered = None;
+    }
     Ok(())
 }
 
@@ -220,12 +228,21 @@ pub(crate) fn compile_function_debug_sections(
                 state.name
             )));
         };
+        // Present because the emit stage was told to collect debug output
+        // (same `debug_info` flag); absent only on the debug-off path, which
+        // never reaches here.
+        let Some(alloc_output) = emitted.alloc_output.as_ref() else {
+            return Err(NativeError::Internal(format!(
+                "debug stage missing allocation output for {}",
+                state.name
+            )));
+        };
         let sections = crate::debug::sections::build_debug_sections(
             func,
             ir,
             lowered,
             &emitted.code,
-            &emitted.alloc_output,
+            alloc_output,
             &state.func_abi,
             &lowered.symbols,
         );

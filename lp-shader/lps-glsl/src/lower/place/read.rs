@@ -1,11 +1,9 @@
-use alloc::vec::Vec;
-
 use lpir::LpirOp;
 
 use crate::hir::PlaceId;
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 use super::path::{LoweredPlace, MemoryPlace, lower_place};
 
 pub(in crate::lower) fn try_read_place_direct(
@@ -42,7 +40,7 @@ fn load_memory_place(
     } else {
         memory.base
     };
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     if ir_types.len() != memory.lane_offsets.len() {
         return Err(Diagnostic::error(
             Span::new(0, 0),

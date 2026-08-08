@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
@@ -7,7 +5,7 @@ use crate::body::{BinaryOp, IncDecOp};
 use crate::hir::{PlaceId, scalar_base_type, scalar_ir_types, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 use super::place_read::read_assign_target;
 use super::place_write::assign_target;
 use super::{lower_binary, single_lane};
@@ -31,7 +29,7 @@ pub(in crate::lower) fn lower_select(
             "ternary result lane count mismatch",
         ));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for ((if_true, if_false), ty) in accept
         .lanes
         .iter()
@@ -67,7 +65,7 @@ pub(in crate::lower) fn lower_inc_dec(
         IncDecOp::Increment => BinaryOp::Add,
         IncDecOp::Decrement => BinaryOp::Sub,
     };
-    let updated = lower_binary(ctx, span, binary_op, old.clone(), one, &current.ty)?;
+    let updated = lower_binary(ctx, span, binary_op, &old, &one, &current.ty)?;
     assign_target(ctx, span, target, updated.clone())?;
     if prefix { Ok(updated) } else { Ok(old) }
 }
@@ -77,7 +75,7 @@ pub(in crate::lower) fn temp_copy(
     value: &LowerValue,
     span: Span,
 ) -> Result<LowerValue, Diagnostic> {
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for (lane, ty) in value.lanes.iter().zip(scalar_ir_types(&value.ty)?) {
         let dst = ctx.fb.alloc_vreg(ty);
         ctx.fb.push(LpirOp::Copy { dst, src: *lane });
@@ -98,7 +96,7 @@ pub(in crate::lower) fn one_value(
     ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let base = scalar_base_type(ty).unwrap_or_else(|| ty.clone());
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for _ in 0..scalar_lane_count(ty) {
         let lane = match base {
             LpsType::Float => {

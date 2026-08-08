@@ -1,4 +1,3 @@
-use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{IrType, LpirOp};
@@ -8,7 +7,7 @@ use crate::body::BinaryOp;
 use crate::hir::{BuiltinKind, ExprId, HirUserCallWriteback, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue, lower_expr};
+use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
 use super::builtin_integer::{
     lower_bit_count_lane, lower_bitfield_extract_lane, lower_bitfield_insert_lane,
     lower_bitfield_reverse_lane, lower_find_lsb_lane, lower_find_msb_lane,
@@ -48,8 +47,8 @@ pub(in crate::lower) fn lower_builtin(
             ctx,
             span,
             BinaryOp::Sub,
-            values[0].clone(),
-            values[1].clone(),
+            &values[0],
+            &values[1],
             &values[0].ty,
         )?;
         return lower_length(ctx, span, &delta, result_ty);
@@ -58,10 +57,10 @@ pub(in crate::lower) fn lower_builtin(
         return lower_cross(ctx, span, &values[0], &values[1], result_ty);
     }
     if kind == BuiltinKind::Determinant {
-        return lower_matrix_determinant(ctx, span, values[0].clone(), result_ty);
+        return lower_matrix_determinant(ctx, span, &values[0], result_ty);
     }
     if kind == BuiltinKind::Inverse {
-        return lower_matrix_inverse(ctx, span, values[0].clone(), result_ty);
+        return lower_matrix_inverse(ctx, span, &values[0], result_ty);
     }
     if kind == BuiltinKind::Dot {
         return lower_dot(ctx, span, &values[0], &values[1], result_ty);
@@ -76,10 +75,10 @@ pub(in crate::lower) fn lower_builtin(
         return lower_outer_product(ctx, span, &values[0], &values[1], result_ty);
     }
     if kind == BuiltinKind::Transpose {
-        return lower_matrix_transpose(ctx, span, values[0].clone(), result_ty);
+        return lower_matrix_transpose(ctx, span, &values[0], result_ty);
     }
     let width = scalar_lane_count(result_ty);
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for i in 0..width {
         let lane = match kind {
             BuiltinKind::Abs => {
@@ -91,17 +90,9 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Degrees => {
                 let scale = LowerValue {
                     ty: LpsType::Float,
-                    lanes: vec![fconst(ctx, 180.0 / core::f32::consts::PI)],
+                    lanes: Lanes::one(fconst(ctx, 180.0 / core::f32::consts::PI)),
                 };
-                lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Mul,
-                    values[0].clone(),
-                    scale,
-                    result_ty,
-                )?
-                .lanes[i]
+                lower_binary(ctx, span, BinaryOp::Mul, &values[0], &scale, result_ty)?.lanes[i]
             }
             BuiltinKind::Cross => unreachable!("cross returns before lane-wise builtin lowering"),
             BuiltinKind::Determinant => {
@@ -123,54 +114,19 @@ pub(in crate::lower) fn lower_builtin(
             }
             BuiltinKind::BitfieldReverse => lower_bitfield_reverse_lane(ctx, &values[0], i),
             BuiltinKind::Equal => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Eq,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Eq, &values[0], &values[1], result_ty);
             }
             BuiltinKind::GreaterThan => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Gt,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Gt, &values[0], &values[1], result_ty);
             }
             BuiltinKind::GreaterThanEqual => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Ge,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Ge, &values[0], &values[1], result_ty);
             }
             BuiltinKind::LessThan => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Lt,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Lt, &values[0], &values[1], result_ty);
             }
             BuiltinKind::LessThanEqual => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Le,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Le, &values[0], &values[1], result_ty);
             }
             BuiltinKind::ImulExtended => {
                 unreachable!("imulExtended returns before lane-wise builtin lowering")
@@ -186,14 +142,7 @@ pub(in crate::lower) fn lower_builtin(
             }
             BuiltinKind::Modf => unreachable!("modf returns before lane-wise builtin lowering"),
             BuiltinKind::NotEqual => {
-                return lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Ne,
-                    values[0].clone(),
-                    values[1].clone(),
-                    result_ty,
-                );
+                return lower_binary(ctx, span, BinaryOp::Ne, &values[0], &values[1], result_ty);
             }
             BuiltinKind::Floor => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Floor)?
@@ -229,17 +178,9 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Radians => {
                 let scale = LowerValue {
                     ty: LpsType::Float,
-                    lanes: vec![fconst(ctx, core::f32::consts::PI / 180.0)],
+                    lanes: Lanes::one(fconst(ctx, core::f32::consts::PI / 180.0)),
                 };
-                lower_binary(
-                    ctx,
-                    span,
-                    BinaryOp::Mul,
-                    values[0].clone(),
-                    scale,
-                    result_ty,
-                )?
-                .lanes[i]
+                lower_binary(ctx, span, BinaryOp::Mul, &values[0], &scale, result_ty)?.lanes[i]
             }
             BuiltinKind::Round => lower_round_lane(ctx, &values[0], i),
             BuiltinKind::RoundEven => {
@@ -323,8 +264,8 @@ fn lower_modf_builtin(
         ));
     };
     let width = scalar_lane_count(result_ty);
-    let mut integer_lanes = Vec::with_capacity(width);
-    let mut fractional_lanes = Vec::with_capacity(width);
+    let mut integer_lanes = Lanes::new();
+    let mut fractional_lanes = Lanes::new();
     for i in 0..width {
         let x = lane_at(value, i);
         let integer_lane = ctx.fb.alloc_vreg(IrType::F32);
@@ -568,7 +509,7 @@ fn lower_matrix_comp_mult(
     if lhs.lanes.len() != rhs.lanes.len() {
         return Err(Diagnostic::error(span, "matrixCompMult lane counts differ"));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for (l, r) in lhs.lanes.iter().zip(rhs.lanes.iter()) {
         let dst = ctx.fb.alloc_vreg(IrType::F32);
         ctx.fb.push(LpirOp::Fmul {
@@ -600,7 +541,7 @@ fn lower_outer_product(
     if lhs.lanes.len() != rows || rhs.lanes.len() != cols {
         return Err(Diagnostic::error(span, "unsupported outerProduct shape"));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for col in 0..cols {
         for row in 0..rows {
             let dst = ctx.fb.alloc_vreg(IrType::F32);
@@ -661,7 +602,7 @@ fn lower_length(
     ctx.fb.push(LpirOp::Fsqrt { dst, src: sum });
     Ok(LowerValue {
         ty: LpsType::Float,
-        lanes: vec![dst],
+        lanes: Lanes::one(dst),
     })
 }
 
@@ -704,7 +645,7 @@ fn lower_dot(
     }
     Ok(LowerValue {
         ty: LpsType::Float,
-        lanes: vec![acc],
+        lanes: Lanes::one(acc),
     })
 }
 
@@ -739,13 +680,14 @@ fn lower_cross(
         });
         dst
     };
+    let lanes = Lanes::from_slice(&[
+        component(1, 2, 2, 1),
+        component(2, 0, 0, 2),
+        component(0, 1, 1, 0),
+    ]);
     Ok(LowerValue {
         ty: LpsType::Vec3,
-        lanes: vec![
-            component(1, 2, 2, 1),
-            component(2, 0, 0, 2),
-            component(0, 1, 1, 0),
-        ],
+        lanes,
     })
 }
 
@@ -759,7 +701,7 @@ fn lower_normalize(
         return Err(Diagnostic::error(span, "normalize expects float lanes"));
     }
     let length = lower_length(ctx, span, value, &LpsType::Float)?;
-    lower_binary(ctx, span, BinaryOp::Div, value.clone(), length, result_ty)
+    lower_binary(ctx, span, BinaryOp::Div, value, &length, result_ty)
 }
 
 pub(in crate::lower::ops) fn lower_bool_builtin(
@@ -796,12 +738,12 @@ pub(in crate::lower::ops) fn lower_bool_builtin(
             }
             Ok(LowerValue {
                 ty: result_ty.clone(),
-                lanes: vec![acc],
+                lanes: Lanes::one(acc),
             })
         }
         BuiltinKind::Not => {
-            let mut lanes = Vec::new();
-            for lane in &value.lanes {
+            let mut lanes = Lanes::new();
+            for lane in value.lanes.iter() {
                 let zero = ctx.fb.alloc_vreg(IrType::I32);
                 let dst = ctx.fb.alloc_vreg(IrType::I32);
                 ctx.fb.push(LpirOp::IconstI32 {

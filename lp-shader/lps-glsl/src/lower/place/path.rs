@@ -7,7 +7,7 @@ use crate::hir::{PlaceRoot, PlaceSegment, TypeShape};
 use crate::{Diagnostic, Span};
 
 use super::super::storage::{LocalStorage, is_pointer_param, param_pointer};
-use super::super::{LowerCtx, lower_expr};
+use super::super::{Lanes, LowerCtx, lower_expr};
 use super::dynamic;
 use super::layout::{constant_index, scalar_lane_offsets};
 
@@ -20,7 +20,7 @@ pub(super) enum LoweredPlace {
 #[derive(Clone)]
 pub(super) struct FlatPlace {
     pub(super) ty: LpsType,
-    pub(super) lanes: Vec<VReg>,
+    pub(super) lanes: Lanes,
 }
 
 #[derive(Clone)]
@@ -145,7 +145,7 @@ fn apply_field(
             };
             LoweredPlace::Flat(FlatPlace {
                 ty: ty.clone(),
-                lanes: lanes.to_vec(),
+                lanes: Lanes::from_slice(lanes),
             })
         }
         LoweredPlace::Memory(memory) => LoweredPlace::Memory(MemoryPlace {
@@ -174,7 +174,7 @@ fn apply_swizzle(
                         .copied()
                         .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Lanes, _>>()?;
             LoweredPlace::Flat(FlatPlace {
                 ty: ty.clone(),
                 lanes: projected,
@@ -249,7 +249,7 @@ fn apply_array_index(
             };
             Ok(Some(LoweredPlace::Flat(FlatPlace {
                 ty: ty.clone(),
-                lanes: lanes.to_vec(),
+                lanes: Lanes::from_slice(lanes),
             })))
         }
         LoweredPlace::Memory(memory) => {
@@ -311,7 +311,7 @@ fn apply_flat_index(
             };
             Some(LoweredPlace::Flat(FlatPlace {
                 ty: ty.clone(),
-                lanes: lanes.to_vec(),
+                lanes: Lanes::from_slice(lanes),
             }))
         }
         LoweredPlace::Memory(memory) => {

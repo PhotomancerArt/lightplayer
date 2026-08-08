@@ -136,18 +136,13 @@ impl<'src> CompileJob<'src> {
                         "compile job missing indexed source",
                     ));
                 };
-                let struct_names = index
-                    .structs
-                    .iter()
-                    .map(|decl| decl.name.clone())
-                    .collect::<alloc::vec::Vec<_>>();
                 let mut bodies = Vec::new();
                 for function in &index.functions {
                     match crate::body::parse_function_body(
                         self.source,
                         tokens,
                         function.body_span,
-                        &struct_names,
+                        &index.structs,
                     ) {
                         Ok(body) => bodies.push((function.name.clone(), body)),
                         Err(err) => {

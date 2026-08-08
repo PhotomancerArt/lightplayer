@@ -222,10 +222,14 @@ impl<'a> EmitContext<'a> {
         symbols: &'a ModuleSymbols,
         vreg_pool: &'a [VReg],
         first_free_label: LabelId,
+        vinst_count: usize,
         collect_debug_lines: bool,
     ) -> Self {
         Self {
-            items: Vec::new(),
+            // Items are `Bytes` runs broken by labels/branches, so the count
+            // lands well under one per VInst; half is a cheap starting size
+            // that keeps the growth doubling off the compile's hot path.
+            items: Vec::with_capacity(vinst_count / 2 + 1),
             literals: Vec::new(),
             marks: Vec::new(),
             frame,
@@ -1539,6 +1543,20 @@ impl<'a> EmitContext<'a> {
             .last()
             .map_or(code_start, |s| s.offset + Self::item_size(&s.item, s.long));
 
+        // Everything layout-dependent is settled at this point: the loop above
+        // exited with `changed == false`, so the offsets stamped into
+        // `self.items` and the `self.label_offsets` table rebuilt from them
+        // both describe the final layout. That is what lets the encode loop
+        // below CONSUME the items — nothing after it re-reads their offsets.
+        debug_assert!(converged, "layout must be final before items are drained");
+        // Debug lines name item offsets, so they are built here rather than
+        // after the encode loop, which no longer has the items to consult.
+        let debug_lines: Vec<(u32, Option<u32>)> = self
+            .marks
+            .iter()
+            .map(|&(idx, within, op)| (self.items[idx].offset + within, Some(op)))
+            .collect();
+
         let mut code: Vec<u8> = Vec::with_capacity(total as usize + 4);
         let mut relocs: Vec<NativeReloc> = Vec::new();
 
@@ -1565,14 +1583,22 @@ impl<'a> EmitContext<'a> {
             debug_assert_eq!(code.len() as u32, code_start);
         }
 
-        for s in &self.items {
+        // Drain rather than borrow: each `Bytes` run is freed as soon as it has
+        // been copied into `code`, so the worst heap moment is one image plus
+        // one run — not the image plus every run of it a second time. This is
+        // the peak that matters on the 320 KB device heap.
+        let items = core::mem::take(&mut self.items);
+        for s in items {
             let pc = s.offset as i64;
             debug_assert_eq!(code.len() as u32, s.offset);
-            match &s.item {
-                Item::Bytes(b) => code.extend_from_slice(b),
+            match s.item {
+                Item::Bytes(b) => {
+                    code.extend_from_slice(&b);
+                    drop(b);
+                }
                 Item::LabelDef(_) => {}
                 Item::Jump { label } => {
-                    let target = self.label_offset(*label)? as i64;
+                    let target = self.label_offset(label)? as i64;
                     let off = target - (pc + 4);
                     if !imm::is_legal(ImmOp::JDisp, off as i32) {
                         return Err(crate::emit_err!("J offset {off} out of range"));
@@ -1580,20 +1606,20 @@ impl<'a> EmitContext<'a> {
                     code.extend_from_slice(&encode(&Inst::J(off as i32)));
                 }
                 Item::CondBr { nez, reg, label } => {
-                    let target = self.label_offset(*label)? as i64;
+                    let target = self.label_offset(label)? as i64;
                     let kind = |nez: bool| if nez { BrZ::Bnez } else { BrZ::Beqz };
                     if !s.long {
                         let diff = target - (pc + 4);
                         debug_assert!((BRI12_MIN..=BRI12_MAX).contains(&diff));
                         code.extend_from_slice(&encode(&Inst::BranchZ(
-                            kind(*nez),
-                            *reg,
+                            kind(nez),
+                            reg,
                             diff as i32,
                         )));
                     } else {
                         // Inverted branch over `j target` (the branch skips
                         // the 3-byte J: target = PC + 4 + 2).
-                        code.extend_from_slice(&encode(&Inst::BranchZ(kind(!*nez), *reg, 2)));
+                        code.extend_from_slice(&encode(&Inst::BranchZ(kind(!nez), reg, 2)));
                         let off = target - (pc + 3 + 4);
                         if !imm::is_legal(ImmOp::JDisp, off as i32) {
                             return Err(crate::emit_err!("relaxed branch J offset out of range"));
@@ -1606,7 +1632,7 @@ impl<'a> EmitContext<'a> {
                     // The 16-bit field is ONE-extended (value = field -
                     // 0x10000): the legal displacement is -262144..=-4 bytes,
                     // and pool-before-code makes every displacement backward.
-                    let lit_off = (4 + 4 * *lit) as i64;
+                    let lit_off = (4 + 4 * lit) as i64;
                     let base = (pc + 3) & !3;
                     let disp = lit_off - base;
                     if !imm::is_legal(ImmOp::L32rDisp, disp as i32) {
@@ -1615,7 +1641,7 @@ impl<'a> EmitContext<'a> {
                         ));
                     }
                     let field = ((disp >> 2) & 0xFFFF) as u16;
-                    code.extend_from_slice(&encode(&Inst::L32r(*rt, field)));
+                    code.extend_from_slice(&encode(&Inst::L32r(rt, field)));
                 }
             }
         }
@@ -1626,12 +1652,6 @@ impl<'a> EmitContext<'a> {
         while !code.len().is_multiple_of(4) {
             code.push(0);
         }
-
-        let debug_lines = self
-            .marks
-            .iter()
-            .map(|&(idx, within, op)| (self.items[idx].offset + within, Some(op)))
-            .collect();
 
         Ok(IsaEmitOutput {
             code,
@@ -1680,6 +1700,7 @@ pub(crate) fn emit_function(
         symbols,
         vreg_pool,
         first_free_label(vinsts),
+        vinsts.len(),
         collect_debug_lines,
     );
 

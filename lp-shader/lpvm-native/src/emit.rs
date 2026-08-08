@@ -17,8 +17,15 @@ pub struct EmittedCode {
     pub relocs: Vec<NativeReloc>,
     /// Debug line table: (code_offset, optional_src_op).
     pub debug_lines: Vec<(u32, Option<u32>)>,
-    /// Allocation output for debug rendering.
-    pub alloc_output: AllocOutput,
+    /// Allocation output for debug rendering — `Some` exactly when the caller
+    /// asked for debug output (`collect_debug_lines`).
+    ///
+    /// Its only consumer is `debug::sections::build_debug_sections`, which
+    /// runs under the same flag. Handing it back unconditionally kept the
+    /// per-operand allocation table (plus every edit) alive through the end of
+    /// each function's compile for nothing; dropping it with the emitter's
+    /// other scaffolding is the whole point of the `Option`.
+    pub alloc_output: Option<AllocOutput>,
 }
 
 /// Emit a LoweredFunction to machine code.
@@ -110,7 +117,7 @@ pub fn emit_lowered_with_alloc(
             })
             .collect(),
         debug_lines: emitted.debug_lines,
-        alloc_output: alloc_result.output,
+        alloc_output: collect_debug_lines.then_some(alloc_result.output),
     })
 }
 

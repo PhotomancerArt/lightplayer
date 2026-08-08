@@ -7,7 +7,7 @@ use crate::{Diagnostic, Span};
 
 use super::arena::ExprId;
 use super::scalar::{scalar_base_type, scalar_lane_count};
-use super::shape::TypeShape;
+use super::shape::struct_field;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(
@@ -121,15 +121,18 @@ impl HirPlace {
     }
 
     pub(super) fn push_field(&mut self, span: Span, name: &str) -> Result<(), Diagnostic> {
-        let shape = TypeShape::new(&self.ty);
-        if let Some(field) = shape.field(name) {
-            self.ty = field.ty.clone();
+        if let Some(field) = struct_field(&self.ty, name) {
+            let ty = field.ty.clone();
+            let lane_offset = field.lane_offset;
+            let lane_count = field.lane_count;
+            let byte_offset = field.byte_offset;
+            self.ty = ty.clone();
             self.segments.push(PlaceSegment::Field {
                 name: String::from(name),
-                ty: field.ty.clone(),
-                lane_offset: field.lane_offset,
-                lane_count: field.lane_count,
-                byte_offset: field.byte_offset,
+                ty,
+                lane_offset,
+                lane_count,
+                byte_offset,
             });
             return Ok(());
         }
@@ -144,8 +147,10 @@ impl HirPlace {
     }
 
     pub(super) fn push_index(&mut self, index: ExprId, span: Span) -> Result<(), Diagnostic> {
-        let shape = TypeShape::new(&self.ty);
-        if let Some(column_ty) = shape.matrix_column().cloned() {
+        // The matrix/array/vector questions are answered by the type itself;
+        // building a `TypeShape` here would clone the whole type (and, for
+        // structs, every field) per index segment to ask three predicates.
+        if let Some(column_ty) = self.ty.matrix_column_type() {
             self.ty = column_ty.clone();
             self.segments.push(PlaceSegment::Index {
                 index,
@@ -153,8 +158,8 @@ impl HirPlace {
             });
             return Ok(());
         }
-        if let Some((element, _, _)) = shape.array_element() {
-            let ty = element.clone();
+        if let LpsType::Array { element, .. } = &self.ty {
+            let ty = (**element).clone();
             self.ty = ty.clone();
             self.segments.push(PlaceSegment::Index { index, ty });
             return Ok(());
@@ -182,8 +187,7 @@ pub(super) fn access_lanes(
     ty: &LpsType,
     fields: &str,
 ) -> Result<(Vec<usize>, LpsType), Diagnostic> {
-    let shape = TypeShape::new(ty);
-    if let Some(field) = shape.field(fields) {
+    if let Some(field) = struct_field(ty, fields) {
         return Ok((
             (field.lane_offset..field.lane_offset + field.lane_count).collect(),
             field.ty.clone(),

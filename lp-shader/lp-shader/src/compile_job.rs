@@ -6,6 +6,7 @@ use lps_shared::{LpsModuleSig, TextureStorageFormat};
 use lpvm::{LpvmCompileBudget, LpvmCompileParams, LpvmCompileStepResult, LpvmEngine};
 
 use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
+use crate::compile_stats::LpirModuleStats;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 
@@ -72,7 +73,10 @@ enum ShaderCompileState<'src, 'engine, E: LpvmEngine> {
         meta: LpsModuleSig,
     },
     Backend {
-        ir: LpirModule,
+        /// The front-end module's summary, kept in place of the module: the
+        /// module itself was moved into `job`, and nothing after link needs
+        /// more than these counts.
+        ir_stats: LpirModuleStats,
         meta: LpsModuleSig,
         render_fn_index: usize,
         render_texture_fn_name: alloc::string::String,
@@ -236,45 +240,54 @@ where
                         None
                     };
 
-                if let Some(job) =
-                    self.engine
-                        .start_compile_job(ir.clone(), meta.clone(), self.params.clone())
+                // The post-link consumer's only need for the LPIR is this
+                // summary, so take it here and let the module move into the
+                // backend job; an engine with no job hands the module back.
+                let ir_stats = LpirModuleStats::from_ir(&ir);
+                match self
+                    .engine
+                    .start_compile_job(ir, meta.clone(), self.params.clone())
                 {
-                    self.state = ShaderCompileState::Backend {
-                        ir,
-                        meta,
-                        render_fn_index,
-                        render_texture_fn_name,
-                        render_samples_fn_name,
-                        job,
-                    };
-                    ShaderCompileStepResult::Pending
-                } else {
-                    match self.engine.compile_with_params(&ir, &meta, &self.params) {
-                        Ok(module) => {
-                            match LpsPxShader::new(
-                                module,
-                                meta,
-                                &ir,
-                                self.output_format,
-                                render_fn_index,
-                                render_texture_fn_name,
-                                render_samples_fn_name,
-                            ) {
-                                Ok(shader) => ShaderCompileStepResult::Finished(shader),
-                                Err(err) => ShaderCompileStepResult::Failed(LpsError::Compile(
-                                    format!("{err}"),
-                                )),
+                    Ok(job) => {
+                        self.state = ShaderCompileState::Backend {
+                            ir_stats,
+                            meta,
+                            render_fn_index,
+                            render_texture_fn_name,
+                            render_samples_fn_name,
+                            job,
+                        };
+                        ShaderCompileStepResult::Pending
+                    }
+                    // The engine hands back the module (and the signatures it
+                    // was offered, which this path already owns a copy of).
+                    Err((ir, _returned_meta)) => {
+                        match self.engine.compile_with_params(&ir, &meta, &self.params) {
+                            Ok(module) => {
+                                match LpsPxShader::new(
+                                    module,
+                                    meta,
+                                    ir_stats,
+                                    self.output_format,
+                                    render_fn_index,
+                                    render_texture_fn_name,
+                                    render_samples_fn_name,
+                                ) {
+                                    Ok(shader) => ShaderCompileStepResult::Finished(shader),
+                                    Err(err) => ShaderCompileStepResult::Failed(LpsError::Compile(
+                                        format!("{err}"),
+                                    )),
+                                }
                             }
-                        }
-                        Err(err) => {
-                            ShaderCompileStepResult::Failed(LpsError::Compile(format!("{err}")))
+                            Err(err) => {
+                                ShaderCompileStepResult::Failed(LpsError::Compile(format!("{err}")))
+                            }
                         }
                     }
                 }
             }
             ShaderCompileState::Backend {
-                ir,
+                ir_stats,
                 meta,
                 render_fn_index,
                 render_texture_fn_name,
@@ -283,7 +296,7 @@ where
             } => match job.step(LpvmCompileBudget::steps(budget.backend_steps)) {
                 LpvmCompileStepResult::Pending => {
                     self.state = ShaderCompileState::Backend {
-                        ir,
+                        ir_stats,
                         meta,
                         render_fn_index,
                         render_texture_fn_name,
@@ -299,7 +312,7 @@ where
                     match LpsPxShader::new(
                         module,
                         meta,
-                        &ir,
+                        ir_stats,
                         self.output_format,
                         render_fn_index,
                         render_texture_fn_name,

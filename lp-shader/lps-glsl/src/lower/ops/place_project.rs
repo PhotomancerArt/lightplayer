@@ -1,12 +1,10 @@
-use alloc::vec::Vec;
-
 use lpir::LpirOp;
 use lps_shared::LpsType;
 
 use crate::hir::PlaceSegment;
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue, lower_expr};
+use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
 use super::access::copy_value;
 use super::index::{assign_index_value, lower_index};
 
@@ -146,7 +144,7 @@ fn read_contiguous_lanes(
     };
     Ok(LowerValue {
         ty: ty.clone(),
-        lanes: lanes.to_vec(),
+        lanes: Lanes::from_slice(lanes),
     })
 }
 
@@ -156,7 +154,7 @@ fn read_lane_map(
     lanes: &[usize],
     ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
-    let mut out = Vec::new();
+    let mut out = Lanes::new();
     for lane in lanes {
         let Some(value_lane) = value.lanes.get(*lane) else {
             return Err(Diagnostic::error(span, "lane read out of range"));

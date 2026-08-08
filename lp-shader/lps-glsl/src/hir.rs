@@ -80,7 +80,11 @@ struct HirBuildFunctionState {
     globals: VecMap<String, GlobalConst>,
     body_map: VecMap<String, ParsedFunctionBody>,
     functions: Vec<HirFunction>,
-    function_meta: Vec<LpsFnSig>,
+    /// Set when [`synthesize_shader_init`] produced the trailing synthetic
+    /// function; the module signature is built from the sig table in
+    /// [`HirBuildFunctionState::finish`], so this is all the extra
+    /// bookkeeping it needs.
+    has_shader_init: bool,
     next_function: usize,
 }
 
@@ -110,7 +114,7 @@ impl<'src> HirBuildJob<'src> {
         let state = core::mem::replace(&mut self.state, HirBuildState::Done);
         match state {
             HirBuildState::Header { bodies } => {
-                let array_size_consts =
+                let (array_size_consts, const_init_cache) =
                     build_array_size_consts(self.source, &self.tokens, &self.index)?;
                 let structs = build_struct_types(&self.index, &array_size_consts)?;
                 let (uniforms, uniforms_type, uniforms_size) =
@@ -137,6 +141,7 @@ impl<'src> HirBuildJob<'src> {
                     &array_size_consts,
                     &mut imports,
                     &self.options.texture_specs,
+                    const_init_cache,
                 )?;
                 self.state = HirBuildState::Functions(Box::new(HirBuildFunctionState {
                     array_size_consts,
@@ -151,7 +156,7 @@ impl<'src> HirBuildJob<'src> {
                     globals,
                     body_map: function_body_map(bodies),
                     functions: Vec::new(),
-                    function_meta: Vec::new(),
+                    has_shader_init: false,
                     next_function: 0,
                 }));
                 Ok(HirBuildStepResult::Pending)
@@ -168,8 +173,6 @@ impl<'src> HirBuildJob<'src> {
             }
             HirBuildState::ShaderInit(mut state) => {
                 if let Some(init) = synthesize_shader_init(
-                    self.source,
-                    &self.tokens,
                     &state.global_inits,
                     &state.functions_sigs,
                     &state.uniforms,
@@ -180,12 +183,7 @@ impl<'src> HirBuildJob<'src> {
                     &mut state.imports,
                     &self.options.texture_specs,
                 )? {
-                    state.function_meta.push(LpsFnSig {
-                        name: String::from("__shader_init"),
-                        return_type: LpsType::Void,
-                        parameters: Vec::new(),
-                        kind: LpsFnKind::Synthetic,
-                    });
+                    state.has_shader_init = true;
                     state.functions.push(init);
                 }
                 self.state = HirBuildState::Done;
@@ -201,21 +199,6 @@ impl<'src> HirBuildJob<'src> {
     fn type_next_function(&self, state: &mut HirBuildFunctionState) -> Result<(), Diagnostic> {
         let function_index = state.next_function;
         let sig = &state.functions_sigs[function_index];
-        state.function_meta.push(LpsFnSig {
-            name: sig.name.clone(),
-            return_type: sig.return_ty.clone(),
-            parameters: sig
-                .params
-                .iter()
-                .map(|p| FnParam {
-                    name: p.name.clone().unwrap_or_default(),
-                    ty: p.ty.clone(),
-                    qualifier: p.qualifier,
-                })
-                .collect(),
-            kind: LpsFnKind::UserDefined,
-        });
-
         let decl = &self.index.functions[function_index];
         let parsed_body = state
             .body_map
@@ -248,7 +231,7 @@ impl HirBuildFunctionState {
         HirModule {
             functions: self.functions,
             meta: LpsModuleSig {
-                functions: self.function_meta,
+                functions: module_function_sigs(self.functions_sigs, self.has_shader_init),
                 uniforms_type: self.uniforms_type,
                 globals_type: self.globals_type,
                 texture_specs: options.texture_specs.clone(),
@@ -263,6 +246,42 @@ impl HirBuildFunctionState {
     }
 }
 
+/// The module signature list, built by consuming the sig table.
+///
+/// [`FunctionSig`] and [`LpsFnSig`] carry the same name, return type and
+/// parameters. Nothing reads the sig table once every function is typed, so
+/// the signature list moves that data out instead of cloning it per function
+/// and per parameter — the [`HirFunction`] copy is the one that has to own
+/// its own.
+fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<LpsFnSig> {
+    let mut meta = sigs
+        .into_iter()
+        .map(|sig| LpsFnSig {
+            name: sig.name,
+            return_type: sig.return_ty,
+            parameters: sig
+                .params
+                .into_iter()
+                .map(|p| FnParam {
+                    name: p.name.unwrap_or_default(),
+                    ty: p.ty,
+                    qualifier: p.qualifier,
+                })
+                .collect(),
+            kind: LpsFnKind::UserDefined,
+        })
+        .collect::<Vec<_>>();
+    if has_shader_init {
+        meta.push(LpsFnSig {
+            name: String::from("__shader_init"),
+            return_type: LpsType::Void,
+            parameters: Vec::new(),
+            kind: LpsFnKind::Synthetic,
+        });
+    }
+    meta
+}
+
 #[allow(
     dead_code,
     reason = "kept as the synchronous HIR builder for tests and future callers"
@@ -274,7 +293,7 @@ pub fn build_hir(
     bodies: Vec<(String, ParsedFunctionBody)>,
     options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
-    let array_size_consts = build_array_size_consts(source, tokens, index)?;
+    let (array_size_consts, const_init_cache) = build_array_size_consts(source, tokens, index)?;
     let structs = build_struct_types(index, &array_size_consts)?;
     let (uniforms, uniforms_type, uniforms_size) =
         build_uniforms(index, &structs, &array_size_consts)?;
@@ -299,6 +318,7 @@ pub fn build_hir(
         &array_size_consts,
         &mut imports,
         &options.texture_specs,
+        const_init_cache,
     )?;
     let body_map = function_body_map(bodies);
     let mut functions = Vec::new();
@@ -345,8 +365,6 @@ pub fn build_hir(
     }
 
     if let Some(init) = synthesize_shader_init(
-        source,
-        tokens,
         &global_inits,
         &functions_sigs,
         &uniforms,
@@ -414,36 +432,54 @@ fn scalar_or_struct_type_name_to_lps(
     span: Span,
     structs: &StructTypes,
 ) -> Result<LpsType, Diagnostic> {
+    scalar_or_struct_type_name_lookup(name, structs)
+        .ok_or_else(|| Diagnostic::error(span, format!("unsupported type `{name}`")))
+}
+
+/// Type-name lookup that never builds a [`Diagnostic`].
+///
+/// The failure message of [`scalar_or_struct_type_name_to_lps`] costs a
+/// `format!` allocation, and the probe-style caller
+/// (`TypeCtx::is_constructor_name`, via [`is_scalar_or_struct_type_name`])
+/// discards it for every non-type callee — which is every builtin and every
+/// user function call in the shader.
+fn scalar_or_struct_type_name_lookup(name: &str, structs: &StructTypes) -> Option<LpsType> {
     if let Some(ty) = structs.get(name) {
-        return Ok(ty.clone());
+        return Some(ty.clone());
     }
+    scalar_type_name_to_lps(name)
+}
+
+fn scalar_type_name_to_lps(name: &str) -> Option<LpsType> {
     match name {
-        "void" => Ok(LpsType::Void),
-        "float" => Ok(LpsType::Float),
-        "int" => Ok(LpsType::Int),
-        "uint" => Ok(LpsType::UInt),
-        "bool" => Ok(LpsType::Bool),
-        "vec2" => Ok(LpsType::Vec2),
-        "vec3" => Ok(LpsType::Vec3),
-        "vec4" => Ok(LpsType::Vec4),
-        "ivec2" => Ok(LpsType::IVec2),
-        "ivec3" => Ok(LpsType::IVec3),
-        "ivec4" => Ok(LpsType::IVec4),
-        "uvec2" => Ok(LpsType::UVec2),
-        "uvec3" => Ok(LpsType::UVec3),
-        "uvec4" => Ok(LpsType::UVec4),
-        "bvec2" => Ok(LpsType::BVec2),
-        "bvec3" => Ok(LpsType::BVec3),
-        "bvec4" => Ok(LpsType::BVec4),
-        "mat2" => Ok(LpsType::Mat2),
-        "mat3" => Ok(LpsType::Mat3),
-        "mat4" => Ok(LpsType::Mat4),
-        "sampler2D" | "texture2D" => Ok(LpsType::Texture2D),
-        other => Err(Diagnostic::error(
-            span,
-            format!("unsupported type `{other}`"),
-        )),
+        "void" => Some(LpsType::Void),
+        "float" => Some(LpsType::Float),
+        "int" => Some(LpsType::Int),
+        "uint" => Some(LpsType::UInt),
+        "bool" => Some(LpsType::Bool),
+        "vec2" => Some(LpsType::Vec2),
+        "vec3" => Some(LpsType::Vec3),
+        "vec4" => Some(LpsType::Vec4),
+        "ivec2" => Some(LpsType::IVec2),
+        "ivec3" => Some(LpsType::IVec3),
+        "ivec4" => Some(LpsType::IVec4),
+        "uvec2" => Some(LpsType::UVec2),
+        "uvec3" => Some(LpsType::UVec3),
+        "uvec4" => Some(LpsType::UVec4),
+        "bvec2" => Some(LpsType::BVec2),
+        "bvec3" => Some(LpsType::BVec3),
+        "bvec4" => Some(LpsType::BVec4),
+        "mat2" => Some(LpsType::Mat2),
+        "mat3" => Some(LpsType::Mat3),
+        "mat4" => Some(LpsType::Mat4),
+        "sampler2D" | "texture2D" => Some(LpsType::Texture2D),
+        _ => None,
     }
+}
+
+/// Whether `name` names a scalar or struct type, allocation-free.
+fn is_scalar_or_struct_type_name(name: &str, structs: &StructTypes) -> bool {
+    structs.contains_key(name) || scalar_type_name_to_lps(name).is_some()
 }
 
 fn fixed_array_type(
@@ -557,7 +593,8 @@ fn infer_array_constructor_type(
     span: Span,
     base: LpsType,
     lens: &[Option<u32>],
-    args: &[HirExpr],
+    arena: &HirArena,
+    args: &[ExprId],
 ) -> Result<LpsType, Diagnostic> {
     let Some((first_len, rest_lens)) = lens.split_first() else {
         return Ok(base);
@@ -574,7 +611,7 @@ fn infer_array_constructor_type(
                 "unsized array constructor requires at least one argument",
             )
         })?;
-        infer_array_decl_type(span, &base, rest_lens, &first_arg.ty)?
+        infer_array_decl_type(span, &base, rest_lens, arena.expr_ty(*first_arg))?
     };
     Ok(LpsType::Array {
         element: Box::new(element),
@@ -617,25 +654,34 @@ fn array_base_and_lens(ty: &LpsType) -> Option<(LpsType, Vec<u32>)> {
     }
 }
 
+/// Parses each `int`/`uint` const initializer once and returns both the
+/// folded array-size table and the parsed expressions themselves (aligned
+/// index-for-index with `index.consts`, `None` for entries this pass didn't
+/// touch). [`build_global_consts`] consumes the cache instead of re-parsing
+/// the same spans.
 fn build_array_size_consts(
     source: &str,
     tokens: &[Token],
     index: &TopLevelIndex,
-) -> Result<ArraySizeConsts, Diagnostic> {
+) -> Result<(ArraySizeConsts, Vec<Option<ParsedExpr>>), Diagnostic> {
     let mut consts = VecMap::new();
+    let mut parsed_cache = Vec::with_capacity(index.consts.len());
     for konst in &index.consts {
         if !matches!(konst.ty.name.as_str(), "int" | "uint") {
+            parsed_cache.push(None);
             continue;
         }
         let Some(init_span) = konst.init_span else {
+            parsed_cache.push(None);
             continue;
         };
         let parsed = parse_expr_tokens(source, tokens, init_span)?;
         if let Some(value) = eval_parsed_array_size_expr(&parsed, &consts) {
             consts.insert(konst.name.clone(), value);
         }
+        parsed_cache.push(Some(parsed));
     }
-    Ok(consts)
+    Ok((consts, parsed_cache))
 }
 
 fn eval_parsed_array_size_expr(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<u32> {
@@ -769,6 +815,9 @@ struct GlobalInit {
     ty: LpsType,
     byte_offset: u32,
     init_span: Span,
+    /// Parsed once in [`build_global_vars`] (validation pass); carried here
+    /// so [`synthesize_shader_init`] doesn't parse the same span again.
+    init: ParsedExpr,
 }
 
 fn function_body_map(
@@ -826,12 +875,13 @@ fn build_global_vars(
             ty: ty.clone(),
         });
         if let Some(init_span) = init_span {
-            let _ = parse_expr_tokens(source, tokens, init_span)?;
+            let init = parse_expr_tokens(source, tokens, init_span)?;
             inits.push(GlobalInit {
                 name: name.clone(),
                 ty: ty.clone(),
                 byte_offset,
                 init_span,
+                init,
             });
         }
         globals.insert(name, GlobalInfo { ty, byte_offset });
@@ -859,9 +909,10 @@ fn build_global_consts(
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
+    mut const_init_cache: Vec<Option<ParsedExpr>>,
 ) -> Result<VecMap<String, GlobalConst>, Diagnostic> {
     let mut globals = VecMap::new();
-    for konst in &index.consts {
+    for (const_index, konst) in index.consts.iter().enumerate() {
         let ty = type_ref_to_lps_with_structs(&konst.ty, structs, array_size_consts)?;
         let Some(init_span) = konst.init_span else {
             return Err(Diagnostic::error(
@@ -869,7 +920,13 @@ fn build_global_consts(
                 "const declaration requires initializer",
             ));
         };
-        let parsed = parse_expr_tokens(source, tokens, init_span)?;
+        // `build_array_size_consts` already parsed this span for int/uint
+        // consts; parsing is a pure function of (source, tokens, span), so
+        // reusing that result is identical to re-parsing.
+        let parsed = match const_init_cache.get_mut(const_index).and_then(Option::take) {
+            Some(cached) => cached,
+            None => parse_expr_tokens(source, tokens, init_span)?,
+        };
         let mut ctx = TypeCtx::global_const(
             functions,
             uniforms,
@@ -898,8 +955,6 @@ fn build_global_consts(
     reason = "synthetic init needs the same typing context as functions"
 )]
 fn synthesize_shader_init(
-    source: &str,
-    tokens: &[Token],
     inits: &[GlobalInit],
     functions: &[FunctionSig],
     uniforms: &VecMap<String, UniformInfo>,
@@ -931,8 +986,10 @@ fn synthesize_shader_init(
     );
     let mut statements = Vec::new();
     for init in inits {
-        let parsed = parse_expr_tokens(source, tokens, init.init_span)?;
-        let expr = ctx.type_expr(&parsed)?;
+        // Already parsed once in `build_global_vars`; parsing is a pure
+        // function of (source, tokens, span), so this is behaviorally
+        // identical to re-parsing `init.init_span` here.
+        let expr = ctx.type_expr(&init.init)?;
         let value = ctx.coerce_expr(expr, &init.ty)?;
         let target = ctx.arena.push_place(HirPlace::global(
             init.name.clone(),

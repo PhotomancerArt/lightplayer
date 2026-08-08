@@ -16,6 +16,7 @@ use lpvm::{
 };
 
 use crate::LpsCompileStats;
+use crate::compile_stats::LpirModuleStats;
 use crate::error::{LpsError, ShaderFuelTrap, ShaderFuelTrapEntry};
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
@@ -147,7 +148,7 @@ impl LpsPxShader {
     pub(crate) fn new<M: LpvmModule + 'static>(
         module: M,
         meta: LpsModuleSig,
-        ir: &lpir::LpirModule,
+        ir_stats: LpirModuleStats,
         output_format: TextureStorageFormat,
         render_fn_index: usize,
         render_texture_fn_name: String,
@@ -179,7 +180,7 @@ impl LpsPxShader {
             )));
         }
 
-        let compile_stats = LpsCompileStats::from_module(ir, &module);
+        let compile_stats = LpsCompileStats::from_module(ir_stats, &module);
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;

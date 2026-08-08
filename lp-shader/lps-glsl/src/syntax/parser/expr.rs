@@ -1,6 +1,7 @@
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
+use crate::index::StructDecl;
 use crate::syntax::{AssignOp, BinaryOp, IncDecOp, ParsedExpr, ParsedExprKind, UnaryOp};
 use crate::{Diagnostic, Span, TokenKind};
 
@@ -441,7 +442,7 @@ fn parse_i32_literal(text: &str) -> Result<i32, core::num::ParseIntError> {
 pub(super) fn array_constructor_name(
     expr: &ParsedExpr,
     source: &str,
-    struct_names: &[alloc::string::String],
+    struct_names: &[StructDecl],
 ) -> Option<alloc::string::String> {
     let ParsedExprKind::Index { base, index } = &expr.kind else {
         return None;

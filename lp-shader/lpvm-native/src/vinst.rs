@@ -11,7 +11,10 @@ use alloc::vec::Vec;
 /// LPIR virtual register at the IR boundary; lowered to [`VReg`] (`u16`).
 pub type IrVReg = lpir::VReg;
 
-/// Virtual register index after lowering (`0..`[`crate::config::MAX_VREGS`]).
+/// Virtual register index after lowering. Ids are uncapped within `u16`:
+/// large functions (and [`TempVRegs`] temps) routinely mint past
+/// [`crate::config::MAX_VREGS`], which is only [`crate::regset::RegSet`]'s
+/// inline-storage threshold, not a limit.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
 pub struct VReg(pub u16);
 

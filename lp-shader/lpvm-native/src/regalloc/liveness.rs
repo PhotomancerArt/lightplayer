@@ -1,5 +1,6 @@
 //! Recursive liveness analysis for region tree.
-//! Uses RegSet (fixed-size bitset, no heap).
+//! Uses RegSet (inline bitset below `MAX_VREGS`, heap overflow above — every
+//! vreg id is tracked exactly; see `regset.rs`).
 
 use alloc::format;
 use alloc::string::String;

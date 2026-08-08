@@ -26,23 +26,49 @@ pub struct LpsCompileStats {
     pub float_impl: FloatImpl,
 }
 
-impl LpsCompileStats {
-    pub(crate) fn from_module<M: LpvmModule>(fallback_ir: &LpirModule, module: &M) -> Self {
-        let ir = module.lpir_module().unwrap_or(fallback_ir);
+/// Everything these stats need to know about the front-end LPIR module.
+///
+/// Three counters, taken while the module is still in hand. Compilation used
+/// to keep the whole `LpirModule` alive alongside the backend job's copy just
+/// so this summary could be computed after link; extracting it up front lets
+/// the module be *moved* into the backend job instead (the jit path never gets
+/// it back — [`LpvmModule::lpir_module`] is `None` there).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LpirModuleStats {
+    function_count: usize,
+    import_count: usize,
+    inst_count: usize,
+}
+
+impl LpirModuleStats {
+    pub(crate) fn from_ir(ir: &LpirModule) -> Self {
         Self {
-            lpir_function_count: ir.functions.len(),
-            lpir_import_count: ir.imports.len(),
-            lpir_inst_count: count_lpir_insts(ir),
+            function_count: ir.functions.len(),
+            import_count: ir.imports.len(),
+            inst_count: ir
+                .functions
+                .values()
+                .map(|function| function.body.len())
+                .sum(),
+        }
+    }
+}
+
+impl LpsCompileStats {
+    /// `fallback_ir` is the summary of the front-end module, used unless the
+    /// backend retained its own LPIR (emu paths), which is then the more
+    /// accurate answer because backend passes may have rewritten it.
+    pub(crate) fn from_module<M: LpvmModule>(fallback_ir: LpirModuleStats, module: &M) -> Self {
+        let ir = module
+            .lpir_module()
+            .map_or(fallback_ir, LpirModuleStats::from_ir);
+        Self {
+            lpir_function_count: ir.function_count,
+            lpir_import_count: ir.import_count,
+            lpir_inst_count: ir.inst_count,
             final_inst_count: module.final_instruction_count(),
             final_code_size_bytes: module.code_size_bytes(),
             float_impl: module.float_impl(),
         }
     }
-}
-
-fn count_lpir_insts(ir: &LpirModule) -> usize {
-    ir.functions
-        .values()
-        .map(|function| function.body.len())
-        .sum()
 }
