@@ -8,6 +8,15 @@
 //! the cards that consume it. [`use_thumb_preview`] is the whole consumer
 //! surface: `CardThumb` calls it and renders the returned snapshot.
 //!
+//! # Which picture a thumb shows
+//!
+//! A **control-first** project — one whose root scope resolves `control.out`,
+//! answered by the engine and carried on the slot's output frames — leads
+//! with its LAMPS, the same rule the editor's module-face hero follows. The
+//! raster present keeps running underneath (it is what ticks the engine and
+//! carries the lamp answer home); only its canvas stays hidden. Everything
+//! else is exactly the raster thumb it has always been.
+//!
 //! # Host construction and lifetime
 //!
 //! One [`PreviewHost`] per page, constructed **lazily** the first time a
@@ -32,7 +41,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_studio_core::PreviewSource;
+use lpa_studio_core::{PreviewSource, UiControlProductPreview};
 
 /// What the thumb's corner badge shows about its preview slot (fidelity-
 /// tiers ADR: the granted tier and every failure are user-visible, never
@@ -75,6 +84,10 @@ pub(crate) struct ThumbPreview {
     /// The live canvas layer to mount, when this thumb has a preview
     /// source (wasm builds only; `None` renders the static stack).
     pub canvas: Option<ThumbCanvas>,
+    /// The lamp field to draw over the canvas, for a control-first project
+    /// whose output frames carry something drawable. `Some` IS the reveal
+    /// signal — the field only exists once a frame has landed.
+    pub lamps: Option<UiControlProductPreview>,
     /// Badge derived from the live slot status (`None` until the slot
     /// goes live or fails).
     pub badge: Option<ThumbPreviewBadge>,
@@ -87,7 +100,9 @@ pub(crate) struct ThumbCanvas {
     /// permanently consumes a canvas, so every recovery mounts a fresh
     /// element (preview-lab's generation discipline).
     pub id: String,
-    /// A frame has reached this canvas — reveal it over the gradient.
+    /// A frame has reached this canvas AND the raster is the picture this
+    /// thumb shows — reveal it over the gradient. A control-first slot
+    /// leaves it `false`: it presents to a hidden canvas and draws lamps.
     pub revealed: bool,
 }
 
@@ -141,6 +156,7 @@ pub(crate) fn use_preview_lease(source: Option<PreviewSource>, fps: Option<f32>)
         ThumbPreview {
             frame_id,
             canvas: None,
+            lamps: None,
             badge: None,
         }
     }
@@ -154,13 +170,14 @@ mod wasm {
     use dioxus::prelude::*;
     use gloo_timers::future::TimeoutFuture;
     use lpa_studio_core::{
-        PreviewHost, PreviewHostConfig, PreviewProfile, PreviewSlotHandle, PreviewSlotRequest,
-        PreviewSlotStatus, PreviewSource, PreviewTier,
+        ControlDisplayLayout, PreviewHost, PreviewHostConfig, PreviewProfile, PreviewSlotHandle,
+        PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier, UiControlProductPreview,
     };
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::Closure;
 
     use super::{ThumbCanvas, ThumbPreview, ThumbPreviewBadge};
+    use crate::app::node::lamp_view::control_sample_layout_has_rgb;
 
     /// Status/visibility poll cadence per thumb. Change detection rides
     /// `status_revision()`, so each tick is a couple of cheap reads.
@@ -253,6 +270,13 @@ mod wasm {
         visible: Option<bool>,
         /// Last consumed `status_revision` (cheap change detection).
         last_revision: Option<u64>,
+        /// Last consumed `output_frame_revision` — the lamp half's own cheap
+        /// change detection, so a repeated publish repaints nothing.
+        last_output_revision: Option<u64>,
+        /// The newest output frame carried nothing this renderer can draw
+        /// (see [`is_drawable_lamp_frame`]), so the thumb shows its raster
+        /// instead of parking on a blank box.
+        lamp_fallback: bool,
         /// Substantive failures so far (parks at [`THUMB_ERROR_LIMIT`]).
         errors: u8,
         /// Canvas-generation remounts so far (parks at
@@ -271,6 +295,7 @@ mod wasm {
         let generation = use_signal(|| 0_u32);
         let badge = use_signal(|| None::<ThumbPreviewBadge>);
         let revealed = use_signal(|| false);
+        let lamps = use_signal(|| None::<UiControlProductPreview>);
         let state = use_hook(|| Rc::new(RefCell::new(LiveThumbState::default())));
 
         let tick_state = Rc::clone(&state);
@@ -284,8 +309,14 @@ mod wasm {
                 let Some(source) = source else {
                     return; // static thumb: nothing to drive
                 };
+                let signals = ThumbSignals {
+                    generation,
+                    badge,
+                    revealed,
+                    lamps,
+                };
                 loop {
-                    drive_thumb(&state, &frame_id, &source, fps, generation, badge, revealed);
+                    drive_thumb(&state, &frame_id, &source, fps, signals);
                     TimeoutFuture::new(THUMB_POLL_MS).await;
                 }
             }
@@ -307,9 +338,23 @@ mod wasm {
                 id: thumb_canvas_id(&frame_id, generation()),
                 revealed: revealed(),
             }),
+            lamps: lamps(),
             badge: badge(),
             frame_id,
         }
+    }
+
+    /// Everything one live thumb renders from, as the poll loop writes it.
+    #[derive(Clone, Copy)]
+    struct ThumbSignals {
+        /// Canvas element generation, bumped on every recovery remount.
+        generation: Signal<u32>,
+        badge: Signal<Option<ThumbPreviewBadge>>,
+        /// The raster canvas is this thumb's picture and has a frame on it.
+        revealed: Signal<bool>,
+        /// The lamp field, once a control-first slot has published a
+        /// drawable one.
+        lamps: Signal<Option<UiControlProductPreview>>,
     }
 
     /// One poll tick: attach the observer once the frame exists, lease
@@ -319,10 +364,14 @@ mod wasm {
         frame_id: &str,
         source: &PreviewSource,
         fps: Option<f32>,
-        mut generation: Signal<u32>,
-        mut badge: Signal<Option<ThumbPreviewBadge>>,
-        mut revealed: Signal<bool>,
+        signals: ThumbSignals,
     ) {
+        let ThumbSignals {
+            mut generation,
+            mut badge,
+            mut revealed,
+            mut lamps,
+        } = signals;
         let mut state = state_rc.borrow_mut();
 
         if state.observer.is_none() && !state.observer_broken {
@@ -346,23 +395,55 @@ mod wasm {
                     profile: PreviewProfile::default(),
                 });
                 state.last_revision = None;
+                state.last_output_revision = None;
                 state.handle = Some(handle);
             }
         }
 
-        // Snapshot the handle's observables before mutating the state.
-        let (presented, revision, status) = {
+        // Snapshot the handle's observables before mutating the state. The
+        // output frame is read only when its revision moved — cloning a frame
+        // is an Rc bump, but a repaint of the lamp field is not.
+        let (presented, revision, status, control_first, output_frame) = {
             let Some(handle) = &state.handle else {
                 return;
             };
+            let control_first = handle.control_first();
+            let output_revision = handle.output_frame_revision();
+            let output_frame = (control_first == Some(true)
+                && state.last_output_revision != Some(output_revision))
+            .then(|| (output_revision, handle.output_frame()));
             (
                 handle.presented_frames() > 0,
                 handle.status_revision(),
                 handle.status(),
+                control_first,
+                output_frame,
             )
         };
-        if *revealed.peek() != presented {
-            revealed.set(presented);
+
+        // The lamp half: a control-first project draws its published output.
+        if let Some((output_revision, frame)) = output_frame {
+            state.last_output_revision = Some(output_revision);
+            if let Some(frame) = frame {
+                state.lamp_fallback = !is_drawable_lamp_frame(&frame);
+                if state.lamp_fallback {
+                    if lamps.peek().is_some() {
+                        lamps.set(None);
+                    }
+                } else {
+                    lamps.set(Some(frame));
+                }
+            }
+        }
+
+        // Which layer owns the box. A control-first slot keeps its raster
+        // canvas hidden — mounted and presenting, because the present is what
+        // ticks the engine and carries the lamp answer home, but never shown —
+        // until the lamps themselves land. Before that it is pending, exactly
+        // like a visual slot before its first present: the gradient base.
+        let raster_revealed = presented && (control_first != Some(true) || state.lamp_fallback);
+        if *revealed.peek() != raster_revealed {
+            revealed.set(raster_revealed);
         }
         if state.last_revision == Some(revision) {
             return;
@@ -390,7 +471,13 @@ mod wasm {
                 // ours (remount a fresh generation, lease again).
                 state.handle = None;
                 state.last_revision = None;
+                state.last_output_revision = None;
                 revealed.set(false);
+                // The lamps go with the canvas: the next lease redeploys the
+                // project and republishes them.
+                if lamps.peek().is_some() {
+                    lamps.set(None);
+                }
                 // The transferred-canvas error is the EXPECTED recovery
                 // path after LRU eviction or a worker recycle (the host
                 // words it "already transferred — remount"), so it spends
@@ -420,6 +507,25 @@ mod wasm {
                 }
             }
         }
+    }
+
+    /// Whether an output frame is a picture this thumb can actually draw.
+    ///
+    /// [`LampView`] needs a 2D display layout with lamps in it, and RGB
+    /// samples to colour them from. A control-first project with neither —
+    /// the engine refusing dome-scale geometry over its wire budget, an
+    /// output with zero lamps — falls back to the raster thumb: today's
+    /// picture is a truer card than a permanently blank box. A frame that has
+    /// simply not arrived yet is a different state (pending, the gradient),
+    /// and it never reaches here.
+    ///
+    /// [`LampView`]: crate::app::node::lamp_view::LampView
+    fn is_drawable_lamp_frame(frame: &UiControlProductPreview) -> bool {
+        let has_lamps = matches!(
+            frame.display_layout.as_deref(),
+            Some(ControlDisplayLayout::Layout2d(layout)) if !layout.lamps.is_empty()
+        );
+        has_lamps && control_sample_layout_has_rgb(frame)
     }
 
     /// Observe the thumb frame for visibility edges. The callback pushes

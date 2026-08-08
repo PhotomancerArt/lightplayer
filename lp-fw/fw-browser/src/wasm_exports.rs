@@ -1,9 +1,10 @@
 //! wasm-bindgen exports used by `fw-browser-worker.js`.
 
+use lpc_wire::ControlDisplayLayoutRead;
 use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
-use crate::envelope::BrowserInputEnvelope;
+use crate::envelope::{BrowserInputEnvelope, PreviewOutputFrameMessage};
 use crate::tier::RuntimeTier;
 use crate::{logger, runtime_registry};
 
@@ -139,6 +140,37 @@ pub fn render_bus_texture_rgba8(
 ) -> Result<Vec<u8>, String> {
     runtime_registry::with_runtime_mut(runtime_id, |runtime| {
         runtime.render_bus_texture_rgba8(channel, width, height)
+    })
+}
+
+/// Read the runtime's published output frame as the worker's
+/// `preview_output_frame` message JSON.
+///
+/// `display_layout_json` is a serialized `lpc_wire::ControlDisplayLayoutRead`
+/// — the same geometry gate the device-card feed pulls with, so a steady card
+/// asks `always` once and `if_changed` thereafter and the layout crosses the
+/// boundary only when it actually moved. The samples themselves are the
+/// published buffers (u16 LE, post-finalize); nothing is rendered.
+///
+/// The whole message — discriminator, correlation id, control-first fact —
+/// is composed here so the worker script only has to parse and post it.
+#[wasm_bindgen]
+pub fn read_output_frame_json(
+    runtime_id: u32,
+    frame_id: u32,
+    display_layout_json: &str,
+) -> Result<String, String> {
+    let display_layout: ControlDisplayLayoutRead = serde_json::from_str(display_layout_json)
+        .map_err(|error| format!("parse display layout read: {error}"))?;
+    runtime_registry::with_runtime_mut(runtime_id, |runtime| {
+        let (control_first, outputs) = runtime.read_output_frame(display_layout);
+        serde_json::to_string(&PreviewOutputFrameMessage::new(
+            runtime_id,
+            frame_id,
+            control_first,
+            outputs,
+        ))
+        .map_err(|error| format!("serialize output frame message: {error}"))
     })
 }
 
