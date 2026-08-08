@@ -391,7 +391,7 @@ mod tests {
     };
 
     const SPEED_SHADER: &str = "layout(binding = 0) uniform float speed;\n\
-         vec4 render(vec2 pos) { return vec4(fract(speed), 0.0, 0.0, 1.0); }";
+         vec4 render_2d(vec2 pos) { return vec4(fract(speed), 0.0, 0.0, 1.0); }";
 
     fn run(input: &Value, host: &mut FakeHost) -> IterateOutcome {
         futures_executor::block_on(run_upsert_param(input, host, &mut |_| {}))
@@ -565,7 +565,7 @@ mod tests {
     fn def_only_names_pass_the_precheck() {
         // The record exists but the uniform is (currently) undeclared —
         // polishing a stale record is allowed.
-        let mut host = FakeHost::new("vec4 render(vec2 pos) { return vec4(1.0); }");
+        let mut host = FakeHost::new("vec4 render_2d(vec2 pos) { return vec4(1.0); }");
         host.params = Some(vec![ParamDefRecord {
             name: "legacy".into(),
             ..ParamDefRecord::default()
@@ -584,7 +584,7 @@ mod tests {
         let mut host = FakeHost::new(
             "layout(binding = 4) uniform float gravity;\n\
              layout(binding = 5) uniform highp float ballCount;\n\
-             vec4 render(vec2 pos) { this does not compile }",
+             vec4 render_2d(vec2 pos) { this does not compile }",
         );
         let outcome = run(&json!({ "name": "gravity", "default": 1.0 }), &mut host);
         let content: Value = serde_json::from_str(&outcome.content).expect("json");

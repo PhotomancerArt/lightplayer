@@ -11,7 +11,7 @@ use crate::base::code_figure::{CodeFigure, CodeHighlight, CodeHighlightTone};
 const SAMPLE: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
                       layout(binding = 1) uniform float speed;\n\
                       \n\
-                      vec4 render(vec2 pos) {\n    \
+                      vec4 render_2d(vec2 pos) {\n    \
                           vec2 uv = pos / outputSize;\n    \
                           float v = sin(uv.x * 6.2831853 + speed);\n    \
                           return vec4(vec3(v), 1.0);\n\

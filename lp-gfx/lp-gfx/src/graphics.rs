@@ -189,11 +189,43 @@ pub trait LpGraphics: Send + Sync {
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError>;
 
     /// Write all `count × 2` Q16.16 point coordinates (`[x0, y0, x1, y1, …]`).
+    ///
+    /// This is the 2D packing. A 1D-declared shader consumes tightly packed
+    /// single words (`[t0, t1, …]`) — the buffer stays pair-sized, so a 1D
+    /// writer needs a lane-aware entry point here rather than this
+    /// full-slice one (space-tagged sample requests, P4 of the
+    /// dimensionality plan).
     fn write_sample_points(
         &self,
         points: &mut SamplePointsHandle,
         xy_q16: &[i32],
     ) -> Result<(), GfxError>;
+
+    /// Write all `count` Q16.16 coordinates of a **1-lane** batch
+    /// (`[t0, t1, …]`), the packing a `render_1d` shader consumes.
+    ///
+    /// The allocation stays pair-sized (see [`SamplePointsHandle`]), so the
+    /// `t` words fill the first `count` words and the tail is zeroed slack.
+    /// This is a thin wrapper over [`Self::write_sample_points`] rather than
+    /// a new backend surface: every backend stores one flat `i32` buffer, so
+    /// zero-padding here is exactly the contract
+    /// `lp_shader::synth::render_samples` reads. Backends do not override it.
+    fn write_sample_points_1d(
+        &self,
+        points: &mut SamplePointsHandle,
+        t_q16: &[i32],
+    ) -> Result<(), GfxError> {
+        let count = points.count() as usize;
+        if t_q16.len() != count {
+            return Err(GfxError::Backend(alloc::format!(
+                "1D sample point coordinates: buffer holds {count} points, got {}",
+                t_q16.len()
+            )));
+        }
+        let mut padded = alloc::vec![0i32; count * 2];
+        padded[..count].copy_from_slice(t_q16);
+        self.write_sample_points(points, &padded)
+    }
 
     /// Read all `count × 2` Q16.16 point coordinates back.
     fn read_sample_points(&self, points: &SamplePointsHandle) -> Result<Vec<i32>, GfxError>;

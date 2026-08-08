@@ -29,7 +29,7 @@ vec2 movingNoise(vec2 coord, float t) {
     return vec2(hue, value);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     // Front-panel knob: `glow` scales the highlight (default 0.5 reproduces
     // the original). The old `speed` multiplier is gone — the wrapped terms

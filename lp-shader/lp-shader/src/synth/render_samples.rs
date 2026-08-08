@@ -1,4 +1,26 @@
 //! Synthesise `__render_samples_rgba16`: point loop over packed Q16.16 positions.
+//!
+//! # Packed point layout (the host↔guest contract)
+//!
+//! The `points` buffer is **tightly packed Q16.16 words, one lane group per
+//! point, in the declared space's lane count**
+//! ([`ShaderEntrySpace::coord_lanes`]):
+//!
+//! | declared space | stride | word layout |
+//! |---|---|---|
+//! | `TwoD` (`render_2d`) | 8 bytes | `[x0, y0, x1, y1, …]` |
+//! | `OneD` (`render_1d`) | 4 bytes | `[t0, t1, t2, …]` |
+//!
+//! Both are pixel-space coordinates in the same Q16.16 frame currency the
+//! render-texture walk uses — *not* normalized UVs, and not scaled by
+//! `outputSize`. The 1D layout is the packing space-tagged sample requests
+//! must produce.
+//!
+//! The buffer *allocation* is unchanged and stays pair-sized
+//! ([`crate::LpsEngine::alloc_sample_points`] reserves `count × 8` bytes in
+//! both spaces): a 1D batch simply leaves the second half of the allocation
+//! unread, which keeps one allocation shape across a space change and costs
+//! only the slack. A 1D writer fills `points[0..count]`.
 
 use alloc::string::String;
 use alloc::vec;
@@ -14,15 +36,20 @@ use lpvm::{DEFAULT_INVOCATION_FUEL, VMCTX_OFFSET_FUEL};
 use super::render_texture::{
     Q16CoordDecoder, SynthError, append_local_function, emit_globals_reset,
 };
+use crate::entry_space::ShaderEntrySpace;
 
 pub const RENDER_SAMPLES_RGBA16_FN: &str = "__render_samples_rgba16";
 
 /// Append `__render_samples_rgba16` to `module` and `meta` in lockstep.
+///
+/// `space` decides the packed point stride and the entry's arity — see the
+/// module docs for the layout.
 pub fn synthesise_render_samples_rgba16(
     module: &mut LpirModule,
     meta: &mut LpsModuleSig,
     render_fn_index: usize,
     float_mode: FloatMode,
+    space: ShaderEntrySpace,
 ) -> Result<String, SynthError> {
     let render_sig = meta
         .functions
@@ -112,28 +139,27 @@ pub fn synthesise_render_samples_rgba16(
             lhs: points_ptr,
             rhs: points_off,
         });
-        let pos_x = fb.alloc_vreg(IrType::I32);
-        let pos_y = fb.alloc_vreg(IrType::I32);
-        fb.push(LpirOp::Load {
-            dst: pos_x,
-            base: point_base,
-            offset: 0,
-        });
-        fb.push(LpirOp::Load {
-            dst: pos_y,
-            base: point_base,
-            offset: 4,
-        });
-
-        let pos_x_f = coords.decode(&mut fb, pos_x);
-        let pos_y_f = coords.decode(&mut fb, pos_y);
+        // Loads first, then decodes — the op order the Q32 wrapper has
+        // always emitted, so a 2D shader's codegen is byte-identical to
+        // what it was before 1D existed.
+        let words: Vec<_> = (0..space.coord_lanes())
+            .map(|lane| {
+                let word = fb.alloc_vreg(IrType::I32);
+                fb.push(LpirOp::Load {
+                    dst: word,
+                    base: point_base,
+                    offset: (lane as u32) * 4,
+                });
+                word
+            })
+            .collect();
+        let mut call_args = alloc::vec![VMCTX_VREG];
+        for word in words {
+            call_args.push(coords.decode(&mut fb, word));
+        }
 
         let color: Vec<_> = (0..4).map(|_| fb.alloc_vreg(IrType::F32)).collect();
-        fb.push_call(
-            render_callee,
-            &[VMCTX_VREG, pos_x_f, pos_y_f],
-            color.as_slice(),
-        );
+        fb.push_call(render_callee, call_args.as_slice(), color.as_slice());
 
         let sample_base = fb.alloc_vreg(IrType::I32);
         fb.push(LpirOp::Iadd {
@@ -154,7 +180,7 @@ pub fn synthesise_render_samples_rgba16(
         fb.push(LpirOp::IaddImm {
             dst: points_off,
             src: points_off,
-            imm: 8,
+            imm: (space.coord_lanes() as i32) * 4,
         });
         fb.push(LpirOp::IaddImm {
             dst: out_off,
@@ -210,8 +236,14 @@ mod tests {
     #[test]
     fn synth_body_arms_per_invocation_fuel_before_render_call() {
         let (mut ir, mut meta) = make_stub_render_module();
-        let name =
-            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::Q32).expect("synth");
+        let name = synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            0,
+            FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("synth");
         let synth_fn = ir
             .functions
             .values()
@@ -271,8 +303,14 @@ mod tests {
     #[test]
     fn q32_decodes_points_with_a_bare_reinterpret() {
         let (mut ir, mut meta) = make_stub_render_module();
-        let name =
-            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::Q32).expect("synth");
+        let name = synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            0,
+            FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("synth");
         let body = synth_body(&ir, &name);
 
         assert_eq!(
@@ -297,8 +335,14 @@ mod tests {
     #[test]
     fn f32_decodes_points_by_scaling_the_fixed_point_word() {
         let (mut ir, mut meta) = make_stub_render_module();
-        let name =
-            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::F32).expect("synth");
+        let name = synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            0,
+            FloatMode::F32,
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("synth");
         let body = synth_body(&ir, &name);
 
         assert!(
@@ -340,10 +384,15 @@ mod tests {
     }
 
     fn make_stub_render_module() -> (LpirModule, LpsModuleSig) {
+        make_stub_entry_module(ShaderEntrySpace::TwoD)
+    }
+
+    fn make_stub_entry_module(space: ShaderEntrySpace) -> (LpirModule, LpsModuleSig) {
         let return_ir = alloc::vec![IrType::F32; 4];
-        let mut fb = FunctionBuilder::new("render", return_ir.as_slice());
-        let _px = fb.add_param(IrType::F32);
-        let _py = fb.add_param(IrType::F32);
+        let mut fb = FunctionBuilder::new(space.entry_name(), return_ir.as_slice());
+        for _ in 0..space.coord_lanes() {
+            let _p = fb.add_param(IrType::F32);
+        }
         let one_bits = fb.alloc_vreg(IrType::I32);
         fb.push(LpirOp::IconstI32 {
             dst: one_bits,
@@ -366,11 +415,14 @@ mod tests {
 
         let meta = LpsModuleSig {
             functions: alloc::vec![LpsFnSig {
-                name: String::from("render"),
+                name: String::from(space.entry_name()),
                 return_type: LpsType::Vec4,
                 parameters: alloc::vec![FnParam {
                     name: String::from("pos"),
-                    ty: LpsType::Vec2,
+                    ty: match space {
+                        ShaderEntrySpace::TwoD => LpsType::Vec2,
+                        ShaderEntrySpace::OneD => LpsType::Float,
+                    },
                     qualifier: ParamQualifier::In,
                 }],
                 kind: LpsFnKind::UserDefined,
@@ -378,5 +430,49 @@ mod tests {
             ..Default::default()
         };
         (module, meta)
+    }
+
+    /// The 1D sample loop walks **tightly packed single words**: one load at
+    /// offset 0 per point and a 4-byte stride, versus the 2D pair's two
+    /// loads and 8-byte stride. This is the layout space-tagged sample
+    /// requests must produce.
+    #[test]
+    fn one_d_decodes_single_lane_points_at_a_four_byte_stride() {
+        let (mut ir, mut meta) = make_stub_entry_module(ShaderEntrySpace::OneD);
+        let name = synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            0,
+            FloatMode::Q32,
+            ShaderEntrySpace::OneD,
+        )
+        .expect("synth");
+        let body = synth_body(&ir, &name);
+
+        assert_eq!(
+            body.iter()
+                .filter(|op| matches!(op, LpirOp::Load { .. }))
+                .count(),
+            1,
+            "one coordinate word per point"
+        );
+        assert!(
+            body.iter().any(|op| matches!(
+                op,
+                LpirOp::Load { offset, .. } if *offset == 0
+            )),
+            "the single lane sits at the point's own offset"
+        );
+        assert!(
+            body.iter()
+                .any(|op| matches!(op, LpirOp::IaddImm { imm, .. } if *imm == 4)),
+            "points advance one word per sample"
+        );
+        assert!(
+            !body
+                .iter()
+                .any(|op| matches!(op, LpirOp::Load { offset, .. } if *offset == 4)),
+            "no second lane is read"
+        );
     }
 }

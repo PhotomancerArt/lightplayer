@@ -26,7 +26,7 @@ vec3 bandColor(float band) {
     return vec3(0.7, 0.0, 1.0);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     float band = floor(uv.y * 5.0);
 

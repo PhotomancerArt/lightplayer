@@ -308,6 +308,7 @@ pub fn fluid_output_path() -> SlotPath {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::products::visual::{ConsumerPolicy, VisualSpace};
     use alloc::sync::Arc;
     use lp_collection::VecMap;
     use lpc_model::{
@@ -347,7 +348,7 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -439,6 +440,8 @@ mod tests {
                     height: 8,
                     format: TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render fluid texture");
@@ -455,7 +458,7 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -608,6 +611,8 @@ void tick() {
                     height: 8,
                     format: TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render fluid texture");

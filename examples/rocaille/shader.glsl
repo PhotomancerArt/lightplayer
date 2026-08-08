@@ -27,7 +27,7 @@ vec4 friendPattern(vec2 uv) {
     return color;
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     return friendPattern(uv);
 }
