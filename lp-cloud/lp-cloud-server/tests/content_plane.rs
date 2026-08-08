@@ -59,21 +59,18 @@ async fn a_blob_whose_body_does_not_hash_to_its_address_is_refused() {
     );
 }
 
-/// Reads are open (the hash is the capability, and an unfurler fetching
-/// `og:image` has no session); writes are not.
+/// Reads AND writes are open: the hash is the capability on the way down
+/// (an unfurler fetching `og:image` has no session), and since API v3 an
+/// anonymous `Access::Edit` push uploads its blobs with no session either —
+/// the write stays hash-verified and idempotent.
 #[tokio::test]
-async fn uploading_requires_a_session_but_reading_does_not() {
+async fn uploading_and_reading_are_both_anonymous_legal() {
     let server = TestServer::new();
     let bytes = b"anonymous upload".to_vec();
     let hash = ContentHash::of(&bytes);
 
     let anonymous = server.put(&format!("/b/{hash}"), bytes.clone(), None).await;
-    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
-
-    let session = server.sign_in("yona@example.com").await;
-    server
-        .put(&format!("/b/{hash}"), bytes, Some(&session))
-        .await;
+    assert_eq!(anonymous.status(), StatusCode::OK);
     assert_eq!(
         server.get(&format!("/b/{hash}")).await.status(),
         StatusCode::OK
@@ -156,7 +153,7 @@ async fn a_tree_at_the_wrong_address_is_refused() {
 }
 
 #[tokio::test]
-async fn a_tree_upload_requires_a_session_and_a_manifest() {
+async fn a_tree_upload_requires_a_manifest_but_no_session() {
     let server = TestServer::new();
     let manifest = manifest();
     let json = serde_json::to_vec(&manifest).unwrap();
@@ -167,7 +164,7 @@ async fn a_tree_upload_requires_a_session_and_a_manifest() {
             .put(&format!("/t/{package}"), json, None)
             .await
             .status(),
-        StatusCode::UNAUTHORIZED
+        StatusCode::OK
     );
 
     let session = server.sign_in("yona@example.com").await;

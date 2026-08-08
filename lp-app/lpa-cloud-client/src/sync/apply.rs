@@ -98,7 +98,7 @@ mod tests {
     use crate::sync::pull::pull;
     use crate::sync::push::push;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::Visibility;
+    use lpc_cloud_api::Access;
     use lpc_history::SyncRelation;
 
     #[test]
@@ -112,7 +112,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -151,7 +151,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -177,7 +177,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -215,7 +215,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

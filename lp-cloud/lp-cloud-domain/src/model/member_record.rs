@@ -1,9 +1,8 @@
 //! One person's access to one project.
 
 use alloc::string::String;
+use lpc_cloud_api::MemberRole;
 use lpc_history::PrefixedUid;
-
-use crate::model::member_role::MemberRole;
 
 /// A membership row: project × email, with the account it resolved to.
 ///
@@ -23,7 +22,7 @@ pub struct MemberRecord {
     pub email: String,
     /// The account this email resolved to, or `None` while pending.
     pub user: Option<PrefixedUid>,
-    /// Owner or plain member.
+    /// Owner or editor.
     pub role: MemberRole,
     /// When the row was created, f64 epoch seconds from the clock port.
     pub added_at: f64,

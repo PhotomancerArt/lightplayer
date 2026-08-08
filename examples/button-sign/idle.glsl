@@ -10,7 +10,7 @@ layout(binding = 4) uniform sampler2D palette;
 
 const float TAU = 6.2831853;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec2 p = (uv - 0.5) * vec2(outputSize.x / outputSize.y, 1.0);
     float n = lpfn_fbm(p * 2.8 + vec2(time * 0.035, -time * 0.025), 3, 0u);

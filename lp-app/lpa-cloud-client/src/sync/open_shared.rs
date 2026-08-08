@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_cloud_api::{HeadInfo, ProjectMeta};
+use lpc_cloud_api::{HeadInfo, ProjectMeta, SidecarMeta};
 use lpc_history::ContentHash;
 
 use crate::cloud_binding::CloudBinding;
@@ -18,6 +18,9 @@ use crate::sync_error::SyncError;
 pub struct OpenSharedReport {
     /// The service's record of the project.
     pub meta: ProjectMeta,
+    /// Display metadata from the service's most recent commit — the name
+    /// the copy's library entry should wear.
+    pub sidecar: SidecarMeta,
     /// The service's frontier.
     pub heads: Vec<HeadInfo>,
     /// The version checked out into the working copy.
@@ -84,6 +87,7 @@ pub async fn open_shared<P: CloudPort + ?Sized>(
 
     Ok(OpenSharedReport {
         meta: remote.meta,
+        sidecar: remote.sidecar,
         heads: remote.heads,
         head,
         adopted_events: log.events.len(),
@@ -97,7 +101,7 @@ mod tests {
     use crate::sync::publish::publish;
     use crate::sync::pull::pull;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::{CloudError, Visibility};
+    use lpc_cloud_api::{Access, CloudError};
 
     #[test]
     fn an_anonymous_viewer_gets_content_history_and_a_binding() {
@@ -113,7 +117,7 @@ mod tests {
         let published = block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "zook-dome",
             &sidecar("Zook Dome"),
         ))
@@ -151,7 +155,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Private,
+            Access::None,
             "dome",
             &sidecar("Dome"),
         ))
@@ -175,7 +179,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

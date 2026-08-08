@@ -64,7 +64,7 @@ pub use compute_shader::LpComputeShader;
 pub use gfx_error::GfxError;
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
-pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
+pub use lp_shader::{ShaderEntrySpace, ShaderFuelTrap, ShaderFuelTrapEntry};
 #[cfg(feature = "null-backend")]
 pub use null_graphics::NullGraphics;
 pub use sample_out_handle::SampleOutHandle;

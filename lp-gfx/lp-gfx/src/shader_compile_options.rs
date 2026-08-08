@@ -20,12 +20,23 @@ pub struct ShaderCompileOptions {
     /// on a mismatch — missing or extra specs are compile errors on the CPU
     /// and GPU tiers alike.
     pub textures: lp_shader::TextureBindingSpecs,
+    /// Space the shader declares it renders in — the entry contract every
+    /// backend must honour: `TwoD` means the source defines
+    /// `vec4 render_2d(vec2 pos)`, `OneD` means `vec4 render_1d(float pos)`
+    /// (dimensionality plan D19).
+    ///
+    /// Explicit for the same reason as [`Self::semantics`]: it is an
+    /// authored decision (`ShaderDef::space`) that travels with the compile
+    /// request, never inferred from the source text. Backends that fork at
+    /// the GLSL (the GPU tier) splice the matching entry call; the CPU tier
+    /// validates and synthesises against it.
+    pub space: lp_shader::ShaderEntrySpace,
 }
 
 impl ShaderCompileOptions {
     /// Build options from the two per-backend product decisions — semantics
     /// tier and GLSL frontend — with neutral defaults for the rest (20 max
-    /// errors, no texture bindings).
+    /// errors, no texture bindings, the default 2D declared space).
     ///
     /// There is deliberately no `Default`: `frontend` used to fall back to a
     /// `cfg!(feature = "naga")` default, which let Cargo feature unification
@@ -40,7 +51,15 @@ impl ShaderCompileOptions {
             max_errors: Some(20),
             frontend,
             textures: lp_shader::TextureBindingSpecs::new(),
+            space: lp_shader::ShaderEntrySpace::TwoD,
         }
+    }
+
+    /// Same options, for a shader declaring `space`.
+    #[must_use]
+    pub fn with_space(mut self, space: lp_shader::ShaderEntrySpace) -> Self {
+        self.space = space;
+        self
     }
 
     /// LPIR compiler configuration for this compile.

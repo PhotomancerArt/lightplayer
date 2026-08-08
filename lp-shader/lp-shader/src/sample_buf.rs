@@ -4,8 +4,16 @@ use lpvm::LpvmBuffer;
 
 /// Packed Q16.16 shader pixel-space sample points.
 ///
-/// Each point is `[x_pixel_q16, y_pixel_q16]`. These are the same continuous
-/// pixel coordinates passed to `render(vec2 pos)`, not normalized texture UVs.
+/// The packing follows the shader's declared space
+/// ([`crate::ShaderEntrySpace`], full contract in
+/// [`crate::synth::render_samples`]): a 2D shader reads `[x, y]` pairs, a 1D
+/// shader reads tightly packed single `[t]` words. Either way these are the
+/// same continuous pixel coordinates the entry takes, not normalized texture
+/// UVs.
+///
+/// The allocation is pair-sized in both spaces ([`count`](Self::count) × 8
+/// bytes), so a 1D batch fills `data_mut()[..count]` and leaves the rest as
+/// slack.
 pub struct LpsSamplePointBuf {
     buffer: LpvmBuffer,
     count: u32,

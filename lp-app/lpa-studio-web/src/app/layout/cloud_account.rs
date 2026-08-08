@@ -875,8 +875,8 @@ mod tests {
     #[test]
     fn hrefs_encode_only_the_values() {
         assert_eq!(
-            sign_in_href("/auth/dev", "/sim/my project", Some("a+b@x.com")),
-            "/auth/dev?email=a%2Bb%40x.com&next=%2Fsim%2Fmy%20project"
+            sign_in_href("/auth/dev", "/p/my project", Some("a+b@x.com")),
+            "/auth/dev?email=a%2Bb%40x.com&next=%2Fp%2Fmy%20project"
         );
         assert_eq!(
             sign_in_href("/auth/google", "/", None),

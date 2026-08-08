@@ -815,6 +815,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("synth");
 
@@ -895,7 +896,7 @@ mod tests {
         );
     }
 
-    /// Raw `render_frame` with an infinite pixel: the user render fn's
+    /// Raw `render_frame` with an infinite pixel: the user render_2d fn's
     /// emitted checks drain the wrapper-armed per-pixel tank, the trap
     /// unwinds the whole frame call, and the slot carries the offending
     /// linear pixel index. Earlier pixels are already written.
@@ -972,6 +973,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let options = WasmOptions {
@@ -1127,13 +1129,13 @@ mod tests {
         (module, render_vec4_meta())
     }
 
-    /// `render(pos, size, time)` — the 5-scalar-param shape that makes the
-    /// emitter synthesize the legacy `render_frame` wrapper export. Returns
-    /// vec4(1.0); first spins forever iff `pos.x` equals `spin_at_bits`
-    /// (raw Q16.16 bits — the wrapper passes `x << 16`).
+    /// `render_2d(pos, size, time)` — the 5-scalar-param shape that makes
+    /// the emitter synthesize the legacy `render_frame` wrapper export.
+    /// Returns vec4(1.0); first spins forever iff `pos.x` equals
+    /// `spin_at_bits` (raw Q16.16 bits — the wrapper passes `x << 16`).
     fn render_frame_module(spin_at_bits: Option<i32>) -> (LpirModule, LpsModuleSig) {
         let ret_tys = [IrType::F32; 4];
-        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let mut fb = FunctionBuilder::new("render_2d", &ret_tys);
         let px = fb.add_param(IrType::F32);
         let _py = fb.add_param(IrType::F32);
         let _w = fb.add_param(IrType::F32);
@@ -1182,7 +1184,7 @@ mod tests {
 
         let meta = LpsModuleSig {
             functions: vec![LpsFnSig {
-                name: String::from("render"),
+                name: String::from("render_2d"),
                 return_type: LpsType::Vec4,
                 parameters: vec![
                     FnParam {

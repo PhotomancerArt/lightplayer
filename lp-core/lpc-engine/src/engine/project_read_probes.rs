@@ -29,6 +29,7 @@ use crate::products::visual::RenderTextureRequest;
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
+use crate::products::visual::{ConsumerPolicy, VisualSpace};
 
 /// One output node found by the published-frame tree walk, snapshotted so the
 /// layout pass can take `&mut Engine` without holding a tree borrow.
@@ -50,6 +51,8 @@ impl Engine {
             height: request.height,
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: self.frame_time().total_ms as f32 / 1000.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         let revision = self.revision();
         let product = request.product;

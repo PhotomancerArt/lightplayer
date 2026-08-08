@@ -89,7 +89,7 @@ vec2 pick_noise(vec2 scaledCoord, float t) {
     return fbm_demo(scaledCoord, t);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float t = time * input_speed;
     float s = 0.05 * input_zoom;
     vec2 center = outputSize * 0.5;

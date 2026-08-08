@@ -2240,6 +2240,7 @@ mod binding_kind_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::products::visual::{ConsumerPolicy, VisualSpace};
     extern crate std;
 
     use core::cell::Cell;
@@ -2285,7 +2286,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2429,7 +2430,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2514,12 +2515,12 @@ mod tests {
         .expect("active.json");
         fs.write_file(
             "/idle.glsl".as_path(),
-            b"vec4 render(vec2 pos) { return vec4(0.0, pos, 1.0); }",
+            b"vec4 render_2d(vec2 pos) { return vec4(0.0, pos, 1.0); }",
         )
         .expect("idle.glsl");
         fs.write_file(
             "/active.glsl".as_path(),
-            b"vec4 render(vec2 pos) { return vec4(time, pos.x, pos.y, 1.0); }",
+            b"vec4 render_2d(vec2 pos) { return vec4(time, pos.x, pos.y, 1.0); }",
         )
         .expect("active.glsl");
         fs
@@ -2527,7 +2528,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3023,7 +3024,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_product_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3072,7 +3073,7 @@ mod tests {
         .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
-            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+            b"vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
         )
         .expect("shader.glsl");
 
@@ -3185,7 +3186,7 @@ mod tests {
     #[test]
     fn a_phasor_uniform_rides_the_clocks_default_time_product_with_no_authoring() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3271,7 +3272,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3301,7 +3302,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3331,7 +3332,7 @@ mod tests {
         .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
-            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+            b"vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
         )
         .expect("shader.glsl");
 
@@ -3677,7 +3678,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3722,7 +3723,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3742,7 +3743,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3913,7 +3914,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4112,6 +4113,8 @@ mod tests {
                     height: 16,
                     format: TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("fluid texture");
@@ -4562,7 +4565,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4633,7 +4636,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4740,6 +4743,8 @@ mod tests {
                 height: 64,
                 format: TextureStorageFormat::Rgba16Unorm,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             },
         )
         .expect("texture")
@@ -4927,7 +4932,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4985,7 +4990,7 @@ mod tests {
         .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
-            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+            b"vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
         )
         .expect("shader.glsl");
         fs.write_file(
@@ -5121,7 +5126,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -5456,7 +5461,7 @@ mod tests {
 }
 "#;
 
-    const CHAR_SHADER_GLSL: &[u8] = b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }";
+    const CHAR_SHADER_GLSL: &[u8] = b"vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }";
 
     // A compute shader declares the same default-bound `time` slot the
     // starter does (`starter_time_consumed_slots`), plus one produced slot
@@ -5793,7 +5798,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

@@ -14,7 +14,7 @@ use lpc_cloud_api::request::{
     GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
 };
 use lpc_cloud_api::response::{Events, ProjectInfo, PushResult};
-use lpc_cloud_api::{HeadInfo, SidecarMeta, Visibility};
+use lpc_cloud_api::{Access, HeadInfo, SidecarMeta};
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 
 use crate::cloud_port::{CloudPort, call};
@@ -23,18 +23,10 @@ use crate::sync_error::SyncError;
 pub(crate) async fn publish_project<P: CloudPort + ?Sized>(
     port: &P,
     uid: PrefixedUid,
-    visibility: Visibility,
+    access: Access,
     slug: String,
 ) -> Result<ProjectInfo, SyncError> {
-    call(
-        port,
-        PublishProject {
-            uid,
-            visibility,
-            slug,
-        },
-    )
-    .await
+    call(port, PublishProject { uid, access, slug }).await
 }
 
 pub(crate) async fn get_project<P: CloudPort + ?Sized>(

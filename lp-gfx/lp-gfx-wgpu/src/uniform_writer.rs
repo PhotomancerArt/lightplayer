@@ -277,8 +277,12 @@ mod tests {
         authored: &str,
         uniforms: LpsValueF32,
     ) -> Result<Vec<(u32, Vec<u8>)>, GfxError> {
-        let shader = compile_wgsl(authored, &lp_shader::TextureBindingSpecs::new())
-            .expect("shader compiles");
+        let shader = compile_wgsl(
+            authored,
+            &lp_shader::TextureBindingSpecs::new(),
+            lp_shader::ShaderEntrySpace::TwoD,
+        )
+        .expect("shader compiles");
         let table = reflect_uniforms(&shader.module).expect("uniforms reflect");
         encode_uniforms(&shader.module, &table, &uniforms)
     }
@@ -302,7 +306,7 @@ mod tests {
         let encoded = encode_shader(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              layout(binding = 1) uniform float time;\n\
-             vec4 render(vec2 pos) { return vec4(pos / outputSize, time, 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, time, 1.0); }\n",
             root(vec![
                 ("outputSize", LpsValueF32::Vec2([128.0, 64.0])),
                 ("time", LpsValueF32::F32(2.5)),
@@ -327,8 +331,9 @@ mod tests {
         // they are, by reading the reflected struct layout back.
         let shader = compile_wgsl(
             "layout(binding = 0) uniform Block { vec3 a; vec2 b; } blk;\n\
-             vec4 render(vec2 pos) { return vec4(blk.a + vec3(blk.b, 0.0), 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(blk.a + vec3(blk.b, 0.0), 1.0); }\n",
             &lp_shader::TextureBindingSpecs::new(),
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");
@@ -363,8 +368,9 @@ mod tests {
     fn mat3_columns_are_16_byte_strided() {
         let shader = compile_wgsl(
             "layout(binding = 0) uniform Block { mat3 m; float tail; } blk;\n\
-             vec4 render(vec2 pos) { return vec4(blk.m * vec3(pos, blk.tail), 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(blk.m * vec3(pos, blk.tail), 1.0); }\n",
             &lp_shader::TextureBindingSpecs::new(),
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");
@@ -397,8 +403,9 @@ mod tests {
         let shader = compile_wgsl(
             "struct Inner { float x; vec3 v; };\n\
              layout(binding = 0) uniform Block { Inner inner; float after; } blk;\n\
-             vec4 render(vec2 pos) { return vec4(blk.inner.v * blk.inner.x, blk.after); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(blk.inner.v * blk.inner.x, blk.after); }\n",
             &lp_shader::TextureBindingSpecs::new(),
+            lp_shader::ShaderEntrySpace::TwoD,
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");
@@ -432,7 +439,7 @@ mod tests {
     fn missing_uniform_field_errors_with_the_dotted_path() {
         let err = encode_shader(
             "layout(binding = 0) uniform float time;\n\
-             vec4 render(vec2 pos) { return vec4(time); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(time); }\n",
             root(vec![("unrelated", LpsValueF32::F32(0.0))]),
         )
         .expect_err("must fail");
@@ -448,7 +455,7 @@ mod tests {
     fn type_mismatch_errors_clearly() {
         let err = encode_shader(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
             root(vec![("outputSize", LpsValueF32::F32(128.0))]),
         )
         .expect_err("must fail");

@@ -469,7 +469,7 @@ float test_main() {
     fn shader_init_is_marked_synthetic() {
         let glsl = r#"
         float gShared = 0.5;
-        vec4 render(vec2 pos) {
+        vec4 render_2d(vec2 pos) {
             gShared = pos.x;
             return vec4(gShared);
         }
@@ -484,7 +484,11 @@ float test_main() {
             .expect("expected __shader_init for module with non-const global");
         assert_eq!(init.kind, LpsFnKind::Synthetic);
 
-        let render = meta.functions.iter().find(|f| f.name == "render").unwrap();
+        let render = meta
+            .functions
+            .iter()
+            .find(|f| f.name == "render_2d")
+            .unwrap();
         assert_eq!(render.kind, LpsFnKind::UserDefined);
     }
 

@@ -20,20 +20,20 @@
 //! /explore              the explore section (placeholder until modpacks)
 //! /account              the signed-in account's profile page (identity,
 //!                       account, sessions); signed out it asks you in
-//! /sim/<project-key>    the editor as a lens on THE sim session running
-//!                       that project (slug — the user-facing identifier —
-//!                       or a `prj…` uid as fallback). A sim runtime's
-//!                       identity is its project (D37).
-//! /sim/<key>/play       the SAME session, rendered as play mode (panel.md
-//!                       P12: the root module's panel, nothing else).
-//! /device/<dev-uid>     the editor as a lens on that device's session;
-//!                       the project comes from the device.
-//! /device/<uid>/play    likewise.
-//! /p/<slug>-prj<uid>    a SHARED project link (D24): the uid is the whole
-//!                       of the identity (80 bits of it — the link IS the
-//!                       token) and the slug in front is cosmetic, so
+//! /p/<slug>-prj<uid>    THE project route (identity vision D1/D9): the
+//!                       editor as a lens on the sim session running that
+//!                       project, and the share link, at ONE address — the
+//!                       address bar IS the link you paste. The uid is the
+//!                       whole of the identity (80 bits of it — the link IS
+//!                       the token); the slug in front is cosmetic, so
 //!                       renaming never breaks a link already in somebody's
 //!                       chat history. A bare `/p/prj<uid>` resolves too.
+//! /p/<link>/play        the SAME session, rendered as play mode (panel.md
+//!                       P12: the root module's panel, nothing else).
+//! /device/<dev-uid>     the editor as a lens on that device's session;
+//!                       the project comes from the device. Devices keep
+//!                       their own `dev…` identity (vision D13).
+//! /device/<uid>/play    likewise.
 //! /stories[/<story-id>] the story book (dev)
 //! /mapping              the standalone 2D mapping editor
 //! /boards[/<vendor>/<product>], /boards/edit
@@ -60,8 +60,16 @@
 //! remove-never: bookmarks and pasted links outlive re-encodings (the
 //! story-capture harness still drives the book by hash, too).
 //!
-//! **Play is a lens ZOOM, not a different document.** `/sim/x` and
-//! `/sim/x/play` address the same runtime session, so every
+//! **`/sim/` is gone.** The project route absorbed it (identity vision
+//! D1/D9, P3): one project had two addresses — `/sim/<slug>` for the
+//! owner and `/p/<slug>-<uid>` for everybody else — which is one address
+//! too many for a product whose share gesture is "copy what the address
+//! bar already says". Old `/sim/` links get no shim and no redirect: they
+//! are pre-1.0, and the hash-era links they descend from already died
+//! once (cloud-folders-sync P09).
+//!
+//! **Play is a lens ZOOM, not a different document.** `/p/x` and
+//! `/p/x/play` address the same runtime session, so every
 //! route-equivalence question ("is the view already showing this route?",
 //! "is the lens already bound here?") is asked through
 //! [`StudioRoute::same_session`], which ignores the flag. Toggling play must
@@ -76,11 +84,15 @@
 //!
 //! Reconciliation rules (implemented in `web_app.rs`):
 //! - the editor is showing → the route follows the LENS via
-//!   [`lens_route`]: lens on the sim + open project → `Sim(slug)` (a
+//!   [`lens_route`]: lens on the sim + open project → `Project(uid)` (a
 //!   **push** when coming from a page — a gallery open, a new history
 //!   entry — a **replace** when already on a lens route); lens on the
 //!   device → `Device(uid)`.
 //!   A not-yet-identified device has no honest address; the URL stays put.
+//! - the open project's display name is known (or changed) → the address
+//!   bar HEALS to `/p/<slugify(name)>-<uid>` via `replaceState` (D10), so
+//!   a stale slug, a case-mangled paste and a bare uid all straighten out
+//!   without a navigation or a history entry. One place: `web_app.rs`.
 //! - the editor went away → `replace(Devices)` — the gallery the cards
 //!   live on, not the `/` landing — once an open had actually started
 //!   (`saw_opening`); the boot-time home flash never rewrites the URL, or
@@ -89,17 +101,20 @@
 //!   dispatch: to a gallery route (`Devices`/`Projects`, the sections
 //!   that render the shell) while the editor is open = lens detach
 //!   (runtime-pool P3: the editor closes, every runtime session keeps
-//!   running); to `Sim` = the open-on-sim path (create/reuse the sim
-//!   session and push the head — D19 — or re-attach when that project is
-//!   already the sim's loaded project); to `Device` = attach the existing
-//!   session for that uid, or granted-port connect (M1) + attach.
+//!   running); to `Project` = the open-on-sim path when the LIBRARY HAS
+//!   that uid (create/reuse the sim session and push the head — D19 — or
+//!   re-attach when that project is already the sim's loaded project), and
+//!   otherwise somebody else's share link: the uid is held as a
+//!   [`PendingSharedProject`] intent and the app lands on Home with the
+//!   URL untouched (the visitor pull is a later round); to `Device` =
+//!   attach the existing session for that uid, or granted-port connect
+//!   (M1) + attach.
 //!   Connecting/failed device states render honestly on the gallery's cards
 //!   (their connect evidence) — the device route never shows the opening
-//!   frame. `SharedProject` lands on Home carrying a pending intent; the
-//!   open/pull flow itself is a later round.
+//!   frame.
 //! - reload = re-derivation by the same rules: the pool dies with the
-//!   page, and the route rebuilds its runtime (`Sim` respawns + loads;
-//!   `Device` reconnects the granted port + attaches).
+//!   page, and the route rebuilds its runtime (`Project` respawns the sim
+//!   + loads; `Device` reconnects the granted port + attaches).
 //!
 //! `navigate`/`replace` update the URL via the History API, which fires
 //! **no** events — the caller updates the route signal itself, so a
@@ -114,7 +129,8 @@
 //! seam, frozen so `scripts/studio-story-pngs.mjs` keeps working.
 
 use lpa_studio_core::{UiLensRuntime, UiStudioView};
-use lpc_history::{PrefixedUid, UID_BODY_LEN, UidPrefix};
+use lpc_cloud_api::share_link;
+use lpc_history::PrefixedUid;
 
 /// Where the user is (or is headed) in the Studio shell.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150,20 +166,32 @@ pub(crate) enum StudioRoute {
     /// reached from the identity dropdown, not the tab row — and renders
     /// an invitation to sign in rather than a 404 when nobody is.
     Account,
-    /// The editor as a lens on THE sim session running this project. The
-    /// key is the slug (preferred) or a `prj…` uid (machine-stable
-    /// fallback). Reload respawns the sim and loads the project.
-    /// `play` renders that same session as play mode (`/play` suffix).
-    Sim { key: String, play: bool },
+    /// **The** project address (`/p/<slug>-prj…`, identity vision
+    /// D1/D9/D10): the editor as a lens on THE sim session running this
+    /// project when the library has it, and the share link somebody else
+    /// opens when it does not. One route, because the address bar IS the
+    /// link — there is no second, owner-only URL to keep in step.
+    ///
+    /// Reload respawns the sim and loads the project; `play` renders that
+    /// same session as play mode (`/play` suffix).
+    Project {
+        /// The whole of the identity: 80 bits that are both the project's
+        /// name in the system and (for a shared project) the access token.
+        /// Routing reads nothing else.
+        uid: PrefixedUid,
+        /// The slug the address carried, kept so [`StudioRoute::path`] can
+        /// re-emit the link the user is looking at rather than collapsing
+        /// it to a bare uid. Cosmetic and never compared: the authoritative
+        /// slug is recomputed from the project's display name and healed
+        /// into the address bar by `web_app.rs` (D10). `None` for a bare
+        /// `/p/prj…`.
+        slug: Option<String>,
+        play: bool,
+    },
     /// The editor as a lens on this device's runtime session (`dev…`
     /// uid). Reload connects the granted port (M1) and attaches.
     /// `play` renders that same session as play mode (`/play` suffix).
     Device { uid: String, play: bool },
-    /// A shared-project link (`/p/<slug>-prj…`, D24). The uid is the
-    /// identity AND the link token; the slug that decorates it is cosmetic
-    /// and is dropped at parse. Round one lands the app on `Home` with this
-    /// uid held as a pending intent — the open/pull flow is a later round.
-    SharedProject { uid: String },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
     /// The standalone 2D mapping editor (project-free; edits
@@ -217,17 +245,6 @@ impl StudioRoute {
         let (path, _query) = path.split_once('?').unwrap_or((path, ""));
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
-            Some("sim") => match (segments.next(), segments.next(), segments.next()) {
-                (Some(key), None, _) => StudioRoute::Sim {
-                    key: key.to_string(),
-                    play: false,
-                },
-                (Some(key), Some("play"), None) => StudioRoute::Sim {
-                    key: key.to_string(),
-                    play: true,
-                },
-                _ => StudioRoute::Home,
-            },
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => StudioRoute::Device {
                     uid: uid.to_string(),
@@ -239,15 +256,18 @@ impl StudioRoute {
                 },
                 _ => StudioRoute::Home,
             },
-            // A share link: only the LAST segment is examined, so
-            // `/p/<slug>-prjx` and `/p/anything/else/prjx` both resolve
-            // and a path with no uid in it resolves to the landing rather
-            // than to a guess. Mirrors `lp-cloud-server`'s
-            // `page::share_path`.
-            Some("p") => segments
-                .next_back()
-                .and_then(share_uid_from_segment)
-                .map_or(StudioRoute::Home, |uid| StudioRoute::SharedProject { uid }),
+            // The project route. Exactly one link segment, optionally
+            // followed by `play` — depth junk is not a guess at some
+            // project, it is an unknown path. The segment itself is as
+            // forgiving as the shared grammar allows (case mangling,
+            // sentence punctuation, a stale or missing slug); a segment
+            // with no well-formed `prj…` uid in it reads as the landing,
+            // never as a guess.
+            Some("p") => match (segments.next(), segments.next(), segments.next()) {
+                (Some(link), None, _) => project_route(link, false),
+                (Some(link), Some("play"), None) => project_route(link, true),
+                _ => StudioRoute::Home,
+            },
             // `/home` is a kept alias for the root — old links stay
             // loadable; `path()` only ever emits `/`.
             Some("home") if segments.next().is_none() => StudioRoute::Home,
@@ -309,10 +329,10 @@ impl StudioRoute {
     ///
     /// `/` IS the Home path — the root landing is Home (see the variant
     /// docs); `/home` parses in as an alias but is never emitted. A
-    /// `SharedProject` renders as the bare `/p/<uid>`:
-    /// the pretty slug is decoration the router does not know, and is put
-    /// back by [`canonical_share_path`] once the project's meta is in
-    /// hand.
+    /// `Project` re-emits whatever slug its route state carries (a bare
+    /// `/p/<uid>` when it has none); the authoritative slug comes from the
+    /// project's display name, and `web_app.rs` heals the address bar to
+    /// it (D10) rather than the router guessing here.
     pub(crate) fn path(&self) -> String {
         match self {
             StudioRoute::Home => "/".to_string(),
@@ -320,11 +340,12 @@ impl StudioRoute {
             StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
             StudioRoute::Account => "/account".to_string(),
-            StudioRoute::Sim { key, play: false } => format!("/sim/{key}"),
-            StudioRoute::Sim { key, play: true } => format!("/sim/{key}/play"),
+            StudioRoute::Project { uid, slug, play } => {
+                let path = share_link::canonical_path(slug.as_deref().unwrap_or_default(), *uid);
+                if *play { format!("{path}/play") } else { path }
+            }
             StudioRoute::Device { uid, play: false } => format!("/device/{uid}"),
             StudioRoute::Device { uid, play: true } => format!("/device/{uid}/play"),
-            StudioRoute::SharedProject { uid } => format!("/p/{uid}"),
             StudioRoute::Stories { story_id: None } => "/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("/stories/{id}"),
             StudioRoute::MappingEditor => "/mapping".to_string(),
@@ -345,15 +366,16 @@ impl StudioRoute {
         }
     }
 
-    /// Whether the emitted view already shows this SIM route's project
-    /// (the key may be either the slug or the uid). Drives the opening
-    /// frame — which only sim routes render; a device route's connecting
-    /// window renders honestly on the gallery's cards instead.
-    pub(crate) fn sim_matches_view(&self, view: &UiStudioView) -> bool {
+    /// Whether the emitted view already shows this PROJECT route's project.
+    /// The uid is the whole comparison — the slug in the address is
+    /// cosmetic and may be stale, so matching on it would frame a project
+    /// that is already open. Drives the opening frame, which only project
+    /// routes render; a device route's connecting window renders honestly
+    /// on the gallery's cards instead.
+    pub(crate) fn project_matches_view(&self, view: &UiStudioView) -> bool {
         match self {
-            StudioRoute::Sim { key, play: _ } => {
-                view.open_project_uid.as_deref() == Some(key)
-                    || view.open_project_slug.as_deref() == Some(key)
+            StudioRoute::Project { uid, .. } => {
+                view.open_project_uid.as_deref() == Some(uid.to_string().as_str())
             }
             _ => false,
         }
@@ -362,11 +384,15 @@ impl StudioRoute {
     /// Whether two routes address the same runtime SESSION — play and
     /// non-play are the same document at different zoom (panel.md P12), so
     /// every "already here?" question uses this instead of `==`. Without it
-    /// the view→URL sync would see `#/sim/x/play` as a different route from
-    /// the lens's `#/sim/x` and rewrite the user straight back out of play.
+    /// the view→URL sync would see `/p/x/play` as a different route from
+    /// the lens's `/p/x` and rewrite the user straight back out of play.
+    ///
+    /// A project's slug is ignored for the same reason: the canonicalizer
+    /// (D10) rewrites a stale slug in place, and an `==` comparison would
+    /// read that rewrite as a navigation to somewhere else.
     pub(crate) fn same_session(&self, other: &StudioRoute) -> bool {
         match (self, other) {
-            (StudioRoute::Sim { key: a, .. }, StudioRoute::Sim { key: b, .. }) => a == b,
+            (StudioRoute::Project { uid: a, .. }, StudioRoute::Project { uid: b, .. }) => a == b,
             (StudioRoute::Device { uid: a, .. }, StudioRoute::Device { uid: b, .. }) => a == b,
             _ => self == other,
         }
@@ -376,8 +402,9 @@ impl StudioRoute {
     /// returned unchanged (nothing else has a play zoom).
     pub(crate) fn with_play(&self, play: bool) -> StudioRoute {
         match self {
-            StudioRoute::Sim { key, .. } => StudioRoute::Sim {
-                key: key.clone(),
+            StudioRoute::Project { uid, slug, .. } => StudioRoute::Project {
+                uid: *uid,
+                slug: slug.clone(),
                 play,
             },
             StudioRoute::Device { uid, .. } => StudioRoute::Device {
@@ -392,36 +419,23 @@ impl StudioRoute {
     pub(crate) fn is_play(&self) -> bool {
         matches!(
             self,
-            StudioRoute::Sim { play: true, .. } | StudioRoute::Device { play: true, .. }
+            StudioRoute::Project { play: true, .. } | StudioRoute::Device { play: true, .. }
         )
     }
 
     /// Whether this route is a lens on a runtime session (the routes that
     /// have a play variant at all).
     pub(crate) fn is_lens(&self) -> bool {
-        matches!(self, StudioRoute::Sim { .. } | StudioRoute::Device { .. })
+        matches!(
+            self,
+            StudioRoute::Project { .. } | StudioRoute::Device { .. }
+        )
     }
 }
 
-/// A shared project the user arrived on (`/p/<slug>-prjx`), held as an
-/// intent until something can act on it. Provided as a context by
-/// `web_app.rs` and, this round, deliberately consumed by nobody: the route
-/// lands the app on `Home` and the open/pull flow (fetch it, offer it, copy
-/// it into the library) is the post-chrome frontend round. Until then the
-/// address bar keeps the pretty link — a bare `/p/<uid>` rewrite would
-/// throw away the slug the sender chose, and the canonicalization that puts
-/// it back ([`canonical_share_path`]) needs project meta nobody has yet.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
-
-/// The project uid inside one share-path segment, if there is one.
-///
-/// The slug may itself contain `-` — and `prj` can even occur inside a
-/// base-32 uid body — but the uid's length is FIXED, so the split point is
-/// simply the last `"prj".len() + UID_BODY_LEN` characters; strict parsing
-/// of that tail is what makes trailing junk a miss rather than a
-/// truncation. Same rule as the server's `page::share_path` — the two
-/// halves must agree about what a link means.
+/// One `/p/` link segment as a route: the shared grammar's `(slug, uid)`
+/// split, with an empty slug read as no slug at all. A segment that names
+/// no project is the landing — never a guess.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(
@@ -429,24 +443,47 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<String>);
         reason = "reached through parse from the wasm URL plumbing; host builds only run the unit tests"
     )
 )]
-fn share_uid_from_segment(segment: &str) -> Option<String> {
-    let start = segment.len().checked_sub("prj".len() + UID_BODY_LEN)?;
-    let uid: PrefixedUid = segment.get(start..)?.parse().ok()?;
-    (uid.prefix() == UidPrefix::Project).then(|| uid.to_string())
+fn project_route(link: &str, play: bool) -> StudioRoute {
+    match share_link::split_segment(link) {
+        Some((slug, uid)) => StudioRoute::Project {
+            uid,
+            slug: (!slug.is_empty()).then_some(slug),
+            play,
+        },
+        None => StudioRoute::Home,
+    }
 }
 
+/// A shared project the user arrived on (`/p/<slug>-prjx`) that this
+/// library does NOT have, held as an intent until something can act on it.
+/// Provided as a context by `web_app.rs` and, this round, deliberately
+/// consumed by nobody: the route lands the app on `Home` and the visitor
+/// flow (fetch it, offer it, copy it into the library) is a later round.
+/// Until then the address bar keeps the pretty link exactly as the sender
+/// wrote it — the D10 canonicalization only heals a project we can name,
+/// and nobody here can name this one yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PendingSharedProject(pub(crate) Option<PrefixedUid>);
+
 /// The canonical share path for a project: cosmetic slug, load-bearing uid.
-/// Callers hand it the slug once the project's meta is known (the pending
-/// shared-project intent starts life with the uid alone).
-#[allow(
-    dead_code,
-    reason = "the share UI that writes canonical links is the post-chrome round; the rule and its tests land with the parser they mirror"
-)]
+/// Callers hand it the slug once the project's meta is known.
+///
+/// `uid` is a `&str` here because its callers (the gallery card's `<a
+/// href>`, the chrome's session chip) carry uids the way their view models
+/// do — as strings straight off a card. Every one of them is an
+/// already-valid project uid, so this delegates to
+/// [`share_link::canonical_path`] and falls back to the bare shape only
+/// for a malformed uid, which never happens in practice.
 pub(crate) fn canonical_share_path(slug: &str, uid: &str) -> String {
-    if slug.is_empty() {
-        format!("/p/{uid}")
-    } else {
-        format!("/p/{slug}-{uid}")
+    match uid.parse::<PrefixedUid>() {
+        Ok(uid) => share_link::canonical_path(slug, uid),
+        Err(_) => {
+            if slug.is_empty() {
+                format!("/p/{uid}")
+            } else {
+                format!("/p/{slug}-{uid}")
+            }
+        }
     }
 }
 
@@ -505,9 +542,11 @@ pub(crate) fn install_legacy_hash_shim() {
 pub(crate) fn install_legacy_hash_shim() {}
 
 /// The route the LENS binds, when the editor has an addressable one (SDI:
-/// the URL is the focused document). The sim's key is the session's
-/// loaded-project slug (it survives detach, so re-attach flows address
-/// the same document). `None` while the lens is detached, while the sim
+/// the URL is the focused document). The sim's identity is the session's
+/// loaded-project `prj…` uid (it survives detach, so re-attach flows
+/// address the same document); the slug that decorates it is cosmetic and
+/// comes from the live library binding, so a rename shows up without
+/// waiting for a reload. `None` while the lens is detached, while the sim
 /// runs nothing library-backed (the storeless demo path), and for a
 /// device whose identity has not landed — in each case the caller leaves
 /// the URL alone.
@@ -521,9 +560,14 @@ pub(crate) fn install_legacy_hash_shim() {}
 /// leaves a play URL alone.
 pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     match view.lens.as_ref()? {
-        UiLensRuntime::Sim { project_key } => project_key
-            .clone()
-            .map(|key| StudioRoute::Sim { key, play: false }),
+        UiLensRuntime::Sim { project_uid } => {
+            let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
+            Some(StudioRoute::Project {
+                uid,
+                slug: view.open_project_name.clone(),
+                play: false,
+            })
+        }
         UiLensRuntime::Device { uid } => uid
             .clone()
             .map(|uid| StudioRoute::Device { uid, play: false }),
@@ -717,7 +761,7 @@ fn current_path() -> Option<String> {
 /// guard alive for the app's lifetime (a `use_hook`).
 ///
 /// **The click interception** is what a fragment used to give us for free:
-/// a plain click on `<a href="/sim/x">` would otherwise reload the whole
+/// a plain click on `<a href="/p/x-prjy">` would otherwise reload the whole
 /// page (killing the runtime pool) even with a server fallback behind it.
 /// It is deliberately narrow — same-origin, plain left click, no modifier,
 /// no `target`/`download` — so cmd/middle-click still opens a real new tab
@@ -863,16 +907,20 @@ mod tests {
             StudioRoute::Projects,
             StudioRoute::Explore,
             StudioRoute::Account,
-            StudioRoute::Sim {
-                key: "2026-07-09-1421-basic".to_string(),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("2026-07-09-1421-basic".to_string()),
                 play: false,
             },
-            StudioRoute::Sim {
-                key: "2026-07-09-1421-basic".to_string(),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("2026-07-09-1421-basic".to_string()),
                 play: true,
             },
-            StudioRoute::Sim {
-                key: "prjabc123".to_string(),
+            // the bare-uid form: no slug to re-emit
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: None,
                 play: false,
             },
             StudioRoute::Device {
@@ -882,9 +930,6 @@ mod tests {
             StudioRoute::Device {
                 uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: true,
-            },
-            StudioRoute::SharedProject {
-                uid: SHARE_UID.to_string(),
             },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
@@ -913,6 +958,10 @@ mod tests {
 
     /// A minted project uid’s shape: `prj` + 16 base-32 characters.
     const SHARE_UID: &str = "prjh7kq9xy2mq4tb8wz";
+
+    fn share_uid() -> PrefixedUid {
+        SHARE_UID.parse().expect("a well-formed project uid")
+    }
 
     #[test]
     fn routes_round_trip_through_their_path() {
@@ -978,9 +1027,11 @@ mod tests {
             "",
             "/",
             "/nope",
+            // `/sim/` retired with P3 — no shim, no redirect
             "/sim",
-            "/sim/prjx/extra",
-            "/sim/prjx/play/extra",
+            "/sim/2026-07-09-1421-basic",
+            "/sim/prjh7kq9xy2mq4tb8wz",
+            "/sim/prjh7kq9xy2mq4tb8wz/play",
             "/device",
             "/device/devx/extra",
             "/device/devx/play/extra",
@@ -989,7 +1040,7 @@ mod tests {
             "#",
             "#/",
             "#/nope",
-            "#/sim",
+            "#/sim/2026-07-09-1421-basic",
             "#/device/devx/extra",
             "#/device/devx/play/extra",
             "#/mapping/extra",
@@ -1027,9 +1078,20 @@ mod tests {
     #[test]
     fn the_play_segment_parses_on_both_lens_routes() {
         assert_eq!(
-            StudioRoute::parse("/sim/basic/play"),
-            StudioRoute::Sim {
-                key: "basic".to_string(),
+            StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/play")),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("zook-dome".to_string()),
+                play: true
+            }
+        );
+        // …and on the bare-uid form, which a chip link emits before the
+        // canonicalizer has a name to slugify
+        assert_eq!(
+            StudioRoute::parse(&format!("/p/{SHARE_UID}/play")),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: None,
                 play: true
             }
         );
@@ -1040,28 +1102,20 @@ mod tests {
                 play: true
             }
         );
-        // `play` is a suffix, never a key
-        assert_eq!(
-            StudioRoute::parse("/sim/play"),
-            StudioRoute::Sim {
-                key: "play".to_string(),
-                play: false
-            }
-        );
+        // `play` is a suffix, never a link: it names no project, so it is
+        // the landing rather than a guess
+        assert_eq!(StudioRoute::parse("/p/play"), StudioRoute::Home);
     }
 
     // -----------------------------------------------------------------
-    // `/p/` — the share link (D24)
+    // `/p/` — THE project route (identity vision D1/D9/D10)
     // -----------------------------------------------------------------
 
     /// The uid is the identity and the link token; the slug in front of it
     /// is cosmetic, so two names for one uid are one project (which is what
     /// makes renaming safe for links already in somebody's chat history).
     #[test]
-    fn share_paths_read_the_uid_whatever_decorates_it() {
-        let shared = StudioRoute::SharedProject {
-            uid: SHARE_UID.to_string(),
-        };
+    fn project_paths_read_the_uid_whatever_decorates_it() {
         for path in [
             format!("/p/zook-dome-{SHARE_UID}"),
             format!("/p/{SHARE_UID}"),
@@ -1069,19 +1123,53 @@ mod tests {
             format!("/p/a-very-long-renamed-project-{SHARE_UID}"),
             // a stale slug for the same uid is the same project
             format!("/p/old-name-{SHARE_UID}"),
-            // only the LAST segment is examined
-            format!("/p/some/nested/thing-{SHARE_UID}"),
             // and the legacy dialect, for a link shared before the cutover
             format!("#/p/zook-dome-{SHARE_UID}"),
+            // D10: the whole segment survives case mangling (a link
+            // through a shouting chat client, a mail app that title-cases)
+            format!("/p/{}", format!("zook-dome-{SHARE_UID}").to_uppercase()),
+            // trailing sentence punctuation is junk, not part of the link
+            format!("/p/zook-dome-{SHARE_UID})."),
+            // …and the play zoom addresses the same project
+            format!("/p/zook-dome-{SHARE_UID}/play"),
         ] {
-            assert_eq!(StudioRoute::parse(&path), shared, "{path:?}");
+            let route = StudioRoute::parse(&path);
+            assert!(
+                matches!(&route, StudioRoute::Project { uid, .. } if *uid == share_uid()),
+                "{path:?} parsed as {route:?}"
+            );
         }
     }
 
-    /// Strictness is the point: a truncated or padded body is a MISS, not a
-    /// guess at some other project.
+    /// The slug rides along for display only — a stale or shouted one is
+    /// preserved verbatim so `path()` re-emits the link the user is looking
+    /// at; healing it is the canonicalizer's job, not the parser's.
     #[test]
-    fn share_paths_without_a_well_formed_uid_read_as_the_landing() {
+    fn a_project_path_keeps_its_slug_verbatim_for_display() {
+        assert_eq!(
+            StudioRoute::parse(&format!("/p/Old-Name-{SHARE_UID}")),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("Old-Name".to_string()),
+                play: false,
+            }
+        );
+        // a bare uid carries no slug at all (not an empty one)
+        assert_eq!(
+            StudioRoute::parse(&format!("/p/{SHARE_UID}")),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: None,
+                play: false,
+            }
+        );
+    }
+
+    /// Strictness is the point: a truncated or padded body is a MISS, not a
+    /// guess at some other project. Depth junk is a miss too — `/p/` takes
+    /// exactly one link segment, plus an optional `play`.
+    #[test]
+    fn project_paths_without_a_well_formed_uid_read_as_the_landing() {
         for path in [
             "/p",
             "/p/",
@@ -1092,6 +1180,12 @@ mod tests {
             // right shape, wrong kind of thing
             "/p/devh7kq9xy2mq4tb8wz",
             "/p/usrh7Kq9xY2mQ4tB8Wz",
+            // depth junk: a nested path is not a link (it used to resolve
+            // off its last segment; `/play` needs the position to mean
+            // something, so the shape is now exact)
+            "/p/some/nested/thing-prjh7kq9xy2mq4tb8wz",
+            "/p/zook-dome-prjh7kq9xy2mq4tb8wz/play/extra",
+            "/p/zook-dome-prjh7kq9xy2mq4tb8wz/edit",
         ] {
             assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
@@ -1099,45 +1193,51 @@ mod tests {
 
     #[test]
     fn the_canonical_share_path_round_trips_and_survives_an_empty_slug() {
-        let shared = StudioRoute::SharedProject {
-            uid: SHARE_UID.to_string(),
-        };
         let canonical = canonical_share_path("zook-dome", SHARE_UID);
         assert_eq!(canonical, format!("/p/zook-dome-{SHARE_UID}"));
-        assert_eq!(StudioRoute::parse(&canonical), shared);
+        assert_eq!(
+            StudioRoute::parse(&canonical),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("zook-dome".to_string()),
+                play: false,
+            }
+        );
         assert_eq!(
             canonical_share_path("", SHARE_UID),
             format!("/p/{SHARE_UID}")
         );
         assert_eq!(
             StudioRoute::parse(&canonical_share_path("", SHARE_UID)),
-            shared
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: None,
+                play: false,
+            }
         );
-        // the router's own path is the bare uid — the slug comes back only
-        // once the project's meta is known
-        assert_eq!(shared.path(), format!("/p/{SHARE_UID}"));
     }
 
-    /// A share link is not a lens: it has no play zoom and it is nobody's
-    /// session (round one it lands on Home with a pending intent).
+    /// A stale slug and the canonical one are the SAME session, so the
+    /// canonicalizer's `replaceState` never reads as a navigation and the
+    /// view→URL sync never fights it.
     #[test]
-    fn a_share_route_is_not_a_lens() {
-        let shared = StudioRoute::SharedProject {
-            uid: SHARE_UID.to_string(),
-        };
-        assert!(!shared.is_lens());
-        assert!(!shared.is_play());
-        assert_eq!(shared.with_play(true), shared);
-        assert!(!shared.same_session(&StudioRoute::Home));
-        assert!(shared.same_session(&shared));
+    fn a_stale_slug_addresses_the_same_session_as_the_canonical_one() {
+        let stale = StudioRoute::parse(&format!("/p/old-name-{SHARE_UID}"));
+        let canonical = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}"));
+        let bare = StudioRoute::parse(&format!("/p/{SHARE_UID}"));
+        assert_ne!(stale, canonical);
+        assert!(stale.same_session(&canonical));
+        assert!(bare.same_session(&canonical));
+        assert!(canonical.same_session(&canonical.with_play(true)));
     }
 
     /// Play is a lens ZOOM: toggling it must never read as a different
     /// document, or the view→URL sync would bounce the user out of it.
     #[test]
     fn play_and_non_play_are_the_same_session() {
-        let editing = StudioRoute::Sim {
-            key: "basic".to_string(),
+        let editing = StudioRoute::Project {
+            uid: share_uid(),
+            slug: Some("basic".to_string()),
             play: false,
         };
         let playing = editing.with_play(true);
@@ -1147,11 +1247,12 @@ mod tests {
         assert!(playing.is_play() && !editing.is_play());
         assert!(playing.is_lens() && editing.is_lens());
         // a different project is a different session, play or not
-        assert!(!playing.same_session(&StudioRoute::Sim {
-            key: "other".to_string(),
+        assert!(!playing.same_session(&StudioRoute::Project {
+            uid: "prj0000000000000000".parse().expect("a project uid"),
+            slug: Some("basic".to_string()),
             play: true
         }));
-        // and a device is never a sim
+        // and a device is never a project
         assert!(!playing.same_session(&StudioRoute::Device {
             uid: "basic".to_string(),
             play: true
@@ -1166,17 +1267,18 @@ mod tests {
     /// The opening frame follows the session, not the zoom: a play URL on a
     /// project the view has not reached yet still frames.
     #[test]
-    fn sim_matches_view_ignores_play() {
+    fn project_matches_view_ignores_play() {
         let view = editor_view(Some(UiLensRuntime::Sim {
-            project_key: Some("basic".to_string()),
+            project_uid: Some(SHARE_UID.to_string()),
         }))
-        .with_open_project(Some("prjabc".to_string()), Some("basic".to_string()));
+        .with_open_project(Some(SHARE_UID.to_string()), Some("basic".to_string()));
         assert!(
-            StudioRoute::Sim {
-                key: "basic".to_string(),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("basic".to_string()),
                 play: true
             }
-            .sim_matches_view(&view)
+            .project_matches_view(&view)
         );
     }
 
@@ -1316,17 +1418,28 @@ mod tests {
         UiStudioView::new(vec![pane], UiConsoleView::empty()).with_lens(lens)
     }
 
+    /// The lens binds the project route by UID; the open package's slug
+    /// rides along as the address's cosmetic half.
     #[test]
-    fn lens_on_the_sim_binds_the_sim_route_by_slug() {
+    fn lens_on_the_sim_binds_the_project_route_by_uid() {
         let view = editor_view(Some(UiLensRuntime::Sim {
-            project_key: Some("2026-07-09-1421-basic".to_string()),
-        }));
+            project_uid: Some(SHARE_UID.to_string()),
+        }))
+        .with_open_project(
+            Some(SHARE_UID.to_string()),
+            Some("2026-07-09-1421-basic".to_string()),
+        );
         assert_eq!(
             lens_route(&view),
-            Some(StudioRoute::Sim {
-                key: "2026-07-09-1421-basic".to_string(),
+            Some(StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("2026-07-09-1421-basic".to_string()),
                 play: false
             })
+        );
+        assert_eq!(
+            lens_route(&view).map(|route| route.path()),
+            Some(format!("/p/2026-07-09-1421-basic-{SHARE_UID}"))
         );
     }
 
@@ -1353,47 +1466,49 @@ mod tests {
             lens_route(&editor_view(Some(UiLensRuntime::Device { uid: None }))),
             None
         );
-        // a sim-run project with no library slug (the storeless demo path)
+        // a sim-run project with no library identity (the storeless demo
+        // path) has no honest address either
         assert_eq!(
-            lens_route(&editor_view(Some(UiLensRuntime::Sim { project_key: None }))),
+            lens_route(&editor_view(Some(UiLensRuntime::Sim { project_uid: None }))),
             None
         );
     }
 
     #[test]
-    fn sim_route_matches_the_view_by_slug_or_uid_and_device_routes_never_frame() {
+    fn a_project_route_matches_the_view_by_uid_and_device_routes_never_frame() {
         let view = editor_view(Some(UiLensRuntime::Sim {
-            project_key: Some("2026-07-09-1421-basic".to_string()),
+            project_uid: Some(SHARE_UID.to_string()),
         }))
         .with_open_project(
-            Some("prjabc".to_string()),
+            Some(SHARE_UID.to_string()),
             Some("2026-07-09-1421-basic".to_string()),
         );
-        for key in ["2026-07-09-1421-basic", "prjabc"] {
-            assert!(
-                StudioRoute::Sim {
-                    key: key.to_string(),
-                    play: false
-                }
-                .sim_matches_view(&view),
-                "{key}"
-            );
+        // whatever slug the address carries — canonical, stale or absent —
+        // the uid is what decides
+        for slug in [Some("2026-07-09-1421-basic"), Some("old-name"), None] {
+            let route = StudioRoute::Project {
+                uid: share_uid(),
+                slug: slug.map(str::to_string),
+                play: false,
+            };
+            assert!(route.project_matches_view(&view), "{slug:?}");
         }
         assert!(
-            !StudioRoute::Sim {
-                key: "other".to_string(),
+            !StudioRoute::Project {
+                uid: "prj0000000000000000".parse().expect("a project uid"),
+                slug: Some("2026-07-09-1421-basic".to_string()),
                 play: false
             }
-            .sim_matches_view(&view)
+            .project_matches_view(&view)
         );
         // device routes render the gallery honestly, never the opening
-        // frame — sim_matches_view is deliberately false for them
+        // frame — project_matches_view is deliberately false for them
         assert!(
             !StudioRoute::Device {
                 uid: "devaaaaaaaaaaaaaaaa".to_string(),
                 play: false
             }
-            .sim_matches_view(&view)
+            .project_matches_view(&view)
         );
     }
 }

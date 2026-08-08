@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::layout::site_chrome::{SiteChrome, SiteSection};
+use crate::app::layout::site_chrome::{ChromeProjectMenu, SiteChrome, SiteSection};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::base::{LogoLockup, LogoMark};
 
@@ -199,6 +199,32 @@ fn strip_frame(
                 sessions,
                 on_editor,
                 overflow_menu_open: flyout_open,
+                VersionChipPreview { chip: branch_chip() }
+            }
+        }
+    }
+}
+
+#[story(
+    label = "⋯ menu on a project route",
+    description = "The overflow menu while a project is open: a Project group leads it (spike project-share §5, ruling G4). \"Sharing & access…\" opens the same panel the Share pill does, and \"Archive project\" is a QUIET row, not a red one — archiving is reversible and nothing is deleted, so dressing it as destructive would teach people to fear the wrong control. There is no Delete forever anywhere in this menu."
+)]
+pub(crate) fn overflow_menu_project_group() -> Element {
+    rsx! {
+        // A NARROW frame, like the `narrow` story: `overflow_menu_open`
+        // opens the narrow mount of the menu, and at a wide container that
+        // mount is `display: none` — an open popover anchored to a hidden
+        // trigger has nothing to measure.
+        div {
+            class: "tw:min-h-[460px] tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
+            style: "max-width: 390px;",
+            SiteChrome {
+                section: SiteSection::Session,
+                overflow_menu_open: true,
+                project_menu: Some(ChromeProjectMenu {
+                    on_share: EventHandler::new(|()| {}),
+                    on_archive: EventHandler::new(|()| {}),
+                }),
                 VersionChipPreview { chip: branch_chip() }
             }
         }

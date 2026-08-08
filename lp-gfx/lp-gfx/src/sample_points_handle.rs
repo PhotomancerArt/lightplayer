@@ -6,7 +6,14 @@ use core::any::Any;
 use crate::handle_allocator::{HandleAllocator, HandleBacking};
 
 /// Opaque handle to a buffer of Q16.16 shader pixel-space sample points
-/// (`[x_q16, y_q16]` pairs) owned by an [`crate::LpGraphics`] backend.
+/// owned by an [`crate::LpGraphics`] backend.
+///
+/// The **packing follows the shader's declared space**, not the handle: a 2D
+/// shader (`render_2d`) reads `[x_q16, y_q16]` pairs, a 1D shader
+/// (`render_1d`) reads tightly packed single `[t_q16]` words. The allocation
+/// is pair-sized either way, so a 1D batch fills the first `count` words and
+/// leaves the rest slack (`lp_shader::synth::render_samples` carries the full
+/// contract).
 ///
 /// RAII: dropping the handle returns the allocation. Point data moves through
 /// [`crate::LpGraphics::write_sample_points`] /
@@ -32,7 +39,8 @@ impl SamplePointsHandle {
         }
     }
 
-    /// Number of sample points (each point is two `i32` Q16.16 coordinates).
+    /// Number of sample points (one or two `i32` Q16.16 coordinates each,
+    /// per the consuming shader's declared space).
     #[must_use]
     pub fn count(&self) -> u32 {
         self.count

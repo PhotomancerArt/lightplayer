@@ -383,7 +383,7 @@ fn input_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "source": { "type": "string",
-                "description": "New full GLSL source. When present it is staged as an unsaved edit AND compiled for this experiment. Must define `vec4 render(vec2 pos)`. Max 10240 bytes." },
+                "description": "New full GLSL source. When present it is staged as an unsaved edit AND compiled for this experiment. Must define `vec4 render_2d(vec2 pos)`. Max 10240 bytes." },
             "note": { "type": "string",
                 "description": "One-line intent, shown in the UI next to this call." },
             "size": { "type": "array", "items": { "type": "integer", "minimum": 1 },
@@ -428,8 +428,8 @@ mod tests {
     use super::*;
     use crate::tool::iterate_host::{EngineStatusKind, HostError, HostFuture, ShaderContext};
 
-    const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
-    const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
+    const RED: &str = "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
+    const GREEN: &str = "vec4 render_2d(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
 
     /// Drive one `run_iterate` call to completion, discarding progress.
     fn run(
@@ -453,9 +453,9 @@ mod tests {
             "size": [128, 128],
             "bindings": { "phase": 0.25, "cfg.color": [1, 0, 0] },
             "probes": [
-                { "id": "center", "ty": "vec4", "expr": "render(pos)",
+                { "id": "center", "ty": "vec4", "expr": "render_2d(pos)",
                   "domain": { "point": { "at": [0.5, 0.5] } } },
-                { "id": "row", "ty": "float", "expr": "render(pos).r",
+                { "id": "row", "ty": "float", "expr": "render_2d(pos).r",
                   "domain": { "line": { "from": [0, 0.5], "to": [1, 0.5], "n": 8 } },
                   "reduce": "stats",
                   "vary": { "binding": "phase", "values": [0, 1] } }
@@ -500,7 +500,7 @@ mod tests {
     fn source_is_staged_before_probes_and_compile_errors_are_data() {
         let mut host = FakeHost::new(RED);
         let mut cache = None;
-        let broken = "vec4 render(vec2 pos) { return oops; }";
+        let broken = "vec4 render_2d(vec2 pos) { return oops; }";
         let outcome = run(&json!({ "source": broken }), &mut host, &mut cache);
         assert!(!outcome.is_error, "compile errors are data");
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
@@ -586,10 +586,10 @@ mod tests {
     #[test]
     fn probe_results_are_rounded_for_transport() {
         let mut host =
-            FakeHost::new("vec4 render(vec2 pos) { return vec4(0.123456, 0.0, 0.0, 1.0); }");
+            FakeHost::new("vec4 render_2d(vec2 pos) { return vec4(0.123456, 0.0, 0.0, 1.0); }");
         let mut cache = None;
         let outcome = run(
-            &json!({ "probes": [ { "id": "p", "ty": "float", "expr": "render(pos).r",
+            &json!({ "probes": [ { "id": "p", "ty": "float", "expr": "render_2d(pos).r",
                 "domain": { "point": { "at": [0.5, 0.5] } } } ] }),
             &mut host,
             &mut cache,
@@ -690,9 +690,9 @@ mod tests {
         let mut phases = Vec::new();
         futures_executor::block_on(run_iterate(
             &json!({ "probes": [
-                { "id": "a", "ty": "float", "expr": "render(pos).r",
+                { "id": "a", "ty": "float", "expr": "render_2d(pos).r",
                   "domain": { "point": { "at": [0.5, 0.5] } } },
-                { "id": "b", "ty": "float", "expr": "render(pos).g",
+                { "id": "b", "ty": "float", "expr": "render_2d(pos).g",
                   "domain": { "point": { "at": [0.5, 0.5] } } }
             ] }),
             &mut host,

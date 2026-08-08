@@ -1215,6 +1215,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
+    use lp_shader::ShaderEntrySpace;
     use lp_shader::synth::synthesise_render_texture;
     use lpir::builder::FunctionBuilder;
     use lpir::{FloatMode, FuncId, IrType, LpirModule, LpirOp};
@@ -1365,6 +1366,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
 
@@ -1422,6 +1424,7 @@ mod tests {
             0,
             TextureStorageFormat::Rgba16Unorm,
             FloatMode::Q32,
+            ShaderEntrySpace::TwoD,
         )
         .expect("synth");
         let options = NativeCompileOptions {

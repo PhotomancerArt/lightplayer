@@ -19,13 +19,20 @@
 
 use core::cell::{Cell, RefCell};
 use core::time::Duration;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    CloudAccountControl, PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+    ChromeProjectMenu, CloudAccountControl, PlayToggle, SiteChrome, SiteSection,
+    StudioSettingsPopover, VersionBadge,
 };
+use crate::app::share::{
+    ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, use_visitor_session,
+};
+use crate::base::{ToastHost, use_toast_provider};
+use crate::cloud::SharedOpenState;
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -37,6 +44,8 @@ use lpa_studio_core::{
     SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
     UiLogLevel, UiStudioView, has_unsaved_work,
 };
+use lpc_cloud_api::share_link;
+use lpc_history::PrefixedUid;
 
 const STYLE: &str = include_str!("style.css");
 
@@ -116,31 +125,48 @@ pub fn App() -> Element {
     // context as a `Signal<CloudSession>` alongside a refresh handle. Nothing
     // renders it yet (P5/P6 do); an unreachable service leaves it quiet.
     crate::cloud::use_cloud_session_provider();
+    // The one transient-confirmation slot (base/toast.rs). Provided here so
+    // a line survives the surface that raised it: archiving navigates Home
+    // and unmounts the menu row that asked for it, and the "Archived —
+    // Restore from the Projects page." line still has to land.
+    let toasts = use_toast_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
     // browser-navigation listener dispatches actions for back/forward and
     // in-app link clicks.
     //
-    // A share link (`/p/<slug>-prjx`) is the one route that does NOT become
-    // the app's route: it lands on Home holding a pending intent (D24), and
-    // the URL is left exactly as the sender wrote it — the open/pull flow
-    // and its canonicalization are the post-chrome round.
+    // `/p/<slug>-prjx` is BOTH the owner's editor address and the link a
+    // visitor was handed (identity vision D1/D9) — which one it is depends
+    // on a fact only the mounted library holds, so the route is resolved
+    // against the library roster below (`library_uids`) rather than at
+    // parse time.
     let boot_route = use_hook(router::boot_route);
-    let shared_project = use_context_provider(|| {
-        Signal::new(router::PendingSharedProject(match &boot_route {
-            StudioRoute::SharedProject { uid } => Some(uid.clone()),
-            _ => None,
-        }))
-    });
-    let boot_is_share = matches!(boot_route, StudioRoute::SharedProject { .. });
-    let mut route = use_signal(move || match boot_route {
-        StudioRoute::SharedProject { .. } => StudioRoute::Home,
-        other => other,
+    let shared_project = use_context_provider(|| Signal::new(router::PendingSharedProject(None)));
+    let mut route = use_signal({
+        let boot_route = boot_route.clone();
+        move || boot_route
     });
     use_hook(move || {
-        if !boot_is_share {
-            router::replace(&route.peek().clone());
+        router::replace(&route.peek().clone());
+    });
+    // The library's `prj…` uids, latched from the last view whose library
+    // had actually MOUNTED. `None` means the library has not spoken yet:
+    // an empty roster from an unmounted store is not an answer, and
+    // answering "we don't have it" from one would send an owner reloading
+    // their own project down the visitor path.
+    let library_uids = use_hook(|| Rc::new(RefCell::new(None::<BTreeSet<String>>)));
+    // A `/p/<uid>` route waiting for that roster (boot, before the store
+    // has attached). Resolved by the view loop on the first mounted
+    // library; navigation mid-session answers straight from the latch.
+    let pending_project_route = use_hook(|| Rc::new(RefCell::new(None::<PrefixedUid>)));
+    use_hook({
+        let waiting = Rc::clone(&pending_project_route);
+        let boot_route = boot_route.clone();
+        move || {
+            if let StudioRoute::Project { uid, .. } = boot_route {
+                *waiting.borrow_mut() = Some(uid);
+            }
         }
     });
     // What the view currently shows, for the navigation listener: the
@@ -174,6 +200,8 @@ pub fn App() -> Element {
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
     let loop_unsaved = Rc::clone(&unsaved);
+    let loop_library_uids = Rc::clone(&library_uids);
+    let loop_pending_project = Rc::clone(&pending_project_route);
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -257,12 +285,35 @@ pub fn App() -> Element {
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
+        let loop_tx = handle.tx.clone();
         spawn(async move {
             while let Some(next) = view_rx.recv().await {
                 *loop_open_ids.borrow_mut() = next
                     .open_project_uid
                     .clone()
-                    .zip(next.open_project_slug.clone());
+                    .zip(next.open_project_name.clone());
+                // Latch the library roster and answer any `/p/<uid>` route
+                // that has been waiting for it (the boot case — navigation
+                // mid-session reads the same latch synchronously).
+                if let Some(home) = next.home.as_ref()
+                    && home.library_available
+                {
+                    *loop_library_uids.borrow_mut() =
+                        Some(home.projects.iter().map(|card| card.uid.clone()).collect());
+                }
+                let waiting = *loop_pending_project.borrow();
+                if let Some(uid) = waiting
+                    && resolve_project_route(
+                        uid,
+                        &loop_library_uids,
+                        &loop_tx,
+                        &loop_pending_route_open,
+                        shared_project,
+                        route,
+                    )
+                {
+                    *loop_pending_project.borrow_mut() = None;
+                }
                 // The editor is showing exactly when the view built the
                 // pane layout (device-opened projects carry no library
                 // uid, so pane presence — not project identity — is the
@@ -293,7 +344,7 @@ pub fn App() -> Element {
 
                 // view → route: the URL follows the LENS (SDI — the URL is
                 // the focused document): lens on the sim + open project →
-                // /sim/<slug>; lens on a device → /device/<uid>.
+                // /p/<slug>-<uid>; lens on a device → /device/<uid>.
                 let current = route.peek().clone();
                 // A STEADY lens follows the URL only while a shell route
                 // is what's rendered (the gallery routes, where a card
@@ -308,7 +359,7 @@ pub fn App() -> Element {
                     current,
                     StudioRoute::Devices
                         | StudioRoute::Projects
-                        | StudioRoute::Sim { .. }
+                        | StudioRoute::Project { .. }
                         | StudioRoute::Device { .. }
                 );
                 if editor_showing && (on_shell_route || bound_changed) {
@@ -321,7 +372,7 @@ pub fn App() -> Element {
                     {
                         if matches!(
                             current,
-                            StudioRoute::Sim { .. } | StudioRoute::Device { .. }
+                            StudioRoute::Project { .. } | StudioRoute::Device { .. }
                         ) {
                             // boot/forward resolution on a lens route
                             // (uid → slug, identity landing): same place,
@@ -335,11 +386,12 @@ pub fn App() -> Element {
                         }
                         route.set(target);
                     }
-                    // an unaddressable lens (no slug yet, or a device
-                    // whose identity has not landed) keeps the URL as-is
+                    // an unaddressable lens (no library identity yet, or a
+                    // device whose identity has not landed) keeps the URL
+                    // as-is
                 } else if matches!(
                     current,
-                    StudioRoute::Sim { .. } | StudioRoute::Device { .. }
+                    StudioRoute::Project { .. } | StudioRoute::Device { .. }
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
@@ -358,6 +410,36 @@ pub fn App() -> Element {
                     if open_ended {
                         router::replace(&StudioRoute::Devices);
                         route.set(StudioRoute::Devices);
+                    }
+                }
+
+                // D10 — the address bar HEALS. The canonical link for a
+                // project is `/p/<slugify(display name)>-<uid>`, so once
+                // the open project's name is known (and again the moment a
+                // rename lands) a stale slug, a case-mangled paste and a
+                // bare uid all straighten out. This is the ONE place that
+                // decides what the pretty half says.
+                //
+                // `replaceState` only: nothing navigates, no history entry
+                // is spent, and `same_session` ignores the slug — so the
+                // lens sync above never reads this rewrite as a move to
+                // some other document and never fights it.
+                let current = route.peek().clone();
+                if let StudioRoute::Project { uid, play, .. } = &current
+                    && next.open_project_uid.as_deref() == Some(uid.to_string().as_str())
+                {
+                    let canonical = StudioRoute::Project {
+                        uid: *uid,
+                        slug: next
+                            .open_project_name
+                            .as_deref()
+                            .map(share_link::slugify)
+                            .filter(|slug| !slug.is_empty()),
+                        play: *play,
+                    };
+                    if canonical != current {
+                        router::replace(&canonical);
+                        route.set(canonical);
                     }
                 }
 
@@ -417,22 +499,13 @@ pub fn App() -> Element {
     let nav_editor_open = Rc::clone(&editor_open_now);
     let nav_bound_route = Rc::clone(&bound_route_now);
     let nav_pending_route_open = Rc::clone(&pending_route_open);
-    let mut nav_shared_project = shared_project;
+    let nav_library_uids = Rc::clone(&library_uids);
+    let nav_pending_project = Rc::clone(&pending_project_route);
     let _route_listener = use_hook(move || {
         router::install_route_listener(move || {
             let new_route = router::current_route();
             let old = route.peek().clone();
             if new_route == old {
-                return;
-            }
-            // A share link navigated to mid-session is an intent, not a
-            // destination (D24): record the uid and change nothing else —
-            // the app keeps showing what it was showing, and the URL keeps
-            // the sender's pretty link for the open flow (a later round) to
-            // canonicalize. Deliberately NOT a lens detach: nothing has
-            // asked to leave the editor yet.
-            if let StudioRoute::SharedProject { uid } = &new_route {
-                nav_shared_project.set(router::PendingSharedProject(Some(uid.clone())));
                 return;
             }
             route.set(new_route.clone());
@@ -451,32 +524,33 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Sim { key, play: _ } => {
-                    // already the focused document? (the bound route
-                    // carries the slug; the open ids cover a uid-keyed URL).
-                    // Play is ignored on purpose: entering or leaving play
-                    // must never re-open the session.
-                    let already_bound = match &*nav_bound_route.borrow() {
-                        Some(StudioRoute::Sim { key: bound, .. }) => {
-                            bound == key
-                                || nav_open_ids
-                                    .borrow()
-                                    .as_ref()
-                                    .is_some_and(|(uid, _)| uid == key)
-                        }
-                        _ => false,
-                    };
-                    if !already_bound {
-                        // the open-on-sim path: create/reuse the sim
-                        // session and push the head (D19) — or re-attach
-                        // when the sim already runs this project (the
-                        // core's open flow decides from its loaded-project
-                        // record)
-                        nav_pending_route_open.set(true);
-                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
-                            HOME_NODE_ID,
-                            HomeOp::OpenPackage { key: key.clone() },
-                        )));
+                StudioRoute::Project { uid, .. } => {
+                    // already the focused document? The uid is the whole
+                    // comparison — a stale slug in the pasted link is the
+                    // same project, and play is ignored on purpose:
+                    // entering or leaving play must never re-open the
+                    // session.
+                    let uid_string = uid.to_string();
+                    let already_bound = matches!(
+                        &*nav_bound_route.borrow(),
+                        Some(StudioRoute::Project { uid: bound, .. }) if bound == uid
+                    ) || nav_open_ids
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|(open, _)| *open == uid_string);
+                    if !already_bound
+                        && !resolve_project_route(
+                            *uid,
+                            &nav_library_uids,
+                            &nav_bridge.tx,
+                            &nav_pending_route_open,
+                            shared_project,
+                            route,
+                        )
+                    {
+                        // the library has not mounted yet (a very early
+                        // in-app link): hold the intent for the view loop
+                        *nav_pending_project.borrow_mut() = Some(*uid);
                     }
                 }
                 StudioRoute::Device { uid, play: _ } => {
@@ -497,8 +571,6 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                // Handled above, before the route signal moved.
-                StudioRoute::SharedProject { .. } => {}
                 StudioRoute::Home
                 | StudioRoute::Explore
                 | StudioRoute::Account
@@ -524,6 +596,30 @@ pub fn App() -> Element {
                 }
             }
         })
+    });
+
+    // The P6 visitor coordinator: who is looking at the open `/p/`
+    // project, the strip banner's state, the pull loop, fork and discard.
+    // Provided as context for the chrome slot and the banner host below.
+    let _visitor_session = use_visitor_session(bridge.tx.clone(), view, route);
+
+    // A `/p/` link whose uid the library does not hold (P3's pending
+    // intent), consumed here: fetch → tracking copy in the library → the
+    // ordinary open funnel; or the calm not-found line on Home.
+    let shared_open_state = use_context_provider(|| Signal::new(SharedOpenState::Idle));
+    let consume_bridge = bridge.clone();
+    let consume_pending_route_open = Rc::clone(&pending_route_open);
+    use_effect(move || {
+        let Some(uid) = shared_project().0 else {
+            return;
+        };
+        consume_shared_intent(
+            uid,
+            shared_open_state,
+            shared_project,
+            consume_bridge.tx.clone(),
+            Rc::clone(&consume_pending_route_open),
+        );
     });
 
     // The local project library: probed in the startup hook below (which
@@ -554,21 +650,13 @@ pub fn App() -> Element {
             }
             store_status.set(status);
             // Reload = re-derivation (D37): the pool died with the page,
-            // so the route rebuilds its runtime — a sim route respawns the
-            // sim and loads the project (the open-on-sim path); a device
-            // route connects the granted port (M1) and attaches, with the
+            // so the route rebuilds its runtime — a device route connects
+            // the granted port (M1) and attaches, with the
             // connecting/failed window rendering honestly on the gallery's
-            // device card.
+            // device card. A `/p/<uid>` route rebuilds too, but not from
+            // here: it first has to learn whether this library HAS that
+            // project, so the view loop resolves it against the roster.
             match &startup_route {
-                StudioRoute::Sim { key, play: _ } => {
-                    startup_pending_route_open.set(true);
-                    startup_bridge
-                        .tx
-                        .send(StudioCommand::Action(UiAction::from_op(
-                            HOME_NODE_ID,
-                            HomeOp::OpenPackage { key: key.clone() },
-                        )));
-                }
                 StudioRoute::Device { uid, play: _ } => {
                     startup_pending_route_open.set(true);
                     startup_bridge
@@ -581,7 +669,7 @@ pub fn App() -> Element {
                         )));
                 }
                 StudioRoute::Home
-                | StudioRoute::SharedProject { .. }
+                | StudioRoute::Project { .. }
                 | StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Explore
@@ -660,20 +748,50 @@ pub fn App() -> Element {
         })
     });
 
-    // The URL's intent picks the frame: a SIM route whose project the
+    // The URL's intent picks the frame: a PROJECT route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.
     // A device route never does — its connecting/failed window renders
-    // honestly on the gallery's device card (the connect evidence).
+    // honestly on the gallery's device card (the connect evidence). A
+    // link to a project this library does NOT have never gets here: the
+    // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
     let current_route = route.read().clone();
-    let opening_frame = matches!(current_route, StudioRoute::Sim { .. })
-        && !current_route.sim_matches_view(&current_view);
+    let opening_frame = matches!(current_route, StudioRoute::Project { .. })
+        && !current_route.project_matches_view(&current_view);
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let play = current_route.is_play();
     let play_toggle = current_route
         .is_lens()
         .then(|| current_route.with_play(!play).path());
+
+    // Sharing administers THE project in the address bar (D1 — the address
+    // bar IS the link), so both its doors exist only on a project route.
+    // Whether the pill actually draws is a further question only the
+    // service can answer; see `app::share::ProjectShareControl`.
+    let project_uid = match &current_route {
+        StudioRoute::Project { uid, .. } => Some(*uid),
+        _ => None,
+    };
+    // The ⋯ menu's "Sharing & access…" opens the SAME panel the pill does.
+    // A popover owns its own open state, so the row bumps a request count
+    // that re-keys the control and mounts it open — one bump per ask, so
+    // asking again after closing reopens it.
+    let mut share_request = use_signal(|| 0u32);
+    let project_menu = project_uid.map(|uid| ChromeProjectMenu {
+        on_share: EventHandler::new(move |()| share_request += 1),
+        on_archive: EventHandler::new(move |()| {
+            archive_project(uid, Some(toasts), move || {
+                // We just archived the project this route addresses; the
+                // link no longer resolves for anyone but its members, so
+                // staying here would be a lie. Home, with a real history
+                // entry — back returns to where the user was.
+                let mut route = route;
+                router::navigate(&StudioRoute::Home);
+                route.set(StudioRoute::Home);
+            });
+        }),
+    });
 
     // One shell for every section: the chrome renders at the same offset
     // whatever is below it, and switching sections swaps only the body —
@@ -710,11 +828,29 @@ pub fn App() -> Element {
                 section,
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
+                project_menu,
                 if let Some(href) = play_toggle {
                     // A plain hash link, like the nav tabs: the route
                     // listener picks it up, sees the same session, and
                     // swaps only what the shell renders.
                     PlayToggle { href, playing: play }
+                }
+                if let Some(uid) = project_uid {
+                    // First in the right cluster, ahead of the gear and
+                    // the avatar (spike §1-A). Re-keyed on the request
+                    // count so the ⋯ row can mount it open, and on the
+                    // uid so moving to another project re-asks the
+                    // service instead of showing the last one's roster.
+                    ProjectShareControl {
+                        key: "{uid}-{share_request}",
+                        uid,
+                        initially_open: share_request() > 0,
+                    }
+                    // The same slot, visitor variant (P6, spike §2-D).
+                    // Each door self-gates on the service's answer —
+                    // members get the pill above, link-holders get this
+                    // one, and never both.
+                    VisitorShareSlot {}
                 }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
@@ -728,6 +864,11 @@ pub fn App() -> Element {
                 CloudAccountControl { on_account: section == SiteSection::Account }
             }
             LocalStoreBanner { status: store_status.read().clone() }
+            // The visitor strip (P6, spike §3-A): full-width under the
+            // chrome, only for an open tracking copy without write.
+            // Self-gating — renders nothing for members and non-project
+            // routes.
+            VisitorBannerHost {}
             match current_route {
                 StudioRoute::Home => rsx! {
                     crate::app::HomePage { on_action }
@@ -777,8 +918,105 @@ pub fn App() -> Element {
                     }
                 },
             }
+            // Last, and outside every section: one line at the page's
+            // bottom for acts with no other visible consequence (a link on
+            // the clipboard, an access level flipped, a project archived).
+            ToastHost {}
         }
     }
+}
+
+/// Act on a `/p/<uid>` route, once the library roster can say whether this
+/// is the user's own project or somebody else's link (identity vision
+/// D1/D9 — the two cases share one address, and only the library tells
+/// them apart).
+///
+/// A HIT opens through the same funnel a gallery card's click uses
+/// (`HomeOp::OpenPackage`, keyed by uid): create or reuse the sim session
+/// and push the head (D19), or re-attach when the sim already runs this
+/// project — the core's open flow decides that from its own loaded-project
+/// record (the D37 invariant, `studio_controller.rs`), so this must keep
+/// handing it a key that record recognizes.
+///
+/// A MISS is a visitor: hold the uid as a pending intent, land on Home, and
+/// leave the URL exactly as the sender wrote it. Nothing consumes the
+/// intent this round — the fetch/offer/copy flow is a later one.
+///
+/// Returns whether the roster could answer at all; `false` means the
+/// library has not mounted yet and the caller should hold the intent.
+fn resolve_project_route(
+    uid: PrefixedUid,
+    library_uids: &RefCell<Option<BTreeSet<String>>>,
+    tx: &CommandSender,
+    pending_route_open: &Rc<Cell<bool>>,
+    mut shared_project: Signal<router::PendingSharedProject>,
+    mut route: Signal<StudioRoute>,
+) -> bool {
+    let uid_string = uid.to_string();
+    let Some(in_library) = library_uids
+        .borrow()
+        .as_ref()
+        .map(|uids| uids.contains(&uid_string))
+    else {
+        return false;
+    };
+    if in_library {
+        pending_route_open.set(true);
+        tx.send(StudioCommand::Action(UiAction::from_op(
+            HOME_NODE_ID,
+            HomeOp::OpenPackage { key: uid_string },
+        )));
+    } else {
+        shared_project.set(router::PendingSharedProject(Some(uid)));
+        route.set(StudioRoute::Home);
+    }
+    true
+}
+
+/// Consume one pending shared-project intent (P6): fetch the project as a
+/// tracking copy into the library, then open it through the same funnel a
+/// gallery card uses. A refusal lands in `state` for Home's one quiet
+/// line; the URL stays exactly as the sender wrote it, so a reload
+/// retries.
+#[cfg(target_arch = "wasm32")]
+fn consume_shared_intent(
+    uid: PrefixedUid,
+    mut state: Signal<SharedOpenState>,
+    mut shared_project: Signal<router::PendingSharedProject>,
+    tx: CommandSender,
+    pending_route_open: Rc<Cell<bool>>,
+) {
+    state.set(SharedOpenState::Opening);
+    spawn(async move {
+        match crate::cloud::shared_open::open_shared_into_library(uid).await {
+            Ok(summary) => {
+                state.set(SharedOpenState::Idle);
+                pending_route_open.set(true);
+                tx.send(StudioCommand::Action(UiAction::from_op(
+                    HOME_NODE_ID,
+                    HomeOp::OpenPackage {
+                        key: summary.uid.to_string(),
+                    },
+                )));
+            }
+            Err(failure) => state.set(failure),
+        }
+        // Consumed either way: a fresh navigation (or reload) re-arms it.
+        shared_project.set(router::PendingSharedProject(None));
+    });
+}
+
+/// Host builds never navigate; the intent simply clears.
+#[cfg(not(target_arch = "wasm32"))]
+fn consume_shared_intent(
+    _uid: PrefixedUid,
+    mut state: Signal<SharedOpenState>,
+    mut shared_project: Signal<router::PendingSharedProject>,
+    _tx: CommandSender,
+    _pending_route_open: Rc<Cell<bool>>,
+) {
+    state.set(SharedOpenState::Idle);
+    shared_project.set(router::PendingSharedProject(None));
 }
 
 /// The pull loop's per-request progress-deadline timer on wasm: a `setTimeout`

@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dimensionality as a first-class citizen — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --card: #171b20;          --card-subtle: #14181d;
+    --card-muted: #11161b;    --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+    --sel-border: #d6dae0; --sel-bg: rgba(214,218,224,.12);
+
+    --good-bg: #13241d;  --good-border: #365545;  --good-text: #7be0b2;
+    --live-bg: #142330;  --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --warn-bg: #292614;  --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --attn-bg: #291f14;  --attn-border: #795833;  --attn-text: #f0b97a;
+    --err-bg: #301b1d;   --err-border: #874b4b;   --err-text: #ffc7c7;
+    --bound-bg: #241a33; --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --engaged-border: #8a6f35; --engaged-text: #e8c56b;
+    --panel-primary: #18201d;  --panel-primary-border: #34463e;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 820px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 36px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 820px; }
+  p.thesis b { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 820px; border: 1px solid var(--border); background: var(--card-muted);
+              border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
+              margin: 12px 0 0; }
+  .leannote b { color: var(--muted); }
+  details.archive { margin-top: 26px; border-top: 1px solid var(--border-muted); padding-top: 8px; }
+  details.archive > summary { cursor: pointer; font-size: 11px; letter-spacing: .1em;
+    color: var(--subtle); text-transform: uppercase; user-select: none; }
+  details.archive .row { margin-top: 14px; }
+  details.archive .aside-reason { color: var(--dim); font-size: 11px; font-style: italic;
+    text-transform: none; letter-spacing: 0; }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .xcontrols input { accent-color: var(--accent); }
+  .xcontrols select { background: var(--card-muted); color: var(--muted); font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs); padding: 2px 6px; }
+
+  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .ccol { width: 356px; }
+  .ccol h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--muted); margin: 0 0 8px; }
+  .ccol h3 .lean { color: var(--good-text); font-size: 9.5px; margin-left: 6px; }
+  .ccol p.why { font-size: 11.5px; color: var(--dim); margin: 8px 0 0; line-height: 1.45; }
+
+  /* ================= node card (real face grammar) ================= */
+  .ncard { border: 1px solid var(--border); border-radius: var(--r-md);
+           background: var(--card); overflow: hidden; width: 100%; }
+  .nhead { display: grid; grid-template-columns: 26px minmax(0,1fr) auto;
+           align-items: center; min-height: 40px; padding-right: 10px;
+           background: var(--card-subtle); border-bottom: 1px solid var(--border-muted); }
+  .nhead .crail { color: var(--dim); font-size: 10px; text-align: center; opacity: .5; }
+  .nhead h3 { margin: 0; font-size: 1.02rem; font-weight: 700; color: var(--strong);
+              line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nhead .trail { display: inline-flex; align-items: center; gap: 7px; }
+  .nhead .kind { font-size: 11px; font-weight: 700; text-transform: lowercase;
+                 letter-spacing: .03em; color: var(--dim); white-space: nowrap; }
+  .spacebadge { font-family: var(--mono); font-size: 10px; font-weight: 700;
+                border: 1px solid var(--border-strong); border-radius: 3px;
+                color: var(--subtle); padding: 1px 5px; cursor: default; letter-spacing: .04em; }
+  .spacebadge.err { border-color: var(--err-border); color: var(--err-text); background: var(--err-bg); }
+  .spacebadge.btn { cursor: pointer; }
+  .spacebadge.btn:hover { border-color: var(--sel-border); color: var(--text); }
+
+  .sect { display: grid; grid-template-columns: 20px minmax(0,1fr); }
+  .sect + .sect, .sect + .drawer, .drawer + .drawer, .sect:not(:first-of-type)
+    { border-top: 1px solid var(--border-muted); }
+  .srail { writing-mode: vertical-rl; transform: rotate(180deg);
+           font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em;
+           color: var(--dim); display: flex; align-items: center; justify-content: center;
+           padding: 8px 0; user-select: none; }
+  .sbody { min-width: 0; }
+
+  .drawer { display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+            cursor: pointer; background: transparent; border: 0; width: 100%; text-align: left; }
+  .drawer:hover { background: var(--card-muted); }
+  .drawer .chev { color: var(--dim); font-size: 9px; }
+  .drawer .lab { font-size: .6rem; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: .14em; color: var(--subtle); }
+  .drawer .sum { font-family: var(--mono); font-size: .68rem; color: var(--dim);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawer .sum.err { color: var(--err-text); }
+
+  /* hero / product preview */
+  .hero { position: relative; background: var(--terminal); }
+  .hero canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .hero .cap { position: absolute; left: 8px; bottom: 6px; font-family: var(--mono);
+               font-size: 9.5px; color: var(--subtle); letter-spacing: .04em;
+               background: color-mix(in srgb, var(--terminal) 72%, transparent);
+               padding: 1px 6px; border-radius: 3px; pointer-events: none; }
+  .togglebar { display: flex; justify-content: flex-end; align-items: center; gap: 2px;
+               padding: 3px 8px; border-bottom: 1px solid var(--border);
+               background: var(--terminal); }
+  .togglebar .tspring { margin-right: auto; font-family: var(--mono); font-size: 9.5px;
+                        color: var(--dim); letter-spacing: .05em; padding-left: 2px; }
+  .tgl { appearance: none; border: 0; background: transparent; color: var(--subtle);
+         padding: 3px 8px; border-radius: 5px; font-size: 10.5px; font-weight: 700;
+         cursor: pointer; font-family: var(--mono); letter-spacing: .05em; }
+  .tgl:hover { color: var(--text); background: rgba(255,255,255,.05); }
+  .tgl.on { color: #3fd68e; background: rgba(63,214,142,.1); }
+
+  /* settings / panel controls */
+  .settings { display: flex; flex-wrap: wrap; gap: 16px 18px; padding: 12px 16px 12px 8px;
+              align-items: flex-start; }
+  .pctl { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 52px; }
+  .pctl .lbl { font-size: .66rem; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .08em; color: var(--subtle); white-space: nowrap; }
+  .pctl .lbl.bound { color: var(--bound-text); }
+  .pctl .val { font-family: var(--mono); font-size: .7rem; font-variant-numeric: tabular-nums;
+               color: var(--muted); }
+  .pctl .val.bound { color: var(--bound-text); }
+
+  /* space chips + answer badges (shared vocabulary) */
+  .spc { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong);
+         border-radius: 4px; padding: 1px 6px; font-family: var(--mono); font-size: 10.5px;
+         font-weight: 700; color: var(--subtle); letter-spacing: .03em; white-space: nowrap; }
+  .spc.pri { background: var(--raised); color: var(--strong); }
+  .spc .prit { font-size: 8px; font-weight: 800; letter-spacing: .08em; color: var(--dim);
+               text-transform: uppercase; font-family: var(--sans); }
+  .spc.pri .prit { color: var(--heading); }
+  .ansb { display: inline-flex; align-items: center; gap: 4px; border-radius: 3px; padding: 0 5px;
+          font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+          border: 1px solid var(--border-strong); color: var(--dim); white-space: nowrap; }
+  .ansb.native  { border-color: var(--good-border); color: var(--good-text); background: var(--good-bg); }
+  .ansb.project { border-color: var(--live-border); color: var(--live-text); background: var(--live-bg); }
+  .ansb.hint    { border-color: var(--attn-border); color: var(--attn-text); background: var(--attn-bg); }
+  .ansb.err     { border-color: var(--err-border); color: var(--err-text); background: var(--err-bg); }
+
+  /* slot pane */
+  .spane { border: 1px solid var(--border); border-radius: var(--r-sm);
+           background: var(--card-subtle); overflow: hidden; }
+  .spane.bound { border-color: var(--bound-border); }
+  .sp-h { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-muted);
+          background: var(--card-muted); padding: 4px 8px 4px 10px; }
+  .spane.bound .sp-h { background: linear-gradient(90deg, var(--bound-bg), transparent 72%), var(--card-muted); }
+  .sp-h b { font-size: 12px; font-weight: 700; color: var(--strong); }
+  .sp-h .sp-i { margin-left: auto; color: var(--dim); font-size: 11px; }
+  .sp-b { display: grid; gap: 8px; padding: 12px; place-items: center; }
+  .sp-b.flush { padding: 0; display: block; }
+
+  /* slot rows (advanced drawer look) */
+  .slotrow { display: grid; grid-template-columns: minmax(110px,.4fr) minmax(0,1fr) 26px;
+             align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
+  .slotrow:nth-child(odd) { background: var(--card-muted); }
+  .slotrow.bound { background: linear-gradient(270deg, var(--bound-bg) 0%, var(--bound-bg) 34%, transparent 100%); }
+  .slotrow .sname { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .slotrow .sinfo { color: var(--dim); font-size: 11px; text-align: center; }
+  .field { display: inline-flex; min-height: 24px; align-items: center; gap: 6px;
+           border: 1px solid var(--border-subtle); background: var(--bg); border-radius: var(--r-xs);
+           padding: 2px 8px; font-size: 12px; font-weight: 500; color: var(--muted);
+           max-width: 100%; }
+  select.field { cursor: pointer; appearance: auto; font-family: var(--sans); }
+  .field.ro { border-color: var(--border-muted); background: var(--card-muted); color: var(--subtle); }
+
+  .bindchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--bound-border);
+              border-radius: var(--r-xs); padding: 1px 6px; color: var(--bound-text);
+              font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+
+  /* §1 negotiation stage */
+  .stage { display: grid; grid-template-columns: 320px 240px minmax(280px, 380px);
+           gap: 22px; align-items: start; }
+  @media (max-width: 1020px) { .stage { grid-template-columns: 1fr; } }
+  .pickrow { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .pick { appearance: none; cursor: pointer; border: 1px solid var(--border-strong);
+          background: var(--card-subtle); color: var(--muted); border-radius: var(--r-xs);
+          padding: 3px 9px; font-size: 11.5px; font-weight: 600; }
+  .pick:hover { border-color: var(--sel-border); color: var(--text); }
+  .pick.on { border-color: var(--accent-border); color: var(--accent); background: var(--card-muted); }
+  .setline { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+
+  .negbox { border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+            background: var(--terminal); overflow: hidden; }
+  .negbox .nb-h { padding: 4px 9px; font-size: 9px; font-weight: 800; letter-spacing: .14em;
+                  text-transform: uppercase; color: var(--dim); background: var(--card-muted);
+                  border-bottom: 1px solid var(--border-muted); }
+  .negbox .nb-b { padding: 10px 11px 12px; display: grid; gap: 7px; justify-items: start; }
+  .negbox .mode { font-size: 13px; font-weight: 700; color: var(--strong); }
+  .negbox .why { font-size: 11px; color: var(--subtle); line-height: 1.45; }
+  .negbox .why b { color: var(--muted); }
+  .negbox[data-mode=native]  { border-color: var(--good-border); }
+  .negbox[data-mode=project] { border-color: var(--live-border); }
+  .negbox[data-mode=scan]    { border-color: var(--attn-border); }
+  .negbox .ovrow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtle); }
+
+  .pframe { position: relative; background: #07080a; border: 1px solid var(--border);
+            border-radius: 7px; overflow: hidden; }
+  .pframe canvas { display: block; width: 100%; height: auto; }
+  .ppill { position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 5px;
+           border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+           background: color-mix(in srgb, var(--terminal) 78%, transparent);
+           font: 800 9.5px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+  .ppill.native { color: var(--good-text); }
+  .ppill.project { color: var(--live-text); }
+  .ppill.scan { color: var(--attn-text); border-color: var(--attn-border); }
+  .fcap { display: flex; gap: 6px; align-items: center; margin-top: 7px; flex-wrap: wrap;
+          font-size: 11px; color: var(--dim); }
+
+  /* §2 space cell editor */
+  .segrow { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+            overflow: hidden; }
+  .seg { appearance: none; border: 0; background: transparent; color: var(--subtle);
+         font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 3px 10px;
+         cursor: pointer; border-right: 1px solid var(--border-muted); }
+  .seg:last-child { border-right: 0; }
+  .seg:hover { color: var(--text); background: rgba(255,255,255,.04); }
+  .seg.on { background: var(--raised); color: var(--strong); }
+  .segrow.err { border-color: var(--err-border); }
+  .cellrow { display: grid; grid-template-columns: 44px minmax(0,1fr); align-items: center;
+             gap: 8px; }
+  .cellrow .ct { font-family: var(--mono); font-size: 10.5px; font-weight: 700; color: var(--dim); }
+  .cellsub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .errline { font-size: 11px; color: var(--err-text); background: var(--err-bg);
+             border: 1px solid var(--err-border); border-radius: var(--r-xs); padding: 4px 8px; }
+  .spacegrid { display: grid; gap: 8px; padding: 10px 14px 12px 6px; justify-items: start; }
+  .chipsum { display: inline-flex; gap: 5px; align-items: center; cursor: pointer;
+             background: none; border: 0; padding: 0; }
+
+  /* §3 projection picker sheet */
+  .sheetdemo { position: relative; border: 1px solid var(--border); border-radius: var(--r-md);
+               background: var(--card); overflow: hidden; min-height: 330px; }
+  .sheetdemo .blurbg { position: absolute; inset: 0;
+    background: color-mix(in srgb, var(--terminal) 76%, transparent); backdrop-filter: blur(1.5px); }
+  .sheet { position: relative; margin: 26px auto; width: 328px; max-width: calc(100% - 28px);
+           background: var(--card); border: 1px solid var(--border-strong); border-radius: 10px;
+           padding: 14px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+  .sheet h4 { margin: 0 0 6px; font-size: 13px; color: var(--strong); }
+  .sheet p { margin: 0 0 10px; font-size: 11.5px; color: var(--subtle); line-height: 1.5; }
+  .projgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .projtile { display: grid; gap: 5px; justify-items: center; border: 1px solid var(--border-strong);
+              border-radius: 8px; padding: 8px 8px 6px; cursor: pointer; background: var(--card-subtle); }
+  .projtile:hover { border-color: var(--sel-border); }
+  .projtile.on { border-color: var(--accent-border); background: var(--card-muted); }
+  .projtile canvas { border-radius: 4px; display: block; }
+  .projtile .pl { font-size: 9.5px; font-weight: 700; letter-spacing: .08em;
+                  text-transform: uppercase; color: var(--subtle); }
+  .projtile.on .pl { color: var(--accent); }
+  .projtile .pd { font-size: 9px; color: var(--dim); }
+  .sheetrow { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+  .sheetrow .note { margin-right: auto; font-size: 10px; color: var(--dim); max-width: 150px; }
+  .cta { appearance: none; border-radius: 7px; font-size: 12px; font-weight: 600;
+         padding: 6px 12px; cursor: pointer; border: 1px solid var(--border);
+         background: transparent; color: var(--muted); white-space: nowrap; }
+  .cta.primary { border-color: var(--good-text); color: var(--good-text); }
+  .cta.primary:disabled { opacity: .4; cursor: default; }
+  .cta.wfull { width: 100%; border-radius: var(--r-md); padding: 8px 12px; font-size: 13px; }
+
+  /* precedence ladder */
+  .ladder { display: grid; gap: 6px; }
+  .lrung { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 8px; align-items: baseline;
+           border: 1px solid var(--border-muted); border-radius: var(--r-sm);
+           padding: 6px 9px; font-size: 11.5px; color: var(--dim); background: var(--card-subtle); }
+  .lrung .ln { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+  .lrung b { color: var(--muted); font-weight: 600; }
+  .lrung.win { border-color: var(--accent-border); color: var(--muted); }
+  .lrung.win .wintag { color: var(--accent); font-size: 9px; font-weight: 800;
+                       letter-spacing: .08em; text-transform: uppercase; margin-left: 6px; }
+  .lrung .wintag { display: none; }
+  .lrung.win .wintag { display: inline; }
+
+  /* §4 wizard */
+  .wiz { width: 340px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+         background: var(--card); overflow: hidden; border-left: 3px solid var(--warn-text); }
+  .wiz .wh { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-muted);
+             background: var(--terminal); padding: 6px 10px; }
+  .wiz .wh b { font-size: 13.5px; color: var(--heading); font-weight: 700; flex: 1;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wiz .wh .hw { font-family: var(--mono); font-size: .6rem; font-weight: 800; letter-spacing: .1em;
+                 text-transform: uppercase; color: var(--good-text); border: 1px solid var(--good-border);
+                 background: var(--good-bg); border-radius: 999px; padding: 1px 7px; }
+  .wiz .wh .x { appearance: none; border: 0; background: none; color: var(--dim); cursor: pointer;
+                font-size: 12px; }
+  .steps { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border-muted);
+           background: var(--terminal); padding: 6px 10px; font-size: .65rem; }
+  .steps .sep { color: var(--dim); }
+  .step { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 999px;
+          color: var(--dim); font-weight: 700; }
+  .step .num { display: inline-grid; place-items: center; width: 14px; height: 14px;
+               border-radius: 999px; border: 1px solid var(--border-strong);
+               font-size: .55rem; color: var(--subtle); }
+  .step.done { color: var(--heading); }
+  .step.done .num { border-color: var(--accent-border); color: var(--accent); }
+  .step.now { background: var(--raised); color: var(--strong); }
+  .step.now .num { border-color: var(--accent-border); color: var(--accent); }
+  .wbody { display: grid; gap: 12px; padding: 12px; align-content: start; }
+  .wq { margin: 0; font-size: 14px; font-weight: 700; color: var(--strong); }
+  .wsub { margin: -6px 0 0; font-size: .7rem; color: var(--dim); }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { position: relative; display: grid; justify-items: center; gap: 6px; border-radius: 8px;
+          border: 1px solid transparent; background: var(--card-subtle); padding: 10px 6px 8px;
+          cursor: pointer; }
+  .tile:hover { border-color: var(--border-strong); }
+  .tile.on { border-color: var(--accent-border); }
+  .tile.soon { opacity: .45; cursor: default; }
+  .tile svg { width: 44px; height: 30px; stroke: var(--subtle); fill: none; stroke-width: 1.6;
+              stroke-linecap: round; }
+  .tile.on svg { stroke: var(--accent); }
+  .tile .tl { font-size: 11px; font-weight: 700; color: var(--muted); }
+  .tile .ts { font-size: 9.5px; color: var(--dim); }
+  .tile .soonb { position: absolute; top: 5px; right: 5px; font-size: 8px; font-weight: 800;
+                 letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+                 border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; }
+  .followup { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 8px;
+              background: var(--card-muted); padding: 10px; }
+  .followup .fq { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--text); }
+  .optbtn { display: grid; gap: 2px; text-align: left; border: 1px solid var(--border-strong);
+            border-radius: 7px; background: var(--card-subtle); padding: 7px 10px; cursor: pointer;
+            color: var(--muted); font-size: 12px; }
+  .optbtn small { color: var(--dim); font-size: 10.5px; }
+  .optbtn:hover { border-color: var(--sel-border); }
+  .optbtn.on { border-color: var(--accent-border); }
+  .optbtn.on small { color: var(--subtle); }
+  .bioline { margin: 0; font-family: var(--mono); font-size: .68rem; color: var(--dim);
+             display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .backlink { appearance: none; border: 0; background: none; color: var(--heading);
+              font-size: .7rem; font-weight: 700; cursor: pointer; justify-self: start; padding: 0; }
+</style>
+</head>
+<body>
+
+<h1>Dimensionality as a first-class citizen</h1>
+<p class="hint">
+  UX spike for the T2 vision (<code>2026-08-07-1025-dimensionality-first-class</code>): spaces are
+  declared on <b>both ends</b> (shader: primary + per-target answers; fixture: primary + authored set),
+  selection is <b>intersection preferring effect intent</b>, and every mismatch cell is <b>one
+  coordinate map</b> executed at the sampling boundary. Everything animated below runs the real
+  math — the radial tile really is <code>t&nbsp;=&nbsp;|uv−c|</code> sampling the same 1D content.
+  Sections: ① the negotiation, live · ② the shader card's space affordance (3 concepts) ·
+  ③ the projection picker + override ladder · ④ the fixture's declaration moment ·
+  ⑤ the preview space toggle.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>Time</b><label><input type="checkbox" id="xrun" checked> animate</label></span>
+  <span class="grp"><b>comet's opinion</b>
+    <select id="xdecl" data-syncop>
+      <option value="extrude">in 2D: extrude</option>
+      <option value="radial" selected>in 2D: radial</option>
+      <option value="angular">in 2D: angular</option>
+      <option value="mirror">in 2D: mirror</option>
+      <option value="none">no opinion (consumer default)</option>
+    </select></span>
+  <span class="grp"><label><input type="checkbox" id="xmismatch"> declaration mismatch (§2 error state)</label></span>
+</div>
+
+<!-- ==================== 1 · negotiation ==================== -->
+<section class="concept" id="s1">
+<h2>1. The negotiation, live — pick a source × a fixture</h2>
+<p class="thesis">
+  Not a screen — the engine rule made touchable, so the affordances in §2–§5 can be judged against
+  it. <b>Try:</b> fire2012 × scarf (native 1D — the ring map is <i>ignored</i>), plasma × scarf
+  (native 2D — same ring, now the map is used), comet × matrix (projected via its <i>declared</i>
+  radial; flip <b>force</b> in the box to make the fixture win), ripple × matrix (multi-entry: its own 2D look, no projection at
+  all), plasma × strip (2D→1D centre scanline, wearing the visible hint).
+</p>
+<div class="pickrow" id="fxpicks"></div>
+<div class="pickrow" id="fixpicks"></div>
+<div class="stage">
+  <div>
+    <div class="spane"><div class="sp-h"><b id="srcname">fire2012</b><span class="sp-i">ⓘ</span></div>
+      <div class="sp-b flush"><div class="hero"><canvas id="srccanvas" width="384" height="96"></canvas>
+        <span class="cap" id="srccap">1D product</span></div></div>
+    </div>
+    <div class="fcap"><span>declares:</span><span class="setline" id="srcset"></span></div>
+  </div>
+  <div class="negbox" id="negbox" data-mode="native">
+    <div class="nb-h">space negotiation</div>
+    <div class="nb-b">
+      <span class="mode" id="negmode">native · 1D</span>
+      <span class="why" id="negwhy"></span>
+      <div class="ovrow" id="ovrow" hidden>
+        <span>fixture default:</span>
+        <select class="field" data-syncdef>
+          <option value="extrude" selected>extrude</option>
+          <option value="radial">radial</option>
+          <option value="angular">angular</option>
+          <option value="mirror">mirror</option>
+        </select>
+        <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer">
+          <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="pframe"><canvas id="fixcanvas" width="380" height="240"></canvas>
+      <span class="ppill native" id="fixpill">native · 1d</span></div>
+    <div class="fcap" id="fixcap"></div>
+  </div>
+</div>
+</section>
+
+<!-- ==================== 2 · shader card affordance ==================== -->
+<section class="concept" id="s2">
+<h2>2. The shader card — where does the space declaration live?</h2>
+<p class="thesis">
+  <b>Decision log.</b> Gate 1 (2026-08-07): the dedicated <code>space</code> section is
+  <b>chosen</b> — "this is a first-order fundamental aspect… our UX teaches the problem and guides
+  a solution; more things may ride here in time." The <code>ShaderSpace</code> slot (primary
+  variant + per-target cells) renders as a segmented primary + one row per other space. The
+  <b>mismatch toggle</b> (top strip) shows the D1 cross-validation: declared 1D but the GLSL
+  defines <code>render(vec2)</code>. A and C are archived below; everything still edits one state.
+</p>
+<div class="row">
+  <div class="ccol">
+    <h3>the <code>space</code> section <span class="lean">✓ chosen at gate 1</span></h3>
+    <div class="ncard" id="cardB"></div>
+    <p class="why">The declaration is identity, and identity gets a rail label — same rank as
+      <code>output</code>/<code>settings</code>. This is the shader's half of the <b>mirror</b>:
+      the fixture card grows the same section with the inverse (consumer) cells and shared
+      controls — see §4B.</p>
+  </div>
+</div>
+<details class="archive">
+  <summary>Explored and set aside at gate 1 <span class="aside-reason">— kept for contrast</span></summary>
+  <div class="row">
+    <div class="ccol">
+      <h3>A — settings-strip control <span class="aside-reason">— identity buried among performance knobs</span></h3>
+      <div class="ncard" id="cardA"></div>
+    </div>
+    <div class="ccol">
+      <h3>C — header badge + drawer <span class="aside-reason">— cells hidden where nobody learns they exist</span></h3>
+      <div class="ncard" id="cardC"></div>
+    </div>
+  </div>
+</details>
+</section>
+
+<!-- ==================== 3 · projection picker ==================== -->
+<section class="concept" id="s3">
+<h2>3. The projection picker — the guided moment, and who wins</h2>
+<p class="thesis">
+  <b>Decision log.</b> Gate 1 (2026-08-07): projection is a <b>generic enum with a custom UI
+  treatment, declarable on either side of the binding</b> — sources state an <i>opinion</i> (or,
+  later, a custom native entry); consumers provide a <i>default</i> that fills silence, plus
+  <b>force</b> to win anyway. Same pair-specific core types on both sides
+  (<code>VisualProductSpace</code> / <code>VisualConsumerSpace</code>); 3D cells added lazily —
+  the matrix is sparse, nothing "rides on" 2D. The sheet (left) is the enum's custom treatment,
+  reachable from either side; used as the escape valve it <b>leaves a configured projection node
+  in the wiring</b>. Right: the mirrored slot pair and the who-wins ladder.
+  <br><b>Gate 2:</b> converged — A's live tiles move <b>inside B's dropdowns</b> (opening the
+  enum field opens the tile picker; one custom treatment, authored on both sides). "Opinion" is
+  not final wording — closer to <i>default projection</i>; wording decided on real surface.
+</p>
+<div class="row">
+  <div class="ccol" style="width: 380px">
+    <h3>A — the ask (sheet over the fixture card)</h3>
+    <div class="sheetdemo"><div class="blurbg"></div>
+      <div class="sheet">
+        <h4>comet is a 1D effect — Halo lives in 2D</h4>
+        <p>How should it fill the space? comet suggests <b id="sheetsugg">radial</b>.</p>
+        <div class="projgrid" id="projgrid"></div>
+        <div class="sheetrow">
+          <span class="note">Adds a projection node to the wiring — inspect or rebind it later.</span>
+          <button class="cta">Not now</button>
+          <button class="cta primary" id="sheetuse">Use radial</button>
+        </div>
+      </div>
+    </div>
+    <p class="why">The tiles animate the actual shader through the actual maps — the choice is
+      made by looking at the answer, not imagining it. The suggested (declared) option comes
+      pre-picked.</p>
+  </div>
+  <div class="ccol">
+    <h3>B — the mirrored slot pair (both sides of the binding)</h3>
+    <div class="spane">
+      <div class="sp-h"><b>comet — product side</b>
+        <span class="sp-i" style="font-family:var(--mono);font-size:9.5px">VisualProductSpace</span></div>
+      <div class="sp-b" style="place-items:stretch;padding:0;gap:0">
+        <div class="slotrow"><span class="sname">consumed in 2D</span>
+          <select class="field" data-syncop>
+            <option value="none">no opinion</option>
+            <option value="extrude">Opinion · extrude</option>
+            <option value="radial" selected>Opinion · radial</option>
+            <option value="angular">Opinion · angular</option>
+            <option value="mirror">Opinion · mirror</option>
+          </select><span class="sinfo">ⓘ</span></div>
+        <div class="slotrow"><span class="sname">consumed in 3D</span>
+          <span class="field ro">no opinion · soon</span><span class="sinfo">ⓘ</span></div>
+      </div>
+    </div>
+    <div class="spane" style="margin-top:10px">
+      <div class="sp-h"><b>Halo — consumer side</b>
+        <span class="sp-i" style="font-family:var(--mono);font-size:9.5px">VisualConsumerSpace</span></div>
+      <div class="sp-b" style="place-items:stretch;padding:0;gap:0">
+        <div class="slotrow"><span class="sname">from 1D sources</span>
+          <span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0">
+          <select class="field" data-syncdef>
+            <option value="extrude" selected>Default · extrude</option>
+            <option value="radial">Default · radial</option>
+            <option value="angular">Default · angular</option>
+            <option value="mirror">Default · mirror</option>
+          </select>
+          <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-size:11px;color:var(--subtle)">
+            <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label></span>
+          <span class="sinfo">ⓘ</span></div>
+        <div class="slotrow"><span class="sname">from 3D sources</span>
+          <span class="field ro">Default · slice · soon</span><span class="sinfo">ⓘ</span></div>
+      </div>
+    </div>
+    <div class="ladder" id="ladder" style="margin-top:10px"></div>
+    <label style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--subtle);margin-top:6px;cursor:pointer">
+      <input type="checkbox" id="nodetoggle" style="accent-color:var(--accent)"> explicit projection node in the wire
+    </label>
+    <p class="why">One shared set of pair-specific projection enums, referenced from both sides:
+      the source's <b>opinion</b>, the consumer's <b>default</b> (fills silence) and <b>force</b>
+      (wins anyway); the explicit node trumps both by changing the arriving product's space. A 1D
+      fixture carries the inverse cells (<i>from 2D sources: centre scanline…</i>) — same shape,
+      mirrored pairs. These selects, §1's negotiation box, §4B's fixture card, and the top strip
+      are all one state.</p>
+  </div>
+</div>
+</section>
+
+<!-- ==================== 4 · fixture declaration ==================== -->
+<section class="concept" id="s4">
+<h2>4. The fixture's declaration moment — identity, not preference</h2>
+<p class="thesis">
+  <b>Decision log.</b> Gate 1 (2026-08-07): the step is right but <b>not wizard-owned</b> — it is
+  the fixture's <code>space</code> section <b>in guided clothing</b> (the tiles are presets that
+  fill the section), and it fires wherever a fixture node is created: setup wizard,
+  <i>+ fixture</i>, paste. The obvious symmetry: shader and fixture both grow a
+  <code>space</code> section, sharing controls, mirrors of each other. The one authored bit
+  stays — <i>does strip order mean something?</i> — appearing only for mapped shapes (D3). Preset
+  options need another pass. Pick <b>Mapped shape</b> to see the question; right: the same
+  section at rest on the card, now carrying the consumer cells from §3.
+  <br><b>Gate 2:</b> the card (§4B) is about right; the wizard step is directionally right but
+  still tentative — decide on real surface.
+</p>
+<div class="row">
+  <div class="ccol" style="width:340px">
+    <h3>A — the wizard step</h3>
+    <div class="wiz">
+      <div class="wh"><b>Workbench ESP32</b><span class="hw">HW</span><button class="x">✕</button></div>
+      <div class="steps">
+        <span class="step done"><span class="num">✓</span>Connect</span><span class="sep">›</span>
+        <span class="step done"><span class="num">✓</span>Flash</span><span class="sep">›</span>
+        <span class="step now"><span class="num">3</span>Shape</span><span class="sep">›</span>
+        <span class="step"><span class="num">4</span>Provision</span>
+      </div>
+      <div class="wbody">
+        <p class="wq">What shape is this fixture?</p>
+        <p class="wsub">This is the fixture's identity — effects and packs are matched to it.</p>
+        <div class="tiles" id="shapetiles"></div>
+        <div class="followup" id="followup" hidden>
+          <p class="fq">Does strip order still mean something?</p>
+          <button class="optbtn" data-strip="yes"><span>Yes — it's a strip worn in a shape</span>
+            <small>scarf, outline, rope light — 1D effects run along the strip and ignore the map</small></button>
+          <button class="optbtn" data-strip="no"><span>No — the map is the real layout</span>
+            <small>matrix, panel — wire order is plumbing, nobody should ever see it</small></button>
+        </div>
+        <p class="bioline" id="wizbio" hidden></p>
+        <button class="cta primary wfull" id="wizcta" disabled>Continue</button>
+        <button class="backlink">← Back</button>
+      </div>
+    </div>
+  </div>
+  <div class="ccol">
+    <h3>B — what it produces: the fixture card, declared</h3>
+    <div class="ncard">
+      <div class="nhead"><span class="crail">⌄</span><h3>Halo</h3>
+        <span class="trail"><span class="spacebadge" id="fixbadge">1D+2D</span><span class="kind">fixture</span></span></div>
+      <div class="sect"><div class="srail">output</div><div class="sbody">
+        <div class="hero"><canvas id="fixherocanvas" width="384" height="200"></canvas>
+          <span class="cap" id="fixherocap">2D · ring map</span></div></div></div>
+      <div class="sect"><div class="srail">space</div><div class="sbody">
+        <div class="spacegrid" id="fixspacegrid"></div></div></div>
+      <div class="sect"><div class="srail">settings</div><div class="sbody">
+        <div class="settings" id="fixsettings"></div></div></div>
+      <button class="drawer"><span class="chev">›</span><span class="lab">advanced</span>
+        <span class="sum">slots · bindings · mapping</span></button>
+    </div>
+    <p class="why">The mirror made visible: primary + authored set as chips, then the consumer
+      cells — the same controls as the shader's product cells, inverse pairs. <i>Primary</i> stays
+      a recommendation fact (what Explore filters to first), never a sampling input. The wizard
+      answer on the left updates this card live; its selects share state with §1 and §3.</p>
+  </div>
+</div>
+</section>
+
+<!-- ==================== 5 · preview space toggle ==================== -->
+<section class="concept" id="s5">
+<h2>5. Previewing across spaces — space checkboxes on the hero</h2>
+<p class="thesis">
+  <b>Decision log.</b> Gate 1 (2026-08-07): the toggle is <b>chosen, checkbox-style not
+  radio</b> — 1D and 2D are independent, so turning both on gives the stacked view as a free
+  best-of-both. The caption names the projection <i>and its origin</i> (declared / consumer
+  default / forced) — D11's honesty rule. The palette pane gets the identical treatment: any 1D
+  source previews across spaces with zero shader involved.
+</p>
+<div class="row">
+  <div class="ccol">
+    <h3>space checkboxes on the hero <span class="lean">✓ chosen at gate 1</span></h3>
+    <div class="ncard">
+      <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
+        <span class="trail"><span class="spacebadge">1D</span><span class="kind">shader</span></span></div>
+      <div class="sect"><div class="srail">output</div><div class="sbody">
+        <div class="togglebar"><span class="tspring">preview spaces</span>
+          <button class="tgl on" data-pv="1d">1D</button><button class="tgl" data-pv="2d">2D</button></div>
+        <div class="hero" id="pvwrap1"><canvas id="pv1" width="384" height="40"></canvas>
+          <span class="cap">native · 1D</span></div>
+        <div class="hero" id="pvwrap2" hidden style="border-top:1px solid var(--border)">
+          <canvas id="pv2" width="384" height="150"></canvas>
+          <span class="cap" id="pv2cap">in 2D · radial (declared)</span></div></div></div>
+      <div class="sect"><div class="srail">settings</div><div class="sbody">
+        <div class="settings" id="pvknobs"></div></div></div>
+    </div>
+    <p class="why">1D only = today's card, unchanged. 2D only = "how will this look on my
+      matrix". Both on = the stacked ground-truth view, opt-in instead of a permanent tax on
+      every shader card. One box must stay on.</p>
+  </div>
+  <div class="ccol" style="width: 260px">
+    <h3>…and the palette (any 1D source)</h3>
+    <div class="spane bound">
+      <div class="sp-h"><b>palette</b><span class="bindchip">← palette</span></div>
+      <div class="sp-b flush">
+        <div class="togglebar"><span class="tspring">Sunset</span>
+          <button class="tgl on" data-ppv="1d">1D</button><button class="tgl" data-ppv="2d">2D</button></div>
+        <div class="hero" id="ppwrap1"><canvas id="pp1" width="256" height="44"></canvas>
+          <span class="cap">gradient · 1D</span></div>
+        <div class="hero" id="ppwrap2" hidden style="border-top:1px solid var(--border)">
+          <canvas id="pp2" width="256" height="120"></canvas>
+          <span class="cap">in 2D · radial (declared)</span></div>
+      </div>
+    </div>
+    <p class="why">palette → radial with no shader anywhere is why the projection
+      <i>mechanism</i> lives at the sampling boundary; the checkboxes just read the same
+      declaration.</p>
+  </div>
+</div>
+</section>
+
+<script>
+/* ================================================================== */
+/* state */
+const S = {
+  t: 3.4, run: true,   // start mid-flight so the comet is on screen at first paint
+  fx: 'fire', fixture: 'scarf',
+  cometDecl: 'radial', mismatch: false,
+  consDefault: 'extrude', consForce: false,   // the consumer side (shared everywhere)
+  decl: { primary: 1, in2d: 'radial', in3d: 'default' },   // §2 shared editor state
+  aOpen: false, cOpen: false,
+  pick3a: 'radial', nodeOn: false,
+  wizShape: null, wizStrip: null,
+  pv1: true, pv2: false, ppv1: true, ppv2: false,          // §5 checkbox toggles
+};
+
+/* ---------------- content library (real math) ---------------- */
+function clamp01(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+function lerp(a,b,k){ return a + (b-a)*k; }
+
+function heatColor(h){ // classic fire2012 heat ramp
+  h = clamp01(h);
+  if (h < 0.38) return [Math.round(255*(h/0.38)*0.9), 0, 0];
+  if (h < 0.72) { const k=(h-0.38)/0.34; return [230+Math.round(25*k), Math.round(190*k), 0]; }
+  const k=(h-0.72)/0.28; return [255, 190+Math.round(65*k), Math.round(210*k)];
+}
+function fire1d(x, t){
+  const flick = 0.22*Math.sin(9*x - 3.1*t) + 0.14*Math.sin(23*x + 6.7*t) + 0.1*Math.sin(41*x - 11*t);
+  return heatColor(1.25 - x*1.35 + flick*(0.4+0.6*x));
+}
+function comet1d(x, t){
+  const p = ((t*0.22) % 1.3) - 0.12;
+  const d = x - p;
+  let v = 0;
+  if (d <= 0 && d > -0.42) v = Math.exp(d*9);        // tail behind the head
+  const head = Math.exp(-Math.pow(d*46,2));
+  const r = Math.round(255*clamp01(head*1.0 + v*0.25));
+  const g = Math.round(255*clamp01(head*0.9 + v*0.45));
+  const b = Math.round(255*clamp01(head*0.8 + v*0.95));
+  return [r,g,b];
+}
+const SUNSET = [[0,[18,11,46]],[0.32,[138,28,74]],[0.58,[226,72,60]],[0.8,[244,163,60]],[1,[247,232,160]]];
+function palette1d(x){
+  x = clamp01(x);
+  for (let i=1;i<SUNSET.length;i++){
+    if (x <= SUNSET[i][0]){
+      const [x0,c0]=SUNSET[i-1], [x1,c1]=SUNSET[i], k=(x-x0)/(x1-x0);
+      return [0,1,2].map(j=>Math.round(lerp(c0[j],c1[j],k)));
+    }
+  }
+  return SUNSET.at(-1)[1];
+}
+function ripple1d(x, t){
+  const v = 0.5 + 0.5*Math.sin(14*x - 3*t);
+  const w = Math.pow(v, 3);
+  return [Math.round(30*w), Math.round(170*w+20), Math.round(200*w+30)];
+}
+function ripple2d(u, v, t){ // its OWN 2D look: two interfering centres — not derivable by projecting its 1D
+  const d1 = Math.hypot(u-0.3, v-0.42), d2 = Math.hypot(u-0.74, v-0.6);
+  const s = Math.sin(26*d1 - 3*t) + Math.sin(26*d2 - 3*t);
+  const w = Math.pow(clamp01(0.5 + 0.35*s), 2.4);
+  return [Math.round(30*w), Math.round(170*w+18), Math.round(205*w+28)];
+}
+function plasma2d(u, v, t){
+  const s = Math.sin(9*u + t) + Math.sin(9*v + 1.35*t)
+          + Math.sin(7*(u+v) + t*0.8)
+          + Math.sin(11*Math.hypot(u-0.5, v-0.5) - 1.6*t);
+  const k = s/4;
+  return [ Math.round(120 + 110*Math.sin(3.1*k + 2.2)),
+           Math.round(90  + 100*Math.sin(3.1*k + 4.2)),
+           Math.round(150 + 100*Math.sin(3.1*k + 0.6)) ];
+}
+
+/* coordinate maps — target coord → source coord (the whole mechanism) */
+const PROJ = {
+  extrude: { f: (u,v)=>u,                                          d: 'copy along the height'  },
+  radial:  { f: (u,v)=>clamp01(Math.hypot(u-0.5, v-0.5)/0.66),     d: 't = |uv − centre|'      },
+  angular: { f: (u,v)=>((Math.atan2(v-0.5, u-0.5)/(2*Math.PI))+0.5), d: 't = angle around centre' },
+  mirror:  { f: (u,v)=>Math.abs(2*u-1),                            d: 'reflected at the middle' },
+};
+
+/* ---------------- catalog ---------------- */
+const EFFECTS = {
+  fire:    { label:'fire2012', set:[1], primary:1, decl2d:null,
+             s1: fire1d },
+  comet:   { label:'comet',    set:[1], primary:1, get decl2d(){ return S.cometDecl==='none'?null:S.cometDecl; },
+             s1: comet1d },
+  palette: { label:'Sunset · palette', set:[1], primary:1, decl2d:'radial', isPalette:true,
+             s1: (x,t)=>palette1d(x + 0.03*Math.sin(t*0.4)) },
+  ripple:  { label:'ripple · multi-entry', set:[1,2], primary:1, decl2d:null,
+             s1: ripple1d, s2: ripple2d },
+  plasma:  { label:'plasma',   set:[2], primary:2, decl2d:null,
+             s2: plasma2d },
+};
+const FIXTURES = {
+  strip:  { label:'Bare strip · 60 px',    set:[1],   primary:1, layout:'row',  n:60 },
+  scarf:  { label:'Scarf · ring map',      set:[1,2], primary:1, layout:'ring', n:48 },
+  matrix: { label:'Matrix 16×16',          set:[2],   primary:2, layout:'grid', n:256 },
+};
+
+/* fixture LED geometry: each led = {x1d?, u, v} in unit space */
+function ledsOf(key){
+  const fx = FIXTURES[key], out = [];
+  if (fx.layout === 'row')
+    for (let i=0;i<fx.n;i++) out.push({ x1d: i/(fx.n-1), u: i/(fx.n-1), v: 0.5 });
+  else if (fx.layout === 'ring')
+    for (let i=0;i<fx.n;i++){
+      const a = (i/fx.n)*2*Math.PI - Math.PI/2;
+      out.push({ x1d: i/(fx.n-1), u: 0.5 + 0.4*Math.cos(a), v: 0.5 + 0.4*Math.sin(a) });
+    }
+  else {
+    const side = 16;
+    for (let r=0;r<side;r++) for (let c=0;c<side;c++)
+      out.push({ x1d: null, u: c/(side-1), v: r/(side-1) });
+  }
+  return out;
+}
+const LEDS = Object.fromEntries(Object.keys(FIXTURES).map(k => [k, ledsOf(k)]));
+
+/* ---------------- the negotiation (the ratified rule) ---------------- */
+function negotiate(fxKey, fixKey){
+  const fx = EFFECTS[fxKey], fix = FIXTURES[fixKey];
+  const inter = fx.set.filter(s => fix.set.includes(s));
+  if (inter.length){
+    const space = inter.includes(fx.primary) ? fx.primary : inter[0];
+    const ownEntry = space !== fx.primary;
+    return { mode:'native', space,
+      label: `native · ${space}D`,
+      why: space === 1 && fixKey === 'scarf'
+        ? `{${fx.set.join(',')}D} ∩ {1D, 2D} → <b>1D — effect intent wins.</b> The ring map is ignored; sampling runs on strip position.`
+        : ownEntry
+        ? `no ${fx.primary}D on this fixture, but ${fx.label.split(' ·')[0]} carries its <b>own ${space}D entry</b> — no projection ever fires.`
+        : `both ends speak ${space}D — sampled directly, no machinery.`,
+      perLed: led => space === 1 ? fx.s1(led.x1d, S.t) : fx.s2(led.u, led.v, S.t) };
+  }
+  if (fx.primary === 1){ // 1D content on a {2D} fixture
+    const opinion = fx.decl2d;
+    const src = S.consForce ? S.consDefault : (opinion ?? S.consDefault);
+    const origin = S.consForce ? 'forced by fixture'
+      : opinion ? `declared by ${fx.label.split(' ·')[0]}` : 'consumer default';
+    return { mode:'project', proj: src, origin,
+      label: `project · 1D→2D`,
+      why: `empty intersection → the 1D→2D cell fires: <b>${src}</b> (${origin}). ${PROJ[src].d}. Zero nodes in the wire.`,
+      perLed: led => fx.s1(PROJ[src].f(led.u, led.v), S.t) };
+  }
+  return { mode:'scan', // 2D content on a {1D} strip
+    label: `scan · 2D→1D`,
+    why: `empty intersection the other way: centre scanline, worn openly (the hint pill) — friendly beats a black fixture.`,
+    perLed: led => fx.s2(led.x1d, 0.5, S.t) };
+}
+
+/* ---------------- canvas renderers ---------------- */
+function drawBand(cv, f1d){
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, n = 96, w = W/n;
+  for (let i=0;i<n;i++){
+    const [r,g,b] = f1d(i/(n-1), S.t);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(i*w, 0, w+1, H);
+  }
+}
+function drawField(cv, f2d){
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, nx = 56, ny = Math.round(nx*H/W);
+  const w = W/nx, h = H/ny;
+  for (let iy=0;iy<ny;iy++) for (let ix=0;ix<nx;ix++){
+    const [r,g,b] = f2d(ix/(nx-1), iy/(ny-1), S.t);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(ix*w, iy*h, w+1, h+1);
+  }
+}
+function drawLamps(cv, fixKey, perLed){
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  ctx.fillStyle = '#07080a'; ctx.fillRect(0,0,W,H);
+  const inset = 0.09, leds = LEDS[fixKey];
+  const R = FIXTURES[fixKey].layout === 'grid' ? Math.min(W,H)/40 : Math.min(W,H)/34;
+  for (const led of leds){
+    const x = (inset + led.u*(1-2*inset))*W, y = (inset + led.v*(1-2*inset))*H;
+    const [r,g,b] = perLed(led);
+    ctx.fillStyle = `rgba(${r},${g},${b},0.22)`;
+    ctx.beginPath(); ctx.arc(x, y, R*2.3, 0, 7); ctx.fill();
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+  }
+}
+
+/* ---------------- shared small builders ---------------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function spaceChips(fx){
+  return fx.set.map(s => {
+    const pri = s === fx.primary;
+    return `<span class="spc ${pri?'pri':''}">${s}D${pri?' <span class="prit">primary</span>':''}</span>`;
+  }).join('');
+}
+function knobSvg(frac, bound){
+  const stroke = bound ? 'var(--bound-border)' : 'var(--border-strong)';
+  const lit = bound ? 'var(--bound-text)' : 'var(--subtle)';
+  const a0 = 135, a1 = 135 + 270*frac;
+  const arc = (r,s,e) => {
+    const p = a => [24 + r*Math.cos(Math.PI*a/180), 24 + r*Math.sin(Math.PI*a/180)];
+    const [x0,y0]=p(s),[x1,y1]=p(e);
+    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 ${e-s>180?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  };
+  const pa = Math.PI*(a1)/180;
+  return `<svg width="46" height="46" viewBox="0 0 48 48">
+    <path d="${arc(19,135,405)}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" opacity=".55"/>
+    <path d="${arc(19,a0,Math.max(a0+1,a1))}" fill="none" stroke="${lit}" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="24" cy="24" r="12.5" fill="var(--raised)" stroke="${stroke}"/>
+    <line x1="${24+7*Math.cos(pa)}" y1="${24+7*Math.sin(pa)}" x2="${24+12*Math.cos(pa)}" y2="${24+12*Math.sin(pa)}"
+      stroke="${lit}" stroke-width="1.8" stroke-linecap="round"/>
+  </svg>`;
+}
+function knobCtl(label, val, frac, bound){
+  return `<div class="pctl">${knobSvg(frac, bound)}
+    <span class="lbl ${bound?'bound':''}">${label}</span>
+    <span class="val ${bound?'bound':''}">${val}</span></div>`;
+}
+
+/* ================================================================== */
+/* §1 — negotiation stage */
+const fxPicksEl = document.getElementById('fxpicks');
+const fixPicksEl = document.getElementById('fixpicks');
+fxPicksEl.innerHTML = '<b style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-right:4px">source</b>' +
+  Object.entries(EFFECTS).map(([k,f]) =>
+    `<button class="pick" data-fx="${k}">${esc(f.label)}</button>`).join('');
+fixPicksEl.innerHTML = '<b style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-right:4px">fixture</b>' +
+  Object.entries(FIXTURES).map(([k,f]) =>
+    `<button class="pick" data-fixture="${k}">${esc(f.label)}</button>`).join('');
+fxPicksEl.addEventListener('click', e => {
+  const b = e.target.closest('[data-fx]'); if (!b) return;
+  S.fx = b.dataset.fx; renderStage(true);
+});
+fixPicksEl.addEventListener('click', e => {
+  const b = e.target.closest('[data-fixture]'); if (!b) return;
+  S.fixture = b.dataset.fixture; renderStage(true);
+});
+
+function renderStage(structural){
+  const fx = EFFECTS[S.fx], neg = negotiate(S.fx, S.fixture);
+  if (structural){
+    document.querySelectorAll('[data-fx]').forEach(b => b.classList.toggle('on', b.dataset.fx === S.fx));
+    document.querySelectorAll('[data-fixture]').forEach(b => b.classList.toggle('on', b.dataset.fixture === S.fixture));
+    document.getElementById('srcname').textContent = fx.label;
+    document.getElementById('srcset').innerHTML = spaceChips(fx) +
+      (fx.decl2d ? ` <span class="ansb project">in 2D: ${fx.decl2d}</span>` : '') +
+      (fx.set.includes(2) && fx.primary === 1 ? ' <span class="ansb native">own 2D entry</span>' : '');
+    document.getElementById('srccap').textContent = fx.primary === 1 ? '1D product' : '2D product';
+    const negbox = document.getElementById('negbox');
+    negbox.dataset.mode = neg.mode;
+    document.getElementById('negmode').textContent = neg.label;
+    document.getElementById('negwhy').innerHTML = neg.why;
+    document.getElementById('ovrow').hidden = neg.mode !== 'project';
+    const pill = document.getElementById('fixpill');
+    pill.className = 'ppill ' + neg.mode;
+    pill.textContent = neg.mode === 'native' ? `native · ${neg.space}d`
+      : neg.mode === 'project' ? `1d→2d · ${neg.proj}` : '2d→1d · centre line';
+    document.getElementById('fixcap').innerHTML =
+      `<span>${esc(FIXTURES[S.fixture].label)}</span>` + spaceChips(FIXTURES[S.fixture]) +
+      (S.fixture === 'scarf' && neg.mode === 'native' && neg.space === 1
+        ? ' <span class="ansb hint">ring map ignored</span>' : '');
+    const cv = document.getElementById('fixcanvas');
+    cv.height = FIXTURES[S.fixture].layout === 'row' ? 90 : 240;
+  }
+  const src = document.getElementById('srccanvas');
+  if (fx.primary === 1){ src.height = 60; drawBand(src, fx.s1); }
+  else { src.height = 150; drawField(src, fx.s2); }
+  drawLamps(document.getElementById('fixcanvas'), S.fixture, neg.perLed);
+}
+
+/* ================================================================== */
+/* §2 — three homes for the declaration (shared state) */
+function cellSelect(cell){ // cell: 'in2d' | 'in3d'
+  const val = S.decl[cell];
+  const opts = cell === 'in2d'
+    ? [['default','Default — extrude'],['radial','Project · radial'],['angular','Project · angular'],
+       ['mirror','Project · mirror'],['native','Native entry — write render(vec2)…']]
+    : [['default','Default — extrude'],['cyl','Project · cylindrical']];
+  return `<select class="field" data-cell="${cell}">` + opts.map(([v,l]) =>
+    `<option value="${v}" ${v===val?'selected':''}>${l}</option>`).join('') + '</select>';
+}
+function declSummary(){
+  const p = S.decl.primary;
+  if (p !== 1) return `${p}D`;
+  const c2 = S.decl.in2d === 'default' ? 'extrude' : S.decl.in2d;
+  return `1D · 2D:${c2}`;
+}
+function declBadgeTxt(){ return S.decl.primary + 'D'; }
+function segPrimary(){
+  return `<span class="segrow ${S.mismatch?'err':''}">` + [1,2,3].map(d =>
+    `<button class="seg ${S.decl.primary===d?'on':''}" data-pri="${d}">${d}D</button>`).join('') + '</span>';
+}
+function cellRows(){
+  if (S.decl.primary !== 1)
+    return `<div class="cellsub" style="font-size:11px;color:var(--dim)">cells for ${S.decl.primary}D primary — same shape, different pairs (1D→ back-projection, 3D→ …)</div>`;
+  return `
+    <div class="cellrow"><span class="ct">in 2D</span><span class="cellsub">${cellSelect('in2d')}
+      ${S.decl.in2d==='radial' ? '<span class="field ro">centre 0.5 × 0.5</span>' : ''}
+      ${S.decl.in2d==='native' ? '<span class="ansb native">own entry</span>' : ''}</span></div>
+    <div class="cellrow"><span class="ct">in 3D</span><span class="cellsub">${cellSelect('in3d')}</span></div>`;
+}
+const mismatchLine = () =>
+  `<div class="errline">declared 1D, but the GLSL defines <code>vec4 render_2d(vec2)</code> —
+   fix the declaration or the entry</div>`;
+
+function renderCardA(){
+  document.getElementById('cardA').innerHTML = `
+    <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
+      <span class="trail"><span class="kind">shader</span></span></div>
+    <div class="sect"><div class="srail">output</div><div class="sbody">
+      <div class="hero"><canvas id="heroA" width="384" height="64"></canvas></div></div></div>
+    <div class="sect"><div class="srail">settings</div><div class="sbody">
+      <div class="settings">
+        ${knobCtl('speed','0.62',0.62,true)}
+        ${knobCtl('tail','0.35',0.35,false)}
+        <div class="pctl">
+          <button class="chipsum" data-aopen title="Space declaration">
+            <span class="spacebadge ${S.mismatch?'err':''}" style="font-size:12px;padding:3px 8px">${declBadgeTxt()}</span></button>
+          <span class="lbl">space</span>
+          <span class="val" style="color:var(--dim)">${esc(declSummary().replace(/^..? · /,'') || '—')}</span>
+        </div>
+      </div>
+      ${S.aOpen ? `<div class="spacegrid" style="border-top:1px dashed var(--border-muted);padding-left:16px">
+          ${segPrimary()} ${cellRows()} ${S.mismatch?mismatchLine():''}</div>` : ''}
+    </div></div>
+    <button class="drawer"><span class="chev">›</span><span class="lab">code</span>
+      <span class="sum">shaders/comet.glsl</span></button>
+    <button class="drawer"><span class="chev">›</span><span class="lab">advanced</span>
+      <span class="sum">slots · bindings</span></button>`;
+}
+function renderCardB(){
+  document.getElementById('cardB').innerHTML = `
+    <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
+      <span class="trail"><span class="kind">shader</span></span></div>
+    <div class="sect"><div class="srail">output</div><div class="sbody">
+      <div class="hero"><canvas id="heroB" width="384" height="64"></canvas></div></div></div>
+    <div class="sect"><div class="srail">space</div><div class="sbody">
+      <div class="spacegrid">${segPrimary()} ${cellRows()} ${S.mismatch?mismatchLine():''}</div></div></div>
+    <div class="sect"><div class="srail">settings</div><div class="sbody">
+      <div class="settings">${knobCtl('speed','0.62',0.62,true)}${knobCtl('tail','0.35',0.35,false)}</div></div></div>
+    <button class="drawer"><span class="chev">›</span><span class="lab">code</span>
+      <span class="sum">shaders/comet.glsl</span></button>
+    <button class="drawer"><span class="chev">›</span><span class="lab">advanced</span>
+      <span class="sum">slots · bindings</span></button>`;
+}
+function renderCardC(){
+  document.getElementById('cardC').innerHTML = `
+    <div class="nhead"><span class="crail">⌄</span><h3>comet</h3>
+      <span class="trail"><span class="spacebadge btn ${S.mismatch?'err':''}" data-copen
+        title="Space declaration — click">${declBadgeTxt()}</span><span class="kind">shader</span></span></div>
+    <div class="sect"><div class="srail">output</div><div class="sbody">
+      <div class="hero"><canvas id="heroC" width="384" height="64"></canvas></div></div></div>
+    <div class="sect"><div class="srail">settings</div><div class="sbody">
+      <div class="settings">${knobCtl('speed','0.62',0.62,true)}${knobCtl('tail','0.35',0.35,false)}</div></div></div>
+    <button class="drawer"><span class="chev">${S.cOpen?'⌄':'›'}</span><span class="lab">advanced</span>
+      <span class="sum ${S.mismatch?'err':''}">${S.mismatch?'space ≠ entry · ':''}space · slots · bindings</span></button>
+    ${S.cOpen ? `<div class="sect"><div class="srail">space</div><div class="sbody">
+      <div class="spacegrid">${segPrimary()} ${cellRows()} ${S.mismatch?mismatchLine():''}</div></div></div>` : ''}`;
+}
+function renderS2(){
+  renderCardA(); renderCardB(); renderCardC();
+  for (const id of ['heroA','heroB','heroC']){
+    const cv = document.getElementById(id);
+    if (cv) drawBand(cv, EFFECTS.comet.s1);
+  }
+}
+document.getElementById('s2').addEventListener('click', e => {
+  const pri = e.target.closest('[data-pri]');
+  if (pri){ S.decl.primary = +pri.dataset.pri; renderS2(); return; }
+  if (e.target.closest('[data-aopen]')){ S.aOpen = !S.aOpen; renderS2(); return; }
+  if (e.target.closest('[data-copen]')){ S.cOpen = !S.cOpen; renderS2(); return; }
+});
+document.getElementById('s2').addEventListener('change', e => {
+  const sel = e.target.closest('[data-cell]');
+  if (sel){ S.decl[sel.dataset.cell] = sel.value; renderS2(); }
+});
+
+/* ================================================================== */
+/* §3 — projection picker + ladder */
+function renderProjGrid(){
+  const grid = document.getElementById('projgrid');
+  const sugg = EFFECTS.comet.decl2d;
+  grid.innerHTML = Object.entries(PROJ).map(([k,p]) => `
+    <div class="projtile ${S.pick3a===k?'on':''}" data-proj="${k}">
+      <canvas width="128" height="76" data-projcv="${k}"></canvas>
+      <span class="pl">${k}${sugg===k?' · suggested':''}</span>
+      <span class="pd">${p.d}</span>
+    </div>`).join('');
+  document.getElementById('sheetsugg').textContent = sugg ?? 'nothing — the consumer default applies';
+  document.getElementById('sheetuse').textContent = 'Use ' + S.pick3a;
+}
+document.getElementById('projgrid').addEventListener('click', e => {
+  const t = e.target.closest('[data-proj]');
+  if (t){ S.pick3a = t.dataset.proj; renderProjGrid(); drawProjTiles(); }
+});
+function drawProjTiles(){
+  document.querySelectorAll('[data-projcv]').forEach(cv => {
+    const p = PROJ[cv.dataset.projcv];
+    drawField(cv, (u,v,t) => EFFECTS.comet.s1(p.f(u,v), t));
+  });
+}
+
+function renderLadder(){
+  const opinion = EFFECTS.comet.decl2d;
+  const winner = S.nodeOn ? 3 : (S.consForce ? 2 : (opinion ? 1 : 2));
+  document.getElementById('ladder').innerHTML = `
+    <div class="lrung ${winner===1?'win':''}"><span class="ln">1</span>
+      <span><b>source opinion</b> — ${opinion ? `comet: <b>${opinion}</b>` : 'none'}
+        · zero nodes<span class="wintag">← in effect</span></span></div>
+    <div class="lrung ${winner===2?'win':''}"><span class="ln">2</span>
+      <span><b>consumer policy</b> — Default · <b>${S.consDefault}</b>${S.consForce
+        ? ' · <b>forced</b> (wins over opinions)' : ' (fills silence)'}
+        · zero nodes<span class="wintag">← in effect</span></span></div>
+    <div class="lrung ${winner===3?'win':''}"><span class="ln">3</span>
+      <span><b>explicit node</b> — ${S.nodeOn
+        ? `<span class="bindchip">proj_radial_1 → visual</span> product arrives already-2D`
+        : 'none in the wire'}<span class="wintag">← in effect</span></span></div>`;
+}
+document.getElementById('nodetoggle').addEventListener('change', e => {
+  S.nodeOn = e.target.checked; renderLadder();
+});
+
+/* ================================================================== */
+/* §4 — wizard + fixture card */
+const SHAPES = [
+  ['strip',  'Strip',       '1D — a line of pixels',
+    '<svg viewBox="0 0 44 30"><line x1="4" y1="15" x2="40" y2="15"/><circle cx="8" cy="15" r="1.6"/><circle cx="15" cy="15" r="1.6"/><circle cx="22" cy="15" r="1.6"/><circle cx="29" cy="15" r="1.6"/><circle cx="36" cy="15" r="1.6"/></svg>'],
+  ['matrix', 'Matrix',      '2D — a grid or panel',
+    '<svg viewBox="0 0 44 30"><rect x="8" y="3" width="28" height="24" rx="2"/><path d="M8 11h28M8 19h28M17 3v24M26 3v24"/></svg>'],
+  ['mapped', 'Mapped shape','a strip placed in space',
+    '<svg viewBox="0 0 44 30"><circle cx="22" cy="15" r="11"/><circle cx="22" cy="4" r="1.6"/><circle cx="30" cy="7" r="1.6"/><circle cx="33" cy="15" r="1.6"/><circle cx="30" cy="23" r="1.6"/><circle cx="22" cy="26" r="1.6"/><circle cx="14" cy="23" r="1.6"/><circle cx="11" cy="15" r="1.6"/><circle cx="14" cy="7" r="1.6"/></svg>'],
+  ['voxel',  '3D / voxel',  'a cube or volume',
+    '<svg viewBox="0 0 44 30"><path d="M22 3 36 9v13l-14 6-14-6V9Z"/><path d="M8 9l14 6 14-6M22 15v13"/></svg>'],
+];
+function wizResult(){
+  if (S.wizShape === 'strip')  return { chips: '{1D}',        bio: 'declared: 1D — strip order is the layout' };
+  if (S.wizShape === 'matrix') return { chips: '{2D}',        bio: 'declared: 2D — wire order is plumbing, not a coordinate' };
+  if (S.wizShape === 'mapped'){
+    if (S.wizStrip === 'yes')  return { chips: '{1D primary, 2D}', bio: 'declared: 1D primary + 2D (map) — fire2012 will ignore the map' };
+    if (S.wizStrip === 'no')   return { chips: '{2D}',        bio: 'declared: 2D (map) only' };
+  }
+  return null;
+}
+function renderWiz(){
+  document.getElementById('shapetiles').innerHTML = SHAPES.map(([k,l,s,svg]) => `
+    <div class="tile ${S.wizShape===k?'on':''} ${k==='voxel'?'soon':''}" data-shape="${k}">
+      ${k==='voxel'?'<span class="soonb">soon</span>':''}${svg}
+      <span class="tl">${l}</span><span class="ts">${s}</span></div>`).join('');
+  const fu = document.getElementById('followup');
+  fu.hidden = S.wizShape !== 'mapped';
+  fu.querySelectorAll('[data-strip]').forEach(b =>
+    b.classList.toggle('on', b.dataset.strip === S.wizStrip));
+  const res = wizResult();
+  const bio = document.getElementById('wizbio');
+  bio.hidden = !res;
+  if (res) bio.innerHTML = esc(res.bio);
+  document.getElementById('wizcta').disabled = !res;
+  renderFixtureCard(res);
+}
+document.getElementById('shapetiles').addEventListener('click', e => {
+  const t = e.target.closest('[data-shape]');
+  if (!t || t.classList.contains('soon')) return;
+  S.wizShape = t.dataset.shape;
+  if (S.wizShape !== 'mapped') S.wizStrip = null;
+  renderWiz();
+});
+document.getElementById('followup').addEventListener('click', e => {
+  const b = e.target.closest('[data-strip]');
+  if (b){ S.wizStrip = b.dataset.strip; renderWiz(); }
+});
+
+function renderFixtureCard(res){
+  // defaults to the scarf declaration until the wizard decides otherwise
+  const isScarf = !res || (S.wizShape === 'mapped' && S.wizStrip !== 'no');
+  const decl = res ?? { chips: '{1D primary, 2D}', bio: '' };
+  const set = decl.chips.includes('1D primary') ? [1,2] : decl.chips === '{1D}' ? [1] : [2];
+  const primary = decl.chips.includes('1D') && !decl.chips.includes('2D (map) only')
+    && decl.chips !== '{2D}' ? 1 : 2;
+  document.getElementById('fixbadge').textContent = set.map(d=>d+'D').join('+');
+  document.getElementById('fixspacegrid').innerHTML = `
+    <div class="setline">${set.map(s =>
+      `<span class="spc ${s===primary?'pri':''}">${s}D${s===primary?' <span class="prit">primary</span>':''}</span>`).join('')}
+      ${set.includes(2) && S.wizShape !== 'matrix' ? '<span class="field ro" style="font-size:11px">map: ring.map2d</span>' : ''}</div>
+    <div class="cellsub" style="font-size:10.5px;color:var(--dim)">
+      ${set.includes(1) ? '1D — strip order · native for 1D effects' : 'wire order not a coordinate'}
+      ${set.includes(2) ? (set.includes(1) ? ' · 2D — via map, for 2D effects' : '2D — native') : ''}</div>
+    ${set.includes(2) ? `
+    <div class="cellrow"><span class="ct">from 1D</span><span class="cellsub">
+      <select class="field" data-syncdef>
+        <option value="extrude">Default · extrude</option>
+        <option value="radial">Default · radial</option>
+        <option value="angular">Default · angular</option>
+        <option value="mirror">Default · mirror</option>
+      </select>
+      <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-size:11px;color:var(--subtle)">
+        <input type="checkbox" data-syncforce style="accent-color:var(--accent)"> force</label></span></div>
+    <div class="cellrow"><span class="ct">from 3D</span><span class="cellsub">
+      <span class="field ro">Default · slice · soon</span></span></div>`
+    : `
+    <div class="cellrow"><span class="ct">from 2D</span><span class="cellsub">
+      <span class="field ro">Default · centre scanline + hint</span></span></div>
+    <div class="cellrow"><span class="ct">from 3D</span><span class="cellsub">
+      <span class="field ro">soon</span></span></div>`}`;
+  document.querySelectorAll('#fixspacegrid [data-syncdef]').forEach(el => el.value = S.consDefault);
+  document.querySelectorAll('#fixspacegrid [data-syncforce]').forEach(el => el.checked = S.consForce);
+  const hcv = document.getElementById('fixherocanvas');
+  const layoutKey = set.includes(2) && set.includes(1) ? 'scarf' : set.includes(2) ? 'matrix' : 'strip';
+  hcv.height = layoutKey === 'strip' ? 70 : 200;
+  document.getElementById('fixherocap').textContent =
+    layoutKey === 'scarf' ? '2D · ring map' : layoutKey === 'matrix' ? '2D · grid' : '1D · strip';
+  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey);
+  drawLamps(hcv, layoutKey, neg.perLed);
+  document.getElementById('fixsettings').innerHTML =
+    knobCtl('brightness','80%',0.8,false) +
+    `<div class="pctl" style="min-width:110px;align-items:flex-start">
+      <span class="lbl">power</span>
+      <span class="val" style="color:var(--dim)">≈1.4 / 3.0 A (46%)</span></div>`;
+}
+
+/* ================================================================== */
+/* §5 — space checkboxes on the hero (checkbox-style: both can be on) */
+function pvToggle(key1, key2, isFirst){
+  const cur = isFirst ? S[key1] : S[key2], other = isFirst ? S[key2] : S[key1];
+  if (cur && !other) return;                    // one box must stay on
+  if (isFirst) S[key1] = !S[key1]; else S[key2] = !S[key2];
+  renderPrev(true);
+}
+document.querySelectorAll('[data-pv]').forEach(b =>
+  b.addEventListener('click', () => pvToggle('pv1','pv2', b.dataset.pv === '1d')));
+document.querySelectorAll('[data-ppv]').forEach(b =>
+  b.addEventListener('click', () => pvToggle('ppv1','ppv2', b.dataset.ppv === '1d')));
+function declProj(){ return EFFECTS.comet.decl2d ?? S.consDefault; }
+function renderPrev(structural){
+  const proj = declProj();
+  const origin = EFFECTS.comet.decl2d ? 'declared'
+    : S.consForce ? 'forced by fixture' : 'consumer default';
+  if (structural){
+    document.querySelectorAll('[data-pv]').forEach(b =>
+      b.classList.toggle('on', b.dataset.pv === '1d' ? S.pv1 : S.pv2));
+    document.querySelectorAll('[data-ppv]').forEach(b =>
+      b.classList.toggle('on', b.dataset.ppv === '1d' ? S.ppv1 : S.ppv2));
+    document.getElementById('pvwrap1').hidden = !S.pv1;
+    document.getElementById('pvwrap2').hidden = !S.pv2;
+    document.getElementById('ppwrap1').hidden = !S.ppv1;
+    document.getElementById('ppwrap2').hidden = !S.ppv2;
+    document.getElementById('pv2cap').textContent = `in 2D · ${proj} (${origin})`;
+    document.getElementById('pvknobs').innerHTML = knobCtl('speed','0.62',0.62,true);
+  }
+  if (S.pv1) drawBand(document.getElementById('pv1'), EFFECTS.comet.s1);
+  if (S.pv2) drawField(document.getElementById('pv2'), (u,v,t) => EFFECTS.comet.s1(PROJ[proj].f(u,v), t));
+  if (S.ppv1) drawBand(document.getElementById('pp1'), EFFECTS.palette.s1);
+  if (S.ppv2) drawField(document.getElementById('pp2'), (u,v,t) => EFFECTS.palette.s1(PROJ.radial.f(u,v), t));
+}
+
+/* ================================================================== */
+/* global controls + tick */
+document.getElementById('xrun').addEventListener('change', e => { S.run = e.target.checked; });
+document.getElementById('xmismatch').addEventListener('change', e => {
+  S.mismatch = e.target.checked; renderS2();
+});
+
+/* one shared state for opinion / default / force — every control is a [data-sync*] mirror */
+function syncSpaceControls(){
+  document.querySelectorAll('[data-syncop]').forEach(el => { el.value = S.cometDecl; });
+  document.querySelectorAll('[data-syncdef]').forEach(el => { el.value = S.consDefault; });
+  document.querySelectorAll('[data-syncforce]').forEach(el => { el.checked = S.consForce; });
+}
+function rerenderSpaceDependent(){
+  renderStage(true); renderProjGrid(); drawProjTiles(); renderLadder(); renderWiz(); renderPrev(true);
+  syncSpaceControls();
+}
+document.addEventListener('change', e => {
+  if (e.target.matches('[data-syncop]'))         { S.cometDecl  = e.target.value;   rerenderSpaceDependent(); }
+  else if (e.target.matches('[data-syncdef]'))   { S.consDefault = e.target.value;  rerenderSpaceDependent(); }
+  else if (e.target.matches('[data-syncforce]')) { S.consForce  = e.target.checked; rerenderSpaceDependent(); }
+});
+
+function tick(){
+  if (S.run){
+    S.t += 0.066;
+    renderStage(false);
+    for (const id of ['heroA','heroB','heroC']){
+      const cv = document.getElementById(id);
+      if (cv) drawBand(cv, EFFECTS.comet.s1);
+    }
+    drawProjTiles();
+    renderPrev(false);
+    const res = wizResult();
+    renderFixtureCardLampsOnly(res);
+  }
+}
+function renderFixtureCardLampsOnly(res){
+  const decl = res ?? { chips: '{1D primary, 2D}' };
+  const set = decl.chips.includes('1D primary') ? [1,2] : decl.chips === '{1D}' ? [1] : [2];
+  const layoutKey = set.includes(2) && set.includes(1) ? 'scarf' : set.includes(2) ? 'matrix' : 'strip';
+  const neg = negotiate('plasma', layoutKey === 'strip' ? 'strip' : layoutKey);
+  drawLamps(document.getElementById('fixherocanvas'), layoutKey, neg.perLed);
+}
+setInterval(tick, 66);
+
+/* initial render */
+renderStage(true);
+renderS2();
+renderProjGrid(); drawProjTiles(); renderLadder();
+renderWiz();
+renderPrev(true);
+syncSpaceControls();
+
+/* URL params (screenshot harness): ?only=<section-id>, ?fx=, ?fixture=, ?t=  */
+const params = new URLSearchParams(location.search);
+if (params.get('pv') === 'both') { S.pv2 = true; S.ppv2 = true; renderPrev(true); }
+if (params.get('force'))   { S.consForce = true; syncSpaceControls(); }
+if (params.get('wiz'))     { const [sh, st] = params.get('wiz').split('-');
+                             S.wizShape = sh; S.wizStrip = st ?? null; renderWiz(); }
+if (params.get('mismatch')){ S.mismatch = true;
+                             document.getElementById('xmismatch').checked = true; renderS2(); }
+if (params.get('fx'))      { S.fx = params.get('fx'); renderStage(true); }
+if (params.get('fixture')) { S.fixture = params.get('fixture'); renderStage(true); }
+if (params.get('t'))       { S.t = parseFloat(params.get('t')) || 0; S.run = false;
+                             document.getElementById('xrun').checked = false;
+                             renderStage(false); renderS2(); drawProjTiles(); renderPrev(false);
+                             renderFixtureCardLampsOnly(wizResult()); }
+const only = params.get('only');
+if (only){
+  document.querySelectorAll('.concept').forEach(s => { if (s.id !== only) s.style.display = 'none'; });
+  document.querySelector('.xcontrols').style.position = 'static';
+}
+</script>
+</body>
+</html>

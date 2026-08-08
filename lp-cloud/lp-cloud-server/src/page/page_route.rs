@@ -95,9 +95,10 @@ pub async fn get_healthz(State(state): State<AppState>) -> Response {
 /// it.
 async fn share_card(state: &AppState, uid: lpc_history::PrefixedUid) -> Option<OgTags> {
     // Anonymous on purpose: the tags are for whoever holds the link, and the
-    // link is all an unfurler has. `Visibility::Link` is what makes this
-    // succeed; a private project answers `NotFound` here exactly as it would
-    // to any other caller.
+    // link is all an unfurler has. `Access::View` (or `Edit`) is what makes
+    // this succeed; a project whose link opens nothing — including an
+    // archived one — answers `NotFound` here exactly as it would to any
+    // other caller, so the card follows the access rule without knowing it.
     let answer = state
         .with_service(move |core| {
             core.service
@@ -150,7 +151,7 @@ mod tests {
         assert!(looks_like_a_file("/assets/app-a1b2c3d4.js"));
         assert!(looks_like_a_file("/favicon.ico"));
         assert!(!looks_like_a_file("/"));
-        assert!(!looks_like_a_file("/sim/zook-dome"));
+        assert!(!looks_like_a_file("/boards/domraem/dom-z-102"));
         assert!(!looks_like_a_file("/p/zook-dome-prj0000000000000000"));
     }
 }
