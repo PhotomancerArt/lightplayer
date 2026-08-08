@@ -24,3 +24,6 @@ deliberately, in rough order of expected pickup:
 - **3D/voxel cells**, authored 2D→1D scanline choice, 1D mappings.
 - **web-demo** still uses its own pre-uniform 3-arg `render` signature —
   stale before the entry rename; retire or re-port.
+- **T1 pattern 1D template** still authors a 2D shader (`render_2d`
+  over an Nx1 area) — upgrade it to a true `OneD` declaration with
+  `render_1d(float)` once Plan B lands the space UI.

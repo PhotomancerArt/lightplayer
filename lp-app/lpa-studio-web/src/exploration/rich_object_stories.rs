@@ -535,7 +535,9 @@ fn tint_severity(tint: DetailSectionTint) -> u8 {
         | DetailSectionTint::Debug
         | DetailSectionTint::Bound => 2,
         DetailSectionTint::Good => 1,
-        DetailSectionTint::None => 0,
+        // Export (sage) is structural, not a health verdict: it ranks with
+        // the plain sections rather than competing with them.
+        DetailSectionTint::Export | DetailSectionTint::None => 0,
     }
 }
 

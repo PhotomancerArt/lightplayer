@@ -13,8 +13,9 @@ pub use lpa_link::{
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
-    ControlSampleSpan, LampType, LpFeature, LpValue, NodeId, NodeKind, PhasorConfig, PlayState,
-    Revision, SlotMapKey, SlotPath, SlotPathSegment, ToLpValue, Waveform,
+    ControlSampleSpan, ExportFinding, ExportSeverity, LampType, LpFeature, LpValue, NodeId,
+    NodeKind, PhasorConfig, PlayState, Revision, SlotMapKey, SlotPath, SlotPathSegment, ToLpValue,
+    Waveform,
 };
 
 pub mod app;
@@ -45,26 +46,27 @@ pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, SIM_CARD_KEY, SetupSession, UiCardConnection, UiDeviceCard,
-    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
-    UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
+    HomePoolEvidence, HomeSimEvidence, ProjectTemplate, SIM_CARD_KEY, SetupSession,
+    UiCardConnection, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard,
+    UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes,
+    generate_board_project, setup_rail, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiClockFace, UiClockTransport, UiConfigSlot,
-    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiFixtureFace,
-    UiFixturePower, UiLedBudget, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
-    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
-    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire,
-    UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
-    UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
-    UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
-    UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind, UiTimebaseState, UiWireStatus,
-    phasor_rate_display,
+    UiConfigSlotBody, UiControlProductPreview, UiControlSampleFormat, UiExportsGroup,
+    UiFixtureFace, UiFixturePower, UiLedBudget, UiModuleExport, UiModuleFace, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget,
+    UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
+    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -74,18 +76,19 @@ pub use app::preview_host::{
 };
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp,
-    NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit,
-    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
-    SlotEditOp, SlotKind, UiAddNodeMenu, UiAddNodeMenuEntry, UiAffordance, UiAssetContent,
-    UiAssetContentBody, UiAttachTarget, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
+    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
+    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
+    ProjectAssetContentRun, ProjectConnectResult, ProjectController, ProjectEditRun,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
+    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
+    UiAddNodeMenuEntry, UiAffordance, UiAssetContent, UiAssetContentBody, UiAttachTarget,
+    UiImportablePattern, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
     UiPendingEditPhase, UiProjectManifest, UiShaderError, UiTimebaseRead,
 };
 pub use app::rich_object::{

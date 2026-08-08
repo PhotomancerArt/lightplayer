@@ -126,16 +126,18 @@ pub use nodes::{
     FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, FloatMode, FluidDef,
     FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType, MappingConfig, ModuleDef,
     ModuleDefView, NodeDefParseError, NodeStarter, OutputChannelDef, OutputChannelDefView,
-    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec,
-    PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
-    PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint,
-    ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    SpaceAnswer1, SpaceAnswer2, TextureDef, TextureDefView, TextureFormat, TextureState,
-    TextureStateView, VisualConsumerSpace, generate_compute_shader_header, glsl_type_for_lp_type,
-    node_def_asset_ref, resolve_artifact_specifier, set_node_def_asset_ref, shader_panel_step,
-    starter_def_for_kind, starter_for_kind, starter_project_files,
+    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+    PATTERN_EXPORT_FOLDER, PathSpec, PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry,
+    PlaylistEntryView, PlaylistState, PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL,
+    STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
+    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace, ShaderState,
+    ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2, TextureDef, TextureDefView,
+    TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
+    generate_compute_shader_header, glsl_type_for_lp_type, node_def_asset_ref,
+    pattern_project_files_1d, pattern_project_files_2d, resolve_artifact_specifier,
+    set_node_def_asset_ref, shader_panel_step, starter_def_for_kind, starter_for_kind,
+    starter_project_files,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
@@ -151,10 +153,11 @@ pub use project::overlay_mutation::{
     StoredSlotEdit,
 };
 pub use project::{
-    ChangeSummary, CommitResult, LocationSeg, ManifestParseError, MutationBatchResults,
-    MutationResult, NodeAttachSite, NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary,
-    ProjectConfig, ProjectInventory, ProjectManifest, ProjectNode, ProjectNodeOrigin,
-    ProjectNodePlacement, ProjectTree, Revision,
+    ChangeSummary, CommitResult, ExportFileSet, ExportFinding, ExportLintReport, ExportSeverity,
+    LocationSeg, ManifestParseError, MutationBatchResults, MutationResult, NodeAttachSite,
+    NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary, ProjectConfig, ProjectInventory,
+    ProjectKind, ProjectManifest, ProjectNode, ProjectNodeOrigin, ProjectNodePlacement,
+    ProjectTree, Revision, check_export, check_exports,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
