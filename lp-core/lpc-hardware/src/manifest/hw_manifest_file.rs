@@ -465,7 +465,7 @@ mod tests {
                     "open_drain": false,
                     "settle_ms": 50,
                     "off_debounce_ms": 5000,
-                    "feeds": ["/rmt/ws281x0"],
+                    "feeds": ["/gpio/16"],
                     "note": "MTDI strap; must idle low at boot"
                 }
             ]
@@ -478,8 +478,11 @@ mod tests {
         assert!(!gate.open_drain);
         assert_eq!(gate.settle_ms, 50);
         assert_eq!(gate.off_debounce_ms, 5000);
-        assert_eq!(gate.feeds, alloc::vec![String::from("/rmt/ws281x0")]);
-        assert_eq!(gate.note.as_deref(), Some("MTDI strap; must idle low at boot"));
+        assert_eq!(gate.feeds, alloc::vec![String::from("/gpio/16")]);
+        assert_eq!(
+            gate.note.as_deref(),
+            Some("MTDI strap; must idle low at boot")
+        );
 
         let runtime = file.to_manifest().unwrap();
         let gates = runtime.power_gates();
@@ -489,7 +492,7 @@ mod tests {
         assert!(!gates[0].open_drain());
         assert_eq!(gates[0].settle_ms(), 50);
         assert_eq!(gates[0].off_debounce_ms(), 5000);
-        assert_eq!(gates[0].feeds(), [HwAddress::rmt_ws281x(0)]);
+        assert_eq!(gates[0].feeds(), [HwAddress::gpio(16)]);
         assert_eq!(gates[0].note(), Some("MTDI strap; must idle low at boot"));
 
         let rewritten = file.write_json().unwrap();
