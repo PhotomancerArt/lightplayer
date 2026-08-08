@@ -14,14 +14,14 @@ use serde::{Deserialize, Serialize};
 pub enum CloudError {
     /// The referenced project does not exist — or it exists but the caller
     /// cannot see it. Deliberately the *same* answer for both cases: a
-    /// private project the caller lacks access to must be indistinguishable
-    /// from a project that was never created, or existence itself leaks.
+    /// project the caller lacks access to must be indistinguishable from a
+    /// project that was never created, or existence itself leaks.
     NotFound,
     /// The request requires an authenticated [`crate::actor::Actor`] and the
     /// call carried none.
     NotAuthenticated,
     /// The caller is authenticated but is not authorized to perform this
-    /// action on this project (e.g. a non-member setting visibility).
+    /// action on this project (e.g. a non-member setting its access).
     NotAuthorized,
     /// The caller's [`crate::version::CLOUD_API_VERSION`] does not match the
     /// server's. Never guessed at or downgraded — see [`crate::version`].

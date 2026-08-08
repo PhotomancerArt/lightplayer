@@ -3,15 +3,16 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lpc_cloud_api::request::{
-    AddMember, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject, PushCommit,
-    RemoveMember, RevokeSession, SetVisibility, UpdateMe,
+    AddMember, ArchiveProject, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject,
+    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, UpdateMe,
 };
 use lpc_cloud_api::response::{
     Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Ack, Actor, CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions, HeadInfo,
-    LoginOptionsInfo, MeInfo, OidcOption, SessionInfo, SessionList, SidecarMeta, Visibility,
+    Access, Ack, Actor, CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions,
+    HeadInfo, LoginOptionsInfo, MeInfo, MemberInfo, MemberRole, OidcOption, SessionInfo,
+    SessionList, SidecarMeta,
 };
 use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
 
@@ -20,7 +21,6 @@ use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
 use crate::model::login_providers::LoginProviders;
 use crate::model::member_record::MemberRecord;
-use crate::model::member_role::MemberRole;
 use crate::model::project_refs::ProjectRefs;
 use crate::model::session_record::{SESSION_TOKEN_LEN, SessionRecord, session_token_hash};
 use crate::ports::clock::Clock;
@@ -37,6 +37,10 @@ const MAX_NAME_LEN: usize = 200;
 /// `limit`). Local dev only, and generous: a seeded-profile picker with
 /// hundreds of rows would be a UI problem before it is a query problem.
 const DEV_PICKER_CHOICE_LIMIT: usize = 20;
+
+/// What every write refusal on an archived project says. One constant so the
+/// four write paths cannot drift into four different sentences.
+const ARCHIVED: &str = "project is archived";
 
 /// The cloud sync service.
 ///
@@ -115,8 +119,12 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             CloudRequest::PublishProject(request) => {
                 self.publish_project(actor, request).map(Into::into)
             }
-            CloudRequest::SetVisibility(request) => {
-                self.set_visibility(actor, request).map(Into::into)
+            CloudRequest::SetAccess(request) => self.set_access(actor, request).map(Into::into),
+            CloudRequest::ArchiveProject(request) => {
+                self.archive_project(actor, request).map(Into::into)
+            }
+            CloudRequest::RestoreProject(request) => {
+                self.restore_project(actor, request).map(Into::into)
             }
             CloudRequest::AddMember(request) => self.add_member(actor, request).map(Into::into),
             CloudRequest::RemoveMember(request) => {
@@ -124,7 +132,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             }
             CloudRequest::GetProject(request) => self.get_project(actor, request).map(Into::into),
             CloudRequest::GetHeads(request) => self.get_heads(actor, request).map(Into::into),
-            CloudRequest::HaveBlobs(request) => self.have_blobs(actor, request).map(Into::into),
+            CloudRequest::HaveBlobs(request) => self.have_blobs(request).map(Into::into),
             CloudRequest::PushCommit(request) => self.push_commit(actor, request).map(Into::into),
             CloudRequest::GetEvents(request) => self.get_events(actor, request).map(Into::into),
             CloudRequest::GetMe => self.get_me(caller).map(Into::into),
@@ -283,18 +291,18 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
 
     /// Publish a project the client already minted a uid for (D21).
     ///
-    /// Re-publishing your own project restates its slug and visibility.
+    /// Re-publishing your own project restates its slug and access — but
+    /// never its archived state: un-archiving is [`restore_project`](Self::restore_project)'s
+    /// job, and a publish that silently resurrected a project the owner had
+    /// put away would be a surprise, not a convenience.
+    ///
     /// Publishing a uid someone *else* owns answers `NotFound` — the same
     /// answer as a uid that was never published, so the endpoint cannot be
     /// used to probe which project uids exist.
     fn publish_project(
         &mut self,
         actor: Actor,
-        PublishProject {
-            uid,
-            visibility,
-            slug,
-        }: PublishProject,
+        PublishProject { uid, access, slug }: PublishProject,
     ) -> Result<ProjectInfo, CloudError> {
         let user = self.require_user(actor)?;
         if uid.prefix() != UidPrefix::Project {
@@ -307,20 +315,21 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                 return Err(CloudError::NotFound);
             }
             self.store.put_project(CloudProject {
-                visibility,
+                access,
                 slug,
                 ..existing
             });
-            return self.project_info(uid);
+            return self.project_info(actor, uid);
         }
 
         let now = self.clock.now();
         self.store.put_project(CloudProject {
             uid,
             owner: user.uid,
-            visibility,
+            access,
             slug: slug.clone(),
             created_at: now,
+            archived_at: None,
         });
         self.store.put_member(MemberRecord {
             project: uid,
@@ -333,20 +342,52 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         // A project with no commits still needs display metadata; the first
         // push replaces this with the client's own.
         self.store.put_sidecar(uid, placeholder_sidecar(&slug));
-        self.project_info(uid)
+        self.project_info(actor, uid)
     }
 
-    fn set_visibility(
+    /// Change what the link grants. A write, so an `Edit` link can hand out
+    /// a `View` one — the capability the uid carries includes narrowing it.
+    fn set_access(
         &mut self,
         actor: Actor,
-        SetVisibility { uid, visibility }: SetVisibility,
+        SetAccess { uid, access }: SetAccess,
     ) -> Result<ProjectInfo, CloudError> {
-        let (project, _) = self.require_write_access(actor, uid)?;
+        let project = self.require_write_access(actor, uid)?;
+        self.store.put_project(CloudProject { access, ..project });
+        self.project_info(actor, uid)
+    }
+
+    /// Put a project away: its link stops resolving for everyone but its
+    /// members, and every write is refused until [`restore_project`](Self::restore_project).
+    /// Owner-only, and idempotent — archiving an archived project is a
+    /// restatement, not an error.
+    fn archive_project(
+        &mut self,
+        actor: Actor,
+        ArchiveProject { uid }: ArchiveProject,
+    ) -> Result<ProjectInfo, CloudError> {
+        let project = self.require_owner(actor, uid)?;
+        let archived_at = Some(project.archived_at.unwrap_or_else(|| self.clock.now()));
         self.store.put_project(CloudProject {
-            visibility,
+            archived_at,
             ..project
         });
-        self.project_info(uid)
+        self.project_info(actor, uid)
+    }
+
+    /// Undo an archive, restoring whatever access the project already had.
+    /// Owner-only, and idempotent the same way.
+    fn restore_project(
+        &mut self,
+        actor: Actor,
+        RestoreProject { uid }: RestoreProject,
+    ) -> Result<ProjectInfo, CloudError> {
+        let project = self.require_owner(actor, uid)?;
+        self.store.put_project(CloudProject {
+            archived_at: None,
+            ..project
+        });
+        self.project_info(actor, uid)
     }
 
     /// Grant access by email — to an account that may not exist yet (Q4).
@@ -371,10 +412,10 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             email,
             user: invited,
             // Re-adding the owner must not demote them.
-            role: existing_role.unwrap_or(MemberRole::Member),
+            role: existing_role.unwrap_or(MemberRole::Editor),
             added_at: self.clock.now(),
         });
-        self.project_info(uid)
+        self.project_info(actor, uid)
     }
 
     fn remove_member(
@@ -393,7 +434,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             return Err(invalid("the owner cannot be removed from their project"));
         }
         self.store.remove_member(uid, &email);
-        self.project_info(uid)
+        self.project_info(actor, uid)
     }
 
     fn get_project(
@@ -402,7 +443,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         GetProject { uid }: GetProject,
     ) -> Result<ProjectInfo, CloudError> {
         self.require_read_access(actor, uid)?;
-        self.project_info(uid)
+        self.project_info(actor, uid)
     }
 
     fn get_heads(&self, actor: Actor, GetHeads { uid }: GetHeads) -> Result<Heads, CloudError> {
@@ -412,14 +453,16 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         })
     }
 
-    /// Which of these hashes the service does not have. Authenticated: this
-    /// is the pre-flight of a push, and only a member can push.
-    fn have_blobs(
-        &self,
-        actor: Actor,
-        HaveBlobs { hashes }: HaveBlobs,
-    ) -> Result<MissingBlobs, CloudError> {
-        self.require_user(actor)?;
+    /// Which of these hashes the service does not have.
+    ///
+    /// Anonymous-callable, and it has to be: it is the pre-flight of a push,
+    /// and an [`Access::Edit`] link lets a caller with no account push. The
+    /// request names no project, so there is no write check to run against
+    /// one — and none is missing, because the question a caller can ask here
+    /// is "do you have *this* 256-bit hash", which they can only ask about
+    /// content they already hold. (Cost, not access, is the open question;
+    /// rate limits are P7's debt note, not this rule's.)
+    fn have_blobs(&self, HaveBlobs { hashes }: HaveBlobs) -> Result<MissingBlobs, CloudError> {
         let mut missing: Vec<ContentHash> = Vec::new();
         for hash in hashes {
             if !self.store.has_blob(hash) && !missing.contains(&hash) {
@@ -638,10 +681,12 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         }
     }
 
-    /// Read access: a `Link` project is open to anyone holding its uid,
-    /// including anonymous callers; a `Private` one is open to members.
+    /// Read access: the link opens the project at [`Access::View`] or above,
+    /// to anyone holding the uid including anonymous callers; membership
+    /// opens it regardless of what the link says. Archiving closes the link
+    /// (see [`CloudProject::effective_access`]) without touching members.
     ///
-    /// **A private project the caller cannot see answers `NotFound`, never
+    /// **A project the caller cannot see answers `NotFound`, never
     /// `NotAuthorized`.** The uid is the share link, so "this project exists
     /// but is not yours" is itself the leak — it turns the API into an
     /// oracle for which uids are real.
@@ -651,34 +696,81 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         uid: PrefixedUid,
     ) -> Result<CloudProject, CloudError> {
         let project = self.store.project(uid).ok_or(CloudError::NotFound)?;
-        if project.visibility == Visibility::Link || self.is_member(uid, actor) {
+        if project.effective_access() >= Access::View || self.is_member(uid, actor) {
             Ok(project)
         } else {
             Err(CloudError::NotFound)
         }
     }
 
-    /// Write access: membership, always. Anonymous callers get
-    /// `NotAuthenticated` before existence is even considered.
+    /// Write access: membership, **or** an [`Access::Edit`] link — anonymous
+    /// callers included (D-Q6). The 95-bit uid is the capability, and a
+    /// project whose owner set it to `Edit` said so on purpose.
     ///
-    /// An authenticated non-member is told `NotAuthorized` on a `Link`
-    /// project (whose existence they could already see) and `NotFound` on a
-    /// `Private` one (whose existence they could not) — the read rule's leak
-    /// budget, applied to writes.
+    /// The refusals are the read rule's leak budget applied to writes, and
+    /// they are shaped so that none of them answers "does this uid exist":
+    ///
+    /// - an anonymous caller is always `NotAuthenticated`, whether or not
+    ///   the project is there;
+    /// - an authenticated non-member gets `NotAuthorized` where the link
+    ///   already shows the project exists (`View`), and `NotFound`
+    ///   everywhere else — including on a project that is missing, or
+    ///   archived, which closes the link for exactly this purpose;
+    /// - an *archived* project refuses even its own members, with
+    ///   `InvalidRequest` — they can see it, so there is nothing to hide and
+    ///   everything to explain.
     fn require_write_access(
         &self,
         actor: Actor,
         uid: PrefixedUid,
-    ) -> Result<(CloudProject, CloudUser), CloudError> {
-        let user = self.require_user(actor)?;
-        let project = self.store.project(uid).ok_or(CloudError::NotFound)?;
-        if self.store.member_for_user(uid, user.uid).is_some() {
-            Ok((project, user))
-        } else if project.visibility == Visibility::Link {
-            Err(CloudError::NotAuthorized)
-        } else {
-            Err(CloudError::NotFound)
+    ) -> Result<CloudProject, CloudError> {
+        let actor = self.live_actor(actor);
+        let project = self.store.project(uid);
+        let access = project
+            .as_ref()
+            .map_or(Access::None, CloudProject::effective_access);
+        let granted = project.is_some() && (self.is_member(uid, actor) || access == Access::Edit);
+
+        let Some(project) = project.filter(|_| granted) else {
+            return Err(match actor {
+                Actor::Anonymous => CloudError::NotAuthenticated,
+                Actor::User(_) if access >= Access::View => CloudError::NotAuthorized,
+                Actor::User(_) => CloudError::NotFound,
+            });
+        };
+        if project.archived_at.is_some() {
+            return Err(invalid(ARCHIVED));
         }
+        Ok(project)
+    }
+
+    /// Owner-only access, for the two verbs that are the owner's alone:
+    /// archive and restore. Refuses on the same ladder as
+    /// [`require_write_access`](Self::require_write_access) — an editor is
+    /// told `NotAuthorized` on a project they can see, and everyone else
+    /// learns nothing.
+    ///
+    /// Unlike the write check this one *succeeds* on an archived project:
+    /// restoring is what an archived project is for.
+    fn require_owner(&self, actor: Actor, uid: PrefixedUid) -> Result<CloudProject, CloudError> {
+        let actor = self.live_actor(actor);
+        let project = self.store.project(uid);
+        let owned = matches!(
+            (actor, project.as_ref()),
+            (Actor::User(user), Some(project)) if project.owner == user
+        );
+        // What the *caller* can already see, which is what decides whether
+        // `NotAuthorized` is safe to say: a member sees the project whatever
+        // the link says.
+        let visible = project.as_ref().is_some_and(|project| {
+            project.effective_access() >= Access::View || self.is_member(uid, actor)
+        });
+
+        project.filter(|_| owned).ok_or(match actor {
+            Actor::Anonymous => CloudError::NotAuthenticated,
+            Actor::User(_) if visible => CloudError::NotAuthorized,
+            Actor::User(_) => CloudError::NotFound,
+        })
     }
 
     fn is_member(&self, project: PrefixedUid, actor: Actor) -> bool {
@@ -688,17 +780,55 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         }
     }
 
-    fn project_info(&self, uid: PrefixedUid) -> Result<ProjectInfo, CloudError> {
+    /// The caller, with a session naming an account that no longer exists
+    /// downgraded to anonymous — the same rule
+    /// [`require_user`](Self::require_user) applies, in the form the access
+    /// checks need (a caller, not a refusal).
+    fn live_actor(&self, actor: Actor) -> Actor {
+        match actor {
+            Actor::User(uid) if self.store.user(uid).is_some() => actor,
+            _ => Actor::Anonymous,
+        }
+    }
+
+    /// The project as `actor` gets to see it.
+    ///
+    /// The caller-dependent part is `members`: it is a list of people's email
+    /// addresses, so it goes to the people *on* it — the project's members —
+    /// and to nobody else. A link-holder gets `None` however much the link
+    /// grants them: an `Edit` link is write access to the project, never
+    /// access to the roster of who else has it. (Members-only rather than
+    /// writers-only matters at exactly one point, and that is the point: on
+    /// an `Edit` project every reader is a writer.)
+    fn project_info(&self, actor: Actor, uid: PrefixedUid) -> Result<ProjectInfo, CloudError> {
         let project = self.store.project(uid).ok_or(CloudError::NotFound)?;
         let sidecar = self
             .store
             .sidecar(uid)
             .unwrap_or_else(|| placeholder_sidecar(&project.slug));
+        let members = self
+            .is_member(uid, self.live_actor(actor))
+            .then(|| self.member_infos(uid));
         Ok(ProjectInfo {
             meta: project.to_meta(),
             heads: self.store.refs(uid).to_head_infos(),
             sidecar,
+            members,
         })
+    }
+
+    /// A project's membership rows, in the store's order (by email).
+    fn member_infos(&self, uid: PrefixedUid) -> Vec<MemberInfo> {
+        self.store
+            .members(uid)
+            .into_iter()
+            .map(|member| MemberInfo {
+                email: member.email,
+                role: member.role,
+                pending: member.user.is_none(),
+                user: member.user,
+            })
+            .collect()
     }
 }
 

@@ -11,7 +11,7 @@ use lpc_history::PrefixedUid;
 ///
 /// The uid is the whole of the identity **and** the whole of the access
 /// token: 95 bits of keyspace, so holding the link *is* the permission on a
-/// `Visibility::Link` project. The slug is decoration for the address bar and
+/// `Access::View` project. The slug is decoration for the address bar and
 /// carries no meaning — two links with different slugs and the same uid are
 /// the same project, and parsing deliberately ignores the slug rather than
 /// validating it.

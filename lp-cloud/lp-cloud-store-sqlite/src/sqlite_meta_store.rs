@@ -45,7 +45,7 @@ use lp_cloud_domain::{
     CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore, ProjectRefs,
     SessionRecord, StoredEvent,
 };
-use lpc_cloud_api::{SidecarMeta, Visibility};
+use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 use rusqlite::{Connection, Params, Row, params};
 
@@ -342,23 +342,25 @@ impl MetaStore for SqliteMetaStore {
     fn put_project(&mut self, project: CloudProject) {
         // Upsert for the same reason as `put_user`, and here it is load
         // bearing: every child table cascades from `projects`, so an
-        // `INSERT OR REPLACE` on a visibility change would delete the
+        // `INSERT OR REPLACE` on an access change would delete the
         // project's members, refs, events and sidecar.
         self.execute(
             "MetaStore::put_project",
-            "INSERT INTO projects (uid, owner_uid, visibility, slug, created_at)\n\
-             VALUES (?1, ?2, ?3, ?4, ?5)\n\
+            "INSERT INTO projects (uid, owner_uid, access, slug, created_at, archived_at)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)\n\
              ON CONFLICT (uid) DO UPDATE SET\n\
                  owner_uid = excluded.owner_uid,\n\
-                 visibility = excluded.visibility,\n\
+                 access = excluded.access,\n\
                  slug = excluded.slug,\n\
-                 created_at = excluded.created_at",
+                 created_at = excluded.created_at,\n\
+                 archived_at = excluded.archived_at",
             params![
                 project.uid.to_string(),
                 project.owner.to_string(),
-                visibility_to_text(project.visibility),
+                access_to_text(project.access),
                 project.slug,
                 project.created_at,
+                project.archived_at,
             ],
         );
     }
@@ -366,7 +368,8 @@ impl MetaStore for SqliteMetaStore {
     fn project(&self, uid: PrefixedUid) -> Option<CloudProject> {
         self.query_one(
             "MetaStore::project",
-            "SELECT uid, owner_uid, visibility, slug, created_at FROM projects WHERE uid = ?1",
+            "SELECT uid, owner_uid, access, slug, created_at, archived_at\n\
+             FROM projects WHERE uid = ?1",
             params![uid.to_string()],
             decode_project,
         )
@@ -375,7 +378,7 @@ impl MetaStore for SqliteMetaStore {
     fn projects_for_user(&self, user: PrefixedUid) -> Vec<CloudProject> {
         self.query_all(
             "MetaStore::projects_for_user",
-            "SELECT p.uid, p.owner_uid, p.visibility, p.slug, p.created_at\n\
+            "SELECT p.uid, p.owner_uid, p.access, p.slug, p.created_at, p.archived_at\n\
              FROM members m JOIN projects p ON p.uid = m.project_uid\n\
              WHERE m.user_uid = ?1\n\
              ORDER BY m.project_uid, m.email",
@@ -574,9 +577,10 @@ fn decode_project(row: &Row<'_>) -> rusqlite::Result<CloudProject> {
     Ok(CloudProject {
         uid: parse_uid(&row.get::<_, String>(0)?),
         owner: parse_uid(&row.get::<_, String>(1)?),
-        visibility: visibility_from_text(&row.get::<_, String>(2)?),
+        access: access_from_text(&row.get::<_, String>(2)?),
         slug: row.get(3)?,
         created_at: row.get(4)?,
+        archived_at: row.get(5)?,
     })
 }
 
@@ -612,34 +616,36 @@ fn decode_sidecar(row: &Row<'_>) -> rusqlite::Result<SidecarMeta> {
 
 // ---- column encodings -------------------------------------------------
 
-/// Pinned to the wire spelling of [`Visibility`], so a row reads the same
-/// as the API that produced it.
-fn visibility_to_text(visibility: Visibility) -> &'static str {
-    match visibility {
-        Visibility::Private => "private",
-        Visibility::Link => "link",
+/// Pinned to the wire spelling of [`Access`], so a row reads the same as the
+/// API that produced it.
+fn access_to_text(access: Access) -> &'static str {
+    match access {
+        Access::None => "none",
+        Access::View => "view",
+        Access::Edit => "edit",
     }
 }
 
-fn visibility_from_text(text: &str) -> Visibility {
+fn access_from_text(text: &str) -> Access {
     match text {
-        "private" => Visibility::Private,
-        "link" => Visibility::Link,
-        other => panic!("lp-cloud-store-sqlite: unknown visibility {other:?} in the database"),
+        "none" => Access::None,
+        "view" => Access::View,
+        "edit" => Access::Edit,
+        other => panic!("lp-cloud-store-sqlite: unknown access {other:?} in the database"),
     }
 }
 
 fn role_to_text(role: MemberRole) -> &'static str {
     match role {
         MemberRole::Owner => "owner",
-        MemberRole::Member => "member",
+        MemberRole::Editor => "editor",
     }
 }
 
 fn role_from_text(text: &str) -> MemberRole {
     match text {
         "owner" => MemberRole::Owner,
-        "member" => MemberRole::Member,
+        "editor" => MemberRole::Editor,
         other => panic!("lp-cloud-store-sqlite: unknown member role {other:?} in the database"),
     }
 }

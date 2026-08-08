@@ -3,7 +3,7 @@
 //!
 //! The slug is lowercase `[a-z0-9-]`, cosmetic, and mutable; the uid is a
 //! [`PrefixedUid`] naming a project — authoritative, forever, and (for a
-//! `Visibility::Link` project) the whole of the access token. Every parser
+//! shared project) the whole of the access token. Every parser
 //! in the tree delegates here instead of re-implementing the split: the
 //! cloud server's page-plane (`lp-cloud-server::page::share_path`), the
 //! Studio router (`lpa-studio-web::router`), and `lpa-cloud-client`'s

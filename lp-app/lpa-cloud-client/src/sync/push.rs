@@ -149,7 +149,7 @@ mod tests {
     use crate::cloud_port::TransportError;
     use crate::sync::publish::publish;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::Visibility;
+    use lpc_cloud_api::Access;
 
     #[test]
     fn a_second_push_advances_the_line() {
@@ -162,7 +162,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -189,7 +189,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -213,7 +213,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -252,7 +252,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

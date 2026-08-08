@@ -8,7 +8,7 @@ mod builders;
 
 use builders::TestWorld;
 use lpa_cloud_client::{ClobberSide, SyncError, TransportError};
-use lpc_cloud_api::{CloudError, Visibility};
+use lpc_cloud_api::{Access, CloudError};
 use lpc_history::SyncRelation;
 
 /// Share by URL, open with no account: the whole product in one test.
@@ -19,7 +19,7 @@ fn publish_then_anonymous_pull() {
     let visitor = td.visitor();
 
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
     assert_eq!(link.path(), format!("/p/proj-1-{}", dome.uid()));
 
     let copy = visitor.open_url(&format!("https://lightplayer.app{}", link.path()));
@@ -30,7 +30,7 @@ fn publish_then_anonymous_pull() {
     assert!(copy.pull().is_up_to_date());
 
     let sketch = owner.project();
-    let unlisted = sketch.publish(Visibility::Private);
+    let unlisted = sketch.publish(Access::None);
     assert!(matches!(
         visitor.open_shared_error(&unlisted),
         SyncError::Cloud(CloudError::NotFound)
@@ -45,7 +45,7 @@ fn publisher_pushes_tracker_fast_forwards() {
     let visitor = td.visitor();
 
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
     let tracker = visitor.open_shared(&link);
 
     dome.edit("brighter");
@@ -70,7 +70,7 @@ fn viewer_edits_diverges_then_forks() {
     let visitor = td.visitor();
 
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
     let copy = visitor.open_shared(&link);
 
     copy.edit("my own idea");
@@ -95,7 +95,7 @@ fn two_members_edit_push_pull() {
     let td = TestWorld::new();
     let owner = td.user();
     let dome = owner.project();
-    let link = dome.publish(Visibility::Private);
+    let link = dome.publish(Access::None);
 
     let invited = td.invitee();
     dome.add_member(invited.email());
@@ -145,7 +145,7 @@ fn offline_queue_then_push() {
     let td = TestWorld::new();
     let owner = td.user();
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
 
     owner.go_offline();
     dome.edit("sketching on a plane");
@@ -176,7 +176,7 @@ fn clobber_both_directions() {
     let owner = td.user();
 
     let keeping_mine = owner.project();
-    let mine_link = keeping_mine.publish(Visibility::Link);
+    let mine_link = keeping_mine.publish(Access::View);
     let mine_peer = keeping_mine.collaborator().open_shared(&mine_link);
     mine_peer.edit("the peer's take");
     mine_peer.push();
@@ -197,7 +197,7 @@ fn clobber_both_directions() {
     assert_eq!(keeping_mine.server_heads(), vec![keeping_mine.head()]);
 
     let taking_theirs = owner.project();
-    let theirs_link = taking_theirs.publish(Visibility::Link);
+    let theirs_link = taking_theirs.publish(Access::View);
     let theirs_peer = taking_theirs.collaborator().open_shared(&theirs_link);
     theirs_peer.edit("the peer's take");
     theirs_peer.push();
@@ -218,15 +218,15 @@ fn clobber_both_directions() {
     assert_eq!(taking_theirs.server_heads(), vec![taking_theirs.head()]);
 }
 
-/// Holding the link is permission to read, never to write.
+/// A `View` link is permission to read, never to write.
 #[test]
-fn anonymous_cannot_push() {
+fn anonymous_cannot_push_a_view_link() {
     let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
     let copy = visitor.open_shared(&link);
     copy.edit("a stranger's idea");
 
@@ -238,19 +238,87 @@ fn anonymous_cannot_push() {
     assert_eq!(dome.server_heads(), vec![dome.head()]);
 }
 
-/// Unsharing stops the conversation. It does not reach into anybody's
-/// library.
+/// The whole access model in one story: a link that starts as a view, a
+/// visitor who opens it with no account at all, and one flip of a switch by
+/// the owner after which that same visitor's work lands on the project.
 #[test]
-fn visibility_flip_revokes_link_view() {
+fn opening_the_link_to_edit_lets_a_visitor_push() {
     let td = TestWorld::new();
     let owner = td.user();
     let visitor = td.visitor();
 
     let dome = owner.project();
-    let link = dome.publish(Visibility::Link);
+    let link = dome.publish(Access::View);
+
+    let copy = visitor.open_shared(&link);
+    assert_eq!(copy.shader(), "first light");
+    copy.edit("the visitor's idea");
+    assert!(matches!(
+        copy.push_error(),
+        SyncError::Cloud(CloudError::NotAuthenticated)
+    ));
+
+    dome.set_access(Access::Edit);
+
+    assert!(copy.push().advanced());
+    assert_eq!(dome.server_heads(), vec![copy.head()]);
+
+    // And the owner sees it as an ordinary fast-forward from a collaborator.
+    let pulled = dome.pull();
+    assert!(pulled.can_fast_forward());
+    dome.fast_forward(&pulled);
+    assert_eq!(dome.shader(), "the visitor's idea");
+}
+
+/// Archiving takes the project off the link without touching anybody's
+/// library, and restoring puts it back exactly as it was.
+#[test]
+fn archiving_takes_the_link_down_and_restoring_brings_it_back() {
+    let td = TestWorld::new();
+    let owner = td.user();
+    let visitor = td.visitor();
+
+    let dome = owner.project();
+    let link = dome.publish(Access::View);
     let copy = visitor.open_shared(&link);
 
-    dome.set_visibility(Visibility::Private);
+    dome.archive();
+
+    assert!(matches!(
+        copy.pull_error(),
+        SyncError::Cloud(CloudError::NotFound)
+    ));
+    assert_eq!(copy.shader(), "first light", "their copy is untouched");
+    // Its owner cannot push to it either — an archive is a freeze, not a
+    // one-way door.
+    dome.edit("one more thought");
+    assert!(matches!(
+        dome.push_error(),
+        SyncError::Cloud(CloudError::InvalidRequest { .. })
+    ));
+
+    dome.restore();
+
+    assert!(dome.push().advanced());
+    let caught_up = copy.pull();
+    assert!(caught_up.can_fast_forward());
+    copy.fast_forward(&caught_up);
+    assert_eq!(copy.shader(), "one more thought");
+}
+
+/// Unsharing stops the conversation. It does not reach into anybody's
+/// library.
+#[test]
+fn closing_the_link_revokes_the_view() {
+    let td = TestWorld::new();
+    let owner = td.user();
+    let visitor = td.visitor();
+
+    let dome = owner.project();
+    let link = dome.publish(Access::View);
+    let copy = visitor.open_shared(&link);
+
+    dome.set_access(Access::None);
 
     assert!(matches!(
         copy.pull_error(),

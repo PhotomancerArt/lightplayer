@@ -233,7 +233,7 @@ mod tests {
     use crate::sync::publish::publish;
     use crate::sync::push::push;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::{CloudError, Visibility};
+    use lpc_cloud_api::{Access, CloudError};
 
     #[test]
     fn a_pull_with_nothing_new_is_up_to_date() {
@@ -246,7 +246,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -271,7 +271,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -306,7 +306,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -332,7 +332,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -369,7 +369,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -378,7 +378,7 @@ mod tests {
         let viewer = world.anonymous();
         let copy = world.tracking_copy(&viewer, 2, dome.uid());
         let tracking = copy.local_as(dome.uid());
-        world.set_visibility(&yona, dome.uid(), Visibility::Private);
+        world.set_access(&yona, dome.uid(), Access::None);
 
         let error = block_on(pull(&viewer, &tracking)).unwrap_err();
         assert!(matches!(error, SyncError::Cloud(CloudError::NotFound)));
