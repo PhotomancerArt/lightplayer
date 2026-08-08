@@ -1,0 +1,305 @@
+//! The driver: browser timers, OPFS mounts, and `FetchCloudPort` on one
+//! side; [`SyncQueue`] and [`run_trip`] on the other.
+//!
+//! One per tab, created on first use and never torn down. It owns no UI and
+//! reports nothing: the only visible consequence of this module working is
+//! that a project the user never explicitly shared already has a working
+//! link, and the only visible consequence of it failing is that the link
+//! lags (see the crate's P5 for the affordances that do speak).
+//!
+//! # Where the triggers come from
+//!
+//! - **Every catalog transaction** that produced a package
+//!   (`library_host_opfs::catalog`) — create, duplicate, import, seed,
+//!   generate, device-adopt, upgrade, rename. One request per transaction,
+//!   which is what keeps a single create from publishing twice even though
+//!   several op variants funnel through `install_package`.
+//! - **Every save** (`library_host_opfs::notify_saved`), debounced.
+//! - **Sign-in**, which sweeps the whole library.
+//! - **A coarse timer**, which is the retry path for everything the service
+//!   was not reachable for.
+//!
+//! # Locks
+//!
+//! A trip needs the project's history subtree, and exactly one writer may
+//! hold it. When this tab has the project open the driver borrows that
+//! open's live handles (its flusher persists the binding); otherwise it
+//! takes the project lock for the trip and flushes before releasing. A
+//! project another tab holds is skipped — that tab's own driver has it.
+
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use gloo_timers::future::TimeoutFuture;
+use lpa_cloud_client::LocalProject;
+use lpa_studio_core::app::library::{LibraryStore, PackageSummary};
+use lpc_history::PrefixedUid;
+
+use super::sidecar_producer::read_identity;
+use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
+use super::sync_trip::{classify, run_trip};
+use crate::cloud::FetchCloudPort;
+use crate::local_store::opfs_library_host;
+
+/// How often the driver re-attempts everything it is still tracking. Coarse
+/// on purpose: this is the offline-recovery path, not the save path.
+const SWEEP_INTERVAL_MS: u32 = 60_000;
+
+/// How long the sign-in sweep waits for the OPFS library host to exist.
+/// Sign-in and the startup probe are independent tasks and either can land
+/// first; only the sweep cares, and only once per session.
+const HOST_WAIT_RETRIES: usize = 20;
+const HOST_WAIT_DELAY_MS: u32 = 250;
+
+/// Note that a project wants a trip to the service.
+///
+/// Fire-and-forget and cheap: signed out it does nothing at all, and signed
+/// in it records the request and arms a pump. Never awaits, never touches
+/// OPFS, safe to call from inside a catalog transaction.
+pub fn note(uid: &str, trigger: SyncTrigger) {
+    let engine = engine();
+    if !engine.signed_in.get() {
+        return;
+    }
+    let delay = engine.queue.borrow_mut().request(uid, trigger, now_ms());
+    engine.pump_after(delay as u32);
+}
+
+/// Tell the driver whether there is an account to sync with.
+///
+/// The false→true edge is the sign-in sweep (D7): every project in the
+/// library is offered to the service, and the ones it has never seen are
+/// published. Going the other way forgets the queue outright — the next
+/// account's first pump must not inherit this one's work.
+pub fn set_signed_in(signed_in: bool) {
+    let engine = engine();
+    if engine.signed_in.replace(signed_in) == signed_in {
+        return;
+    }
+    if signed_in {
+        let engine = Rc::clone(&engine);
+        wasm_bindgen_futures::spawn_local(async move { engine.sweep().await });
+    } else {
+        engine.queue.borrow_mut().clear();
+    }
+}
+
+/// One tab's auto-publish driver.
+struct SyncEngine {
+    queue: RefCell<SyncQueue>,
+    signed_in: Cell<bool>,
+    /// One pump at a time — the trips inside it run sequentially, which is
+    /// the whole concurrency cap (libraries are small).
+    pumping: Cell<bool>,
+}
+
+impl SyncEngine {
+    fn new() -> Self {
+        Self {
+            queue: RefCell::new(SyncQueue::new()),
+            signed_in: Cell::new(false),
+            pumping: Cell::new(false),
+        }
+    }
+
+    /// Run the pump `delay_ms` from now, off the caller's critical path.
+    fn pump_after(self: &Rc<Self>, delay_ms: u32) {
+        let engine = Rc::clone(self);
+        wasm_bindgen_futures::spawn_local(async move {
+            if delay_ms > 0 {
+                TimeoutFuture::new(delay_ms).await;
+            }
+            engine.pump().await;
+        });
+    }
+
+    /// Take everything that is due and run it, one project at a time.
+    ///
+    /// A single pass. Anything that arrives mid-pass arms its own pump, and
+    /// anything that failed is picked up by the sweep timer, so there is no
+    /// inner loop here to spin.
+    async fn pump(self: &Rc<Self>) {
+        if !self.signed_in.get() || self.pumping.replace(true) {
+            return;
+        }
+        let due = self.queue.borrow_mut().take_due(now_ms());
+        if !due.is_empty() {
+            let library = roster().await;
+            for project in due {
+                let result = self.run_one(&project, &library).await;
+                self.queue
+                    .borrow_mut()
+                    .finish(&project.uid, result, now_ms());
+            }
+        }
+        self.pumping.set(false);
+    }
+
+    /// Offer every project in the library to the service (sign-in, D7).
+    ///
+    /// Unconditional rather than filtered on "has no binding": the trip
+    /// already decides publish-vs-push from the binding, and offering the
+    /// bound ones too is how a push that failed while offline eventually
+    /// lands.
+    async fn sweep(self: &Rc<Self>) {
+        if !self.signed_in.get() {
+            return;
+        }
+        // The library host is built by an independent startup task, and a
+        // `whoami` that answers first would otherwise sweep an empty roster
+        // and consider the account done until the next save.
+        await_library_host().await;
+        // Read the library BEFORE touching the queue: a `RefMut` may not be
+        // held across an await — a save landing mid-read would panic on the
+        // second borrow.
+        let library = roster().await;
+        let now = now_ms();
+        {
+            let mut queue = self.queue.borrow_mut();
+            for uid in library.keys() {
+                queue.request(uid, SyncTrigger::Swept, now);
+            }
+        }
+        self.pump().await;
+    }
+
+    /// The coarse retry loop. Started once, runs for the life of the tab.
+    async fn sweep_forever(self: Rc<Self>) {
+        loop {
+            TimeoutFuture::new(SWEEP_INTERVAL_MS).await;
+            if !self.signed_in.get() {
+                continue;
+            }
+            self.queue.borrow_mut().arm_all(now_ms());
+            self.pump().await;
+        }
+    }
+
+    /// One project's trip, mount and all.
+    async fn run_one(&self, due: &DueProject, roster: &Roster) -> TripResult {
+        let Some(host) = opfs_library_host() else {
+            return TripResult::Refused;
+        };
+        let Ok(uid) = due.uid.parse::<PrefixedUid>() else {
+            log::warn!("cloud sync: {} is not a project uid", due.uid);
+            return TripResult::Refused;
+        };
+        let entry = roster.get(&due.uid);
+        let mount = match host
+            .mount_for_sync(&due.uid, entry.map(|entry| entry.slug.as_str()))
+            .await
+        {
+            Ok(Some(mount)) => mount,
+            // Another tab holds the project; its driver owns the trip.
+            Ok(None) => return TripResult::Retry,
+            Err(error) => {
+                log::warn!("cloud sync: cannot reach {}: {error}", due.uid);
+                return TripResult::Retry;
+            }
+        };
+
+        let fallback = entry.map_or(due.uid.as_str(), |entry| entry.name.as_str());
+        let result = run_mounted(&mount, uid, fallback, due.restate).await;
+        mount.release().await;
+
+        match result {
+            Ok(report) => {
+                log::debug!("cloud sync: {} {report:?}", due.uid);
+                TripResult::Settled
+            }
+            Err(error) => {
+                let verdict = classify(&error);
+                log::warn!("cloud sync: {} failed ({verdict:?}): {error}", due.uid);
+                verdict
+            }
+        }
+    }
+}
+
+/// The trip itself, over mounted stores. Split out so the mount's borrow
+/// ends before it is released.
+async fn run_mounted(
+    mount: &crate::library_host_opfs::SyncMount,
+    uid: PrefixedUid,
+    fallback_name: &str,
+    restate: bool,
+) -> Result<super::sync_trip::TripReport, lpa_cloud_client::SyncError> {
+    let identity = read_identity(mount.package(), fallback_name)
+        .map_err(|error| lpa_cloud_client::SyncError::Encode(error.to_string()))?;
+    let project = LocalProject::new(uid, mount.package(), mount.history());
+    run_trip(
+        &FetchCloudPort::new(),
+        &project,
+        &identity.sidecar(),
+        &identity.cloud_slug(),
+        restate,
+    )
+    .await
+}
+
+/// What the driver needs to know about a project without mounting it: where
+/// its package directory is, and what to call it if its manifest will not
+/// say.
+type Roster = BTreeMap<String, RosterEntry>;
+
+struct RosterEntry {
+    slug: String,
+    name: String,
+}
+
+/// Wait, briefly, for the startup probe to build the library host.
+async fn await_library_host() {
+    for _ in 0..HOST_WAIT_RETRIES {
+        if opfs_library_host().is_some() {
+            return;
+        }
+        TimeoutFuture::new(HOST_WAIT_DELAY_MS).await;
+    }
+    log::warn!("cloud sync: no library host to sweep");
+}
+
+/// One catalog snapshot per pump, not one per project.
+async fn roster() -> Roster {
+    let Some(host) = opfs_library_host() else {
+        return Roster::new();
+    };
+    let snapshot = match lpa_studio_core::app::library::LibraryHost::catalog_snapshot(&*host).await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            log::warn!("cloud sync: cannot read the library roster: {error}");
+            return Roster::new();
+        }
+    };
+    let summaries = LibraryStore::read_only(snapshot).list().unwrap_or_default();
+    summaries
+        .into_iter()
+        .map(
+            |PackageSummary {
+                 uid, slug, name, ..
+             }| (uid.to_string(), RosterEntry { slug, name }),
+        )
+        .collect()
+}
+
+thread_local! {
+    static ENGINE: RefCell<Option<Rc<SyncEngine>>> = const { RefCell::new(None) };
+}
+
+/// The tab's driver, started on first use.
+fn engine() -> Rc<SyncEngine> {
+    ENGINE.with(|slot| {
+        if let Some(engine) = slot.borrow().as_ref() {
+            return Rc::clone(engine);
+        }
+        let engine = Rc::new(SyncEngine::new());
+        *slot.borrow_mut() = Some(Rc::clone(&engine));
+        wasm_bindgen_futures::spawn_local(Rc::clone(&engine).sweep_forever());
+        engine
+    })
+}
+
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}

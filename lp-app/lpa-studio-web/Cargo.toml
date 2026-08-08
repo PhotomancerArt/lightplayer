@@ -48,6 +48,10 @@ lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 # gates that combination cheaply.
 lpa-cloud-client = { path = "../lpa-cloud-client", default-features = false }
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+# The filesystem trait the cloud sync driver hands to `LocalProject`. Not
+# wasm-only: the sidecar producer reads a package manifest through it, and
+# that logic is host-tested.
+lpfs = { path = "../../lp-base/lpfs" }
 # Markdown parsing for agent chat replies (parser only; rendering goes
 # through Dioxus nodes — never raw HTML).
 pulldown-cmark = { version = "0.13", default-features = false }
@@ -102,7 +106,6 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 lpa-fs-opfs = { path = "../lpa-fs-opfs" }
-lpfs = { path = "../../lp-base/lpfs" }
 wasm-bindgen-futures = "0.4"
 
 [build-dependencies]
@@ -113,3 +116,9 @@ workspace = true
 
 [dev-dependencies]
 lightningcss = { version = "1.0.0-alpha.72", default-features = false }
+# The cloud sync trip is tested against the real service in process (D13),
+# not a mock of it — so the host test build turns `in-process` back on for a
+# crate the wasm bundle deliberately builds without it. Dev-dependency
+# features never reach `dx build`, which builds no dev-deps; `just
+# check-wasm-cloud` gates the bundle's combination separately.
+lpa-cloud-client = { path = "../lpa-cloud-client" }

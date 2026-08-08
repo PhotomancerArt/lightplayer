@@ -24,7 +24,7 @@
 //! rather than losing persistence — M2's behavior, kept deliberately.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gloo_timers::future::TimeoutFuture;
@@ -38,6 +38,8 @@ use lpa_studio_core::app::library::{
 };
 use lpfs::{LpFs, LpPath};
 
+use crate::cloud::sync::sync_queue::SyncTrigger;
+
 /// Flush cadence for open-project stores.
 const FLUSH_INTERVAL_MS: u32 = 100;
 
@@ -45,6 +47,13 @@ const FLUSH_INTERVAL_MS: u32 = 100;
 /// beats surfacing `Busy` on the first collision.
 const CATALOG_RETRIES: usize = 5;
 const CATALOG_RETRY_DELAY_MS: u32 = 50;
+
+/// How long an open waits out this tab's own cloud sync trip before
+/// concluding somebody else holds the project. A trip is a network round
+/// trip, so this is seconds rather than the catalog's tens of ms — and a
+/// slow open beats a wrong "open in another tab".
+const SYNC_HANDOFF_RETRIES: usize = 30;
+const SYNC_HANDOFF_DELAY_MS: u32 = 100;
 
 /// BroadcastChannel name for cross-tab library-change pings.
 pub const LIBRARY_CHANNEL: &str = "lp-library";
@@ -62,6 +71,10 @@ struct OpenProjectStores {
 /// The OPFS-backed [`LibraryHost`]. One per tab, attached at startup.
 pub struct OpfsLibraryHost {
     open: RefCell<HashMap<String, OpenProjectStores>>,
+    /// Project uids this tab's cloud driver is holding the project lock for
+    /// (see [`Self::mount_for_sync`]). Shared with the live [`SyncMount`]s,
+    /// which clear their own entry when they drop.
+    syncing: Rc<RefCell<HashSet<String>>>,
     /// Sender side of the cross-tab ping channel (`None` if the browser
     /// lacks BroadcastChannel; pings are best-effort).
     channel: Option<web_sys::BroadcastChannel>,
@@ -74,6 +87,7 @@ impl OpfsLibraryHost {
             .ok();
         Self {
             open: RefCell::new(HashMap::new()),
+            syncing: Rc::new(RefCell::new(HashSet::new())),
             channel,
         }
     }
@@ -97,6 +111,90 @@ impl OpfsLibraryHost {
         if let Some(channel) = &self.channel {
             let _ = channel.post_message(&wasm_bindgen::JsValue::from_str("changed"));
         }
+    }
+
+    /// Borrow (or mount) one project's two subtrees for a cloud sync trip.
+    ///
+    /// The cloud driver writes `/cloud-binding.json` into the history root,
+    /// so it needs the same single-writer guarantee every other write path
+    /// has:
+    ///
+    /// - **Open in this tab** — hand back the open's own live handles. Its
+    ///   flusher persists whatever the trip writes, and taking the project
+    ///   lock here would deadlock against the lock the open already holds.
+    /// - **Not open anywhere** — take the project lock for the trip and
+    ///   mount both subtrees fresh; [`SyncMount::release`] flushes before it
+    ///   lets go, exactly as a catalog transaction does.
+    /// - **Open in another tab** — `Ok(None)`. That tab runs its own driver
+    ///   and owns this project's trips; this one skips it.
+    ///
+    /// `slug` is the package directory's name. The caller usually has it
+    /// from the roster it just read; `None` costs a snapshot mount to
+    /// resolve.
+    pub(crate) async fn mount_for_sync(
+        &self,
+        uid: &str,
+        slug: Option<&str>,
+    ) -> Result<Option<SyncMount>, LibraryHostError> {
+        if let Some(state) = self.open.borrow().get(uid) {
+            return Ok(Some(SyncMount {
+                guard: None,
+                held: None,
+                package: state.package.clone(),
+                history: state.history.clone(),
+                borrowed: true,
+            }));
+        }
+        let guard = match acquire(&LibraryLock::Project(uid.to_string())).await {
+            Acquired::Held(guard) => Some(guard),
+            Acquired::Unguarded => None,
+            Acquired::Refused => return Ok(None),
+        };
+        // Registered as ours from the moment the lock is held, so an open in
+        // this tab waits the trip out instead of being told the project is
+        // open somewhere else. `SyncMount`'s `Drop` clears it.
+        self.syncing.borrow_mut().insert(uid.to_string());
+        let held = HeldForSync {
+            uid: uid.to_string(),
+            syncing: Rc::clone(&self.syncing),
+        };
+        let slug = match slug {
+            Some(slug) => slug.to_string(),
+            None => resolve_key_snapshot(uid).await?.1,
+        };
+        let package_dir = open_library_subdir(&format!("{PACKAGES_DIR}/{slug}"), false)
+            .await
+            .map_err(|e| LibraryHostError::Host(format!("open package dir: {e}")))?;
+        let history_dir = open_library_subdir(&format!("{HISTORY_DIR}/{uid}"), true)
+            .await
+            .map_err(|e| LibraryHostError::Host(format!("open history dir: {e}")))?;
+        Ok(Some(SyncMount {
+            guard,
+            held: Some(held),
+            package: LpFsOpfs::mount(package_dir)
+                .await
+                .map_err(|e| LibraryHostError::Host(format!("mount package: {e}")))?,
+            history: LpFsOpfs::mount(history_dir)
+                .await
+                .map_err(|e| LibraryHostError::Host(format!("mount history: {e}")))?,
+            borrowed: false,
+        }))
+    }
+
+    /// Wait out this tab's own cloud sync trip on `uid`, if there is one.
+    ///
+    /// The driver holds the project lock across a network round trip, and a
+    /// user who just created a project and clicked into it must not be told
+    /// it is "open in another tab" — the hold is this tab's, and it ends.
+    /// Bounded: past the bound the ordinary refusal path takes over.
+    async fn await_sync_handoff(&self, uid: &str) {
+        for _ in 0..SYNC_HANDOFF_RETRIES {
+            if !self.syncing.borrow().contains(uid) {
+                return;
+            }
+            TimeoutFuture::new(SYNC_HANDOFF_DELAY_MS).await;
+        }
+        log::warn!("open of {uid} gave up waiting for its cloud sync trip");
     }
 
     /// Acquire the catalog lock with a short retry, mapping exhaustion to
@@ -164,6 +262,7 @@ impl LibraryHost for OpfsLibraryHost {
             // source bytes; fine at current scale)
             let store_fs = mount_root_store().await?;
             let store = writable_store(&store_fs);
+            let trigger = sync_trigger_for(&op);
             let result = apply_catalog_op(&store, op, now_secs());
 
             // flush fully BEFORE the guards release (drop order below)
@@ -173,6 +272,17 @@ impl LibraryHost for OpfsLibraryHost {
                 .map_err(|e| LibraryHostError::Host(format!("catalog flush: {e}")))?;
             prune_directory_husks(&store_fs).await;
             self.broadcast_changed();
+            // Auto-publish (vision D2): a transaction that produced a package
+            // has changed what the cloud should hold about it. Exactly one
+            // request per transaction, which is what keeps a create from
+            // publishing twice even though several op variants funnel through
+            // `install_package`. Fire-and-forget, after the flush and outside
+            // every lock.
+            if let Ok(outcome) = &result
+                && let Some(summary) = &outcome.summary
+            {
+                crate::cloud::sync::sync_engine::note(&summary.uid.to_string(), trigger);
+            }
             result
         })
     }
@@ -190,6 +300,7 @@ impl LibraryHost for OpfsLibraryHost {
                 if self.open.borrow().contains_key(&uid) {
                     return Err(LibraryHostError::OpenInThisTab { uid });
                 }
+                self.await_sync_handoff(&uid).await;
                 let guard = match acquire(&LibraryLock::Project(uid.clone())).await {
                     Acquired::Held(guard) => Some(guard),
                     Acquired::Unguarded => None,
@@ -280,8 +391,87 @@ impl LibraryHost for OpfsLibraryHost {
         })
     }
 
-    fn notify_saved(&self, _uid: &str) {
+    fn notify_saved(&self, uid: &str) {
         self.broadcast_changed();
+        // Push-on-save, debounced by the driver. Nothing here awaits: a save
+        // is never allowed to wait on the network.
+        crate::cloud::sync::sync_engine::note(uid, SyncTrigger::Saved);
+    }
+}
+
+/// Which cloud-sync trigger a catalog transaction is.
+///
+/// Only [`CatalogOp::Rename`] restates the project's identity — it is the
+/// one op that changes the display name, and therefore the slug half of the
+/// share address. Everything else that produces a package changed its
+/// content, which is a push.
+fn sync_trigger_for(op: &CatalogOp) -> SyncTrigger {
+    match op {
+        CatalogOp::Rename { .. } => SyncTrigger::Renamed,
+        _ => SyncTrigger::Installed,
+    }
+}
+
+/// One project's subtrees, held for the duration of a cloud sync trip.
+///
+/// See [`OpfsLibraryHost::mount_for_sync`] for how it was obtained; the
+/// difference between the two cases is entirely in [`Self::release`].
+pub(crate) struct SyncMount {
+    /// The project lock, when this mount took one.
+    guard: Option<LibraryLockGuard>,
+    /// Registration in the host's `syncing` set, cleared on drop.
+    held: Option<HeldForSync>,
+    package: LpFsOpfs,
+    history: LpFsOpfs,
+    /// These are an open project's live handles, not ours: its flusher and
+    /// its lock outlive the trip.
+    borrowed: bool,
+}
+
+/// "This tab's driver is holding that project", as a drop guard.
+///
+/// A guard rather than a paired insert/remove because a trip that fails
+/// mid-mount must not leave the uid registered — an open would then wait the
+/// full handoff bound for a trip that is not running.
+struct HeldForSync {
+    uid: String,
+    syncing: Rc<RefCell<HashSet<String>>>,
+}
+
+impl Drop for HeldForSync {
+    fn drop(&mut self) {
+        self.syncing.borrow_mut().remove(&self.uid);
+    }
+}
+
+impl SyncMount {
+    pub(crate) fn package(&self) -> &LpFsOpfs {
+        &self.package
+    }
+
+    pub(crate) fn history(&self) -> &LpFsOpfs {
+        &self.history
+    }
+
+    /// Flush what the trip wrote and let the project go.
+    ///
+    /// A borrowed mount does neither: flushing would race the open's own
+    /// flusher for no gain, and there is no lock here to release.
+    pub(crate) async fn release(self) {
+        if self.borrowed {
+            return;
+        }
+        // Only the binding is ever written, and only on a successful trip;
+        // a clean store makes this a no-op.
+        if let Err(e) = self.history.flush().await {
+            log::warn!("cloud sync flush (history): {e}");
+        }
+        if let Some(guard) = self.guard {
+            guard.release();
+        }
+        // After the lock, so an open that was waiting on the registration
+        // finds the lock already free when it stops waiting.
+        drop(self.held);
     }
 }
 
