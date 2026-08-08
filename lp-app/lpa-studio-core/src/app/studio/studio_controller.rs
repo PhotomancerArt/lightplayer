@@ -1482,9 +1482,9 @@ impl StudioController {
                 // binding) is the key: it survives detach, so re-attach
                 // flows address the same document
                 crate::UiLensRuntime::Sim {
-                    project_key: session
+                    project_uid: session
                         .sim_loaded_project()
-                        .map(|project| project.name.clone()),
+                        .map(|project| project.uid.clone()),
                 }
             } else {
                 let uid = session.device_uid().or_else(|| {
@@ -5081,8 +5081,8 @@ impl StudioController {
         if let Some(sim) = self.pool.sim_session() {
             let sim_id = sim.id();
             let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
-            // D37/M5 (`#/sim/<key>` — and the project-card click that now
-            // rides it): when the sim ALREADY runs the requested project,
+            // D37/M5 (`/p/<slug>-<uid>` — and the project-card click that
+            // now rides it): when the sim ALREADY runs the requested project,
             // re-attach the lens instead of pushing the head again — the
             // running session with its server-side overlay IS the document
             // (SDI); a fresh push would discard applied-but-unsaved edits.

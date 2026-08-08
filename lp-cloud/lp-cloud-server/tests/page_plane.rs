@@ -165,7 +165,12 @@ async fn a_project_without_a_preview_gets_a_card_without_an_image() {
 async fn client_routes_fall_back_to_the_document() {
     let server = TestServer::new();
 
-    for path in ["/", "/sim/zook-dome", "/settings/devices", "/anything/deep"] {
+    for path in [
+        "/",
+        "/devices",
+        "/boards/domraem/dom-z-102",
+        "/anything/deep",
+    ] {
         let response = server.get(path).await;
         assert_eq!(response.status(), StatusCode::OK, "for {path}");
         assert_eq!(

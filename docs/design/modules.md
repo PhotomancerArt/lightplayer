@@ -461,7 +461,8 @@ pane's own rows); engaged-vs-inheriting state and the reset gesture
 > Status: landed 2026-08-03 (`planning/2026-08-03-1021-modules-vision-push`
 > P2–P3, gate GV). The flat-root reversal, the module face at every depth
 > (children below as sibling cards), the per-scope wiring drawer, and play
-> mode (`#/sim|device/<key>/play`) are all real; the sidebar bus pane is
+> mode (`/p/<slug>-<uid>/play`, `/device/<uid>/play`) are all real; the
+> sidebar bus pane is
 > deleted. 2026-08-04: the drawer's rows became the **flow view**
 > (writers → value box → readers, from the wiring-UI spike;
 > `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`). The

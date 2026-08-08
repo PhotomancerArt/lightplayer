@@ -151,7 +151,7 @@ mod tests {
         assert!(looks_like_a_file("/assets/app-a1b2c3d4.js"));
         assert!(looks_like_a_file("/favicon.ico"));
         assert!(!looks_like_a_file("/"));
-        assert!(!looks_like_a_file("/sim/zook-dome"));
+        assert!(!looks_like_a_file("/boards/domraem/dom-z-102"));
         assert!(!looks_like_a_file("/p/zook-dome-prj0000000000000000"));
     }
 }
