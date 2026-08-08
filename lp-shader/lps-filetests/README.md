@@ -18,7 +18,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
 | `xtn.f32` | IEEE f32 | `lpvm-native` → Xtensa **hardware FPU** (`add.s`/`mul.s` on the LX7 float file) in the emulator | no — as above |
 | `xtlpn.f32` | IEEE f32 | `lps-glsl` frontend → the same hardware-FPU path | no — as above |
-| `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | no — explicit `--target wasm.f32`; see below |
+| `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | yes — promoted 2026-08-02; see below |
 | `rv32n.f32` | IEEE f32 (soft) | `lpvm-native` f32 lowering → RV32 emulator, float ops as soft-float calls | no — explicit `--target rv32n.f32`; see below |
 | `rv32lpn.f32` | IEEE f32 (soft) | `lps-glsl` frontend → the same soft-float path | no — as above |
 
@@ -36,22 +36,22 @@ default set; run it explicitly when touching the GPU tier.
 and executes the result, through `lpvm-wasm`'s `FloatMode::F32` emit path. That
 path existed for a long time with no target pointed at it, so it had never run.
 
-It is **not in `DEFAULT_TARGETS` and not in CI**. Run it explicitly:
+It **is in `DEFAULT_TARGETS`** (promoted 2026-08-02 — see
+`src/targets/mod.rs`), so it runs in CI with the rest. To run it alone:
 
 ```bash
 scripts/filetests.sh --target wasm.f32
 ```
 
-Note that the `wasm` shorthand now expands to **both** `wasm.q32` and `wasm.f32`.
+Note that the `wasm` shorthand expands to **both** `wasm.q32` and `wasm.f32`.
 Say `wasm.q32` when you mean only the Q32 one.
 
-**Current disposition** (measured on main 2026-08-02, the f32 roadmap's G3
-sweep):
+**Current disposition** (measured 2026-08-07):
 
 ```
                   pass    fail   unimpl  unsupported  compile-fail
-      wasm.f32    6318       0        2          199             0
-6345/6345 tests passed, 2 expected-failure, 850/850 files passed, 13.34s
+      wasm.f32    6326       0        1          199             0
+6353/6353 tests passed, 1 expected-failure, 852/852 files passed, 3.10s
 ```
 
 The 199 `@unsupported` are overwhelmingly not f32-specific — shaders that do not
@@ -60,21 +60,25 @@ axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)` the file carries fo
 every other target. One `@broken(wasm.f32)` remains (`uniform/struct.glsl`),
 and it is a disposition question rather than a defect — see that file's comment.
 
-> **Why it is still on demand.** When this target first ran (roadmap M1) it was
-> held back "pending review gate G1", and **52 files** were `@unimplemented`
-> because `@lpfn`/`@glsl` builtin imports resolved to Q32 builtin ids — there
-> were no f32 resolvers, and the `_f32` bodies that existed were stubs that
-> round-tripped through `Q32::from_f32_wrapping`.
+> **Why it was on demand for a while.** When this target first ran (roadmap M1)
+> it was held back "pending review gate G1", and **52 files** were
+> `@unimplemented` because `@lpfn`/`@glsl` builtin imports resolved to Q32
+> builtin ids — there were no f32 resolvers, and the `_f32` bodies that existed
+> were stubs that round-tripped through `Q32::from_f32_wrapping`.
 >
 > **All of that is fixed.** G1 passed 2026-07-31. M5 replaced the stubs with a
 > real f32 builtin family and added `resolve_builtin_id_for_mode`, pinned by
 > tests in `lpvm-wasm/src/emit/imports.rs` asserting that no import ever
-> resolves across modes. The count is now **2**, not 52.
+> resolves across modes. The remaining exclusion was inertia, not a blocker, and
+> the promotion followed.
 >
-> So the exclusion is **inertia, not a blocker**. Unlike `xtn.*` this target
-> needs no cross-target artifact, and it costs ~13 s. Promoting it to
-> `DEFAULT_TARGETS` is a CI-cost call, recorded as a G3 follow-up rather than
-> taken unilaterally.
+> ⚠️ **What the corpus still does not reach**: `LpirOp::FtoUnorm16` and its
+> siblings. They are emitted only by the synthesised frame wrappers
+> (`lp-shader/src/synth/`), which no filetest drives, and their f32 wasm
+> lowering was wrong for months behind a green 6353/6353
+> (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`). Corpus green
+> is not frame-path green; that seam is covered by
+> `tests/f32_render_entry_wasm.rs` instead.
 
 ### The rv32 soft-float pair
 

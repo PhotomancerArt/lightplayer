@@ -121,6 +121,35 @@ refusing, deliberately.**
 So the three-way split is a decision with one open follow-up, not an accident —
 but the follow-up is "classify one count", not "implement a lowering".
 
+> **Amendment, 2026-08-07 — the follow-up resolved, and the correction above is
+> itself corrected.** The three-way split is gone: both wasm guards are lifted,
+> and all four backends now run the frame entries in both modes.
+>
+> The correction block above says the one count "is the known wasmtime last-bit
+> divergence … a *numeric agreement* question, not a capability one, and it is
+> now the thing to decide". **That attribution was wrong.** Measured on
+> 2026-08-07 by driving this defect's own product-door test through
+> `WasmLpvmEngine`: `lpvm-wasm`'s inline `FloatMode::F32` lowering of the unorm
+> ops used the GPU `v * 65535` scale instead of the `floor(v * 65536)` clamped
+> convention `docs/design/float.md` §7 fixes for the frame boundary and
+> `unorm_conv_f32` implements — a **Guaranteed**-class violation with a
+> one-line cause, not a target-defined rounding difference. Full writeup:
+> `2026-08-07-wasm-f32-unorm-scale-convention.md`.
+>
+> With the scale corrected the wasm f32 frame path is **bit-identical** to the
+> rv32 oracle on this file's shared table, so the guard's own decision rule
+> ("Guaranteed → fix it") is what lifted `rt_wasmtime`'s pair. `rt_browser`'s
+> pair went with them: it shares the emitter, the fix is in the emitter, and the
+> refusal's stated reason was the wasmtime measurement it was reasoning by
+> analogy from.
+>
+> **Regression coverage added:** `lps-filetests/tests/f32_render_entry_wasm.rs`,
+> the wasm sibling of this entry's `f32_render_entry.rs`, asserting the same
+> table exactly through the same two product calls. Which is the lesson below,
+> applied twice: the product's-door test caught this the first time it was
+> pointed at the engine the *host* uses, having been written for the engine the
+> *device* uses.
+
 **Regression coverage** — `lp-shader/lps-filetests/tests/f32_render_entry.rs`,
 entering through the **product's** door: it compiles GLSL with
 `LpsEngine::compile_px_desc(...).with_float_mode(Float)` and drives

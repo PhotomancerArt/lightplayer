@@ -53,36 +53,16 @@ impl BrowserLpvmEngine {
             memory,
         })
     }
-}
 
-pub struct BrowserLpvmModule {
-    pub(crate) wasm_bytes: Vec<u8>,
-    pub(crate) wasm_inst_count: usize,
-    pub(crate) env_memory: Option<EnvMemorySpec>,
-    pub(crate) runtime: Arc<BrowserLpvmSharedRuntime>,
-    pub(crate) signatures: LpsModuleSig,
-    pub(crate) exports: HashMap<String, WasmExport>,
-    pub(crate) shadow_stack_base: Option<i32>,
-    pub(crate) opts: WasmOptions,
-    pub(crate) lpir: LpirModule,
-}
-
-impl LpvmEngine for BrowserLpvmEngine {
-    type Module = BrowserLpvmModule;
-    type Error = WasmError;
-
-    /// Fixed at construction ([`WasmOptions::float_mode`]): this engine emits
-    /// with `self.compile_options` and takes nothing per call, so it claims
-    /// only the mode it was built with. `TargetLpvmGraphics` builds it from
-    /// `WasmOptions::default()`, which is Q32 — so a Float shader previewed on
-    /// the browser CPU tier gets a compile error naming the backend rather
-    /// than a quietly-Fixed render.
-    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
-        mode == self.compile_options.float_mode
-    }
-
-    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        let artifact = compile_lpir(ir, meta, &self.compile_options)?;
+    /// The one emit path both `compile` doors share; `opts.float_mode` is
+    /// recorded on the module so the instance never has to ask the engine.
+    fn compile_with_options(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        opts: WasmOptions,
+    ) -> Result<BrowserLpvmModule, WasmError> {
+        let artifact = compile_lpir(ir, meta, &opts)?;
         let wm = artifact.wasm_module();
         if let Some(spec) = &wm.env_memory {
             let engine_spec = EnvMemorySpec::engine_initial_for_host();
@@ -106,9 +86,53 @@ impl LpvmEngine for BrowserLpvmEngine {
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: wm.shadow_stack_base,
-            opts: self.compile_options.clone(),
+            opts,
             lpir: ir.clone(),
         })
+    }
+}
+
+/// Compiled shader module: WASM bytes + metadata, ready to instantiate.
+pub struct BrowserLpvmModule {
+    pub(crate) wasm_bytes: Vec<u8>,
+    pub(crate) wasm_inst_count: usize,
+    pub(crate) env_memory: Option<EnvMemorySpec>,
+    pub(crate) runtime: Arc<BrowserLpvmSharedRuntime>,
+    pub(crate) signatures: LpsModuleSig,
+    pub(crate) exports: HashMap<String, WasmExport>,
+    pub(crate) shadow_stack_base: Option<i32>,
+    pub(crate) opts: WasmOptions,
+    pub(crate) lpir: LpirModule,
+}
+
+impl LpvmEngine for BrowserLpvmEngine {
+    type Module = BrowserLpvmModule;
+    type Error = WasmError;
+
+    /// Both modes, per compile — not "the mode I was built with".
+    ///
+    /// Same emitter as `rt_wasmtime`, so the capability is the same; the
+    /// runtime differs only in *which* wasm engine executes the bytes.
+    /// [`Self::compile_with_params`] below honours the request, and the
+    /// instance reads its mode off the compiled module's `opts`.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        matches!(mode, lpir::FloatMode::Q32 | lpir::FloatMode::F32)
+    }
+
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+        self.compile_with_options(ir, meta, self.compile_options.clone())
+    }
+
+    fn compile_with_params(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        params: &lpvm::LpvmCompileParams,
+    ) -> Result<Self::Module, Self::Error> {
+        let mut opts = self.compile_options.clone();
+        opts.config = params.config.clone();
+        opts.float_mode = params.float_mode;
+        self.compile_with_options(ir, meta, opts)
     }
 
     fn memory(&self) -> &dyn LpvmMemory {
@@ -122,6 +146,15 @@ impl lpvm::LpvmModule for BrowserLpvmModule {
 
     fn signatures(&self) -> &LpsModuleSig {
         &self.signatures
+    }
+
+    /// See `rt_wasmtime`'s copy: the module's own `opts` answer, and the
+    /// browser's wasm JIT is hardware FP just as wasmtime's is.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        match self.opts.float_mode {
+            lpir::FloatMode::Q32 => lpvm::FloatImpl::Fixed,
+            lpir::FloatMode::F32 => lpvm::FloatImpl::HardwareF32,
+        }
     }
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {

@@ -197,11 +197,24 @@ The wrappers therefore convert at the boundary (`lp-shader`'s
 
 Both Float conversions are **Guaranteed** (§3): int→float is correctly
 rounded, `2^-16` is exactly representable so the scale is exact for any
-coordinate below `2^24` in Q16.16 units, and the two `FtoUnorm16` lowerings
-share one convention by construction (`lps-builtins`' `unorm_conv_f32` /
+coordinate below `2^24` in Q16.16 units, and the `FtoUnorm16` lowerings share
+one convention — `floor(v × 2^bits)` clamped out, `code / 2^bits` back, the
+scale Q32 fixed and Float inherits (`lps-builtins`' `unorm_conv_f32` /
 `unorm_conv_q32`). So a shader whose interior is exact in both modes renders
 the same codes in both — which is what
-`lps-filetests/tests/f32_render_entry.rs` asserts against one shared table.
+`lps-filetests/tests/f32_render_entry.rs` (rv32) and
+`f32_render_entry_wasm.rs` (wasm) assert against one shared table.
+
+⚠️ **They share it by discipline, not by construction.** An earlier version of
+this paragraph said "by construction", counting the two `lps-builtins`
+functions and forgetting that backends may *inline* the conversion instead of
+calling them. `lpvm-wasm` does, and its f32 inline pair used the GPU
+`v × 65535` scale for months behind a fully green corpus, because no filetest
+reaches `LpirOp::FtoUnorm16` at all — it is emitted only by the synthesised
+frame wrappers. Every backend that inlines a boundary conversion is a fresh
+copy of this row and needs its own frame-path assertion; corpus green does not
+imply it. See
+`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`.
 
 The cost is two conversions per coordinate per sample, paid in the frame hot
 path in Float mode only.
