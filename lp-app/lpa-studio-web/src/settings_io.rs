@@ -9,9 +9,10 @@
 //!   accepted v1 posture for the API key.
 //! - **Host layer** — a same-origin `dev-settings.json` fetch. The dev
 //!   server emits it from `~/.lightplayer/settings.json`; deployed builds
-//!   404 (⇒ no host layer). The URL is relative so any port/path works. An
-//!   Electron shell would replace this fetch with IPC/preload carrying the
-//!   same JSON shape.
+//!   404 (⇒ no host layer). The URL is origin-absolute: under path routing
+//!   the app renders at `/docs/<slug>`-style paths, and a relative URL
+//!   would resolve beneath them. An Electron shell would replace this
+//!   fetch with IPC/preload carrying the same JSON shape.
 
 use lpa_studio_core::{AgentProvider, StudioSettings};
 
@@ -19,8 +20,8 @@ use lpa_studio_core::{AgentProvider, StudioSettings};
 /// JSON document).
 pub const SETTINGS_STORAGE_KEY: &str = "lp.settings.v1";
 
-/// Host-layer URL, relative to the app's own origin/path.
-const DEV_SETTINGS_URL: &str = "dev-settings.json";
+/// Host-layer URL, absolute so it resolves the same from every routed path.
+const DEV_SETTINGS_URL: &str = "/dev-settings.json";
 
 /// Read the persisted user layer's JSON, if any. Any storage failure
 /// (blocked storage, private mode) reads as "no stored settings".

@@ -825,7 +825,7 @@ fn embed_asset_editors_in_slots(
 fn face_claimed_debug_rows(face: &crate::UiNodeFace) -> &'static [&'static str] {
     match face {
         crate::UiNodeFace::Clock(face) if face.transport.is_some() => &[
-            "transport.running",
+            "transport.play_state",
             "transport.rate",
             "transport.scrub_offset_seconds",
         ],

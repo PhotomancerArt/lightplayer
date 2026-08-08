@@ -97,13 +97,13 @@ pub fn VersionBadge() -> Element {
     // version.json and changelog.json are fetched independently so a missing
     // changelog never blanks the current-build details, and vice versa.
     use_future(move || async move {
-        match fetch_json::<VersionInfo>("version.json").await {
+        match fetch_json::<VersionInfo>("/version.json").await {
             Some(info) => state.set(VersionState::Loaded(info)),
             None => state.set(VersionState::Unavailable),
         }
     });
     use_future(move || async move {
-        if let Some(log) = fetch_json::<Changelog>("changelog.json").await {
+        if let Some(log) = fetch_json::<Changelog>("/changelog.json").await {
             changelog.set(log.entries);
         }
     });

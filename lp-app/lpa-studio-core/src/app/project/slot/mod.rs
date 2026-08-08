@@ -16,7 +16,9 @@ pub mod slot_edit_op;
 pub use pending_edit::{PendingEdit, PendingEditOp, PendingEditPhase};
 pub use project_slot_address::ProjectSlotAddress;
 pub use project_slot_root::ProjectSlotRoot;
-pub(in crate::app::project) use slot_binding_fact::{BindingFactEditOp, BindingFactOverrides};
+pub(in crate::app::project) use slot_binding_fact::{
+    BindingFactEditOp, BindingFactOverrides, binding_fact_slot_key,
+};
 pub use slot_binding_fact::{SlotBindingFact, SlotBindingFactKind};
 pub use slot_controller::{SlotController, SlotControllerState, SlotKind};
 pub(in crate::app::project) use slot_edit_join::{

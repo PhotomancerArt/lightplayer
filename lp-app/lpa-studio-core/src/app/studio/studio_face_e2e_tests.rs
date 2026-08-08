@@ -167,7 +167,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         .transport
         .clone()
         .expect("the transport block rides the face (tape-hero P2)");
-    assert!(transport.running, "authored default: running");
+    assert_eq!(
+        transport.play_state,
+        lpc_model::PlayState::Playing,
+        "authored default: playing"
+    );
     assert_eq!(transport.rate, 1.0);
     assert_eq!(transport.scrub_offset_seconds, 0.0);
     assert_eq!(
@@ -203,7 +207,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         scrubbed.scrub_offset_seconds, -12.4,
         "the staged scrub value reads back through the face at once"
     );
-    assert!(scrubbed.running, "siblings untouched by the scrub");
+    assert_eq!(
+        scrubbed.play_state,
+        lpc_model::PlayState::Playing,
+        "siblings untouched by the scrub"
+    );
 
     // -- knob drag flood: coalesced SetValues flow back into the face -------
     for value in [1.4_f32, 1.9, 2.5] {
@@ -857,12 +865,20 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
         vec!["brightness"],
-        "nothing is AUTHORED in the root scope itself — the one control is \
-         the fixture's default-bound brightness, promoted by its declared \
-         `panel = \"show\"` hint"
+        "nothing is AUTHORED in the root scope itself — the flat strip \
+         carries only the fixture's promoted brightness fader; the clock's \
+         instrument sits in its own child group (G2 feedback 2026-08-08)"
     );
-    assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
-    let entry_group = &face.panel.groups[0];
+    assert_eq!(
+        face.panel.groups.len(),
+        2,
+        "two groups: the clock's instrument, then the active entry"
+    );
+    assert_eq!(
+        face.panel.groups[0].label, "Clock",
+        "the instrument group leads (G2 feedback 2026-08-08)"
+    );
+    let entry_group = &face.panel.groups[1];
     assert_eq!(
         entry_group.label, "idle",
         "the group wears the ACTIVE entry's name"
@@ -919,7 +935,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.groups[0].controls[0];
+    let glow = &face.panel.groups[1].controls[0];
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::Engaged,
@@ -981,10 +997,44 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
         vec!["brightness", "glow"],
-        "the BOUND uniform lists, plus the fixture's default-bound \
-         brightness promoted by its declared `panel = \"show\"` hint — \
-         `speed` is wired to nothing and stays off (Q13 + the hint \
-         amendment)"
+        "the BOUND uniform lists plus the fixture's promoted brightness \
+         fader in the FLAT strip — the clock's instrument moved to its own \
+         child group (G2 feedback 2026-08-08), and `speed` is wired to \
+         nothing and stays off (Q13 + the hint amendment)"
+    );
+    // The clock contributes EXACTLY ONE control however many channels its
+    // transport rides (grouping is the whole point, P8 item 3), and that
+    // control lives in its own child group wearing the clock node's name —
+    // an instrument never sits in the flat strip (G2 feedback 2026-08-08).
+    let clock_groups: Vec<_> = face
+        .panel
+        .groups
+        .iter()
+        .filter(|group| {
+            group.controls.iter().any(|control| {
+                matches!(
+                    control.control.widget,
+                    crate::UiPanelWidget::Transport { .. }
+                )
+            })
+        })
+        .collect();
+    assert_eq!(clock_groups.len(), 1, "one clock, one instrument group");
+    let clock_group = clock_groups[0];
+    assert_eq!(
+        clock_group.label, "Clock",
+        "the instrument group wears the clock NODE's name, not a widget label"
+    );
+    assert_eq!(
+        clock_group.controls.len(),
+        1,
+        "the instrument group holds exactly the one grouped Transport"
+    );
+    assert_eq!(clock_group.controls[0].channel, "clock.rate");
+    assert!(
+        clock_group.target.is_none(),
+        "no group reset — it would clear the whole module scope's writers; \
+         the instrument carries per-dimension clears"
     );
     let brightness = control_for_channel(&face, "brightness");
     assert!(
@@ -1165,6 +1215,157 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
 }
 
 #[test]
+fn the_panel_transport_drives_all_three_clock_channels() {
+    // P8's product moment, end to end: ONE control on the module panel, and
+    // each of its three dimensions writes ITS OWN channel. Nothing is
+    // mock-fed — a real `LpServer` materializes the three `clock.*` fallback
+    // bindings from the model's declarations, and the writes go down the
+    // runtime command channel the same way a finger's would.
+    let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let scope = face.panel.target.expect("the root panel targets its scope");
+    let transport_control = control_for_channel(&face, "clock.rate");
+    assert_eq!(transport_control.control.label, "Time");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!(
+            "the grouped control wears the Transport widget, got {:?}",
+            transport_control.control.widget
+        );
+    };
+    assert_eq!(
+        transport.rate, 1.0,
+        "the authored default, before any write"
+    );
+    assert_eq!(transport.play_state, lpc_model::PlayState::Playing);
+    // Every dimension resolves to its own declared channel.
+    assert_eq!(
+        transport_control
+            .control
+            .wires
+            .iter()
+            .map(|wire| {
+                let target = wire.panel_target.as_ref().expect("wired by declaration");
+                assert_eq!(target.scope, scope, "all three resolve in the root scope");
+                target.channel.as_str()
+            })
+            .collect::<Vec<_>>(),
+        vec!["clock.rate", "clock.play_state", "clock.scrub"],
+    );
+
+    // -- the three gestures, each on its own channel ------------------------
+    // The fader (f32), the run/pause button (the enum's wire tag as a
+    // String — no new emit family, the `Waveform` spelling), and a strip
+    // drag (f32). These are exactly the ops `TapeTransport` dispatches.
+    for (channel, value) in [
+        ("clock.rate", LpValue::F32(2.0)),
+        (
+            "clock.play_state",
+            LpValue::String(lpc_model::PlayState::Paused.as_str().to_string()),
+        ),
+        ("clock.scrub", LpValue::F32(-4.0)),
+    ] {
+        handle.tx.send(StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            crate::PanelWriteOp {
+                scope,
+                channel: channel.to_string(),
+                value,
+                ttl_ms: None,
+            },
+        )));
+    }
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the panel writes emit a snapshot");
+
+    let face = module_face(&snapshot);
+    let transport_control = control_for_channel(&face, "clock.rate");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!("the control keeps its widget through a write");
+    };
+    // Each dimension converged INDEPENDENTLY — three scalar channels, three
+    // echoes, no read-modify-write anywhere.
+    assert_eq!(transport.rate, 2.0, "the fader moved the rate channel");
+    assert_eq!(
+        transport.play_state,
+        lpc_model::PlayState::Paused,
+        "the run/pause setpoint rode its own channel as a state noun"
+    );
+    assert_eq!(
+        transport.scrub_offset_seconds, -4.0,
+        "and the scrub echo converged on its own"
+    );
+    assert_eq!(
+        transport_control.state,
+        crate::UiPanelControlState::Engaged,
+        "the anchor channel has a panel writer, so the group reads Held"
+    );
+
+    // One control, two cards (P1): the clock's own card shows the same
+    // transport, and its tape carries the same per-dimension wiring — so a
+    // gesture on either surface lands on the same channels.
+    let clock = node_by_kind(&snapshot, "Clock");
+    let Some(UiNodeFace::Clock(clock_face)) = &clock.face else {
+        panic!("the clock card keeps its face");
+    };
+    assert_eq!(
+        clock_face.transport.as_ref().map(|block| block.rate),
+        Some(2.0),
+        "the card's tape reads the same channel the panel wrote"
+    );
+    assert_eq!(
+        clock_face.transport_wires(),
+        transport_control.control.wires,
+        "and dispatches through the same wires"
+    );
+
+    // -- the module reset releases all three ---------------------------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Scope { scope },
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the clear emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let transport_control = control_for_channel(&face, "clock.rate");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!("the control keeps its widget through a clear");
+    };
+    assert_eq!(
+        transport_control.state,
+        crate::UiPanelControlState::ReadDefault
+    );
+    assert_eq!(
+        (transport.rate, transport.play_state),
+        (1.0, lpc_model::PlayState::Playing),
+        "with the writers dropped, every dimension falls back to its \
+         authored default (R6)"
+    );
+}
+
+#[test]
 fn every_gallery_example_opens_onto_a_populated_root_panel() {
     // A gallery example that opens onto an EMPTY panel teaches the wrong
     // thing about modules: the panel is the product, so each embedded
@@ -1212,6 +1413,154 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
             "{}: the root panel publishes nothing — a gallery example must \
              open onto live controls, not an empty panel",
             example.id
+        );
+    }
+}
+
+#[test]
+fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
+    // The face-e2e project resolves BOTH primaries in its root scope (the
+    // shader writes `bus:visual.out`, the fixture writes `bus:control.out`),
+    // which is exactly the shape Yona's 2026-08-07 ruling is about: the
+    // project's output is the LAMPS, so they lead, and the raster the
+    // shader painted is one toggle away.
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    // The connect read arms the product subscriptions; the probe answers on
+    // the next read, so the hero has real bytes to show.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+    let root_path = project_editor(&snapshot).nodes[0].header.path.clone();
+    let face = module_face(&snapshot);
+    assert_eq!(
+        face.hero_choice,
+        Some(crate::ModuleHeroProduct::Control),
+        "both products resolve, so the hero is a choice — and the card's \
+         default one is the lamps"
+    );
+    let hero = face.preview.clone().expect("the root module's hero");
+    assert_eq!(hero.kind, crate::UiProductKind::Control);
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::ControlNative(_)),
+        "the default hero draws the fixture's lamps, got {:?}",
+        hero.preview
+    );
+    assert_eq!(
+        hero.tracking,
+        crate::UiProductTrackingState::Tracking,
+        "the control product is always-live, so the borrowed hero says so"
+    );
+
+    // -- the upper-right toggle: one op, per card ---------------------------
+    handle.tx.send(node_ui_command(NodeUiOp::SetHeroProduct {
+        node: root_path.clone(),
+        product: crate::ModuleHeroProduct::Visual,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the hero toggle emits a snapshot");
+    let face = module_face(&snapshot);
+    assert_eq!(face.hero_choice, Some(crate::ModuleHeroProduct::Visual));
+    let hero = face.preview.clone().expect("the root module's hero");
+    assert_eq!(hero.kind, crate::UiProductKind::Visual);
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::VisualSrgb8 { .. }),
+        "flipped, the hero is the R7 mirror's raster, got {:?}",
+        hero.preview
+    );
+
+    // -- and it is core-owned, so a full rebuild keeps it -------------------
+    // A refresh rebuilds every card DTO from the server's read: view-local
+    // state would be back on the lamps here.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+    let face = module_face(&snapshot);
+    assert_eq!(
+        face.hero_choice,
+        Some(crate::ModuleHeroProduct::Visual),
+        "the preference is keyed by the node's address, so it survives the \
+         card's remount"
+    );
+    assert_eq!(
+        face.preview.expect("the root module's hero").kind,
+        crate::UiProductKind::Visual
+    );
+
+    // -- back again: the toggle is two states of one control ---------------
+    handle.tx.send(node_ui_command(NodeUiOp::SetHeroProduct {
+        node: root_path,
+        product: crate::ModuleHeroProduct::Control,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the hero toggle emits a snapshot");
+    assert_eq!(
+        module_face(&snapshot)
+            .preview
+            .expect("the root module's hero")
+            .kind,
+        crate::UiProductKind::Control
+    );
+}
+
+#[test]
+fn a_one_product_module_falls_back_to_whichever_product_it_has() {
+    // The preference names a kind the scope does not resolve: the hero
+    // falls back to the other one, in both directions, and no toggle is
+    // offered — a one-product module has no choice to make. Neither
+    // project routes its primaries any differently from a real one; each
+    // simply leaves one primary channel unwritten.
+    for visual_only in [false, true] {
+        let server = Rc::new(RefCell::new(single_product_e2e_server(visual_only)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+        let face = module_face(&snapshot);
+        assert_eq!(
+            face.hero_choice, None,
+            "visual_only={visual_only}: one product is not a choice"
+        );
+        let want = if visual_only {
+            crate::UiProductKind::Visual
+        } else {
+            crate::UiProductKind::Control
+        };
+        assert_eq!(
+            face.preview.expect("the root module's hero").kind,
+            want,
+            "visual_only={visual_only}: the hero falls back to the product \
+             the scope actually resolves"
         );
     }
 }
@@ -1425,7 +1774,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1508,6 +1857,119 @@ fn face_e2e_server() -> LpServer {
     server
 }
 
+const SINGLE_PRODUCT_PROJECT_DIR: &str = "/projects/single-product-e2e";
+
+/// A whole project — clock, shader, fixture, output — whose root scope
+/// resolves exactly ONE primary product, for the hero's fallback rules.
+///
+/// Nothing is left dangling: the chain still runs end to end, one link of
+/// it just rides a privately named channel instead of a primary one.
+/// `visual_only` hands the fixture's lamps to `bus:lamps`, so nothing
+/// writes `control.out`; otherwise the shader paints `bus:raster`, so
+/// nothing writes `visual.out`.
+fn single_product_e2e_server(visual_only: bool) -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let (visual_channel, control_channel) = if visual_only {
+        ("bus:visual.out", "bus:lamps")
+    } else {
+        ("bus:raster", "bus:control.out")
+    };
+    let project_json = "{\n  \"format\": 5\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "transport": { "running": true, "rate": 1.0 }
+}"#;
+    let shader_json = format!(
+        r#"{{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {{
+    "speed": {{ "source": "bus:speed" }},
+    "output": {{ "target": "{visual_channel}" }}
+  }},
+  "consumed": {{
+    "speed": {{
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "label": "Speed",
+      "description": "Gradient speed multiplier"
+    }}
+  }}
+}}"#
+    );
+    let fixture_json = format!(
+        r#"{{
+  "kind": "Fixture",
+  "render_size": {{ "width": 4, "height": 4 }},
+  "brightness": 0.8,
+  "mapping": {{ "kind": "Map2d", "source": "sign.map2d.json" }},
+  "bindings": {{
+    "input": {{ "source": "{visual_channel}" }},
+    "output": {{ "target": "{control_channel}" }}
+  }}
+}}"#
+    );
+    let output_json = format!(
+        r#"{{
+  "kind": "Output",
+  "channels": {{
+    "0": {{ "endpoint": "ws281x:local:D10" }}
+  }},
+  "bindings": {{
+    "input": {{ "source": "{control_channel}" }}
+  }}
+}}"#
+    );
+    let single_product_shader = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("shader.json", &shader_json),
+        ("fixture.json", &fixture_json),
+        ("sign.map2d.json", FACE_MAP2D),
+        ("output.json", &output_json),
+        ("shader.glsl", single_product_shader),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{SINGLE_PRODUCT_PROJECT_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(SINGLE_PRODUCT_PROJECT_DIR.as_path())
+        .expect("load single-product-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
 const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
 
 /// The fyeah-sign shape: `glow` bound to `bus:glow`, `speed` unbound (and
@@ -1548,7 +2010,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1963,7 +2425,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let playlist_json = r#"{
   "kind": "Playlist",
@@ -2075,7 +2537,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let playlist_json = format!(
         r#"{{
@@ -2175,7 +2637,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "transport": { "running": true, "rate": 1.0 }
+  "transport": { "play_state": "playing", "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -2403,16 +2865,24 @@ fn module_face(view: &UiStudioView) -> crate::UiModuleFace {
 }
 
 /// The module panel's control for `channel` (channel-keyed — the control
-/// list is dedupe-ordered, so index-addressing is brittle).
+/// list is dedupe-ordered, so index-addressing is brittle). Searches the
+/// flat strip AND nested groups: the clock's instrument lives in its own
+/// child group (G2 feedback 2026-08-08).
 fn control_for_channel<'a>(
     face: &'a crate::UiModuleFace,
     channel: &str,
 ) -> &'a crate::UiPanelControlView {
-    face.panel
-        .controls
-        .iter()
-        .find(|control| control.channel == channel)
-        .unwrap_or_else(|| panic!("module panel carries a {channel} control"))
+    fn find<'a>(
+        group: &'a crate::UiPanelGroup,
+        channel: &str,
+    ) -> Option<&'a crate::UiPanelControlView> {
+        group
+            .controls
+            .iter()
+            .find(|control| control.channel == channel)
+            .or_else(|| group.groups.iter().find_map(|child| find(child, channel)))
+    }
+    find(&face.panel, channel).unwrap_or_else(|| panic!("module panel carries a {channel} control"))
 }
 
 fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {
