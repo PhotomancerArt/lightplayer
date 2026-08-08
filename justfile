@@ -2229,3 +2229,10 @@ decode-backtrace-esp32v3 *addrs:
 # Usage: just profile [path/to/project] [--collect alloc] [--frames N] [--note "description"]
 profile *args:
     cargo run -p lp-cli -- profile {{ args }}
+
+# Renumber this branch's migration step after main merged a different
+# migration for the same format number first (the second-to-merge branch
+# renumbers). See the script header for the exact procedure and what it
+# deliberately leaves to human eyes.
+format-renumber step:
+    scripts/format-renumber.sh {{step}}

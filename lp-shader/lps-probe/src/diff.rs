@@ -103,7 +103,7 @@ fn call_render(
     pos: [f32; 2],
     which: &str,
 ) -> Result<[f32; 4], String> {
-    match inst.call("render", &[LpsValueF32::Vec2(pos)]) {
+    match inst.call("render_2d", &[LpsValueF32::Vec2(pos)]) {
         Ok(LpsValueF32::Vec4(v)) => Ok(v),
         Ok(other) => Err(format!(
             "diff: {which} render returned {other:?}, expected vec4"
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn identical_sources_diff_to_zero() {
-        let src = "vec4 render(vec2 pos) { return vec4(pos.x / 256.0, 0.5, 0.25, 1.0); }";
+        let src = "vec4 render_2d(vec2 pos) { return vec4(pos.x / 256.0, 0.5, 0.25, 1.0); }";
         let a = compile(src);
         let b = compile(src);
         let report = diff_experiments(&a, &b, &ExperimentSpec::default()).expect("diff");
@@ -160,9 +160,9 @@ mod tests {
 
     #[test]
     fn localized_edit_yields_sensible_bbox() {
-        let a = compile("vec4 render(vec2 pos) { return vec4(0.0, 0.0, 0.0, 1.0); }");
+        let a = compile("vec4 render_2d(vec2 pos) { return vec4(0.0, 0.0, 0.0, 1.0); }");
         let b = compile(
-            "vec4 render(vec2 pos) {\n    if (pos.x > 192.0) { return vec4(1.0, 0.0, 0.0, 1.0); }\n    return vec4(0.0, 0.0, 0.0, 1.0);\n}",
+            "vec4 render_2d(vec2 pos) {\n    if (pos.x > 192.0) { return vec4(1.0, 0.0, 0.0, 1.0); }\n    return vec4(0.0, 0.0, 0.0, 1.0);\n}",
         );
         let report = diff_experiments(&a, &b, &ExperimentSpec::default()).expect("diff");
         assert_eq!(report.max_delta, 1.0);
@@ -177,9 +177,9 @@ mod tests {
     #[test]
     fn one_sided_nan_is_infinite_delta() {
         let a = compile(
-            "layout(binding = 0) uniform float z;\nvec4 render(vec2 pos) { return vec4(z / z, 0.0, 0.0, 1.0); }",
+            "layout(binding = 0) uniform float z;\nvec4 render_2d(vec2 pos) { return vec4(z / z, 0.0, 0.0, 1.0); }",
         );
-        let b = compile("vec4 render(vec2 pos) { return vec4(0.5, 0.0, 0.0, 1.0); }");
+        let b = compile("vec4 render_2d(vec2 pos) { return vec4(0.5, 0.0, 0.0, 1.0); }");
         let report = diff_experiments(&a, &b, &ExperimentSpec::default()).expect("diff");
         assert_eq!(report.max_delta, f32::INFINITY);
         assert_eq!(report.changed_fraction, 1.0);

@@ -5,8 +5,9 @@ Client↔cloud-service message vocabulary for LightPlayer's project sync.
 This crate is the entire request/response/error vocabulary a client and the
 cloud sync service exchange, as pure Rust types: `CloudRequest`,
 `CloudResponse`, `CloudError`, the `CloudCall`/`CloudReply` envelope, and the
-supporting building blocks (`Visibility`, `Actor`, `ProjectMeta`,
-`HeadInfo`/`PushOutcome`, `SidecarMeta`, `MeInfo`, `SessionInfo`/`SessionList`,
+supporting building blocks (`Access`, `Actor`, `ProjectMeta`,
+`MemberInfo`/`MemberRole`, `HeadInfo`/`PushOutcome`, `SidecarMeta`, `MeInfo`,
+`SessionInfo`/`SessionList`,
 `Ack`, `LoginOptionsInfo`/`OidcOption`/`DevPickerOptions`/`DevChoice`). It
 carries no transport, no IO, and no logic beyond the version-refusal helper
 in `version.rs`. The blob *transfer* encoding is out of scope entirely —
@@ -19,7 +20,7 @@ hashes (`HaveBlobs`, `MissingBlobs`) that plane is keyed by.
 
 ## Every message is a struct; the pairing is a compile-time fact
 
-Each of the sixteen requests is a struct in `request.rs` (`GetProject { uid }`,
+Each of the eighteen requests is a struct in `request.rs` (`GetProject { uid }`,
 `PushCommit { .. }`, and the payload-free `WhoAmI` / `ListMyProjects` /
 `GetMe` / `ListSessions` / `LoginOptions`); each response is a struct — most
 directly in `response.rs` (`ProjectInfo`, `Heads`, `MissingBlobs`, …), a few
@@ -32,7 +33,7 @@ rather than being re-exported at the crate root: `Events` and `Heads` only
 read unambiguously with their module in front.
 
 `CloudCallSpec` (in `call_spec.rs`) is the pairing table — one hand-written
-impl per request naming its `Response` and how to `extract` it. Sixteen
+impl per request naming its `Response` and how to `extract` it. Eighteen
 impls in one greppable file, deliberately not a macro. It is what lets a client
 write `call(port, GetProject { uid })` and get a `ProjectInfo` back, and what
 lets the service's handlers return the concrete response type; the "what if
@@ -70,6 +71,9 @@ alias, or a best-effort partial-compat decode. `version::check_version` is
 the one place that decision is made; both client and server call it before
 trusting a call or reply body.
 
-`CLOUD_API_VERSION` is `2` as of 2026-08-07: v2 added the account/session/
+`CLOUD_API_VERSION` is `3` as of 2026-08-07: v2 added the account/session/
 login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
-`LoginOptions`).
+`LoginOptions`); v3 replaced `Visibility { Private, Link }` with
+`Access { None, View, Edit }` (`SetVisibility` → `SetAccess`), added
+`ArchiveProject`/`RestoreProject`, `ProjectMeta.archived` and
+`ProjectInfo.members`, and renamed `MemberRole::Member` to `Editor`.

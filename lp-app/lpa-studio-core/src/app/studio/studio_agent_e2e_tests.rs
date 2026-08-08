@@ -27,7 +27,7 @@ use crate::{
 
 /// The staged edit. `layout(binding = N)` is required by the probe
 /// dialect (naga `glsl-in`), exactly as the agent's system prompt says.
-const GREEN_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 1.0, 0.0, 1.0);\n}\n";
+const GREEN_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.0, 1.0, 0.0, 1.0);\n}\n";
 
 #[test]
 fn agent_turn_stages_an_overlay_edit_end_to_end() {
@@ -155,7 +155,7 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
 }
 
 /// A second staged edit for the history/revert flow.
-const BLUE_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 0.0, 1.0, 1.0);\n}\n";
+const BLUE_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.0, 0.0, 1.0, 1.0);\n}\n";
 
 /// P4: two staged edits build the session history; reverting to the first
 /// restages its source through the real overlay path — editor content and
@@ -282,7 +282,7 @@ fn history_revert_restages_an_earlier_edit_end_to_end() {
 /// uniform (`speed`) the node def has no record for — the engine then fails
 /// at RENDER time ("missing uniform field"), the exact class the probe
 /// harness cannot see.
-const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(fract(time * speed), 0.0, 0.0, 1.0);\n}\n";
+const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(fract(time * speed), 0.0, 0.0, 1.0);\n}\n";
 
 #[test]
 fn staged_engine_render_error_reaches_the_iterate_result() {

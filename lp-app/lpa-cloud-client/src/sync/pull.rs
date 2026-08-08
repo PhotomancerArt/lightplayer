@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_cloud_api::{HeadInfo, ProjectMeta, SidecarMeta};
+use lpc_cloud_api::{HeadInfo, MemberInfo, ProjectMeta, SidecarMeta};
 use lpc_history::{ContentHash, HistoryEvent, ProjectHistory, SyncRelation};
 
 use crate::cloud_binding::CloudBinding;
@@ -25,6 +25,10 @@ pub struct PullReport {
     pub meta: ProjectMeta,
     /// Display metadata from the service's most recent commit.
     pub sidecar: SidecarMeta,
+    /// The member roster, when the caller is entitled to it — `Some` only
+    /// for a member (P2's anti-oracle rule). Carried so a pull loop can
+    /// observe a membership change without a second `GetProject`.
+    pub members: Option<Vec<MemberInfo>>,
     /// The service's head frontier. More than one entry means the service is
     /// holding a divergence somebody has to resolve.
     pub heads: Vec<HeadInfo>,
@@ -137,6 +141,7 @@ pub async fn pull<P: CloudPort + ?Sized>(
     Ok(PullReport {
         meta: remote.meta,
         sidecar: remote.sidecar,
+        members: remote.members,
         heads: remote.heads,
         remote_events: log.events,
         remote_head,
@@ -233,7 +238,7 @@ mod tests {
     use crate::sync::publish::publish;
     use crate::sync::push::push;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::{CloudError, Visibility};
+    use lpc_cloud_api::{Access, CloudError};
 
     #[test]
     fn a_pull_with_nothing_new_is_up_to_date() {
@@ -246,7 +251,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -271,7 +276,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -306,7 +311,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -332,7 +337,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -369,7 +374,7 @@ mod tests {
         block_on(publish(
             &yona,
             &local,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))
@@ -378,7 +383,7 @@ mod tests {
         let viewer = world.anonymous();
         let copy = world.tracking_copy(&viewer, 2, dome.uid());
         let tracking = copy.local_as(dome.uid());
-        world.set_visibility(&yona, dome.uid(), Visibility::Private);
+        world.set_access(&yona, dome.uid(), Access::None);
 
         let error = block_on(pull(&viewer, &tracking)).unwrap_err();
         assert!(matches!(error, SyncError::Cloud(CloudError::NotFound)));

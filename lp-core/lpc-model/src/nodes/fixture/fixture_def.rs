@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
     Brightness, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, MappingConfig,
+    VisualConsumerSpace,
 };
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
@@ -30,6 +31,19 @@ pub struct FixtureDef {
     pub diagnostic_mode: ValueSlot<FixtureDiagnosticMode>,
     /// Fixture mapping definition.
     pub mapping: EnumSlot<MappingConfig>,
+    /// Whether this fixture's strip/lamp order carries meaning ("does strip
+    /// order mean something?", dimensionality-first-class vision D3).
+    /// Defaults true (a bare strip is `{1D}`); a serpentine matrix author
+    /// sets it false. Enforced by consumers, not the model — this slot only
+    /// carries the authored bit. Model layer only: not yet read by the
+    /// engine.
+    pub strip_order_meaningful: ValueSlot<bool>,
+    /// This fixture's consumer-side space policy (vision D14): the answer
+    /// side of the two-sided space declaration, mirroring
+    /// [`crate::ShaderSpace`] on the producer side. Defaults to `Auto`
+    /// (defaults-only policy, never force). Model layer only: not yet read
+    /// by the engine.
+    pub consume: EnumSlot<VisualConsumerSpace>,
     /// Color order for RGB channels.
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
@@ -60,6 +74,8 @@ impl Default for FixtureDef {
             sampling: ValueSlot::new(FixtureSamplingConfig::default()),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::default()),
             mapping: EnumSlot::default(),
+            strip_order_meaningful: ValueSlot::new(true),
+            consume: EnumSlot::default(),
             color_order: ValueSlot::default(),
             transform: Affine2dSlot::default(),
             brightness: default_brightness(),
@@ -351,6 +367,8 @@ mod tests {
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
+            strip_order_meaningful: ValueSlot::new(true),
+            consume: EnumSlot::default(),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),
@@ -423,5 +441,17 @@ mod tests {
             view.gamma_correction().path(),
             &SlotPath::parse("gamma_correction").unwrap()
         );
+        assert_eq!(
+            view.strip_order_meaningful().path(),
+            &SlotPath::parse("strip_order_meaningful").unwrap()
+        );
+        assert_eq!(view.consume().path(), &SlotPath::parse("consume").unwrap());
+    }
+
+    #[test]
+    fn fixture_def_defaults_strip_order_meaningful_true_and_consume_auto() {
+        let def = FixtureDef::default();
+        assert!(*def.strip_order_meaningful.value());
+        assert_eq!(*def.consume.value(), VisualConsumerSpace::Auto);
     }
 }

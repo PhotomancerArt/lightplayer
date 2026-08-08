@@ -103,7 +103,8 @@ where
             cfg,
             options.frontend,
         )
-        .with_float_mode(float_mode);
+        .with_float_mode(float_mode)
+        .with_space(options.space);
         desc.textures = options.textures.clone();
         let px = self
             .shared

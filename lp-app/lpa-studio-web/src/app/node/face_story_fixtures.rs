@@ -442,7 +442,7 @@ layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float time;
 layout(binding = 2) uniform float speed;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     float rim = smoothstep(0.35, 0.95, length(uv - 0.5));
     float drift = time * speed * mix(1.0, 0.25, rim);

@@ -95,7 +95,7 @@ fn texture_corpus_gpu_matches_cpu_tier() {
 
         for (run_index, directive) in test_file.run_directives.iter().enumerate() {
             let wrapped = format!(
-                "{}\nvec4 render(vec2 pos) {{ return vec4({}); }}\n",
+                "{}\nvec4 render_2d(vec2 pos) {{ return vec4({}); }}\n",
                 test_file.glsl_source, directive.expression_str
             );
 

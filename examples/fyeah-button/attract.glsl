@@ -10,7 +10,7 @@ float wheelDistance(float a, float b) {
     return d;
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec2 p = uv - 0.5;
     float aspect = outputSize.x / outputSize.y;

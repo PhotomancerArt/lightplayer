@@ -20,7 +20,7 @@ use tempfile::TempDir;
 const BROKEN_SHADER: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     this is not glsl;
 }
 "#;

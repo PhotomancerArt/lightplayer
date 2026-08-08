@@ -7,7 +7,7 @@ vec3 rainbow(float t) {
     return v * v * (3.0 - 2.0 * v);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float led = 0.0;
     if (pos.x >= 1.0) {
         led = 1.0;

@@ -448,7 +448,7 @@ const PATTERN_1D_BODY_GLSL: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Position along the strand, 0 at one end and 1 at the other. A 1D
     // pattern reads this axis and ignores pos.y entirely.
     float along = pos.x / max(outputSize.x, 1.0);
@@ -472,7 +472,7 @@ const PATTERN_2D_BODY_GLSL: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 center = outputSize * 0.5;
     vec2 dir = pos - center;
 
@@ -796,7 +796,7 @@ mod tests {
             pattern_project_files_2d("demo", &registry).expect("2d"),
         ] {
             let glsl = text(&files, "effect/shader.glsl");
-            assert!(glsl.contains("vec4 render(vec2 pos)"), "{glsl}");
+            assert!(glsl.contains("vec4 render_2d(vec2 pos)"), "{glsl}");
             assert!(glsl.contains("uniform float phase"), "{glsl}");
             assert!(glsl.contains("vec3 hsv_to_rgb"), "{glsl}");
 

@@ -300,7 +300,7 @@ mod tests {
     use crate::cloud_port::call;
     use crate::sync_error::SyncError;
     use lpc_cloud_api::request::{GetProject, HaveBlobs, PublishProject, WhoAmI};
-    use lpc_cloud_api::{CloudError, CloudRequest, Visibility};
+    use lpc_cloud_api::{Access, CloudError, CloudRequest};
     use lpc_history::{TreeEntry, UidPrefix};
     use lpfs::LpPathBuf;
 
@@ -330,7 +330,7 @@ mod tests {
             &yona,
             PublishProject {
                 uid,
-                visibility: Visibility::Private,
+                access: Access::None,
                 slug: "zook-dome".into(),
             },
         ))

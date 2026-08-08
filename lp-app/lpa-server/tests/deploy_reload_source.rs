@@ -48,7 +48,7 @@ const FRAMES: u32 = 4;
 const SHADER_V1: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     return vec4(uv.x, 0.0, 0.0, 1.0);
 }
@@ -58,7 +58,7 @@ const SHADER_V2: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 
 // A second version, deliberately a different byte length than the first.
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     return vec4(0.0, 0.0, uv.y, 1.0);
 }

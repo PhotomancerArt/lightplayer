@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project identity &amp; sharing — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via cloud-login spike) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 880px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 880px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  p.sub code, .cap code { font: 600 11px/1.4 var(--mono); color: var(--heading); }
+  button { font-family: var(--sans); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- caps / frames (shared spike idiom) ---- */
+  .barwrap { max-width: 1400px; margin-bottom: 26px; }
+  .barwrap .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .cap .cnote { font-size: 11.5px; color: var(--dim); }
+  .appframe {
+    border: 1px solid var(--border); border-radius: 10px; position: relative;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 140px), var(--bg);
+  }
+
+  /* ---- fake browser frame (address bar is part of the design) ---- */
+  .bframe { border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden;
+    background: #0b0e11; box-shadow: 0 18px 48px rgba(0,0,0,.4); position: relative; }
+  .btop { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: #171a1e; border-bottom: 1px solid #23282e; }
+  .dots { display: inline-flex; gap: 6px; flex: none; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; background: #2e353c; }
+  .abar { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+    background: #0d1013; border: 1px solid #23282e; border-radius: 999px;
+    padding: 5px 13px; font: 500 11.5px/1 var(--mono); color: var(--subtle); }
+  .abar svg { flex: none; color: #5b6570; }
+  .abar .u { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .abar .uo { color: #6b7581; }               /* origin */
+  .abar .uslug { color: var(--heading); }     /* the readable part */
+  .abar .uuid { color: #5b6570; }             /* the forever part */
+  .abar.snap { animation: snapflash 1s ease; }
+  @keyframes snapflash { 0% { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(123,224,178,.12); }
+    100% { border-color: #23282e; box-shadow: none; } }
+  .abar .copyhint { margin-left: auto; flex: none; color: #5b6570; cursor: pointer; display: inline-flex; }
+  .abar .copyhint:hover { color: var(--accent); }
+
+  /* ---- chrome bar (gallery-rework spike, shipped chrome C) ---- */
+  .bar { display: flex; align-items: center; gap: 14px; padding: 9px 20px; min-height: 44px;
+    border-bottom: 1px solid var(--border-subtle); background: var(--bg); }
+  .brand { display: inline-flex; align-items: center; gap: 8px; flex: none;
+    appearance: none; border: 0; background: transparent; padding: 4px 6px; margin: -4px 0 -4px -6px;
+    border-radius: 8px; }
+  .brand svg { color: var(--accent); }
+  .brand .word { font-size: 12.5px; font-weight: 700; color: var(--strong); letter-spacing: .01em; white-space: nowrap; }
+  .navrow { display: inline-flex; align-items: center; gap: 2px; }
+  .navlink {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--subtle);
+    padding: 8px 10px 9px; border-radius: 6px; position: relative; white-space: nowrap;
+  }
+  .navlink:hover { color: var(--text); background: var(--bg-wash); }
+  .navlink.active { color: var(--heading); }
+  .navlink.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+    height: 2px; border-radius: 2px; background: var(--accent);
+  }
+  .ptitle-bar { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .ptitle-bar .sep { color: var(--border-strong); font-weight: 400; }
+  .ptitle-bar .pn { font-size: 12.5px; font-weight: 700; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ptitle-bar .ps { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+  .rside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    color: var(--neutral-text); padding: 0;
+  }
+  .iconbtn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .morebtn { border-color: transparent; background: transparent; color: var(--subtle); font-weight: 800; }
+  .morebtn:hover { background: var(--bg-wash); }
+  .sharebtn {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    appearance: none; border-radius: 999px; padding: 6px 13px;
+    font: 700 11.5px/1 var(--sans); color: var(--neutral-text);
+    background: var(--neutral-bg); border: 1px solid var(--neutral-border);
+  }
+  .sharebtn:hover { color: var(--strong); border-color: var(--accent-border); }
+  .sharebtn svg { color: var(--accent); }
+  .sharebtn.open { color: var(--strong); border-color: var(--accent-border);
+    background: rgba(123,224,178,.07); }
+  .sharecard.anchored { position: absolute; right: 14px; top: 90px; z-index: 20; }
+  .ctag { display: inline-flex; font: 700 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border);
+    border-radius: 999px; padding: 3px 9px; align-self: center; white-space: nowrap; flex: none; }
+  .rej { max-width: 1400px; margin: -12px 0 26px; padding: 8px 12px;
+    border: 1px solid var(--border-muted); border-left: 3px solid var(--err-border);
+    border-radius: 7px; background: var(--surface-muted);
+    font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .rej b { color: var(--muted); }
+  .avbtn {
+    appearance: none; padding: 0; border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .avbtn .av { width: 100%; height: 100%; border-radius: 50%; font-size: 11px; }
+
+  /* ---- avatars ---- */
+  .av {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    border-radius: 50%; overflow: hidden; color: #0d1210; font-weight: 800;
+    background: var(--surface-raised); user-select: none;
+    border: 1px solid color-mix(in srgb, var(--avc, var(--accent)) 55%, transparent);
+    background: color-mix(in srgb, var(--avc, var(--accent)) 22%, var(--surface-subtle));
+    color: color-mix(in srgb, var(--avc, var(--accent)) 88%, white 6%);
+    width: 28px; height: 28px; font-size: 10.5px;
+  }
+
+  /* ---- the sim behind everything (D13: /p/ loads the simulator) ---- */
+  .simpeek { position: relative; height: 130px; overflow: hidden; opacity: .85;
+    pointer-events: none; mask-image: linear-gradient(180deg, #000 20%, transparent 97%); }
+  .simpeek .glow {
+    position: absolute; inset: -40px -20px;
+    background:
+      radial-gradient(420px 200px at 24% 68%, rgba(123,224,178,.42), transparent 66%),
+      radial-gradient(360px 190px at 58% 30%, rgba(201,177,245,.34), transparent 64%),
+      radial-gradient(430px 220px at 86% 72%, rgba(156,200,238,.30), transparent 68%),
+      #0b0e11;
+    animation: simdrift 9s ease-in-out infinite alternate;
+  }
+  @keyframes simdrift { to { transform: translateX(-26px) scale(1.05); filter: hue-rotate(14deg); } }
+  .simpeek .leds {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 1.5px 1.5px, rgba(255,255,255,.5) 1.1px, transparent 1.6px);
+    background-size: 17px 17px; mix-blend-mode: overlay;
+  }
+  .simpeek .simmeta { position: absolute; left: 18px; bottom: 12px;
+    font: 600 10px/1 var(--mono); color: rgba(242,240,232,.55); letter-spacing: .05em; }
+
+  /* ---- share popover card ---- */
+  .popwrap { display: flex; gap: 18px; padding: 16px 20px 22px; align-items: flex-start; flex-wrap: wrap; }
+  .sharecard {
+    width: 348px; flex: none; border: 1px solid var(--border-strong); border-radius: 10px;
+    background: var(--surface-subtle); box-shadow: 0 16px 44px rgba(0,0,0,.45); overflow: hidden;
+  }
+  .sharecard .shead { display: flex; align-items: center; gap: 9px; padding: 10px 14px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .sharecard .shead .t { font-size: 12.5px; font-weight: 700; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sharecard .shead .close { margin-left: auto; color: var(--dim); font-size: 14px; cursor: pointer; }
+  .sharecard .sbody { padding: 12px 14px 14px; display: grid; gap: 10px; }
+
+  .addinput { display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); background: var(--surface-muted); border-radius: 7px; padding: 8px 11px; }
+  .addinput svg { color: var(--dim); flex: none; }
+  .addinput input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
+    font: 600 12px/1.3 var(--sans); color: var(--text); }
+  .addinput input::placeholder { color: var(--dim); font-weight: 500; }
+
+  .prow { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 3px 2px; }
+  .prow .who { min-width: 0; display: grid; gap: 1px; flex: 1; }
+  .prow .nm { font-size: 12px; font-weight: 650; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow .nm .yy { color: var(--dim); font-weight: 500; }
+  .prow .em { font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow .pend { display: inline-flex; font: 700 8.5px/1 var(--mono); letter-spacing: .06em;
+    text-transform: uppercase; color: var(--warn-text); background: var(--warn-bg);
+    border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 7px; margin-left: 6px; }
+  .rolebtn { appearance: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    font: 650 11px/1 var(--sans); color: var(--subtle); background: transparent;
+    border: 0; padding: 5px 7px; border-radius: 6px; flex: none; }
+  .rolebtn:hover { background: var(--surface-raised); color: var(--text); }
+  .rolebtn.fixed { cursor: default; color: var(--dim); }
+  .rolebtn.fixed:hover { background: transparent; color: var(--dim); }
+  .rolebtn svg { color: var(--dim); }
+
+  .ghead { display: block; padding: 4px 2px 0; font-size: 10px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+
+  /* concept A: general-access row (Docs grammar) */
+  .garow { display: flex; align-items: flex-start; gap: 10px; padding: 4px 2px; }
+  .garow .gico { width: 30px; height: 30px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--neutral-text); }
+  .garow.tone-view .gico { color: var(--live-text); background: var(--live-bg); border-color: var(--live-border); }
+  .garow.tone-edit .gico { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
+  .garow .gwho { min-width: 0; flex: 1; display: grid; gap: 2px; }
+  .gasel { appearance: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 700 12px/1 var(--sans); color: var(--text); background: transparent; border: 0;
+    padding: 3px 6px; margin-left: -6px; border-radius: 6px; justify-self: start; }
+  .gasel:hover { background: var(--surface-raised); }
+  .gasel svg { color: var(--dim); }
+  .gadesc { font-size: 10.5px; color: var(--dim); line-height: 1.4; }
+  .gadesc b { color: var(--muted); }
+
+  .sfoot { display: flex; align-items: center; gap: 9px; padding-top: 4px; }
+  .copybtn { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    appearance: none; border-radius: 999px; padding: 7px 14px;
+    font: 700 11.5px/1 var(--sans); color: var(--accent);
+    background: transparent; border: 1px solid var(--accent-border); }
+  .copybtn:hover { background: rgba(123,224,178,.08); }
+  .copybtn svg { flex: none; }
+  .donebtn { appearance: none; cursor: pointer; border-radius: 999px; padding: 7px 16px;
+    font: 700 11.5px/1 var(--sans); color: #0d1512; margin-left: auto;
+    background: var(--accent); border: 1px solid var(--accent-border); }
+  .donebtn:hover { background: var(--accent-hover); }
+
+  /* concept B: link-first */
+  .urlhero { border: 1px solid var(--border); background: var(--terminal); border-radius: 8px;
+    padding: 9px 11px; display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .urlhero .u { flex: 1; min-width: 0; font: 600 11px/1.4 var(--mono); color: var(--subtle);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .urlhero .u .uslug { color: var(--heading); }
+  .urlhero .u .uuid { color: #5b6570; }
+  .urlhero .cbtn { appearance: none; cursor: pointer; flex: none; display: inline-flex; align-items: center; gap: 6px;
+    font: 700 11px/1 var(--sans); color: #0d1512; background: var(--accent);
+    border: 1px solid var(--accent-border); border-radius: 6px; padding: 6px 11px; }
+  .urlhero .cbtn:hover { background: var(--accent-hover); }
+  .urlcap { font-size: 10px; color: var(--dim); margin: -4px 2px 0; line-height: 1.4; }
+
+  .seg { display: flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; appearance: none; cursor: pointer; border: 0; background: transparent;
+    font: 650 11px/1.2 var(--sans); color: var(--subtle); padding: 8px 6px;
+    border-right: 1px solid var(--border-muted); }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { color: var(--text); background: var(--bg-wash); }
+  .seg button[aria-pressed=true] { color: var(--accent); background: rgba(123,224,178,.09); }
+  .seg button[aria-pressed=true].warnseg { color: var(--warn-text); background: rgba(240,220,122,.14); }
+  .segdesc { font-size: 10.5px; color: var(--dim); line-height: 1.45; margin: -2px 2px 0; min-height: 28px; }
+  .segdesc b { color: var(--muted); }
+  .segdesc.warn { color: var(--warn-text); }
+  .segdesc.warn b { color: var(--warn-text); }
+
+  .addrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    appearance: none; cursor: pointer; background: transparent;
+    border: 1px dashed var(--border-strong); border-radius: 7px; padding: 7px 11px;
+    font: 600 11.5px/1 var(--sans); color: var(--subtle); }
+  .addrow:hover { color: var(--text); border-color: var(--dim); }
+  .addrow svg { flex: none; }
+
+  /* concept C: stateful rows */
+  .arow { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left;
+    appearance: none; cursor: pointer; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 8px; padding: 9px 11px; min-width: 0; }
+  .arow:hover { border-color: var(--border-strong); }
+  .arow .radio { width: 14px; height: 14px; border-radius: 50%; flex: none; margin-top: 1px;
+    border: 1.5px solid var(--border-strong); position: relative; }
+  .arow[aria-pressed=true] { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .arow[aria-pressed=true] .radio { border-color: var(--accent); }
+  .arow[aria-pressed=true] .radio::after { content: ""; position: absolute; inset: 2.5px;
+    border-radius: 50%; background: var(--accent); }
+  .arow[aria-pressed=true].warnrow { border-color: var(--warn-border); background: rgba(240,220,122,.05); }
+  .arow[aria-pressed=true].warnrow .radio { border-color: var(--warn-text); }
+  .arow[aria-pressed=true].warnrow .radio::after { background: var(--warn-text); }
+  .arow .at { font-size: 12px; font-weight: 700; color: var(--text); }
+  .arow .ad { font-size: 10.5px; color: var(--dim); line-height: 1.35; margin-top: 1px; }
+  .avstack { display: inline-flex; align-items: center; }
+  .avstack .av { width: 24px; height: 24px; font-size: 9px; margin-right: -7px;
+    box-shadow: 0 0 0 2px var(--surface-subtle); }
+  .peoplerow { display: flex; align-items: center; gap: 10px; padding: 2px 2px; }
+  .peoplerow .lbl { font-size: 11.5px; font-weight: 600; color: var(--muted); flex: 1; }
+  .peoplerow .go { appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 650 11px/1 var(--sans); color: var(--heading); padding: 4px 6px; border-radius: 5px; }
+  .peoplerow .go:hover { background: var(--bg-wash); color: var(--accent); }
+
+  /* visitor banners */
+  .vbanner { display: flex; align-items: center; gap: 11px; padding: 8px 20px;
+    border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+  .vbanner svg { flex: none; }
+  .vbanner .vtext { min-width: 0; color: var(--muted); }
+  .vbanner .vtext b { color: var(--text); font-weight: 650; }
+  .vbanner .vacts { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; flex: none; }
+  .vbanner.live { background: color-mix(in srgb, var(--live-bg) 60%, transparent); }
+  .vbanner.live svg { color: var(--live-text); }
+  .vbanner.warn { background: color-mix(in srgb, var(--warn-bg) 62%, transparent); }
+  .vbanner.warn svg { color: var(--warn-text); }
+  .ghostbtn { appearance: none; cursor: pointer; border-radius: 999px; padding: 5px 12px;
+    font: 700 11px/1 var(--sans); color: var(--neutral-text);
+    background: var(--neutral-bg); border: 1px solid var(--neutral-border); }
+  .ghostbtn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .forkbtn { appearance: none; cursor: pointer; border-radius: 999px; padding: 5px 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 700 11px/1 var(--sans); color: #0d1512;
+    background: var(--accent); border: 1px solid var(--accent-border); }
+  .forkbtn:hover { background: var(--accent-hover); }
+  .forkbtn svg { color: #0d1512; }
+
+  .vpill { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px; padding: 7px 9px 7px 14px;
+    background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: 999px;
+    box-shadow: 0 14px 38px rgba(0,0,0,.5); font-size: 11.5px; color: var(--muted); z-index: 10;
+    white-space: nowrap; }
+  .vpill b { color: var(--text); font-weight: 650; }
+  .vpill svg { flex: none; }
+  .vpill.live svg { color: var(--live-text); }
+  .vpill.warn svg { color: var(--warn-text); }
+
+  .vchipbadge { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 700 9.5px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase;
+    border-radius: 999px; padding: 4px 10px; flex: none; }
+  .vchipbadge.live { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
+  .vchipbadge.warn { color: var(--warn-text); background: var(--warn-bg); border: 1px solid var(--warn-border); }
+
+  /* ---- section 4: url playground ---- */
+  .urlplay { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 1400px; align-items: start; }
+  @media (max-width: 1100px) { .urlplay { grid-template-columns: 1fr; } }
+  .playcard { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle);
+    padding: 14px 16px 16px; display: grid; gap: 10px; align-content: start; }
+  .playcard .pt { font-size: 12px; font-weight: 800; color: var(--strong); }
+  .playcard .pd { font-size: 11px; color: var(--dim); line-height: 1.45; margin-top: -6px; }
+  .nameinput { display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); background: var(--surface-muted); border-radius: 7px; padding: 9px 12px; }
+  .nameinput input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
+    font: 650 13px/1.3 var(--sans); color: var(--text); }
+  .nameinput input:focus { outline: none; }
+  .slugout { border: 1px solid var(--border); background: var(--terminal); border-radius: 8px;
+    padding: 10px 12px; font: 600 11.5px/1.5 var(--mono); color: var(--subtle);
+    overflow-x: auto; white-space: nowrap; }
+  .slugout .uo { color: #6b7581; } .slugout .uslug { color: var(--heading); } .slugout .uuid { color: #5b6570; }
+  .exrow { display: flex; gap: 7px; flex-wrap: wrap; }
+  .exbtn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font: 600 10.5px/1.3 var(--sans); border-radius: 999px; padding: 4px 10px; }
+  .exbtn:hover { color: var(--text); border-color: var(--dim); }
+  .parseout { font: 500 10.5px/1.6 var(--mono); color: var(--dim); border-top: 1px dashed var(--border-muted);
+    padding-top: 9px; }
+  .parseout b { color: var(--good-text); font-weight: 650; }
+  .parseout .steps { color: var(--subtle); }
+
+  /* ---- section 5: archive ---- */
+  .archwrap { display: flex; gap: 18px; padding: 16px 20px 20px; align-items: flex-start; flex-wrap: wrap; }
+  .popmenu {
+    width: 236px; padding: 6px; border-radius: 8px; flex: none;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: 0 14px 38px rgba(0,0,0,.5);
+    font-size: 12px; color: var(--muted);
+  }
+  .popmenu hr { border: 0; border-top: 1px solid var(--border-muted); margin: 4px 2px; }
+  .mrow {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1.2 var(--sans); color: var(--muted);
+    padding: 7px 9px; border-radius: 5px; min-width: 0;
+  }
+  .mrow:hover { background: var(--surface-raised); color: var(--strong); }
+  .mrow svg { color: var(--dim); flex: none; }
+  .mrow:hover svg { color: var(--text); }
+  .mrow .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow.quiet { color: var(--subtle); font-weight: 500; }
+  .archcard { width: 430px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-subtle); overflow: hidden; }
+  .archcard .ahead { padding: 9px 14px; background: var(--terminal); border-bottom: 1px solid var(--border-muted);
+    font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .archrow { display: flex; align-items: center; gap: 11px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border-muted); }
+  .archrow:last-child { border-bottom: 0; }
+  .archrow .strip { width: 52px; height: 30px; border-radius: 6px; flex: none; opacity: .45;
+    filter: saturate(.5); }
+  .archrow .who { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .archrow .nm { font-size: 12px; font-weight: 650; color: var(--subtle);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .archrow .em { font: 500 10px/1.3 var(--mono); color: var(--dim); }
+  .linkbtn { appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 650 11.5px/1 var(--sans); color: var(--heading); padding: 4px 6px; border-radius: 5px; flex: none; }
+  .linkbtn:hover { background: var(--bg-wash); color: var(--accent); }
+  .linkbtn.danger { color: var(--err-text); }
+  .g1 { background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); }
+  .g2 { background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px);
+    background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: 8px;
+    color: var(--text); font-size: 12px; font-weight: 600; padding: 9px 16px;
+    box-shadow: 0 14px 38px rgba(0,0,0,.5); opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease; z-index: 60;
+    display: flex; gap: 9px; align-items: center; max-width: 480px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast svg { color: var(--accent); flex: none; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="mark-e" viewBox="0 0 32 32">
+    <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke="currentColor" stroke-width="1.7" fill="none"/>
+    <g fill="currentColor" opacity=".75">
+      <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/><rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+      <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/><rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+    </g>
+    <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="3.6" y="6.8" width="8.8" height="6.4" rx="1.3"/><path d="M5.5 6.8V5a2.5 2.5 0 0 1 5 0v1.8"/></g>
+  </symbol>
+  <symbol id="i-globe" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.25" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="8" r="5.6"/><path d="M2.4 8h11.2M8 2.4c-3.4 3.4-3.4 7.8 0 11.2M8 2.4c3.4 3.4 3.4 7.8 0 11.2"/></g>
+  </symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m9.9 3.3 2.8 2.8-7 7-3.2.4.4-3.2 7-7z"/><path d="m8.8 4.4 2.8 2.8"/></g>
+  </symbol>
+  <symbol id="i-link" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <path d="M6.5 9.5 9.5 6.5M7.6 4.6l1.2-1.2a2.4 2.4 0 0 1 3.4 0l.4.4a2.4 2.4 0 0 1 0 3.4L11.4 8.4M8.4 11.4l-1.2 1.2a2.4 2.4 0 0 1-3.4 0l-.4-.4a2.4 2.4 0 0 1 0-3.4l1.2-1.2"/></g>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16">
+    <path d="M3 8.6 6.4 12 13 4.6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16">
+    <path d="m4.5 6.2 3.5 3.6 3.5-3.6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></g>
+  </symbol>
+  <symbol id="i-person" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="5.4" r="2.6"/><path d="M2.9 13.6c.7-2.6 2.7-3.9 5.1-3.9s4.4 1.3 5.1 3.9"/></g>
+  </symbol>
+  <symbol id="i-eye" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <path d="M1.8 8s2.3-4 6.2-4 6.2 4 6.2 4-2.3 4-6.2 4S1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/></g>
+  </symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="4.5" cy="3.5" r="1.7"/><circle cx="4.5" cy="12.5" r="1.7"/><circle cx="11.5" cy="6" r="1.7"/>
+      <path d="M4.5 5.2v5.6M11.5 7.7c0 2.6-3 3-5 3.4"/></g>
+  </symbol>
+  <symbol id="i-live" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/>
+      <path d="M4.9 11.1a4.4 4.4 0 0 1 0-6.2M11.1 4.9a4.4 4.4 0 0 1 0 6.2M3 13a7 7 0 0 1 0-10M13 3a7 7 0 0 1 0 10"/></g>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <circle cx="8" cy="8" r="2.2"/>
+      <path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></g>
+  </symbol>
+  <symbol id="i-box" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.4 5.2h11.2v1.9H2.4zM3.4 7.1v5.6a.9.9 0 0 0 .9.9h7.4a.9.9 0 0 0 .9-.9V7.1M6.5 9.4h3"/></g>
+  </symbol>
+  <symbol id="i-rename" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <path d="M8 2.8v10.4M6.2 2.8h3.6M6.2 13.2h3.6M10.5 5.2h2.1a1 1 0 0 1 1 1v3.6a1 1 0 0 1-1 1h-2.1M5.5 5.2H3.4a1 1 0 0 0-1 1v3.6a1 1 0 0 0 1 1h2.1"/></g>
+  </symbol>
+  <symbol id="i-newtab" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.6 8.7v3.5a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2V4.6a1.2 1.2 0 0 1 1.2-1.2h3.5M9.8 2.9h3.3v3.3M13 3 7.6 8.4"/></g>
+  </symbol>
+</defs></svg>
+
+<h1>Project identity &amp; sharing — design spike</h1>
+<p class="hint">
+  Vision D1–D13 (<b>2026-08-07-1630-project-identity-sharing</b>): the address bar <b>is</b> the
+  share link — every project lives at <b>/p/&lt;slug&gt;-&lt;uid&gt;</b>, auto-published, viewable by
+  anyone with the link from birth; the Share popover is pure <b>access control</b>
+  (restricted / view / edit ⊥ people); visitors get a real editor over a tracking copy with a
+  two-state banner; removal is <b>Archive</b>, never bare delete. Uids wear PR #384's shape:
+  <b>prj</b> + 16-char lowercase base-32, case-insensitive. Everything here reacts to the
+  controls strip — flip access, people, and the visitor's divergence state. Append
+  <b>?only=N</b> to isolate a section.
+  <br><br>
+  <b>Converged 2026-08-07</b> — gate rulings: §1 <b>A</b>, lightened (neutral pill, accent icon)
+  and opening the settings as an <b>anchored detail popup</b> for a cohesive look; §2 <b>B</b>
+  link-first is that popup's anatomy; §3 <b>A</b> the strip; §5 archive-in-⋯ confirmed.
+  Rejected concepts shrink to strips.
+</p>
+
+<div class="controls">
+  <span class="group"><b>General access</b>
+    <button class="chip" data-set="access:none">restricted</button>
+    <button class="chip" data-set="access:view" aria-pressed="true">anyone: view</button>
+    <button class="chip" data-set="access:edit">anyone: edit</button>
+  </span>
+  <span class="group"><b>People</b>
+    <button class="chip" data-set="people:you">just you</button>
+    <button class="chip" data-set="people:oliver" aria-pressed="true">+ Oliver (invited)</button>
+    <button class="chip" data-set="people:crew">crew (awkward names)</button>
+  </span>
+  <span class="group"><b>Visitor copy</b>
+    <button class="chip" data-set="visitor:pristine" aria-pressed="true">pristine</button>
+    <button class="chip" data-set="visitor:edited">locally edited</button>
+  </span>
+</div>
+
+<!-- ================================================================ -->
+<section data-sec="1">
+<h2><span class="n">1 ·</span> Where Share lives — the owner's chrome at /p/</h2>
+<p class="sub">
+  D13: the canonical URL loads <b>the simulator</b>; <code>/sim/</code> retires. Baseline shows
+  today's route for contrast. The browser frame is part of the design — the address bar is the
+  share surface, so the chrome question is only: what else does the bar need?
+  <b>A</b> a real Share button (the access-control door, Docs-style); <b>B</b> nothing — trust
+  the URL, park access control behind ⋯. My lean: <b>A</b> — copying the URL shares, but
+  permissions still need a findable door, and the button doubles as the "this thing is shared"
+  signal.
+</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">1·0 · Today (baseline)</span>
+    <span class="cnote">hash-era route grown into <code>/sim/&lt;key&gt;</code> — project identity is a local library key; nothing to copy, nothing to share</span></p>
+  <div class="bframe">
+    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
+      <span class="abar"><svg width="11" height="11"><use href="#i-lock"/></svg>
+        <span class="u"><span class="uo">lightplayer.app</span>/sim/2026-08-05-1121-radiance-dome</span></span></div>
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span><span class="ps">sim</span></span>
+      <span class="rside">
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="avbtn"><span class="av" style="--avc:#7be0b2">YA</span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="simpeek"><div class="glow"></div><div class="leds"></div>
+      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
+  </div>
+</div>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">A · Quiet Share button → anchored panel</span><span class="ctag">chosen · converged</span>
+    <span class="cnote">G1 ruling: lighter touch — neutral pill, accent only in the icon; clicking opens the settings <b>in place</b> as a detail popup (the winning B anatomy from §2), cohesive with the account dropdown.</span></p>
+  <div class="bframe">
+    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
+      <span class="abar" data-abar="a"><svg width="11" height="11"><use href="#i-lock"/></svg>
+        <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span>
+        <span class="copyhint" data-copy title="copy"><svg width="12" height="12"><use href="#i-link"/></svg></span></span></div>
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span></span>
+      <span class="rside">
+        <button class="sharebtn open"><svg width="13" height="13"><use href="#i-person"/></svg> Share</button>
+        <button class="iconbtn"><svg width="14" height="14"><use href="#i-gear"/></svg></button>
+        <button class="avbtn"><span class="av" style="--avc:#7be0b2">YA</span></button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="sharecard anchored">
+      <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
+      <div class="sbody">
+        <div class="urlhero">
+          <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span>
+          <button class="cbtn" data-copy2><svg width="12" height="12"><use href="#i-link"/></svg> Copy</button>
+        </div>
+        <p class="urlcap">Same link as the address bar — copying either works.</p>
+        <div class="seg" data-seg>
+          <button data-acc="none">Restricted</button>
+          <button data-acc="view" aria-pressed="true">Anyone can view</button>
+          <button data-acc="edit" class="warnseg">Anyone can edit</button>
+        </div>
+        <p class="segdesc" data-segdesc></p>
+        <span class="ghead">People</span>
+        <div data-people="anchor"></div>
+        <button class="addrow"><svg width="13" height="13"><use href="#i-plus"/></svg> Add people by email…</button>
+      </div>
+    </div>
+    <div class="simpeek" style="height:440px"><div class="glow"></div><div class="leds"></div>
+      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
+  </div>
+</div>
+
+<p class="rej"><b>B · No button — rejected:</b> chrome-as-shipped with access control hidden in
+  ⋯ → "Sharing…" kept the bar pure, but permissions became invisible and nothing signaled
+  "people can see this." The URL alone shares; it doesn't <i>administer</i>.</p>
+</section>
+
+<!-- ================================================================ -->
+<section data-sec="2">
+<h2><span class="n">2 ·</span> The Share popover — link-first, converged</h2>
+<p class="sub">
+  G2 ruling: <b>B · link-first</b> — the URL is the hero because the address bar is the product;
+  access is a one-glance segment; add-person sits at the list's bottom. The model underneath is
+  D4: general access <code>none|view|edit</code> ⊥ people. Flip <b>People → crew</b> for the
+  long-name and CJK rows; flip <b>anyone: edit</b> for the capability warning (the segment
+  itself goes warning-gold). <b>D</b> is what the same door shows a visitor.
+</p>
+
+<div class="barwrap">
+  <div class="popwrap" style="padding:0; align-items:stretch">
+
+    <div>
+      <p class="cap"><span class="cname">B · Link-first</span><span class="ctag">chosen</span>
+        <span class="cnote">reference copy of §1's anchored panel</span></p>
+      <div class="sharecard">
+        <div class="shead"><span class="t">Share "radiance-dome"</span><span class="close">×</span></div>
+        <div class="sbody">
+          <div class="urlhero">
+            <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span>
+            <button class="cbtn" data-copy2><svg width="12" height="12"><use href="#i-link"/></svg> Copy</button>
+          </div>
+          <p class="urlcap">Same link as the address bar — copying either works.</p>
+          <div class="seg" data-seg>
+            <button data-acc="none">Restricted</button>
+            <button data-acc="view" aria-pressed="true">Anyone can view</button>
+            <button data-acc="edit" class="warnseg">Anyone can edit</button>
+          </div>
+          <p class="segdesc" data-segdesc></p>
+          <span class="ghead">People</span>
+          <div data-people="b"></div>
+          <button class="addrow"><svg width="13" height="13"><use href="#i-plus"/></svg> Add people by email…</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap"><span class="cname">D · What a visitor sees</span>
+        <span class="cnote">same door, read-only content — whatever concept wins</span></p>
+      <div class="sharecard" style="width:300px">
+        <div class="shead"><span class="t">radiance-dome</span><span class="close">×</span></div>
+        <div class="sbody">
+          <p style="margin:0; font-size:11.5px; color:var(--muted); line-height:1.5">
+            Shared by <b style="color:var(--text)">Yona Appletree</b> ·
+            <span data-visdesc>anyone with the link can view</span>.</p>
+          <div class="urlhero" style="padding:7px 9px">
+            <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9…</span></span>
+            <button class="cbtn" data-copy2><svg width="12" height="12"><use href="#i-link"/></svg> Copy</button>
+          </div>
+          <button class="forkbtn" style="justify-self:start"><svg width="12" height="12"><use href="#i-branch"/></svg>
+            Fork — make it yours</button>
+          <p class="urlcap" style="margin-top:-2px">A fork is a new project with its own URL;
+            yours to keep and share.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p class="rej"><b>A · Docs-faithful — rejected:</b> people-first buried the URL in the footer,
+  and general-access-as-a-row needed two nested dropdowns to say what B's segment says in one
+  glance. Its add-people <i>input</i> (vs B's add-row) can still be lifted later if invites grow
+  autocomplete.</p>
+<p class="rej"><b>C · Stateful rows — rejected:</b> the most self-explanatory access picker, but
+  it spent the whole card on one dimension and demoted people to a "Manage →" hop. Its per-state
+  descriptions live on inside B's segment description line.</p>
+</section>
+
+<!-- ================================================================ -->
+<section data-sec="3">
+<h2><span class="n">3 ·</span> The visitor banner — the strip, converged</h2>
+<p class="sub">
+  G3 ruling: <b>A · the strip</b>. D5: visitors edit a real tracking copy; read-only means the
+  server refuses the push, so the UI's whole job is honesty about state. <b>Pristine</b>:
+  "you'll get updates." <b>Edited</b>: "updates paused — fork to keep." Flip <b>Visitor copy</b>
+  in the strip. The "Save" button fakes a refused push — the moment the fork offer earns its
+  keep.
+</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">A · Strip under the chrome</span><span class="ctag">chosen</span>
+    <span class="cnote">full-width, tinted by state, actions in place — the banner is the fork's home</span></p>
+  <div class="bframe">
+    <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
+      <span class="abar"><svg width="11" height="11"><use href="#i-lock"/></svg>
+        <span class="u"><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span></span></div>
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></span>
+      <span class="navrow"><button class="navlink">Devices</button><button class="navlink active">Projects</button></span>
+      <span class="ptitle-bar"><span class="sep">/</span><span class="pn">radiance-dome</span></span>
+      <span class="rside">
+        <button class="ghostbtn" data-refuse>Save</button>
+        <button class="iconbtn morebtn">⋯</button>
+      </span>
+    </div>
+    <div class="vbanner live" data-banner-a>
+      <svg width="14" height="14" data-bico><use href="#i-live"/></svg>
+      <span class="vtext" data-btext></span>
+      <span class="vacts" data-bacts></span>
+    </div>
+    <div class="simpeek"><div class="glow"></div><div class="leds"></div>
+      <span class="simmeta">radiance-dome · 1,500 leds · 30 fps</span></div>
+  </div>
+</div>
+
+<p class="rej"><b>B · Floating pill — rejected:</b> prettiest over the sim, but it floats where
+  toasts live and covers content the visitor came to watch. <b>C · Chrome badge — rejected:</b>
+  quietest, but it put the one action that matters (fork) two clicks away behind a popover.</p>
+</section>
+
+<!-- ================================================================ -->
+<section data-sec="4">
+<h2><span class="n">4 ·</span> The URL itself — slug generation &amp; canonicalization</h2>
+<p class="sub">
+  D10/D11: the whole URL is lowercase and survives mangling; the slug generator has to handle
+  names as people actually write them. Left: type a project name, watch the slug (the D11
+  acceptance example is preloaded). Right: paste-a-mangled-link — every variant resolves by uid
+  and snaps to canonical via <code>replaceState</code>, with the parse spelled out.
+</p>
+
+<div class="urlplay">
+  <div class="playcard">
+    <span class="pt">Name → slug</span>
+    <p class="pd">Fold case · strip diacritics · drop apostrophes · everything else → hyphen ·
+      collapse · trim · cap 48. A name with nothing to keep gets the bare-uid URL — never a fake slug.</p>
+    <div class="nameinput"><svg width="14" height="14" style="color:var(--dim)"><use href="#i-rename"/></svg>
+      <input data-nameinput value='Yona&#39;s "radiance dome" Doors' spellcheck="false"></div>
+    <div class="slugout" data-slugout></div>
+    <div class="exrow">
+      <button class="exbtn" data-ex='Yona&#39;s "radiance dome" Doors'>the D11 example</button>
+      <button class="exbtn" data-ex='Ember — Field (v2)'>em-dash &amp; parens</button>
+      <button class="exbtn" data-ex='Crème brûlée nights'>diacritics</button>
+      <button class="exbtn" data-ex='🔥🔥 fire 🔥🔥'>emoji</button>
+      <button class="exbtn" data-ex='ドームの光'>CJK (no ascii)</button>
+      <button class="exbtn" data-ex='the quick brown fox jumps over the lazy dog and keeps on running forever'>too long</button>
+      <button class="exbtn" data-ex=''>empty</button>
+    </div>
+  </div>
+  <div class="playcard">
+    <span class="pt">Any old link still opens</span>
+    <p class="pd">One parse rule everywhere (server page plane, router, ProjectLink): last
+      <code>-</code> segment → validate <code>prj</code> + 16 base-32, case-folded → resolve →
+      <code>replaceState</code> to canonical.</p>
+    <div class="bframe" style="box-shadow:none">
+      <div class="btop"><span class="dots"><i></i><i></i><i></i></span>
+        <span class="abar" data-canonbar><svg width="11" height="11"><use href="#i-lock"/></svg>
+          <span class="u" data-canonurl><span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-prjhk7q9xy2mq4tb8wz</span></span></span></div>
+    </div>
+    <div class="exrow">
+      <button class="exbtn" data-mangle="stale">stale slug (pre-rename)</button>
+      <button class="exbtn" data-mangle="upper">SHOUTED BY A CHAT APP</button>
+      <button class="exbtn" data-mangle="bare">bare uid, no slug</button>
+      <button class="exbtn" data-mangle="junk">trailing junk</button>
+    </div>
+    <div class="parseout" data-parseout>paste a mangled link above ↑</div>
+  </div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section data-sec="5">
+<h2><span class="n">5 ·</span> Archive — the removal verb</h2>
+<p class="sub">
+  D8: no irreversible actions on the main surface. My lean (Q4 of the assumptions): archive lives
+  in the project's <b>⋯ menu</b> — the Share popover stays pure access control, like Docs. The
+  archive page is where "Delete forever" is allowed to exist, spelled like what it is.
+</p>
+
+<div class="barwrap">
+  <div class="archwrap" style="padding:0">
+    <div>
+      <p class="cap"><span class="cname">The ⋯ menu</span><span class="cnote">archive is a quiet row, not a red one — it's reversible</span></p>
+      <div class="popmenu">
+        <button class="mrow"><svg width="14" height="14"><use href="#i-newtab"/></svg><span class="grow">Open in new tab</span></button>
+        <button class="mrow"><svg width="14" height="14"><use href="#i-rename"/></svg><span class="grow">Rename…</span></button>
+        <button class="mrow"><svg width="14" height="14"><use href="#i-person"/></svg><span class="grow">Sharing &amp; access…</span></button>
+        <hr>
+        <button class="mrow quiet"><svg width="14" height="14"><use href="#i-box"/></svg><span class="grow">Archive project</span></button>
+      </div>
+    </div>
+    <div>
+      <p class="cap"><span class="cname">The archive</span><span class="cnote">restore is the loud verb; the link keeps resolving for you, 404s for visitors</span></p>
+      <div class="archcard">
+        <div class="ahead">Archived projects</div>
+        <div class="archrow">
+          <span class="strip g2"></span>
+          <span class="who"><span class="nm">ember-field (v1)</span>
+            <span class="em">/p/ember-field-prj2c4d9x7w3n8k5m1p · archived Aug 2</span></span>
+          <button class="linkbtn">Restore</button>
+          <button class="linkbtn danger">Delete forever…</button>
+        </div>
+        <div class="archrow">
+          <span class="strip g1"></span>
+          <span class="who"><span class="nm">first-try-gradient</span>
+            <span class="em">/p/first-try-gradient-prj9t2v5q8z4x7c3f6h · archived Jul 28</span></span>
+          <button class="linkbtn">Restore</button>
+          <button class="linkbtn danger">Delete forever…</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<div class="toast" data-toast><svg width="14" height="14"><use href="#i-check"/></svg><span data-toastmsg></span></div>
+
+<script>
+(function () {
+  'use strict';
+  const UID = 'prjhk7q9xy2mq4tb8wz';
+  const $  = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+
+  /* ---------- state ---------- */
+  const state = { access: 'view', people: 'oliver', visitor: 'pristine' };
+
+  const PEOPLE = {
+    you:    { nm: 'Yona Appletree', you: true, em: 'lightatplay@gmail.com', c: '#7be0b2', role: 'Owner' },
+    oliver: { nm: 'Oliver Voss', em: 'oliver@dustcamp.org', c: '#9cc8ee', role: 'Editor', pending: true },
+    pri:    { nm: 'Priyanka Ramaswamy-Krishnamurthy', em: 'priyanka.ramaswamy.krishnamurthy@lightcrew.example.org', c: '#f0dc7a', role: 'Editor' },
+    rin:    { nm: 'リン・ハヤシ', em: 'rin@zookdome.org', c: '#c9b1f5', role: 'Editor' },
+  };
+  const SETS = { you: ['you'], oliver: ['you', 'oliver'], crew: ['you', 'oliver', 'pri', 'rin'] };
+
+  const ACCESS = {
+    none: { label: 'Restricted', role: '', ico: 'i-lock', tone: '',
+      desc: 'Only you and the people below can open the link.',
+      seg:  '<b>Only people added below</b> can open the link. Everyone else sees nothing — not even that it exists.',
+      vis:  'shared with you directly' },
+    view: { label: 'Anyone with the link', role: 'can view', ico: 'i-globe', tone: 'tone-view',
+      desc: 'The link opens the project running — no account needed. Only people below can save changes.',
+      seg:  'Opens <b>running</b> for anyone with the link — no account needed. Only the people below can save changes.',
+      vis:  'anyone with the link can view' },
+    edit: { label: 'Anyone with the link', role: 'can edit', ico: 'i-pencil', tone: 'tone-edit',
+      desc: 'Anyone holding the link can edit and save. The link is the only key.',
+      seg:  'Anyone holding the link can <b>edit and save</b>. The link is the only key — share it accordingly.',
+      vis:  'anyone with the link can edit' },
+  };
+
+  function initials(nm) {
+    const parts = nm.trim().split(/\s+/);
+    return ((parts[0] || ' ')[0] + ((parts[1] || ' ')[0] || '')).toUpperCase();
+  }
+  function av(p, size) {
+    const s = size ? `width:${size}px;height:${size}px;font-size:${Math.round(size * .38)}px;` : '';
+    return `<span class="av" style="--avc:${p.c};${s}">${initials(p.nm)}</span>`;
+  }
+
+  /* ---------- people lists (concepts A & B) ---------- */
+  function renderPeople() {
+    const rows = SETS[state.people].map(k => {
+      const p = PEOPLE[k];
+      const role = p.you
+        ? '<button class="rolebtn fixed">Owner</button>'
+        : '<button class="rolebtn">Editor <svg width="12" height="12"><use href="#i-chev"/></svg></button>';
+      return `<div class="prow">${av(p)}
+        <span class="who"><span class="nm">${p.nm}${p.you ? ' <span class="yy">(you)</span>' : ''}${p.pending ? '<span class="pend">invited</span>' : ''}</span>
+        <span class="em">${p.em}</span></span>${role}</div>`;
+    }).join('');
+    $$('[data-people]').forEach(el => { el.innerHTML = rows; });
+  }
+
+  /* ---------- access (anchored panel, B reference, D visitor card) ---------- */
+  function renderAccess() {
+    const a = ACCESS[state.access];
+    $$('[data-seg] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.acc === state.access));
+    $$('[data-segdesc]').forEach(sd => {
+      sd.innerHTML = a.seg;
+      sd.classList.toggle('warn', state.access === 'edit');
+    });
+    $('[data-visdesc]').textContent = a.vis;
+  }
+
+  /* ---------- visitor banners ---------- */
+  const BANNER = {
+    pristine: {
+      cls: 'live', ico: 'i-live',
+      text: `Viewing <b>Yona Appletree's</b> radiance-dome — updates arrive as they happen.`,
+      pill: `Viewing <b>Yona's</b> radiance-dome · live`,
+      chip: 'viewing',
+      acts: `<button class="ghostbtn" data-copy2>Copy link</button>
+             <button class="forkbtn"><svg width="12" height="12"><use href="#i-branch"/></svg> Fork</button>`,
+      pacts: `<button class="forkbtn" style="padding:4px 11px">Fork</button>`,
+    },
+    edited: {
+      cls: 'warn', ico: 'i-branch',
+      text: `You've made local changes — updates from Yona are <b>paused</b>. They stay on this device unless you fork.`,
+      pill: `Local changes · updates <b>paused</b>`,
+      chip: 'local changes',
+      acts: `<button class="ghostbtn">Discard changes</button>
+             <button class="forkbtn"><svg width="12" height="12"><use href="#i-branch"/></svg> Fork to keep your version</button>`,
+      pacts: `<button class="ghostbtn" style="padding:4px 10px">Discard</button>
+              <button class="forkbtn" style="padding:4px 11px">Fork</button>`,
+    },
+  };
+  function renderVisitor() {
+    const b = BANNER[state.visitor];
+    const strip = $('[data-banner-a]');
+    strip.className = 'vbanner ' + b.cls;
+    $('[data-bico]').innerHTML = `<use href="#${b.ico}"/>`;
+    $('[data-btext]').innerHTML = b.text;
+    $('[data-bacts]').innerHTML = b.acts;
+    wireCopies();
+  }
+
+  /* ---------- toast + copy ---------- */
+  let toastT;
+  function toast(msg) {
+    const t = $('[data-toast]');
+    $('[data-toastmsg]').textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+  function wireCopies() {
+    $$('[data-copy2]:not([data-wired])').forEach(b => {
+      b.dataset.wired = '1';
+      b.addEventListener('click', () => toast('Link copied — opens running for anyone (no account).'));
+    });
+  }
+  $('[data-copy]').addEventListener('click', () => toast('Link copied from the address bar — same link, same powers.'));
+  $('[data-refuse]').addEventListener('click', () => {
+    toast(`This is Yona's project — your changes stay on this device. Fork to give them a home.`);
+    if (state.visitor === 'pristine') setControl('visitor', 'edited');
+  });
+
+  /* ---------- slug playground ---------- */
+  function slugify(name) {
+    let s = name.normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/['‘’]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (s.length > 48) s = s.slice(0, 48).replace(/-+$/, '');
+    return s;
+  }
+  function renderSlug() {
+    const name = $('[data-nameinput]').value;
+    const s = slugify(name);
+    const url = s
+      ? `<span class="uo">lightplayer.app</span>/p/<span class="uslug">${s}</span><span class="uuid">-${UID}</span>`
+      : `<span class="uo">lightplayer.app</span>/p/<span class="uuid">${UID}</span> <span style="color:var(--dim)">· nothing to keep → bare uid</span>`;
+    $('[data-slugout]').innerHTML = url;
+  }
+  $('[data-nameinput]').addEventListener('input', renderSlug);
+  $$('[data-ex]').forEach(b => b.addEventListener('click', () => {
+    $('[data-nameinput]').value = b.dataset.ex;
+    renderSlug();
+  }));
+
+  /* ---------- canonicalization playground ---------- */
+  const MANGLES = {
+    stale: { u: `/p/<span class="uslug">radiance-dome-v1</span><span class="uuid">-${UID}</span>`,
+      note: 'slug is stale (pre-rename)' },
+    upper: { u: `/P/<span class="uslug">RADIANCE-DOME</span><span class="uuid">-${UID.toUpperCase()}</span>`,
+      note: 'case-mangled by a chat app' },
+    bare:  { u: `/p/<span class="uuid">${UID}</span>`, note: 'no slug at all' },
+    junk:  { u: `/p/<span class="uslug">radiance-dome</span><span class="uuid">-${UID}</span><span style="color:#79403e">).</span>`,
+      note: 'punctuation glued on by a sentence' },
+  };
+  const CANON = `<span class="uo">lightplayer.app</span>/p/<span class="uslug">radiance-dome</span><span class="uuid">-${UID}</span>`;
+  let canonT1, canonT2;
+  $$('[data-mangle]').forEach(b => b.addEventListener('click', () => {
+    const m = MANGLES[b.dataset.mangle];
+    const bar = $('[data-canonbar]'); const u = $('[data-canonurl]');
+    clearTimeout(canonT1); clearTimeout(canonT2);
+    bar.classList.remove('snap');
+    u.innerHTML = `<span class="uo">lightplayer.app</span>${m.u}`;
+    $('[data-parseout]').innerHTML =
+      `<span class="steps">incoming: ${m.note}</span><br>` +
+      `<span class="steps">last '-' segment → fold case → strip trailing junk</span><br>` +
+      `→ <b>${UID}</b> · valid prj uid · resolving…`;
+    canonT1 = setTimeout(() => {
+      u.innerHTML = CANON;
+      void bar.offsetWidth;
+      bar.classList.add('snap');
+      $('[data-parseout]').innerHTML =
+        `<span class="steps">last '-' segment → fold case → strip trailing junk</span><br>` +
+        `→ <b>${UID}</b> · resolved · <b>replaceState</b> → canonical. The link never breaks.`;
+    }, 700);
+  }));
+
+  /* ---------- controls ---------- */
+  function setControl(key, val) {
+    state[key] = val;
+    $$(`.chip[data-set^="${key}:"]`).forEach(c =>
+      c.setAttribute('aria-pressed', c.dataset.set === `${key}:${val}`));
+    renderAll();
+  }
+  $$('.chip[data-set]').forEach(c => c.addEventListener('click', () => {
+    const [k, v] = c.dataset.set.split(':');
+    setControl(k, v);
+  }));
+  $$('[data-seg] button').forEach(b => b.addEventListener('click', () => setControl('access', b.dataset.acc)));
+
+  function renderAll() { renderPeople(); renderAccess(); renderVisitor(); renderSlug(); wireCopies(); }
+  renderAll();
+
+  /* ---------- URL presets: ?only=N isolates a section; ?access/&people/&visitor preset the chips ---------- */
+  const params = new URLSearchParams(location.search);
+  ['access', 'people', 'visitor'].forEach(k => {
+    const v = params.get(k);
+    if (v && (k !== 'access' ? SETS[v] || BANNER[v] : ACCESS[v])) setControl(k, v);
+  });
+  const only = params.get('only');
+  if (only) $$('section[data-sec]').forEach(s => { if (s.dataset.sec !== only) s.hidden = true; });
+})();
+</script>
+</body>
+</html>
