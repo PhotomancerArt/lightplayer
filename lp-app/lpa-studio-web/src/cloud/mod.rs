@@ -9,10 +9,13 @@
 //!   unreachable.
 //! - [`account_memory`] — the `lp_accounts` localStorage list the
 //!   switch-account rows are built from. Pure list logic, host-tested.
+//! - [`sync`] — auto-publish: the driver that keeps a signed-in account's
+//!   projects on the service without anyone pressing anything.
 
 pub mod account_memory;
 pub mod fetch_cloud_port;
 pub mod session_state;
+pub mod sync;
 
 pub use fetch_cloud_port::FetchCloudPort;
 pub use session_state::{CloudSession, CloudSessionRefresh, use_cloud_session_provider};
