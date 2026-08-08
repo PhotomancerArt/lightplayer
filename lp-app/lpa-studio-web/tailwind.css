@@ -68,6 +68,9 @@
     --color-status-bound-bg: var(--studio-status-bound-bg);
     --color-status-bound-border: var(--studio-status-bound-border);
     --color-status-bound-foreground: var(--studio-status-bound-text);
+    --color-status-export-bg: var(--studio-status-export-bg);
+    --color-status-export-border: var(--studio-status-export-border);
+    --color-status-export-foreground: var(--studio-status-export-text);
 
     --color-step-marker: var(--studio-step-marker-bg);
     --color-step-active: var(--studio-step-active-bg);

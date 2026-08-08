@@ -2,6 +2,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
+use crate::app::module::module_fixtures::{
+    fire_export, inline_module_export, module_card_with_export,
+};
 use crate::app::node::node_story_fixtures::{
     debug_rows_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
     node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
@@ -267,4 +270,46 @@ pub(crate) fn dirty_detail_popup() -> Element {
             }
         }
     }
+}
+
+/// The module popup as the export stories render it: the card's own face
+/// carries the designation row, exactly as `NodePane` threads it in the app.
+fn export_popup(name: &str, export: lpa_studio_core::UiModuleExport) -> Element {
+    let view = module_card_with_export(name, export);
+    let Some(lpa_studio_core::UiNodeFace::Module(face)) = view.face.clone() else {
+        unreachable!("the fixture card wears a module face")
+    };
+
+    rsx! {
+        div { class: "tw:flex tw:min-h-[760px] tw:items-start tw:justify-end",
+            NodeDetailPopover {
+                header: view.header,
+                pending_edits: vec![],
+                module: face,
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The module detail popup's EXPORT section (module authoring unit, P3), on a module that is not exported yet: the sage-titled section, a checkbox naming the PROJECT (the designation is manifest data even though the gesture lives on the module you are looking at), the hint saying what an importer actually gets, and the upgrade sentence — the first export is what makes a general project a pattern project (vision D14). Provenance sits in the identity rows above, because provenance is what an importer inherits."
+)]
+pub(crate) fn module_export_popup_offered() -> Element {
+    export_popup("fire", fire_export(false))
+}
+
+#[story(
+    description = "The same section once the module IS exported: the box is ticked, the upgrade sentence is gone (the project is already a pattern project), and this export's lint findings render in place — a warning (its channel's only writer is scaffolding, so imported copies run on the authored default) and a hard error (a file reference escapes the folder). The two severities keep their own tones inside a sage section: the family colour says what kind of thing this is, the finding tone says how it is doing."
+)]
+pub(crate) fn module_export_popup_lint() -> Element {
+    export_popup("fire", fire_export(true))
+}
+
+#[story(
+    description = "The DISABLED row: a module that is a single file has no folder to vendor, so the checkbox is inert and the row explains itself rather than disappearing (the add-node picker's disabled-row precedent). The same shape carries the other refusals — a module nested deeper than one level, and a device session, where the manifest you would be editing is the library's, not the one in front of you."
+)]
+pub(crate) fn module_export_popup_disabled() -> Element {
+    export_popup("wave", inline_module_export())
 }

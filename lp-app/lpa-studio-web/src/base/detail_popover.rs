@@ -153,6 +153,11 @@ pub enum DetailSectionTint {
     Debug,
     /// Bound/bus-linked (violet) wash.
     Bound,
+    /// **Export** (sage): the module-authoring family — "this ships from
+    /// here" (module authoring unit D11). Never violet or good-green: an
+    /// export is a structural property of the project, not a binding and
+    /// not a health verdict.
+    Export,
 }
 
 /// Section styling hook: standard section padding and top divider, optionally
@@ -185,6 +190,9 @@ pub fn detail_popover_section_class(tint: DetailSectionTint) -> &'static str {
         DetailSectionTint::Bound => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
         }
+        DetailSectionTint::Export => {
+            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-export-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
+        }
     }
 }
 
@@ -215,6 +223,9 @@ fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
         DetailSectionTint::Debug => "tw:m-0 tw:text-xs tw:font-bold tw:uppercase lp-debug-title",
         DetailSectionTint::Bound => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-bound-foreground"
+        }
+        DetailSectionTint::Export => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-export-foreground"
         }
     }
 }

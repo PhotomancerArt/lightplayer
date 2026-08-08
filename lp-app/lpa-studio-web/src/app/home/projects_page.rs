@@ -8,10 +8,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
 
 use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
+use crate::app::home::new_project_menu::NewProjectMenu;
 use crate::app::home::package_card::{PackageCard, home_action};
 use crate::app::home::{card_grid_class, section_title_class};
 use crate::base::{StudioIcon, StudioIconName};
-use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
+use crate::core::quiet_action_class;
 
 /// The project library. "New" keeps the open-in-sim behavior (this is
 /// the library page, not the device flow); connected-EMPTY devices still
@@ -65,15 +66,12 @@ pub fn ProjectsPage(
                     h2 { class: section_title_class(), "Projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
-                            // "New": create a pure-blank project and open it
+                            // "New": pick a template, then create-and-open
                             // (2026-07-27 deviation from D17 — see the ADR at
-                            // docs/adr/2026-07-27-node-authoring-operations.md)
-                            ActionButton {
-                                action: home_action(HomeOp::CreateProject),
-                                running: busy,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
+                            // docs/adr/2026-07-27-node-authoring-operations.md;
+                            // the template menu is the module authoring
+                            // unit's P4)
+                            NewProjectMenu { busy, on_action }
                             // a real button (matching the ActionButton quiet
                             // chip exactly) that forwards to the hidden file
                             // input — a file dialog can't be a UiAction
