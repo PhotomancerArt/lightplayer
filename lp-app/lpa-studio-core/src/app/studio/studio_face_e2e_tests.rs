@@ -1885,7 +1885,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 5\n}\n";
+    let project_json = "{\n  \"format\": 6\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
