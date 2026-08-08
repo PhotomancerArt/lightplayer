@@ -64,6 +64,11 @@ pub enum ShaderInputMaterializeError {
         len: u32,
         count: usize,
     },
+    IndexOutOfRange {
+        slot: String,
+        index: u32,
+        len: u32,
+    },
     Value(String),
 }
 
@@ -101,6 +106,10 @@ impl core::fmt::Display for ShaderInputMaterializeError {
             Self::TooManyEntries { slot, len, count } => write!(
                 f,
                 "shader map input {slot:?} has {count} entries but mapping length is {len}"
+            ),
+            Self::IndexOutOfRange { slot, index, len } => write!(
+                f,
+                "shader map input {slot:?} has key {index} but dense mapping length is {len}"
             ),
             Self::Value(message) => f.write_str(message),
         }
@@ -140,6 +149,9 @@ fn materialize_map_input(
         .ok_or_else(|| ShaderInputMaterializeError::MissingMapping(String::from(slot_name)))?;
     match mapping.kind.value() {
         ShaderSlotMappingKind::Sentinel => {}
+        ShaderSlotMappingKind::Dense => {
+            return materialize_dense_input(slot_name, slot, data, registry);
+        }
     }
     let key_def = slot
         .key
@@ -192,6 +204,71 @@ fn materialize_map_input(
         };
         validate_u32_field(slot_name, value.value(), key_field, key)?;
         items[index] = value.value().clone();
+    }
+
+    let mut out = Vec::with_capacity(items.len());
+    for value in &items {
+        out.push(model_value_to_lps_value_f32(value).map_err(|e| {
+            ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}"))
+        })?);
+    }
+    Ok(LpsValueF32::Array(out.into_boxed_slice()))
+}
+
+/// Fill a dense array input from an index-keyed slot map: element `i` comes
+/// from `SlotMapKey::U32(i)`, and an index nothing produced stays at the
+/// element type's zero. A key at or past `len` is a wiring fault (a dense
+/// producer emits exactly `0..len`), reported as a mismatched key rather
+/// than silently dropped.
+fn materialize_dense_input(
+    slot_name: &str,
+    slot: &ShaderSlotDef,
+    data: Option<&SlotData>,
+    registry: &SlotShapeRegistry,
+) -> Result<LpsValueF32, ShaderInputMaterializeError> {
+    let mapping = slot
+        .mapping
+        .data
+        .as_ref()
+        .ok_or_else(|| ShaderInputMaterializeError::MissingMapping(String::from(slot_name)))?;
+    let len = *mapping.len.value();
+    let element_ty = lp_type_for_ref(slot.value.value(), registry)?;
+    let default_element = default_value_for_type(&element_ty)?;
+    let len_usize = usize::try_from(len).map_err(|_| {
+        ShaderInputMaterializeError::Value(format!("shader map input {slot_name:?}: len overflow"))
+    })?;
+    let mut items = Vec::new();
+    items.resize(len_usize, default_element);
+
+    let entries = match data {
+        Some(SlotData::Map(map)) => Some(&map.entries),
+        Some(_) => {
+            return Err(ShaderInputMaterializeError::ExpectedMap(String::from(
+                slot_name,
+            )));
+        }
+        None => None,
+    };
+    for (key, data) in entries.into_iter().flatten() {
+        let SlotMapKey::U32(index) = key else {
+            return Err(ShaderInputMaterializeError::UnsupportedKey(String::from(
+                slot_name,
+            )));
+        };
+        let slot_index = usize::try_from(*index).ok().filter(|i| *i < len_usize);
+        let Some(slot_index) = slot_index else {
+            return Err(ShaderInputMaterializeError::IndexOutOfRange {
+                slot: String::from(slot_name),
+                index: *index,
+                len,
+            });
+        };
+        let SlotData::Value(value) = data else {
+            return Err(ShaderInputMaterializeError::ExpectedValue(String::from(
+                slot_name,
+            )));
+        };
+        items[slot_index] = value.value().clone();
     }
 
     let mut out = Vec::with_capacity(items.len());
@@ -392,6 +469,77 @@ mod tests {
         assert!(matches!(
             err,
             ShaderInputMaterializeError::MismatchedKey { .. }
+        ));
+    }
+
+    /// Dense fill: element `i` comes from key `i`; an index nothing
+    /// produced stays at the element type's zero.
+    #[test]
+    fn materializes_dense_map_by_index() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_dense_builtin("f32", 3);
+        let data = SlotData::Map(SlotMapDyn::with_revision(
+            Revision::new(4),
+            VecMap::from([
+                (
+                    SlotMapKey::U32(2),
+                    SlotData::Value(WithRevision::new(Revision::new(4), LpValue::F32(0.75))),
+                ),
+                (
+                    SlotMapKey::U32(0),
+                    SlotData::Value(WithRevision::new(Revision::new(4), LpValue::F32(0.5))),
+                ),
+            ]),
+        ));
+
+        let value = materialize_shader_input("heat", &slot, Some(&data), &registry).expect("input");
+
+        let expected = LpsValueF32::Array(alloc::boxed::Box::new([
+            LpsValueF32::F32(0.5),
+            LpsValueF32::F32(0.0),
+            LpsValueF32::F32(0.75),
+        ]));
+        assert!(value.approx_eq_default(&expected), "{value:?}");
+    }
+
+    #[test]
+    fn materializes_missing_dense_map_to_zeros() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_dense_builtin("f32", 2);
+
+        let value = materialize_shader_input("heat", &slot, None, &registry).expect("input");
+
+        let expected = LpsValueF32::Array(alloc::boxed::Box::new([
+            LpsValueF32::F32(0.0),
+            LpsValueF32::F32(0.0),
+        ]));
+        assert!(value.approx_eq_default(&expected), "{value:?}");
+    }
+
+    /// A key at or past `len` cannot be an element index: a dense producer
+    /// emits exactly `0..len`, so this is a wiring fault, not data to drop.
+    #[test]
+    fn rejects_dense_key_past_mapping_length() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_dense_builtin("f32", 2);
+        let data = SlotData::Map(SlotMapDyn::with_revision(
+            Revision::new(4),
+            VecMap::from([(
+                SlotMapKey::U32(2),
+                SlotData::Value(WithRevision::new(Revision::new(4), LpValue::F32(1.0))),
+            )]),
+        ));
+
+        let err = materialize_shader_input("heat", &slot, Some(&data), &registry)
+            .expect_err("out of range");
+
+        assert!(matches!(
+            err,
+            ShaderInputMaterializeError::IndexOutOfRange {
+                index: 2,
+                len: 2,
+                ..
+            }
         ));
     }
 
