@@ -900,10 +900,12 @@ impl FixtureNode {
         // coordinate sets to send (vision D1 leg c). Selecting is the whole
         // of the consumer's job — the producer executes any projection.
         let product_space = ctx.visual_product_space(visual_product)?;
+        let area_rows =
+            (self.sampling == FixtureSamplingConfig::TextureArea).then_some(settings.height);
         let request_space = select_request_space(
             product_space.primary,
             settings.strip_order_meaningful,
-            fixture_carries_2d_coords(self.mapping.as_mapping_ref()),
+            fixture_carries_2d_coords(self.mapping.as_mapping_ref(), area_rows),
         );
         if self.sampling == FixtureSamplingConfig::Direct {
             let (channels_version, channels) = self
@@ -1315,12 +1317,14 @@ fn select_request_space(
 
 /// Does this fixture carry 2D coordinates at all?
 ///
-/// 2D membership can only come from an **authored map** (vision §1: nobody
-/// builds a ring map by accident) — so the answer is "is there a map", not
-/// anything derived from the lamp positions. `Unset` is the one mapping
-/// that has none.
-fn fixture_carries_2d_coords(mapping: MappingRef<'_>) -> bool {
+/// 2D membership comes from **authored intent**: a map (vision §1: nobody
+/// builds a ring map by accident), or a TextureArea render area taller
+/// than one row — `render_size` height > 1 is the author saying "render my
+/// area in 2D" (the pre-map idiom every area fixture uses). Never derived
+/// from lamp positions.
+fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) -> bool {
     !matches!(mapping, MappingRef::Slots(MappingConfig::Unset))
+        || area_rows.is_some_and(|rows| rows > 1)
 }
 
 fn render_direct_fixture_control(
@@ -4609,15 +4613,29 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
     }
 
-    /// 2D membership comes from an authored map, never from the lamp
-    /// positions (vision §1).
+    /// 2D membership comes from authored intent — a map or a TextureArea
+    /// render area taller than one row — never from the lamp positions
+    /// (vision §1). The area rule is what keeps every pre-map 2D fixture
+    /// (a mapless 16×16 TextureArea) rendering its area instead of being
+    /// scanlined: the regression the studio e2e suite caught.
     #[test]
-    fn only_an_authored_map_puts_2d_in_the_fixtures_set() {
+    fn authored_map_or_2d_area_puts_2d_in_the_fixtures_set() {
         let unset = MappingConfig::Unset;
-        assert!(!fixture_carries_2d_coords(MappingRef::Slots(&unset)));
+        // Mapless + no area (Direct sampling): 1D only.
+        assert!(!fixture_carries_2d_coords(MappingRef::Slots(&unset), None));
+        // Mapless single-row area: still 1D only.
+        assert!(!fixture_carries_2d_coords(
+            MappingRef::Slots(&unset),
+            Some(1)
+        ));
+        // Mapless 2D TextureArea: the render area IS the 2D authorship.
+        assert!(fixture_carries_2d_coords(
+            MappingRef::Slots(&unset),
+            Some(16)
+        ));
         let mapped =
             MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 1.0);
-        assert!(fixture_carries_2d_coords(MappingRef::Slots(&mapped)));
+        assert!(fixture_carries_2d_coords(MappingRef::Slots(&mapped), None));
     }
 
     /// The sample-point cache is keyed on the request space and policy as
