@@ -139,7 +139,12 @@ pub fn ClockFace(
                             }
                         }
                     }
-                    TapeTransport { transport, on_action }
+                    // The card's tape and the module panel's grouped
+                    // Transport control are ONE derivation with two
+                    // presentations (P8 item 7): the card's gestures route
+                    // through the same per-dimension wiring, so holding the
+                    // speed here holds it on the panel too.
+                    TapeTransport { transport, wires: face.transport_wires(), on_action }
                 } else {
                     // No transport rows yet (unread project): the compact
                     // product pane stands in until the first read lands.

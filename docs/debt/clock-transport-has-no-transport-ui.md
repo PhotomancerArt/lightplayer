@@ -77,12 +77,14 @@ produced state; Clear (per value or per node) returns to live time.
   (`retire_face_claimed_debug_rows`, `node_controller.rs`), and the
   tape carries the debug affordance itself — changed controls tint
   attention-orange and one `clear` affordance drops every override.
-  The surface is card-level (and P6 exposes it on the module panel),
+  The surface is card-level (and P8 puts the same instrument on the
+  module panel, as one grouped Transport control over the three
+  `clock.*` channels P6 materialized),
   not the project level the exit criteria guessed — the clock IS the
   project's timebase, so its card is the transport's natural home.
 
 **Exit criteria** — MET 2026-08-05, with one deliberate refinement: the
-transport surface lives on the clock card (+ module panel, P6) rather
+transport surface lives on the clock card (+ module panel, P8) rather
 than a separate project-level home. The `Debug` naming re-check
 (taxonomy follow-up (a)) is answered by this plan's ADR (P7): with the
 transport rows retired into a real instrument, the drawer's remaining

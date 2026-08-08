@@ -31,6 +31,18 @@ pub struct UiClockFace {
     /// have not landed yet (unread project), the same "no read yet, not a
     /// failure" posture [`UiTimebaseState::Unread`] uses.
     pub transport: Option<UiClockTransport>,
+    /// The clock's panel contribution: at most ONE grouped Transport
+    /// control (P8), present exactly when at least one transport leaf's
+    /// wiring is panel-public.
+    ///
+    /// It rides the face because a panel control's derivation and its
+    /// card's are one derivation with two presentations — the enclosing
+    /// module's panel collects it by walking its subtree's faces
+    /// (`subtree_panel_controls`), and the card's own tape hero reads its
+    /// [`crate::UiPanelWire`]s so both surfaces dispatch identically.
+    ///
+    /// Empty is the ordinary state for a clock nothing has wired.
+    pub controls: Vec<crate::UiPanelControl>,
     /// What the timebase probe last said about this product.
     pub timebase: UiTimebaseState,
     /// Trace cards, one per downstream READING riding this timebase, in
@@ -150,9 +162,22 @@ impl UiClockFace {
         Self {
             product,
             transport: None,
+            controls: Vec::new(),
             timebase: UiTimebaseState::Unread,
             phasors: Vec::new(),
         }
+    }
+
+    /// The transport's per-dimension wiring, as the card's own tape hero
+    /// needs it: the grouped control's wires when the transport is public,
+    /// and nothing when it is not — in which case every gesture falls back
+    /// to its slot address, exactly as it did before the promotion.
+    #[must_use]
+    pub fn transport_wires(&self) -> Vec<crate::UiPanelWire> {
+        self.controls
+            .first()
+            .map(|control| control.wires.clone())
+            .unwrap_or_default()
     }
 }
 

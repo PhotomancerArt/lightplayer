@@ -97,7 +97,7 @@ pub use config_slot_row::ConfigSlotRow;
 pub(crate) use face::node_ui_action;
 pub use face::{
     ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
-    PlaylistFace, ShaderFace,
+    PlaylistFace, ShaderFace, TapeTransport,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};

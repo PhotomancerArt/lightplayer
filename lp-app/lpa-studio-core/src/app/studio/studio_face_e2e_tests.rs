@@ -864,10 +864,11 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["brightness"],
-        "nothing is AUTHORED in the root scope itself — the one control is \
-         the fixture's default-bound brightness, promoted by its declared \
-         `panel = \"show\"` hint"
+        vec!["clock.rate", "brightness"],
+        "nothing is AUTHORED in the root scope itself — the two controls \
+         are default-bound and promoted by a declared `panel = \"show\"`: \
+         the clock's grouped Transport (anchored on its rate channel, P8) \
+         and the fixture's brightness fader"
     );
     assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
     let entry_group = &face.panel.groups[0];
@@ -988,11 +989,29 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["brightness", "glow"],
-        "the BOUND uniform lists, plus the fixture's default-bound \
-         brightness promoted by its declared `panel = \"show\"` hint — \
-         `speed` is wired to nothing and stays off (Q13 + the hint \
-         amendment)"
+        vec!["clock.rate", "brightness", "glow"],
+        "the BOUND uniform lists, plus the two promoted default bindings: \
+         the clock's grouped Transport (anchored on its rate channel, P8) \
+         and the fixture's brightness fader — `speed` is wired to nothing \
+         and stays off (Q13 + the hint amendment)"
+    );
+    // The clock contributes EXACTLY ONE control however many channels its
+    // transport rides: grouping is the whole point (P8 item 3). Panel
+    // controls only come from explicit per-kind arms, so no suppression
+    // pass is needed to keep the other two channels off the panel.
+    assert_eq!(
+        face.panel
+            .controls
+            .iter()
+            .filter(|control| {
+                matches!(
+                    control.control.widget,
+                    crate::UiPanelWidget::Transport { .. }
+                )
+            })
+            .count(),
+        1,
+        "one clock, one Transport control"
     );
     let brightness = control_for_channel(&face, "brightness");
     assert!(
@@ -1169,6 +1188,157 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
         "the new value arrives on the next read's ServerRuntimeStatus — \
          nothing is applied optimistically, so a refusal can't leave the \
          switch lying"
+    );
+}
+
+#[test]
+fn the_panel_transport_drives_all_three_clock_channels() {
+    // P8's product moment, end to end: ONE control on the module panel, and
+    // each of its three dimensions writes ITS OWN channel. Nothing is
+    // mock-fed — a real `LpServer` materializes the three `clock.*` fallback
+    // bindings from the model's declarations, and the writes go down the
+    // runtime command channel the same way a finger's would.
+    let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let scope = face.panel.target.expect("the root panel targets its scope");
+    let transport_control = control_for_channel(&face, "clock.rate");
+    assert_eq!(transport_control.control.label, "Transport");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!(
+            "the grouped control wears the Transport widget, got {:?}",
+            transport_control.control.widget
+        );
+    };
+    assert_eq!(
+        transport.rate, 1.0,
+        "the authored default, before any write"
+    );
+    assert_eq!(transport.play_state, lpc_model::PlayState::Playing);
+    // Every dimension resolves to its own declared channel.
+    assert_eq!(
+        transport_control
+            .control
+            .wires
+            .iter()
+            .map(|wire| {
+                let target = wire.panel_target.as_ref().expect("wired by declaration");
+                assert_eq!(target.scope, scope, "all three resolve in the root scope");
+                target.channel.as_str()
+            })
+            .collect::<Vec<_>>(),
+        vec!["clock.rate", "clock.play_state", "clock.scrub"],
+    );
+
+    // -- the three gestures, each on its own channel ------------------------
+    // The fader (f32), the run/pause button (the enum's wire tag as a
+    // String — no new emit family, the `Waveform` spelling), and a strip
+    // drag (f32). These are exactly the ops `TapeTransport` dispatches.
+    for (channel, value) in [
+        ("clock.rate", LpValue::F32(2.0)),
+        (
+            "clock.play_state",
+            LpValue::String(lpc_model::PlayState::Paused.as_str().to_string()),
+        ),
+        ("clock.scrub", LpValue::F32(-4.0)),
+    ] {
+        handle.tx.send(StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            crate::PanelWriteOp {
+                scope,
+                channel: channel.to_string(),
+                value,
+                ttl_ms: None,
+            },
+        )));
+    }
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the panel writes emit a snapshot");
+
+    let face = module_face(&snapshot);
+    let transport_control = control_for_channel(&face, "clock.rate");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!("the control keeps its widget through a write");
+    };
+    // Each dimension converged INDEPENDENTLY — three scalar channels, three
+    // echoes, no read-modify-write anywhere.
+    assert_eq!(transport.rate, 2.0, "the fader moved the rate channel");
+    assert_eq!(
+        transport.play_state,
+        lpc_model::PlayState::Paused,
+        "the run/pause setpoint rode its own channel as a state noun"
+    );
+    assert_eq!(
+        transport.scrub_offset_seconds, -4.0,
+        "and the scrub echo converged on its own"
+    );
+    assert_eq!(
+        transport_control.state,
+        crate::UiPanelControlState::Engaged,
+        "the anchor channel has a panel writer, so the group reads Held"
+    );
+
+    // One control, two cards (P1): the clock's own card shows the same
+    // transport, and its tape carries the same per-dimension wiring — so a
+    // gesture on either surface lands on the same channels.
+    let clock = node_by_kind(&snapshot, "Clock");
+    let Some(UiNodeFace::Clock(clock_face)) = &clock.face else {
+        panic!("the clock card keeps its face");
+    };
+    assert_eq!(
+        clock_face.transport.as_ref().map(|block| block.rate),
+        Some(2.0),
+        "the card's tape reads the same channel the panel wrote"
+    );
+    assert_eq!(
+        clock_face.transport_wires(),
+        transport_control.control.wires,
+        "and dispatches through the same wires"
+    );
+
+    // -- the module reset releases all three ---------------------------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Scope { scope },
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the clear emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let transport_control = control_for_channel(&face, "clock.rate");
+    let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
+        panic!("the control keeps its widget through a clear");
+    };
+    assert_eq!(
+        transport_control.state,
+        crate::UiPanelControlState::ReadDefault
+    );
+    assert_eq!(
+        (transport.rate, transport.play_state),
+        (1.0, lpc_model::PlayState::Playing),
+        "with the writers dropped, every dimension falls back to its \
+         authored default (R6)"
     );
 }
 
