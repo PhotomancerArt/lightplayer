@@ -473,6 +473,9 @@ fn schedule_due_frames(run: &mut LabRun, now: f64) {
                 delta_ms: Some(delta.round() as u32),
                 channel: "visual.out".to_string(),
                 frame_id,
+                // The lab exercises the visual path only; the output side
+                // is the preview host's concern.
+                output_frame: None,
             }
         } else {
             BrowserInputEnvelope::PreviewFrame {
@@ -482,6 +485,7 @@ fn schedule_due_frames(run: &mut LabRun, now: f64) {
                 width: size,
                 height: size,
                 frame_id,
+                output_frame: None,
             }
         };
         let posted = run.rigs[card.worker_index].borrow().post(&envelope);

@@ -177,7 +177,7 @@ fn panel_loading() -> Element {
 }
 
 #[story(
-    description = "`mode=interactive`: the real ModulePanel at play density, with the Reset chip in the chrome. Dragging a knob here fans the write out to every sim the fence named."
+    description = "`mode=interactive`: the real ModulePanel at play density — no chrome Reset; Studio's own transient reset appears only while a control is held. Dragging a knob here fans the write out to every sim the fence named."
 )]
 fn panel_interactive() -> Element {
     rsx! {
@@ -186,14 +186,13 @@ fn panel_interactive() -> Element {
                 panel: docs_panel(),
                 mode: PanelMode::Interactive,
                 on_action: move |_| {},
-                on_reset: move |()| {},
             }
         }
     }
 }
 
 #[story(
-    description = "`mode=readonly`: the identical surface with no dispatchers and pointer events off — a picture of a panel that still looks like the real thing, with the mode said out loud and no Reset chip."
+    description = "`mode=readonly`: the identical surface with no dispatchers and pointer events off — a picture of a panel that still looks like the real thing, with the mode said out loud and no reset affordances at all."
 )]
 fn panel_readonly() -> Element {
     rsx! {
@@ -202,7 +201,6 @@ fn panel_readonly() -> Element {
                 panel: docs_panel(),
                 mode: PanelMode::Readonly,
                 on_action: move |_| {},
-                on_reset: move |()| {},
             }
         }
     }

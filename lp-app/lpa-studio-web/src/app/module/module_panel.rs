@@ -61,9 +61,9 @@ pub fn ModulePanel(
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// Mount the panel's own transient reset glyph (`held > 0`). The
-    /// default is Studio's behavior; a host whose CHROME already owns a
-    /// stable Reset (the docs embeds) passes false so one verb has one
-    /// button and nothing reflows when controls become held.
+    /// default is Studio's behavior; a host rendering a pure picture of a
+    /// panel (the docs read-only embed) passes false so an illustration
+    /// carries no verb at all.
     #[props(default = true)]
     show_reset: bool,
 ) -> Element {

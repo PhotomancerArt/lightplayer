@@ -14,7 +14,11 @@ pub mod starter_project;
 pub mod texture;
 
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
-pub use clock::{CLOCK_TRANSPORT_SHAPE_NAME, ClockDef, ClockDefView, ClockState, ClockTransport};
+pub use clock::{
+    CLOCK_PLAY_STATE_DEFAULT_BIND, CLOCK_PLAY_STATE_SHAPE_NAME, CLOCK_RATE_DEFAULT_BIND,
+    CLOCK_SCRUB_DEFAULT_BIND, CLOCK_TRANSPORT_SHAPE_NAME, ClockDef, ClockDefView, ClockState,
+    ClockTransport, PlayState,
+};
 pub use fixture::{
     Brightness, ColorOrder, ConsumerCell2, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
     FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig,
