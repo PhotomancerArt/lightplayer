@@ -32,8 +32,8 @@ use crate::node::{
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
-    VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSampleBufferRequest, VisualSampleTarget,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -480,7 +480,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -1646,6 +1646,81 @@ impl EngineResolveHost<'_> {
         loaded_registry_def(self.registry, location)
     }
 
+    /// Answer the product-space query (plan D17) by routing it to the
+    /// producing node, exactly like a render call.
+    ///
+    /// The node is taken out of the tree for the duration for the same
+    /// reason the render paths take it: a forwarding producer (playlist,
+    /// module) answers by asking the engine about *its* upstream product,
+    /// which re-enters this host.
+    fn visual_node_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, SessionResolveError> {
+        let node_id = product.node();
+        let revision = self.frame_revision;
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                other => {
+                    let already_executing = matches!(&other, NodeEntryState::Executing { .. })
+                        .then(|| match &other {
+                            NodeEntryState::Executing { call } => call.call.label(),
+                            _ => unreachable!("checked by the matches! above"),
+                        });
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(match already_executing {
+                        Some(label) => format!(
+                            "node {node_id:?} is already executing {label}; re-entry through EngineSession is unsupported"
+                        ),
+                        None => format!("visual space: node {node_id:?} not alive"),
+                    }));
+                }
+            }
+        };
+
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
+        let result = {
+            match node_runtime.render_node() {
+                Some(render_node) => {
+                    let mut ctx = RenderContext::with_services(
+                        node_id,
+                        revision,
+                        self.graphics.clone(),
+                        self.time_provider.clone(),
+                        self.frame_time_seconds,
+                        self,
+                    );
+                    catch_node_panic_framed(
+                        lp_recovery::FrameKind::NodeRender,
+                        &recovery_name,
+                        || render_node.visual_space(product, &mut ctx),
+                    )
+                }
+                // Not a render node at all: nothing to project, and the
+                // caller's real error comes from the render call itself.
+                None => Ok(ProductSpaceInfo::two_d()),
+            }
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+        result.map_err(|e| SessionResolveError::other(format!("visual space: {e}")))
+    }
+
     fn render_node_texture(
         &mut self,
         product: VisualProduct,
@@ -2358,6 +2433,14 @@ fn resolve_shape_projection<'a>(
 }
 
 impl ControlRenderServices for EngineResolveHost<'_> {
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.visual_node_space(product)
+            .map_err(|e| NodeError::msg(format!("visual space: {e}")))
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -2389,6 +2472,14 @@ impl ControlRenderServices for EngineResolveHost<'_> {
 }
 
 impl VisualRenderServices for EngineResolveHost<'_> {
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.visual_node_space(product)
+            .map_err(|e| NodeError::msg(format!("visual space: {e}")))
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,

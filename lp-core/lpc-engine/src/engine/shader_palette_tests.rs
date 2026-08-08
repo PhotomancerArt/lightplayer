@@ -28,6 +28,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::products::visual::{ConsumerPolicy, VisualSpace};
 use lpc_model::{
     ChannelName, Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, Kind, LpValue,
     NodeId, ProductRef, TimeProduct, ToLpValue, TreePath,
@@ -100,6 +101,8 @@ impl Project {
                     height: 1,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render palette shader");
@@ -174,7 +177,7 @@ impl Project {
 
 const PALETTE_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
      layout(binding = 1) uniform sampler2D palette;\n\
-     vec4 render(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
+     vec4 render_2d(vec2 pos) { return texture(palette, vec2(pos.x / outputSize.x, 0.0)); }";
 
 fn write(fs: &LpFsMemory, path: &str, body: &str) {
     let path = String::from(path);
@@ -207,7 +210,7 @@ fn shader_json(bind_palette: bool) -> String {
 /// the slot's own default (private).
 fn palette_fs(bind_palette: bool, second_shader: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 7 }\n");
+    write(&fs, "/project.json", "{ \"format\": 8 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,

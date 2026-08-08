@@ -11,7 +11,7 @@
 //! (precomputed on the CPU as the center of grid texel `i`) plus the
 //! pixel-space sample position as a second attribute, passed to the
 //! fragment stage as a varying. The fragment `main` evaluates
-//! `render(lp_gfx_sample_pos)` — see
+//! `render_2d(lp_gfx_sample_pos)` — see
 //! [`crate::assembly::assemble_sample_fragment_glsl`]. Point primitives
 //! rasterize exactly one fragment each and interpolate nothing, so every
 //! target texel receives `render` at exactly the caller's point.
@@ -41,6 +41,7 @@
 //!   `docs/debt/gpu-tier-cannot-sample-led-output.md`.
 
 use lp_gfx::GfxError;
+use lp_shader::ShaderEntrySpace;
 use lps_shared::TextureStorageFormat;
 
 use crate::gpu_graphics::GpuShared;
@@ -50,10 +51,10 @@ use crate::read_back::read_back_f32;
 use crate::texture_backing::gpu_channels;
 use crate::texture_backing::{GpuTexture, gpu_format, quantize_unorm16};
 
-/// Hand-written point-list vertex stage. Attribute 0 is the precomputed
-/// clip-space position of target grid texel `i`; attribute 1 is the
-/// pixel-space sample position forwarded to the fragment stage.
-const SAMPLE_VERTEX_WGSL: &str = "
+/// Hand-written point-list vertex stage (2D shaders). Attribute 0 is the
+/// precomputed clip-space position of target grid texel `i`; attribute 1 is
+/// the pixel-space sample position forwarded to the fragment stage.
+const SAMPLE_VERTEX_WGSL_2D: &str = "
 struct VsOut {
     @builtin(position) position: vec4<f32>,
     @location(0) sample_pos: vec2<f32>,
@@ -68,8 +69,31 @@ fn vs_main(@location(0) clip_pos: vec2<f32>, @location(1) point: vec2<f32>) -> V
 }
 ";
 
-/// Bytes per sample vertex: `clip_pos: vec2<f32>` + `point: vec2<f32>`.
-const VERTEX_STRIDE: u64 = 16;
+/// The 1D variant: one lane per point, matching the `float` varying the 1D
+/// sample fragment unit declares (`crate::assembly`).
+const SAMPLE_VERTEX_WGSL_1D: &str = "
+struct VsOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) sample_pos: f32,
+}
+
+@vertex
+fn vs_main(@location(0) clip_pos: vec2<f32>, @location(1) point: f32) -> VsOut {
+    var out: VsOut;
+    out.position = vec4<f32>(clip_pos, 0.0, 1.0);
+    out.sample_pos = point;
+    return out;
+}
+";
+
+/// Bytes per sample vertex: `clip_pos: vec2<f32>` plus the point's lanes —
+/// 16 for a 2D shader (`vec2`), 12 for a 1D one (`f32`).
+const fn vertex_stride(space: ShaderEntrySpace) -> u64 {
+    match space {
+        ShaderEntrySpace::TwoD => 16,
+        ShaderEntrySpace::OneD => 12,
+    }
+}
 
 /// The compiled sample pipeline plus its per-count resources. Built lazily
 /// on the first `sample_rgba16` call (render-only consumers — the gallery —
@@ -84,6 +108,9 @@ const VERTEX_STRIDE: u64 = 16;
 pub(crate) struct SamplePass {
     pipeline: wgpu::RenderPipeline,
     resources: Vec<SampleResources>,
+    /// Declared space of the shader this pass serves: the lane count of the
+    /// incoming packed points and of the vertex attribute.
+    space: ShaderEntrySpace,
 }
 
 /// Cap on retained per-count resource sets. Distinct counts come from
@@ -129,6 +156,7 @@ impl SamplePass {
         shared: &GpuShared,
         sample_fragment_wgsl: &str,
         uniform_layout: Option<&wgpu::BindGroupLayout>,
+        space: ShaderEntrySpace,
     ) -> Self {
         let device = &shared.device;
         let fragment_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -137,7 +165,10 @@ impl SamplePass {
         });
         let vertex_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("lp-gfx-wgpu sample points"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(SAMPLE_VERTEX_WGSL)),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(match space {
+                ShaderEntrySpace::TwoD => SAMPLE_VERTEX_WGSL_2D,
+                ShaderEntrySpace::OneD => SAMPLE_VERTEX_WGSL_1D,
+            })),
         });
 
         let layouts: Vec<Option<&wgpu::BindGroupLayout>> =
@@ -155,7 +186,7 @@ impl SamplePass {
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
+                    array_stride: vertex_stride(space),
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -164,7 +195,10 @@ impl SamplePass {
                             shader_location: 0,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
+                            format: match space {
+                                ShaderEntrySpace::TwoD => wgpu::VertexFormat::Float32x2,
+                                ShaderEntrySpace::OneD => wgpu::VertexFormat::Float32,
+                            },
                             offset: 8,
                             shader_location: 1,
                         },
@@ -194,13 +228,15 @@ impl SamplePass {
         Self {
             pipeline,
             resources: Vec::new(),
+            space,
         }
     }
 
-    /// Evaluate the shader at `points_q16` (`count × 2` Q16.16 coordinates)
-    /// and quantize the results into `out` (`count × 4` RGBA16 channels).
-    /// The caller has already written the uniform buffer behind
-    /// `bind_group`.
+    /// Evaluate the shader at `points_q16` — `count` tightly packed Q16.16
+    /// lane groups in the shader's declared space (`[x, y]` pairs for 2D, a
+    /// single `[t]` word for 1D) — and quantize the results into `out`
+    /// (`count × 4` RGBA16 channels). The caller has already written the
+    /// uniform buffer behind `bind_group`.
     pub(crate) fn run(
         &mut self,
         shared: &GpuShared,
@@ -208,9 +244,10 @@ impl SamplePass {
         bind_group: Option<&wgpu::BindGroup>,
         out: &mut [u16],
     ) -> Result<(), GfxError> {
-        debug_assert_eq!(points_q16.len() % 2, 0);
-        debug_assert_eq!(out.len(), points_q16.len() * 2);
-        let count = (points_q16.len() / 2) as u32;
+        let lanes = self.space.coord_lanes();
+        debug_assert_eq!(points_q16.len() % lanes, 0);
+        debug_assert_eq!(out.len(), points_q16.len() / lanes * 4);
+        let count = (points_q16.len() / lanes) as u32;
         if count == 0 {
             return Ok(());
         }
@@ -230,19 +267,20 @@ impl SamplePass {
         let (width, height) = (resources.width, resources.height);
 
         // Vertex i: clip-space center of grid texel (i % W, i / W), then the
-        // Q16.16 point as f32 pixel coordinates (exact for |coord| < 2^24
-        // texels). Texel row 0 is the top of the target, which is clip-space
-        // +y, so rows map top-down.
-        let mut vertices = Vec::with_capacity(points_q16.len() / 2 * 4);
-        for (i, point) in points_q16.chunks_exact(2).enumerate() {
+        // point's Q16.16 lanes as f32 pixel coordinates (exact for |coord| <
+        // 2^24 texels). Texel row 0 is the top of the target, which is
+        // clip-space +y, so rows map top-down.
+        let mut vertices = Vec::with_capacity(count as usize * (2 + lanes));
+        for (i, point) in points_q16.chunks_exact(lanes).enumerate() {
             let col = i as u32 % width;
             let row = i as u32 / width;
             let clip_x = (col as f32 + 0.5) / width as f32 * 2.0 - 1.0;
             let clip_y = 1.0 - (row as f32 + 0.5) / height as f32 * 2.0;
             vertices.push(clip_x);
             vertices.push(clip_y);
-            vertices.push((f64::from(point[0]) / 65536.0) as f32);
-            vertices.push((f64::from(point[1]) / 65536.0) as f32);
+            for lane in point {
+                vertices.push((f64::from(*lane) / 65536.0) as f32);
+            }
         }
         let vertex_bytes: Vec<u8> = vertices.iter().flat_map(|v| v.to_le_bytes()).collect();
         shared
@@ -424,7 +462,7 @@ impl SamplePass {
         let height = count.div_ceil(width);
         let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("lp-gfx-wgpu sample points"),
-            size: u64::from(count) * VERTEX_STRIDE,
+            size: u64::from(count) * vertex_stride(self.space),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

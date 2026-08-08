@@ -641,11 +641,12 @@ mod tests {
 
     #[test]
     fn fenced_code_blocks_keep_their_text() {
-        let nodes = parse_markdown("```glsl\nvec4 render(vec2 p) {\n  return vec4(1.0);\n}\n```");
+        let nodes =
+            parse_markdown("```glsl\nvec4 render_2d(vec2 p) {\n  return vec4(1.0);\n}\n```");
         assert_eq!(
             nodes,
             vec![MdNode::CodeBlock(
-                "vec4 render(vec2 p) {\n  return vec4(1.0);\n}\n".into()
+                "vec4 render_2d(vec2 p) {\n  return vec4(1.0);\n}\n".into()
             )]
         );
     }
@@ -810,11 +811,12 @@ mod tests {
     fn non_embed_fences_still_render_exactly_as_before() {
         // Guards against regressions from threading the info string
         // through FrameKind::CodeBlock.
-        let nodes = parse_markdown("```glsl\nvec4 render(vec2 p) {\n  return vec4(1.0);\n}\n```");
+        let nodes =
+            parse_markdown("```glsl\nvec4 render_2d(vec2 p) {\n  return vec4(1.0);\n}\n```");
         assert_eq!(
             nodes,
             vec![MdNode::CodeBlock(
-                "vec4 render(vec2 p) {\n  return vec4(1.0);\n}\n".into()
+                "vec4 render_2d(vec2 p) {\n  return vec4(1.0);\n}\n".into()
             )]
         );
         // Indented code blocks (no info string at all) are unaffected too.

@@ -108,7 +108,7 @@ mod tests {
     const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\n\
          layout(binding = 1) uniform float speed;\n\
          layout(binding = 2) uniform vec2 outputSize;\n\
-         vec4 render(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
+         vec4 render_2d(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
 
     fn compile() -> CompiledShader {
         CompiledShader::compile(SPEED_SHADER).expect("compiles")
@@ -156,7 +156,7 @@ mod tests {
         // as an orphan on either side once a matching record exists.
         let shader = "layout(binding = 0) uniform float phase;\n\
              layout(binding = 1) uniform float elapsed;\n\
-             vec4 render(vec2 pos) { return vec4(fract(phase), elapsed, 0.0, 1.0); }";
+             vec4 render_2d(vec2 pos) { return vec4(fract(phase), elapsed, 0.0, 1.0); }";
         let compiled = CompiledShader::compile(shader).expect("compiles");
         let defs = vec![def("phase"), def("elapsed")];
         let section = params_json(Some(&compiled), Some(&defs));

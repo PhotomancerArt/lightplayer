@@ -130,6 +130,19 @@ impl NodeRuntime for ModuleNode {
 }
 
 impl RenderNode for ModuleNode {
+    /// A mirror has no space of its own: it answers with the mirrored
+    /// product's, or 2D when it mirrors nothing.
+    fn visual_space(
+        &mut self,
+        _product: VisualProduct,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<crate::products::visual::ProductSpaceInfo, NodeError> {
+        let Some(mirrored) = self.mirrored else {
+            return Ok(crate::products::visual::ProductSpaceInfo::two_d());
+        };
+        ctx.visual_product_space(mirrored)
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,

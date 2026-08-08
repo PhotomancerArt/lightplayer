@@ -540,7 +540,7 @@ fn tabs_dirty_from_agent() -> Element {
 const STORY_GLSL: &str = "\
 layout(binding = 0) uniform float time;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float ring = sin(length(pos - 0.5) * 40.0 - time * 0.35);
     vec3 base = vec3(0.9, 0.3, 0.1);
     return vec4(base * ring, 1.0);

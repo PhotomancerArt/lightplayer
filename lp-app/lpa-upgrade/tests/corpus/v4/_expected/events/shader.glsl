@@ -30,7 +30,7 @@ vec3 drawEvent(vec3 accum, int slot, uint id, uint seq, vec2 uv) {
     return max(accum, eventColor(id, seq) * mask);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec3 color = vec3(0.015, 0.018, 0.025);
 

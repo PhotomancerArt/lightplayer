@@ -10,7 +10,7 @@ vec3 palette(float t) {
     return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.66)));
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     float waves = sin(uv.x * 16.0 + TAU * wavePhaseA) * sin(uv.y * 14.0 - TAU * wavePhaseB);
     float cross = sin((uv.x + uv.y) * 12.0 + waves * 2.3 + TAU * crossPhase);

@@ -15,8 +15,8 @@ use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
-    VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSampleBufferRequest, VisualSampleTarget,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -503,6 +503,15 @@ impl<'a> ControlRenderContext<'a> {
         self.frame_time_seconds
     }
 
+    /// The space the bound visual product lives in — ask before choosing
+    /// which of your own coordinate sets to send (plan D17).
+    pub fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.services.visual_product_space(product)
+    }
+
     pub fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -584,6 +593,20 @@ pub trait TimebaseRead {
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
 pub trait ControlRenderServices: TimebaseRead {
+    /// The space a visual product lives in (plan D17): a metadata query
+    /// routed exactly like `sample_visual_into`, so the product wire value
+    /// stays `{node, output}`.
+    ///
+    /// Defaulted to 2D-with-no-opinion so node-level test fakes keep
+    /// compiling; the engine host overrides it.
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        let _ = product;
+        Ok(ProductSpaceInfo::two_d())
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -607,6 +630,20 @@ pub trait ControlRenderServices: TimebaseRead {
 
 /// Services available while materializing a [`crate::products::visual::VisualProduct`].
 pub trait VisualRenderServices: TimebaseRead {
+    /// The space a visual product lives in (plan D17): a metadata query
+    /// routed exactly like `sample_visual_into`, so the product wire value
+    /// stays `{node, output}`.
+    ///
+    /// Defaulted to 2D-with-no-opinion so node-level test fakes keep
+    /// compiling; the engine host overrides it.
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        let _ = product;
+        Ok(ProductSpaceInfo::two_d())
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -700,6 +737,18 @@ impl<'a> RenderContext<'a> {
 
     pub fn time_seconds(&self) -> f32 {
         self.frame_time_seconds
+    }
+
+    /// The space an upstream visual product lives in — forwarded by nodes
+    /// that pass a product through (playlist, module).
+    pub fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .visual_product_space(product)
     }
 
     pub fn render_texture(
