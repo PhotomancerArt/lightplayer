@@ -564,8 +564,18 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // The provider itself is chip-agnostic and comes from fw-esp32-common
     // untouched; only the driver registered above is chip-side.
-    let output_provider: Rc<RefCell<dyn OutputProvider>> =
-        Rc::new(RefCell::new(Esp32OutputProvider::new(hardware_system)));
+    //
+    // The one chip-side thing it may be handed is the board's switched power
+    // rails: a pad and a clock, which fw-esp32-common cannot have. A board
+    // that declares no gate — every classic carrier but the dig2go — gets a
+    // provider identical to before.
+    let output_provider = Esp32OutputProvider::new(hardware_system);
+    let output_provider =
+        match output::power_gate::controller_for(hardware_registry.manifest().power_gates()) {
+            Some(gates) => output_provider.with_power_gates(gates),
+            None => output_provider,
+        };
+    let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(output_provider));
 
     // Stamped device identity: read the fs-root `/.lp/device.json` once at boot
     // for the hello (missing file → unstamped, `None`).
