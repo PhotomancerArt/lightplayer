@@ -248,22 +248,24 @@ fn failed_result(spec: &ExperimentSpec, diagnostics: Vec<String>) -> ExperimentR
     }
 }
 
-/// The entry contract: user shaders define `vec4 render(vec2 pos)`.
+/// The entry contract: user shaders define `vec4 render_2d(vec2 pos)`
+/// (dimensionality plan D19/Q11 — a bare `render` is no longer an entry
+/// point anywhere, and this probe pipeline is 2D-only).
 fn validate_render_signature(compiled: &CompiledShader) -> Result<(), String> {
     let Some(f) = compiled
         .signatures()
         .functions
         .iter()
-        .find(|f| f.name == "render")
+        .find(|f| f.name == "render_2d")
     else {
         return Err(String::from(
-            "shader must define `vec4 render(vec2 pos)` (no render function found)",
+            "shader must define `vec4 render_2d(vec2 pos)` (no render_2d function found)",
         ));
     };
     let params_ok = f.parameters.len() == 1 && f.parameters[0].ty == LpsType::Vec2;
     if !params_ok || f.return_type != LpsType::Vec4 {
         return Err(format!(
-            "shader must define `vec4 render(vec2 pos)`; found a render function \
+            "shader must define `vec4 render_2d(vec2 pos)`; found a render_2d function \
              with {} parameter(s) returning {:?}",
             f.parameters.len(),
             f.return_type
@@ -567,7 +569,7 @@ mod tests {
     use crate::probe_domain::ProbeDomain;
 
     /// Linear-ramp shader: exact f32 math at grid/point sites.
-    const RAMP: &str = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
+    const RAMP: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
 
     fn probe(id: &str, ty: ProbeType, expr: &str, domain: ProbeDomain) -> ProbeSpec {
         ProbeSpec {
@@ -600,7 +602,7 @@ mod tests {
         let spec = spec_with(vec![probe(
             "center",
             ProbeType::Vec4,
-            "render(pos)",
+            "render_2d(pos)",
             ProbeDomain::Point { at: [0.5, 0.5] },
         )]);
         let result = run_experiment(RAMP, &spec);
@@ -619,7 +621,7 @@ mod tests {
             probe(
                 "pts",
                 ProbeType::Float,
-                "render(pos).x",
+                "render_2d(pos).x",
                 ProbeDomain::Points {
                     at: vec![[0.0, 0.0], [1.0, 0.0]],
                 },
@@ -627,7 +629,7 @@ mod tests {
             probe(
                 "grid",
                 ProbeType::Float,
-                "render(pos).y",
+                "render_2d(pos).y",
                 ProbeDomain::Grid {
                     nx: 2,
                     ny: 2,
@@ -637,7 +639,7 @@ mod tests {
             probe(
                 "line",
                 ProbeType::Float,
-                "render(pos).x",
+                "render_2d(pos).x",
                 ProbeDomain::Line {
                     from: [0.0, 0.0],
                     to: [1.0, 0.0],
@@ -663,7 +665,7 @@ mod tests {
         let mut spec = spec_with(vec![probe(
             "leds",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Leds { indices: None },
         )]);
         spec.led_points = vec![
@@ -690,7 +692,7 @@ mod tests {
         let spec = spec_with(vec![probe(
             "p",
             ProbeType::Vec4,
-            "render(pos)",
+            "render_2d(pos)",
             ProbeDomain::Points { at: sites.to_vec() },
         )]);
         let result = run_experiment(RAMP, &spec);
@@ -700,7 +702,7 @@ mod tests {
         for (site, row) in sites.iter().zip(rows) {
             let pos = [site[0] * 2.0, site[1] * 2.0];
             let direct = inst
-                .call("render", &[LpsValueF32::Vec2(pos)])
+                .call("render_2d", &[LpsValueF32::Vec2(pos)])
                 .expect("direct render");
             let LpsValueF32::Vec4(direct) = direct else {
                 panic!("render must return vec4");
@@ -712,7 +714,7 @@ mod tests {
     #[test]
     fn sweep_plots_a_user_helper() {
         let src = "float tri(float x) { return 1.0 - abs(x * 2.0 - 1.0); }\n\
-                   vec4 render(vec2 pos) { return vec4(tri(pos.x), 0.0, 0.0, 1.0); }";
+                   vec4 render_2d(vec2 pos) { return vec4(tri(pos.x), 0.0, 0.0, 1.0); }";
         let spec = spec_with(vec![probe(
             "sweep",
             ProbeType::Float,
@@ -737,11 +739,11 @@ mod tests {
         // acc accumulates u across calls: ordered vary approximates
         // frame-sequential behavior (see README determinism contract).
         let src = "layout(binding = 0) uniform float u;\nfloat acc = 0.0;\n\
-                   vec4 render(vec2 pos) { acc = acc + u; return vec4(acc, 0.0, 0.0, 1.0); }";
+                   vec4 render_2d(vec2 pos) { acc = acc + u; return vec4(acc, 0.0, 0.0, 1.0); }";
         let mut p = probe(
             "acc",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Point { at: [0.5, 0.5] },
         );
         p.vary = Some(crate::probe_spec::ProbeVary {
@@ -770,9 +772,9 @@ mod tests {
             )
         };
         let spec = spec_with(vec![
-            mk("good1", "render(pos).x"),
+            mk("good1", "render_2d(pos).x"),
             mk("bad", "bogus_fn(pos)"),
-            mk("good2", "render(pos).y"),
+            mk("good2", "render_2d(pos).y"),
         ]);
         let result = run_experiment(RAMP, &spec);
         assert!(matches!(
@@ -794,7 +796,7 @@ mod tests {
 
     #[test]
     fn shader_diagnostics_are_user_relative() {
-        let src = "vec4 render(vec2 pos) {\n    return vec4(0.0);\n}\nfloat bad = ;\n";
+        let src = "vec4 render_2d(vec2 pos) {\n    return vec4(0.0);\n}\nfloat bad = ;\n";
         let result = run_experiment(
             src,
             &spec_with(vec![probe(
@@ -824,7 +826,7 @@ mod tests {
         let spec = spec_with(vec![probe(
             "bad",
             ProbeType::Float,
-            "render(pos).x +",
+            "render_2d(pos).x +",
             ProbeDomain::Point { at: [0.5, 0.5] },
         )]);
         let result = run_experiment(RAMP, &spec);
@@ -850,7 +852,7 @@ mod tests {
         let big_grid = probe(
             "big",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Grid {
                 nx: 100,
                 ny: 100,
@@ -861,7 +863,7 @@ mod tests {
         let mut raw = probe(
             "raw",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Grid {
                 nx: 10,
                 ny: 10,
@@ -890,7 +892,7 @@ mod tests {
             let mut p = probe(
                 id,
                 ProbeType::Float,
-                "render(pos).x",
+                "render_2d(pos).x",
                 ProbeDomain::Grid {
                     nx: 64,
                     ny: 64,
@@ -933,7 +935,7 @@ mod tests {
         // `x` never grows past the bound because the increment is 0.0, so
         // `render` loops forever; the per-evaluation op budget must turn that
         // into bounded, actionable failures instead of a hang.
-        let src = "vec4 render(vec2 pos) {\n\
+        let src = "vec4 render_2d(vec2 pos) {\n\
                        float x = 0.0;\n\
                        while (x < 1.0) { x = x + 0.0; }\n\
                        return vec4(x, 0.0, 0.0, 1.0);\n\
@@ -941,7 +943,7 @@ mod tests {
         let spec = spec_with(vec![probe(
             "p",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Point { at: [0.5, 0.5] },
         )]);
         let result = run_experiment(src, &spec);
@@ -975,13 +977,13 @@ mod tests {
 
     #[test]
     fn health_flags_nan_and_black_shaders() {
-        let nan_src = "layout(binding = 0) uniform float z;\nvec4 render(vec2 pos) { return vec4(z / z, 0.0, 0.0, 1.0); }";
+        let nan_src = "layout(binding = 0) uniform float z;\nvec4 render_2d(vec2 pos) { return vec4(z / z, 0.0, 0.0, 1.0); }";
         let result = run_experiment(nan_src, &ExperimentSpec::default());
         let health = result.health.expect("health");
         assert!(health.nan_count > 0, "{health:?}");
         assert_eq!(health.sites_evaluated, 256);
 
-        let black_src = "vec4 render(vec2 pos) { return vec4(0.0, 0.0, 0.0, 1.0); }";
+        let black_src = "vec4 render_2d(vec2 pos) { return vec4(0.0, 0.0, 0.0, 1.0); }";
         let result = run_experiment(black_src, &ExperimentSpec::default());
         let health = result.health.expect("health");
         assert_eq!(health.near_black_fraction, 1.0);
@@ -992,7 +994,7 @@ mod tests {
     #[test]
     fn health_runs_with_zero_probes_and_reads_bindings() {
         let src = "layout(binding = 0) uniform float level;\n\
-                   vec4 render(vec2 pos) { return vec4(level, level, level, 1.0); }";
+                   vec4 render_2d(vec2 pos) { return vec4(level, level, level, 1.0); }";
         let mut spec = ExperimentSpec::default();
         spec.bindings
             .insert("level".to_string(), BindingValue::Scalar(0.5));
@@ -1032,7 +1034,7 @@ mod tests {
             panic!("expected error");
         };
         assert!(
-            diagnostics[0].contains("vec4 render(vec2 pos)"),
+            diagnostics[0].contains("vec4 render_2d(vec2 pos)"),
             "{diagnostics:?}"
         );
     }
@@ -1042,7 +1044,7 @@ mod tests {
         let mut stats = probe(
             "stats",
             ProbeType::Vec2,
-            "vec2(render(pos).x, 2.0)",
+            "vec2(render_2d(pos).x, 2.0)",
             ProbeDomain::Grid {
                 nx: 4,
                 ny: 4,
@@ -1053,7 +1055,7 @@ mod tests {
         let mut hist = probe(
             "hist",
             ProbeType::Float,
-            "render(pos).x",
+            "render_2d(pos).x",
             ProbeDomain::Grid {
                 nx: 4,
                 ny: 4,
@@ -1088,11 +1090,11 @@ mod tests {
 
     #[test]
     fn lpfn_builtins_work_in_shader_and_probe_expr() {
-        let src = "vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x), 0.0, 0.0, 1.0); }";
+        let src = "vec4 render_2d(vec2 pos) { return vec4(lpfn_saturate(pos.x), 0.0, 0.0, 1.0); }";
         let spec = spec_with(vec![probe(
             "sat",
             ProbeType::Float,
-            "lpfn_saturate(render(pos).x + 4.0)",
+            "lpfn_saturate(render_2d(pos).x + 4.0)",
             ProbeDomain::Point { at: [0.5, 0.5] },
         )]);
         let result = run_experiment(src, &spec);
@@ -1110,7 +1112,7 @@ mod tests {
         let mut p = probe(
             "grid",
             ProbeType::Vec4,
-            "render(pos)",
+            "render_2d(pos)",
             ProbeDomain::Grid {
                 nx: 64,
                 ny: 64,
@@ -1186,7 +1188,7 @@ mod tests {
             ));
             src.push_str("}\n\n");
         }
-        src.push_str("vec4 render(vec2 pos) {\n");
+        src.push_str("vec4 render_2d(vec2 pos) {\n");
         src.push_str("    vec2 uv = pos / outputSize;\n");
         src.push_str("    float n = fbm(uv * 4.0 + time * 0.1);\n");
         src.push_str("    n += layer0(uv) * 0.25;\n");

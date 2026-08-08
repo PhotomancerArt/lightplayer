@@ -608,13 +608,13 @@ fn glsl_completions(
     let user_defines_render = symbols
         .functions
         .iter()
-        .any(|function| function.name == "render");
+        .any(|function| function.name == "render_2d");
     if !user_defines_render {
         completions.push(CodeEditorCompletion {
-            label: "render".to_string(),
-            detail: "vec4 render(vec2 pos)".to_string(),
+            label: "render_2d".to_string(),
+            detail: "vec4 render_2d(vec2 pos)".to_string(),
             kind: CodeEditorCompletionKind::Keyword,
-            snippet: Some("vec4 render(vec2 ${pos}) {\n\t${}\n}".to_string()),
+            snippet: Some("vec4 render_2d(vec2 ${pos}) {\n\t${}\n}".to_string()),
             info: Some(
                 "The shader entry point: called per pixel with continuous pixel coordinates."
                     .to_string(),
@@ -833,13 +833,13 @@ mod tests {
         assert_eq!(completions[0].label, "time");
         assert_eq!(completions[0].detail, "uniform float");
         assert_eq!(completions[0].kind, CodeEditorCompletionKind::Variable);
-        assert_eq!(completions[1].label, "render");
+        assert_eq!(completions[1].label, "render_2d");
         assert!(
             completions[1]
                 .snippet
                 .as_deref()
                 .unwrap()
-                .contains("vec4 render(vec2")
+                .contains("vec4 render_2d(vec2")
         );
 
         // The generated manifest rides along in full: LPFN entries carry
@@ -949,16 +949,19 @@ vec3 tonemap(vec3 color, float exposure) { return color * exposure; }
     #[test]
     fn render_template_drops_once_user_defines_render() {
         let with_render =
-            lps_glsl::analyze_symbols("vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }")
+            lps_glsl::analyze_symbols("vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }")
                 .expect("render shader analyzes");
         let completions = glsl_completions(&[], &with_render);
 
-        // Exactly one `render` entry: the user's own typed function, not
+        // Exactly one `render_2d` entry: the user's own typed function, not
         // the template.
-        let renders: Vec<_> = completions.iter().filter(|c| c.label == "render").collect();
+        let renders: Vec<_> = completions
+            .iter()
+            .filter(|c| c.label == "render_2d")
+            .collect();
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].kind, CodeEditorCompletionKind::Function);
-        assert_eq!(renders[0].detail, "vec4 render(vec2 pos)");
+        assert_eq!(renders[0].detail, "vec4 render_2d(vec2 pos)");
         assert_eq!(renders[0].boost, Some(USER_SYMBOL_BOOST));
     }
 

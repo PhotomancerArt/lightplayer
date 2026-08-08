@@ -261,6 +261,22 @@ impl NodeRuntime for PlaylistNode {
 }
 
 impl RenderNode for PlaylistNode {
+    /// A playlist has no space of its own: it answers with the active
+    /// item's, so a 1D effect stays 1D behind a playlist. During a
+    /// crossfade the ACTIVE item is the answer — the outgoing one is on
+    /// its way out, and a mid-fade space flip would re-key the consumer's
+    /// sample points twice.
+    fn visual_space(
+        &mut self,
+        _product: lpc_model::VisualProduct,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<crate::products::visual::ProductSpaceInfo, NodeError> {
+        let Some(active) = self.active_product else {
+            return Ok(crate::products::visual::ProductSpaceInfo::two_d());
+        };
+        ctx.visual_product_space(active)
+    }
+
     fn render_texture(
         &mut self,
         product: lpc_model::VisualProduct,
@@ -399,6 +415,8 @@ impl RenderNode for PlaylistNode {
                 output_width: request.output_width,
                 output_height: request.output_height,
                 time_seconds: request.time_seconds,
+                space: request.space,
+                policy: request.policy,
             },
             VisualSampleTarget {
                 samples: &mut previous_samples,
@@ -411,6 +429,8 @@ impl RenderNode for PlaylistNode {
                 output_width: request.output_width,
                 output_height: request.output_height,
                 time_seconds: request.time_seconds,
+                space: request.space,
+                policy: request.policy,
             },
             VisualSampleTarget {
                 samples: &mut active_samples,

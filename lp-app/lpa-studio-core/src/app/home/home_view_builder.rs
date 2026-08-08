@@ -823,6 +823,9 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
         PackageProvenance::PulledFromDevice { device_name, .. } => {
             Some(format!("Pulled from {device_name}"))
         }
+        // Project-name-centric on purpose: the service exposes no owner
+        // profile, and guessing would be worse than saying what it is.
+        PackageProvenance::OpenedFromLink => Some("Shared with you".to_string()),
         PackageProvenance::ForkedFrom { parent_project, .. } => {
             let parent = parent_project
                 .parse()
@@ -1225,7 +1228,7 @@ mod tests {
                 "Basic",
                 &[(
                     "project.json".to_string(),
-                    br#"{"format":7,"name":"Basic"}"#.to_vec(),
+                    br#"{"format":8,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
                     source: "examples/fyeah-sign".to_string(),

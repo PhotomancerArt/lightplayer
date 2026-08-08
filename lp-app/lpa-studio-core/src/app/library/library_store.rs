@@ -304,6 +304,87 @@ impl LibraryStore {
         Ok(summary)
     }
 
+    /// Install a project that already exists in full somewhere else — a
+    /// cloud tracking copy (`open_shared`) or a freshly forked line — both
+    /// file sets **verbatim**.
+    ///
+    /// The three ways this differs from [`Self::install_package`] are the
+    /// three things a synced copy must not lose:
+    ///
+    /// - **No uid is minted.** The manifest must already carry one (D17:
+    ///   identity is preserved, never re-minted), and a uid the library
+    ///   already holds is refused — a second copy of the same project would
+    ///   make `/p/<uid>` ambiguous.
+    /// - **No save is recorded.** The history files ARE the history; a
+    ///   fresh `Saved` event on top would be an event that never happened.
+    ///   The event log must be non-empty, or the next open would mint an
+    ///   origin and start a second history (the `open_shared` refusal, at
+    ///   install time).
+    /// - **The provenance sidecar is written under `/.lp/`,** which the
+    ///   hash spec excludes — so recording where the copy came from cannot
+    ///   diverge the working copy from its own head.
+    pub fn install_synced(
+        &self,
+        label: &str,
+        package_files: &[(String, Vec<u8>)],
+        history_files: &[(String, Vec<u8>)],
+        provenance: PackageProvenance,
+        now: f64,
+    ) -> Result<PackageSummary, LibraryError> {
+        // Validate BEFORE the first write: a refused install must not leave
+        // a half-written package directory behind.
+        let uid = synced_install_uid(package_files)?;
+        if self.slug_for_uid(uid)?.is_some() {
+            return Err(LibraryError::Manifest(format!(
+                "{uid} is already in this library"
+            )));
+        }
+        if !history_files.iter().any(|(path, bytes)| {
+            path.trim_start_matches('/') == "events.jsonl" && !bytes.is_empty()
+        }) {
+            return Err(LibraryError::History(
+                "a synced install must carry its event log".to_string(),
+            ));
+        }
+
+        let slug = dated_slug(&(self.stamp)(), label, &self.package_slugs()?);
+        let package_fs = self.chroot_package(&slug)?;
+        {
+            let view = package_fs.borrow();
+            for (relative, bytes) in package_files {
+                let path = format!("/{}", relative.trim_start_matches('/'));
+                view.write_file(path.as_str().as_path(), bytes)?;
+            }
+            package_meta::write_meta(
+                &*view,
+                &PackageMeta {
+                    provenance,
+                    created_at: now,
+                },
+            )?;
+        }
+        let history_fs = {
+            let fs = self.fs.borrow();
+            fs.chroot(format!("{HISTORY_DIR}/{uid}").as_str().as_path())?
+        };
+        {
+            let view = history_fs.borrow();
+            for (relative, bytes) in history_files {
+                let path = format!("/{}", relative.trim_start_matches('/'));
+                view.write_file(path.as_str().as_path(), bytes)?;
+            }
+            let events = EventLog::new(&*view)
+                .read_all()
+                .map_err(|e| LibraryError::History(e.to_string()))?;
+            if events.is_empty() {
+                return Err(LibraryError::History(
+                    "a synced install must carry its event log".to_string(),
+                ));
+            }
+        }
+        self.read_summary(&slug)
+    }
+
     /// Create an empty project with a minimal manifest.
     pub fn create(&self, name: &str, now: f64) -> Result<PackageSummary, LibraryError> {
         self.install_package(name, &[], PackageProvenance::Created, now)
@@ -662,6 +743,28 @@ fn fnv1a64(input: &[u8]) -> u64 {
     hash
 }
 
+/// The uid a synced install arrives under: read from the incoming manifest
+/// bytes before anything touches the store, so a refusal costs no cleanup.
+fn synced_install_uid(package_files: &[(String, Vec<u8>)]) -> Result<PrefixedUid, LibraryError> {
+    let manifest = package_files
+        .iter()
+        .find(|(path, _)| path.trim_start_matches('/') == "project.json")
+        .map(|(_, bytes)| bytes)
+        .ok_or_else(|| {
+            LibraryError::Manifest("a synced install must carry project.json".to_string())
+        })?;
+    let text = core::str::from_utf8(manifest)
+        .map_err(|_| LibraryError::Manifest("project.json is not UTF-8".to_string()))?;
+    let manifest = lpc_model::ProjectManifest::read_json(text)
+        .map_err(|e| LibraryError::Manifest(format!("parse project.json: {e}")))?;
+    manifest
+        .uid
+        .as_deref()
+        .ok_or_else(|| LibraryError::Manifest("a synced install must carry its uid".to_string()))?
+        .parse()
+        .map_err(|e| LibraryError::Manifest(format!("synced install uid: {e}")))
+}
+
 fn origin_event_for(meta: Option<PackageMeta>) -> HistoryEvent {
     let (at, provenance) = meta.map_or((0.0, PackageProvenance::Created), |m| {
         (m.created_at, m.provenance)
@@ -681,6 +784,10 @@ fn origin_event_for(meta: Option<PackageMeta>) -> HistoryEvent {
                 EventKind::Created
             }
         },
+        // A tracking copy's history arrives verbatim (its log is never
+        // empty), so this arm only runs on a damaged copy — `Created` is
+        // the honest degraded origin, matching the damaged-meta fallback.
+        PackageProvenance::OpenedFromLink => EventKind::Created,
         PackageProvenance::ForkedFrom {
             parent_project,
             parent_version,
@@ -719,7 +826,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                br#"{"format":7,"name":"demo"}"#.to_vec(),
+                br#"{"format":8,"name":"demo"}"#.to_vec(),
             ),
             (
                 "module.json".to_string(),
@@ -761,6 +868,105 @@ mod tests {
         assert_eq!(summary.name, "demo");
         assert!(store.find_seeded_from("examples/basic").unwrap().is_some());
         assert!(store.find_seeded_from("examples/other").unwrap().is_none());
+    }
+
+    /// The P6 tracking-copy install: uid preserved from the manifest,
+    /// event log verbatim (no fresh save minted on top), provenance in the
+    /// sidecar — and the ways it refuses without writing.
+    #[test]
+    fn install_synced_preserves_uid_and_history_verbatim() {
+        let store = store();
+        // The incoming copy: a manifest that already carries its uid, and
+        // a history whose log the service produced.
+        let uid = PrefixedUid::mint(UidPrefix::Project, &[42u8; 16]);
+        let mut files = demo_files();
+        files[0].1 = format!(r#"{{"format":5,"uid":"{uid}","name":"demo"}}"#).into_bytes();
+        let history = synced_history();
+
+        let summary = store
+            .install_synced(
+                "demo",
+                &files,
+                &history,
+                PackageProvenance::OpenedFromLink,
+                3.0,
+            )
+            .unwrap();
+        assert_eq!(summary.uid, uid, "identity preserved, never re-minted");
+
+        let handle = store.open(uid).unwrap();
+        assert_eq!(
+            handle.history.events().len(),
+            2,
+            "the log is the service's, verbatim — no save minted on top"
+        );
+        let meta = package_meta::read_meta(&*handle.package_fs.borrow())
+            .unwrap()
+            .unwrap();
+        assert_eq!(meta.provenance, PackageProvenance::OpenedFromLink);
+
+        // A second copy of the same project is refused — `/p/<uid>` must
+        // stay unambiguous.
+        assert!(
+            store
+                .install_synced(
+                    "demo",
+                    &files,
+                    &history,
+                    PackageProvenance::OpenedFromLink,
+                    4.0
+                )
+                .is_err()
+        );
+    }
+
+    /// The service-shaped history a tracking copy arrives with: a real
+    /// two-event log, serialized by the event log's own writer.
+    fn synced_history() -> Vec<(String, Vec<u8>)> {
+        let fs = LpFsMemory::new();
+        let log = EventLog::new(&fs);
+        let mut history = ProjectHistory::new(HistoryEvent {
+            at: 1.0,
+            kind: EventKind::Created,
+        })
+        .unwrap();
+        log.append(history.events().first().unwrap()).unwrap();
+        let save = history.record_save(ContentHash::of(b"content"), 2.0);
+        log.append(&save).unwrap();
+        let bytes = fs
+            .read_file(lpc_history::event::event_log::EVENT_LOG_PATH.as_path())
+            .unwrap();
+        vec![("events.jsonl".to_string(), bytes)]
+    }
+
+    /// The refusals validate before writing: no uid, and no event log,
+    /// both leave the store untouched.
+    #[test]
+    fn install_synced_refuses_missing_uid_or_log() {
+        let store = store();
+        let log = synced_history();
+        // demo_files' manifest has no uid
+        assert!(
+            store
+                .install_synced(
+                    "demo",
+                    &demo_files(),
+                    &log,
+                    PackageProvenance::OpenedFromLink,
+                    1.0
+                )
+                .is_err()
+        );
+
+        let uid = PrefixedUid::mint(UidPrefix::Project, &[43u8; 16]);
+        let mut files = demo_files();
+        files[0].1 = format!(r#"{{"format":5,"uid":"{uid}","name":"demo"}}"#).into_bytes();
+        assert!(
+            store
+                .install_synced("demo", &files, &[], PackageProvenance::OpenedFromLink, 1.0)
+                .is_err()
+        );
+        assert!(store.list().unwrap().is_empty(), "nothing was written");
     }
 
     #[test]

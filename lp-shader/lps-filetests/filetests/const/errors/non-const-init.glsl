@@ -10,6 +10,6 @@ float non_const = 1.0;
 const float BAD = non_const;  // expected-error {{not a constant expression}}
 
 // Naga stops after the const initializer error; `BAD` is never bound for a follow-up diagnostic.
-float render() {
+float probe() {
     return BAD;
 }

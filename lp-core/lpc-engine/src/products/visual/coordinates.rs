@@ -10,8 +10,95 @@
 //! The direct-sampling buffer (`lp_gfx::SamplePointsHandle`) carries shader pixel-space
 //! coordinates encoded as Q16.16 integers. Texture sample batches carry texture UV
 //! coordinates encoded as Q16.16 integers.
+//!
+//! # The projection library
+//!
+//! When producer and consumer live in different spaces, the mismatch is
+//! resolved by exactly one thing: **a coordinate map from the sampling
+//! space into the product's space**, `fn(target_coord) -> source_coord`
+//! (vision D5 — "every mismatch cell is a coordinate map"). Radial,
+//! angular, extrude and mirror are the 2D→1D-source cells;
+//! [`centre_scanline`] is the 1D→2D-source one. They are pure functions on
+//! normalized `[0, 1]` coordinates so the same math serves the CPU sample
+//! path, the texture-fill path, and (later) an explicit projection node.
+//!
+//! All of them run in `f32` via `libm` — never `std` float methods, which
+//! do not exist on the firmware tiers.
 
 pub const Q16_ONE: i32 = 1 << 16;
+
+/// The radial map's normalization constant: **corner reach = 1**.
+///
+/// `radial` measures the distance from the centre of the unit square, so
+/// its natural maximum is the corner distance `|(0.5, 0.5)| = √2/2 ≈
+/// 0.7071`. Dividing by that constant makes the map reach exactly `t = 1`
+/// in the corners and `t ≈ 0.707` at the edge midpoints — i.e. the whole
+/// strip is visible on a square surface and nothing clips.
+///
+/// The alternative anchor (edge reach = 1, divide by 0.5) hides the last
+/// 29% of the strip in the corners, and the UX spike's `/0.66` was an
+/// eyeballed compromise between the two. Corner reach is the one that can
+/// be stated as a rule instead of a taste, so it is the one we keep.
+pub const RADIAL_CORNER_REACH: f32 = core::f32::consts::SQRT_2 / 2.0;
+
+/// Extrude: the strip runs along x, every row identical (the system
+/// default for a 1D source on a 2D surface).
+#[must_use]
+pub fn extrude(u: f32, _v: f32) -> f32 {
+    u.clamp(0.0, 1.0)
+}
+
+/// Radial: distance from the centre, normalized so the corners reach 1
+/// ([`RADIAL_CORNER_REACH`]).
+#[must_use]
+pub fn radial(u: f32, v: f32) -> f32 {
+    let dx = u - 0.5;
+    let dy = v - 0.5;
+    let distance = libm::sqrtf(dx * dx + dy * dy);
+    (distance / RADIAL_CORNER_REACH).clamp(0.0, 1.0)
+}
+
+/// Angular: the angle around the centre, mapped to `[0, 1)` counter-
+/// clockwise from the +x axis. The centre point itself reads 0.
+#[must_use]
+pub fn angular(u: f32, v: f32) -> f32 {
+    let dx = u - 0.5;
+    let dy = v - 0.5;
+    if dx == 0.0 && dy == 0.0 {
+        return 0.0;
+    }
+    let turns = libm::atan2f(dy, dx) / core::f32::consts::TAU;
+    // atan2 is (-0.5, 0.5] turns; wrap the negative half up into [0, 1).
+    let wrapped = if turns < 0.0 { turns + 1.0 } else { turns };
+    // A hair below 1.0 can round to 1.0; keep the range half-open.
+    if wrapped >= 1.0 { 0.0 } else { wrapped }
+}
+
+/// Mirror: the strip runs out from the centre column in both directions.
+#[must_use]
+pub fn mirror(u: f32, _v: f32) -> f32 {
+    libm::fabsf(2.0 * u.clamp(0.0, 1.0) - 1.0)
+}
+
+/// The 2D→1D direction: a 1D sampling coordinate lands on the centre
+/// scanline of a 2D source (vision D8, the only cell authorable today).
+#[must_use]
+pub fn centre_scanline(t: f32) -> (f32, f32) {
+    (t.clamp(0.0, 1.0), 0.5)
+}
+
+/// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
+/// normalized target→source map.
+#[must_use]
+pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v: f32) -> f32 {
+    use crate::products::visual::CellProjection;
+    match cell {
+        CellProjection::Extrude => extrude(u, v),
+        CellProjection::Radial => radial(u, v),
+        CellProjection::Angular => angular(u, v),
+        CellProjection::Mirror => mirror(u, v),
+    }
+}
 
 #[must_use]
 pub fn normalized_f32_to_q16(value: f32) -> i32 {
@@ -67,6 +154,98 @@ mod tests {
         assert_eq!(pixel_q16_to_normalized_q16(0, 16), 0);
         assert_eq!(pixel_q16_to_normalized_q16(8 * Q16_ONE, 16), 32768);
         assert_eq!(pixel_q16_to_normalized_q16(16 * Q16_ONE, 16), 65535);
+    }
+
+    /// Q16.16 round-tripping loses at most 1/65536, and the maps
+    /// themselves are exact rational/`libm` evaluations — 1e-5 is well
+    /// inside both float modes' agreement on these operations.
+    const EPS: f32 = 1e-5;
+
+    fn assert_close(actual: f32, expected: f32, what: &str) {
+        assert!(
+            libm::fabsf(actual - expected) <= EPS,
+            "{what}: {actual} != {expected}"
+        );
+    }
+
+    #[test]
+    fn extrude_is_the_identity_on_u_at_every_corner() {
+        for v in [0.0, 0.5, 1.0] {
+            assert_close(extrude(0.0, v), 0.0, "left edge");
+            assert_close(extrude(0.25, v), 0.25, "quarter");
+            assert_close(extrude(1.0, v), 1.0, "right edge");
+        }
+    }
+
+    #[test]
+    fn radial_reaches_one_in_the_corners_and_zero_at_the_centre() {
+        assert_close(radial(0.5, 0.5), 0.0, "centre");
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            assert_close(radial(u, v), 1.0, "corner");
+        }
+        // Edge midpoints sit at half the corner distance / corner reach.
+        let edge = 0.5 / RADIAL_CORNER_REACH;
+        assert_close(radial(0.0, 0.5), edge, "left edge midpoint");
+        assert_close(radial(0.5, 1.0), edge, "bottom edge midpoint");
+        assert_close(edge, core::f32::consts::SQRT_2 / 2.0, "edge reach is √2/2");
+    }
+
+    #[test]
+    fn angular_runs_one_turn_counter_clockwise_from_plus_x() {
+        assert_close(angular(1.0, 0.5), 0.0, "+x");
+        assert_close(angular(0.5, 1.0), 0.25, "+y");
+        assert_close(angular(0.0, 0.5), 0.5, "-x");
+        assert_close(angular(0.5, 0.0), 0.75, "-y");
+        assert_close(angular(0.5, 0.5), 0.0, "centre is 0 by convention");
+        for (u, v) in [(0.0, 0.0), (1.0, 1.0), (0.25, 0.75)] {
+            let t = angular(u, v);
+            assert!((0.0..1.0).contains(&t), "angular stays in [0, 1): {t}");
+        }
+    }
+
+    #[test]
+    fn mirror_folds_the_strip_around_the_centre_column() {
+        assert_close(mirror(0.0, 0.3), 1.0, "left edge");
+        assert_close(mirror(0.25, 0.3), 0.5, "quarter");
+        assert_close(mirror(0.5, 0.3), 0.0, "centre column");
+        assert_close(mirror(0.75, 0.3), 0.5, "three quarters");
+        assert_close(mirror(1.0, 0.3), 1.0, "right edge");
+    }
+
+    #[test]
+    fn centre_scanline_puts_every_point_on_the_middle_row() {
+        for t in [0.0, 0.25, 0.5, 1.0] {
+            let (u, v) = centre_scanline(t);
+            assert_close(u, t, "u passes through");
+            assert_close(v, 0.5, "v is the centre row");
+        }
+    }
+
+    #[test]
+    fn the_cell_dispatcher_matches_the_named_maps() {
+        use crate::products::visual::CellProjection;
+        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
+            assert_close(
+                project_2d_to_1d(CellProjection::Extrude, u, v),
+                extrude(u, v),
+                "extrude",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Radial, u, v),
+                radial(u, v),
+                "radial",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Angular, u, v),
+                angular(u, v),
+                "angular",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Mirror, u, v),
+                mirror(u, v),
+                "mirror",
+            );
+        }
     }
 
     #[test]

@@ -15,7 +15,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
+use lp_gfx::{
+    GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, ShaderEntrySpace, TextureHandle,
+};
 use lpc_model::{
     AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
     OptionSlot, PhasorConfig, Revision, ShaderDef, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
@@ -32,7 +34,10 @@ use crate::node::{
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
     err_ctx,
 };
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{
+    CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSpace, coordinates, resolve_1d_to_2d,
+};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
@@ -76,6 +81,25 @@ pub struct ShaderNode {
     /// [`semantics_for`] turns it into the [`lp_gfx::ShaderSemantics`] tier
     /// the backend is asked for.
     float_mode: Option<FloatMode>,
+    /// Authored declared space, as the compiler's entry contract. Read from
+    /// the `space` slot (`ShaderDef::space`) and re-read per tick like
+    /// `float_mode`; a change flips `needs_compile`, because the entry a
+    /// source must define changes with it.
+    space: ShaderEntrySpace,
+    /// This shader's authored answer for a 2D consumer, when it is 1D
+    /// (`ShaderSpace::OneD { in_2d }`). `None` = `Default` — no opinion,
+    /// defer to the consumer's policy. Read from the declaration, never
+    /// compiled in: it selects a coordinate map at the sampling boundary,
+    /// so a change costs no recompile.
+    space_answer_2: Option<CellProjection>,
+    /// Scratch point buffer for projected sampling: the consumer's own
+    /// buffer is a *cache* keyed on (mapping, size) that must survive the
+    /// frame, so a projection writes its mapped coordinates here instead
+    /// of over the caller's.
+    projected_points: Option<lp_gfx::SamplePointsHandle>,
+    /// Scratch sample-out for the projected texture fill (2D target filled
+    /// by evaluating a 1D program per pixel).
+    projected_samples: Option<lp_gfx::SampleOutHandle>,
     visual_uniforms: Vec<VisualUniform>,
     /// The last successfully compiled program. Kept through source/config
     /// refreshes and failed recompiles (keep-last-good); replaced only by
@@ -125,6 +149,10 @@ impl ShaderNode {
             glsl_source: source.text,
             consumed_slots: def.consumed_slots,
             float_mode: def.float_mode.data.as_ref().map(|slot| *slot.value()),
+            space: entry_space_for(def.space.value()),
+            space_answer_2: space_answer_2_for(def.space.value()),
+            projected_points: None,
+            projected_samples: None,
             visual_uniforms,
             shader: None,
             compilation_error: None,
@@ -244,6 +272,10 @@ impl ShaderNode {
             semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
             textures: palette_texture_specs(&self.consumed_slots),
+            // The authored space *is* the entry contract: the backend
+            // validates (CPU) or splices (GPU) `render_2d` / `render_1d`
+            // against it rather than sniffing the source.
+            space: self.space,
             ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
         };
 
@@ -311,6 +343,18 @@ impl ShaderNode {
             self.float_mode = next_float_mode;
             self.needs_compile = true;
             self.compilation_error = None;
+        }
+        if let Some(next_space) = try_read_authored_space(ctx)
+            && self.space != next_space
+        {
+            self.space = next_space;
+            self.needs_compile = true;
+            self.compilation_error = None;
+        }
+        // The answer cell selects a coordinate map at the sampling
+        // boundary, so unlike the space variant it never forces a recompile.
+        if let Some(next_answer) = try_read_authored_space_answer_2(ctx) {
+            self.space_answer_2 = next_answer;
         }
         Ok(())
     }
@@ -455,6 +499,260 @@ impl ShaderNode {
         }
         Ok(())
     }
+
+    /// The space this shader natively renders in.
+    fn declared_space(&self) -> VisualSpace {
+        match self.space {
+            ShaderEntrySpace::TwoD => VisualSpace::TwoD,
+            ShaderEntrySpace::OneD => VisualSpace::OneD,
+        }
+    }
+
+    /// What this producer answers the product-space query with.
+    fn space_info(&self) -> ProductSpaceInfo {
+        ProductSpaceInfo {
+            primary: self.declared_space(),
+            in_2d: self.space_answer_2,
+        }
+    }
+
+    /// Sample a request whose space disagrees with this shader's — the
+    /// producer-side half of the negotiation (plan D18).
+    ///
+    /// Both directions are pure coordinate mapping onto a scratch point
+    /// buffer; no new codegen, no fourth ABI surface. `outputSize` stays
+    /// the *request's* dims in both directions, which is what makes the
+    /// mapped coordinate mean the same thing to the program as a native
+    /// one would.
+    fn sample_projected(
+        &mut self,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+        uniforms: &LpsValueF32,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let count = request.points.count() as usize;
+        let source = graphics
+            .read_sample_points(request.points)
+            .map_err(err_ctx("read request sample points"))?;
+
+        match (self.declared_space(), request.space) {
+            (VisualSpace::OneD, VisualSpace::TwoD) => {
+                let cell = resolve_1d_to_2d(self.space_info(), request.policy);
+                let mut mapped = Vec::with_capacity(count);
+                for index in 0..count {
+                    let x = source.get(index * 2).copied().unwrap_or(0);
+                    let y = source.get(index * 2 + 1).copied().unwrap_or(0);
+                    let u = pixel_q16_to_normalized_f32(x, request.output_width);
+                    let v = pixel_q16_to_normalized_f32(y, request.output_height);
+                    let t = coordinates::project_2d_to_1d(cell, u, v);
+                    mapped.push(normalized_f32_to_pixel_q16(t, request.output_width));
+                }
+                let points = ensure_projected_points(
+                    &mut self.projected_points,
+                    graphics,
+                    request.points.count(),
+                )?;
+                graphics
+                    .write_sample_points_1d(points, &mapped)
+                    .map_err(err_ctx("write projected sample points"))?;
+            }
+            (VisualSpace::TwoD, VisualSpace::OneD) => {
+                // Centre scanline (vision D8): a 1D request's points are
+                // 1-lane `t` words in the first `count` words of the buffer.
+                let mut mapped = Vec::with_capacity(count * 2);
+                for index in 0..count {
+                    let t = source.get(index).copied().unwrap_or(0);
+                    let (u, v) = coordinates::centre_scanline(pixel_q16_to_normalized_f32(
+                        t,
+                        request.output_width,
+                    ));
+                    mapped.push(normalized_f32_to_pixel_q16(u, request.output_width));
+                    mapped.push(normalized_f32_to_pixel_q16(v, request.output_height));
+                }
+                let points = ensure_projected_points(
+                    &mut self.projected_points,
+                    graphics,
+                    request.points.count(),
+                )?;
+                graphics
+                    .write_sample_points(points, &mapped)
+                    .map_err(err_ctx("write scanline sample points"))?;
+            }
+            (native, requested) => {
+                return Err(NodeError::msg(format!(
+                    "no projection from {} shader to {} request",
+                    native.label(),
+                    requested.label()
+                )));
+            }
+        }
+
+        let points = self
+            .projected_points
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("projected sample points missing after write"))?;
+        let shader = self
+            .shader
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+        match shader.sample_rgba16(points, target.samples, uniforms) {
+            Ok(()) => Ok(()),
+            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure(&trap),
+            Err(error) => Err(err_ctx("shader projected sample")(error)),
+        }
+    }
+
+    /// Fill a texture target whose space disagrees with this shader's.
+    ///
+    /// Implemented as a **request mapping**, not a synthesized second
+    /// program (plan P4 §4): one sample point per target pixel, mapped
+    /// through the same coordinate library the direct path uses, so there
+    /// is exactly one definition of every projection. The cost is one
+    /// point + one RGBA16 sample per pixel — paid only when a 1D source
+    /// meets a 2D-only consumer through the texture path.
+    fn render_projected_texture(
+        &mut self,
+        request: &RenderTextureRequest,
+        target: &mut TextureHandle,
+        uniforms: &LpsValueF32,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        if self.declared_space() != VisualSpace::OneD || request.space != VisualSpace::TwoD {
+            return Err(NodeError::msg(format!(
+                "no texture projection from {} shader to {} request",
+                self.declared_space().label(),
+                request.space.label()
+            )));
+        }
+        if request.format != lps_shared::TextureStorageFormat::Rgba16Unorm {
+            return Err(NodeError::msg(format!(
+                "projected texture fill needs an Rgba16Unorm target, got {:?}",
+                request.format
+            )));
+        }
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let pixels = (request.width as usize).saturating_mul(request.height as usize);
+        let pixel_count = u32::try_from(pixels)
+            .map_err(|_| NodeError::msg("projected texture fill target is too large"))?;
+        let cell = resolve_1d_to_2d(self.space_info(), request.policy);
+
+        // Pixel centres, matching the CPU texture synth's own convention.
+        let mut mapped = Vec::with_capacity(pixels);
+        for y in 0..request.height {
+            for x in 0..request.width {
+                let u = (x as f32 + 0.5) / request.width as f32;
+                let v = (y as f32 + 0.5) / request.height as f32;
+                let t = coordinates::project_2d_to_1d(cell, u, v);
+                mapped.push(normalized_f32_to_pixel_q16(t, request.width));
+            }
+        }
+
+        let points = ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
+        graphics
+            .write_sample_points_1d(points, &mapped)
+            .map_err(err_ctx("write projected texture points"))?;
+        ensure_projected_samples(&mut self.projected_samples, graphics, pixel_count)?;
+
+        {
+            let points = self
+                .projected_points
+                .as_mut()
+                .ok_or_else(|| NodeError::msg("projected sample points missing after write"))?;
+            let samples = self
+                .projected_samples
+                .as_mut()
+                .ok_or_else(|| NodeError::msg("projected sample target missing"))?;
+            let shader = self
+                .shader
+                .as_mut()
+                .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+            match shader.sample_rgba16(points, samples, uniforms) {
+                Ok(()) => {}
+                Err(GfxError::FuelExhausted(trap)) => return fuel_exhausted_failure(&trap),
+                Err(error) => return Err(err_ctx("shader projected texture sample")(error)),
+            }
+        }
+
+        let samples = self
+            .projected_samples
+            .as_ref()
+            .ok_or_else(|| NodeError::msg("projected sample target missing"))?;
+        let channels = graphics
+            .read_sample_out(samples)
+            .map_err(err_ctx("read projected texture samples"))?;
+        let mut texels = Vec::with_capacity(channels.len() * 2);
+        for channel in &channels {
+            texels.extend_from_slice(&channel.to_le_bytes());
+        }
+        graphics
+            .write_texture(target, &texels)
+            .map_err(err_ctx("write projected texture"))
+    }
+}
+
+/// Normalized `[0, 1]` position of a Q16.16 pixel-space coordinate.
+fn pixel_q16_to_normalized_f32(coord: i32, extent: u32) -> f32 {
+    if extent == 0 {
+        return 0.0;
+    }
+    (coord as f32 / crate::products::visual::coordinates::Q16_ONE as f32) / extent as f32
+}
+
+/// Q16.16 pixel-space coordinate of a normalized `[0, 1]` position.
+fn normalized_f32_to_pixel_q16(value: f32, extent: u32) -> i32 {
+    let pixels = value.clamp(0.0, 1.0) * extent as f32;
+    (pixels * crate::products::visual::coordinates::Q16_ONE as f32) as i32
+}
+
+/// Scratch point buffer for a projected evaluation, reallocated only when
+/// the count changes.
+fn ensure_projected_points<'a>(
+    current: &'a mut Option<lp_gfx::SamplePointsHandle>,
+    graphics: &dyn lp_gfx::LpGraphics,
+    count: u32,
+) -> Result<&'a mut lp_gfx::SamplePointsHandle, NodeError> {
+    if current
+        .as_ref()
+        .is_none_or(|points| points.count() != count)
+    {
+        drop(current.take());
+        *current = Some(
+            graphics
+                .create_sample_points(count)
+                .map_err(err_ctx("allocate projected sample points"))?,
+        );
+    }
+    current
+        .as_mut()
+        .ok_or_else(|| NodeError::msg("projected sample points missing after allocation"))
+}
+
+/// Scratch sample-out for the projected texture fill.
+fn ensure_projected_samples<'a>(
+    current: &'a mut Option<lp_gfx::SampleOutHandle>,
+    graphics: &dyn lp_gfx::LpGraphics,
+    count: u32,
+) -> Result<&'a mut lp_gfx::SampleOutHandle, NodeError> {
+    if current
+        .as_ref()
+        .is_none_or(|samples| samples.count() != count)
+    {
+        drop(current.take());
+        *current = Some(
+            graphics
+                .create_sample_out(count)
+                .map_err(err_ctx("allocate projected sample target"))?,
+        );
+    }
+    current
+        .as_mut()
+        .ok_or_else(|| NodeError::msg("projected sample target missing after allocation"))
 }
 
 impl NodeRuntime for ShaderNode {
@@ -515,6 +813,10 @@ impl NodeRuntime for ShaderNode {
         self.palette_cache.clear();
         self.visual_uniforms
             .retain(|(_, value)| !matches!(value, LpsValueF32::Texture2D(_)));
+        // Projection scratch is pure cache: the next projected evaluation
+        // reallocates and rewrites it from the request it is answering.
+        drop(self.projected_points.take());
+        drop(self.projected_samples.take());
         Ok(())
     }
 
@@ -772,6 +1074,83 @@ pub(super) fn sync_shader_slot_def_from_authored(
     Ok(changed)
 }
 
+/// The compiler's entry contract for an authored [`lpc_model::ShaderSpace`]
+/// declaration: the model carries the per-target answer cells too, but which
+/// entry the source must define depends only on the primary variant.
+fn entry_space_for(space: &lpc_model::ShaderSpace) -> ShaderEntrySpace {
+    match space {
+        lpc_model::ShaderSpace::TwoD { .. } => ShaderEntrySpace::TwoD,
+        lpc_model::ShaderSpace::OneD { .. } => ShaderEntrySpace::OneD,
+    }
+}
+
+/// The authored 2D answer cell of a `OneD` declaration, as the runtime
+/// projection vocabulary. `None` means the authored `Default` — no
+/// opinion — and a `TwoD` declaration has no such cell at all.
+fn space_answer_2_for(space: &lpc_model::ShaderSpace) -> Option<CellProjection> {
+    match space {
+        lpc_model::ShaderSpace::TwoD { .. } => None,
+        lpc_model::ShaderSpace::OneD { in_2d } => cell_projection_for(in_2d.value()),
+    }
+}
+
+/// The runtime map behind an authored [`lpc_model::SpaceAnswer2`] cell.
+fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjection> {
+    match answer {
+        lpc_model::SpaceAnswer2::Default => None,
+        lpc_model::SpaceAnswer2::Extrude => Some(CellProjection::Extrude),
+        lpc_model::SpaceAnswer2::Radial => Some(CellProjection::Radial),
+        lpc_model::SpaceAnswer2::Angular => Some(CellProjection::Angular),
+        lpc_model::SpaceAnswer2::Mirror => Some(CellProjection::Mirror),
+    }
+}
+
+/// The authored `space.OneD.in_2d` cell, read through the same overlay-aware
+/// view as the space variant itself. The outer `None` means "the query did
+/// not resolve" (unit fakes, or a `TwoD` declaration whose inactive variant
+/// subtree is absent) and leaves the loaded answer standing; the inner
+/// `None` is the authored `Default`.
+fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<CellProjection>> {
+    let production = ctx
+        .resolve(&QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
+        })
+        .ok()?;
+    let lpc_model::SlotData::Enum(answer) = production.data() else {
+        return None;
+    };
+    Some(match answer.variant.as_str() {
+        "Default" => None,
+        "Extrude" => Some(CellProjection::Extrude),
+        "Radial" => Some(CellProjection::Radial),
+        "Angular" => Some(CellProjection::Angular),
+        "Mirror" => Some(CellProjection::Mirror),
+        _ => return None,
+    })
+}
+
+/// The authored `space` declaration's variant, read through the same
+/// overlay-aware view as the other per-tick config syncs. `None` when the
+/// query does not resolve or the slot is not an enum (unit fakes without
+/// authored defs) — the loaded declaration then stands.
+fn try_read_authored_space(ctx: &mut TickContext<'_>) -> Option<ShaderEntrySpace> {
+    let production = ctx
+        .resolve(&QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("space").expect("static path"),
+        })
+        .ok()?;
+    let lpc_model::SlotData::Enum(declaration) = production.data() else {
+        return None;
+    };
+    match declaration.variant.as_str() {
+        "TwoD" => Some(ShaderEntrySpace::TwoD),
+        "OneD" => Some(ShaderEntrySpace::OneD),
+        _ => None,
+    }
+}
+
 /// The authored `consumed` map's string key set, read through the same
 /// overlay-aware view as the per-field sync. `None` when the query does
 /// not resolve or the path is not a map (unit fakes without authored
@@ -981,6 +1360,9 @@ impl RenderNode for ShaderNode {
         }
         self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
+        if self.declared_space() != request.space {
+            return self.render_projected_texture(request, target, &uniforms, ctx);
+        }
         let shader = self
             .shader
             .as_mut()
@@ -1031,6 +1413,9 @@ impl RenderNode for ShaderNode {
             request.output_height,
             &self.visual_uniforms,
         );
+        if self.declared_space() != request.space {
+            return self.sample_projected(request, target, &uniforms, ctx);
+        }
         let shader = self
             .shader
             .as_mut()
@@ -1040,6 +1425,15 @@ impl RenderNode for ShaderNode {
             Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure(&trap),
             Err(error) => Err(err_ctx("shader sample")(error)),
         }
+    }
+
+    fn visual_space(
+        &mut self,
+        product: VisualProduct,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+        Ok(self.space_info())
     }
 }
 
@@ -1746,6 +2140,7 @@ mod black_fallback_throttle_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::products::visual::{ConsumerPolicy, VisualSpace};
     use alloc::string::String;
     use alloc::sync::Arc;
     use alloc::vec;
@@ -1777,7 +2172,7 @@ mod tests {
     use lps_shared::TextureBuffer as _;
     use lps_shared::TextureStorageFormat;
 
-    const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
+    const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render_2d(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
     fn shader_def_with_time() -> ShaderDef {
         let mut consumed_slots = VecMap::new();
@@ -1919,7 +2314,7 @@ mod tests {
     /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
     #[test]
     fn unbound_uniform_runs_on_its_authored_default_without_warning() {
-        let source = "layout(binding = 0) uniform float time;\nvec4 render(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nvec4 render_2d(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -1996,7 +2391,7 @@ mod tests {
         // map-entry gesture) produces after load. The key-set reconcile
         // must pick the record up from the authored view; without it the
         // render fails with "missing uniform field `speed`".
-        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -2051,6 +2446,8 @@ mod tests {
                     height: 4,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render succeeds once the reconciled record supplies `speed`");
@@ -2065,7 +2462,7 @@ mod tests {
         // only update an existing one: `default` is engine-read, so
         // `materialize_value_input` otherwise keeps falling back to the
         // stale `none`'s 0.0 until the project reloads.
-        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
@@ -2120,6 +2517,8 @@ mod tests {
             height: 4,
             format: lps_shared::TextureStorageFormat::Rgba16Unorm,
             time_seconds: 0.5,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         // First render requests a compile window (deferral); the second
         // compiles under the at-most-once progress guarantee.
@@ -2173,6 +2572,8 @@ mod tests {
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("warm-up render");
@@ -2185,6 +2586,8 @@ mod tests {
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("render texture");
@@ -2205,7 +2608,7 @@ mod tests {
         let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+             vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
         let mut node = ShaderNode::new(
             NodeId::new(1),
@@ -2236,6 +2639,8 @@ mod tests {
                 output_width: 10,
                 output_height: 16,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             },
             VisualSampleTarget {
                 samples: &mut samples,
@@ -2256,7 +2661,7 @@ mod tests {
         let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
-             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+             vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
         let mut node = ShaderNode::new(
             NodeId::new(1),
@@ -2285,6 +2690,8 @@ mod tests {
                     height,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.0,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
                 &mut ctx,
             )
@@ -2309,6 +2716,8 @@ mod tests {
                 output_width: width,
                 output_height: height,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             },
             VisualSampleTarget {
                 samples: &mut samples,
@@ -2355,6 +2764,8 @@ mod tests {
                         height: 8,
                         format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                         time_seconds: time_ms as f32 / 1000.0,
+                        space: VisualSpace::TwoD,
+                        policy: ConsumerPolicy::default(),
                     },
                 )
                 .expect("render texture");
@@ -2392,6 +2803,8 @@ mod tests {
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("warm-up render");
@@ -2404,6 +2817,8 @@ mod tests {
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("fallback render");
@@ -2434,6 +2849,8 @@ mod tests {
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.6,
+                    space: VisualSpace::TwoD,
+                    policy: ConsumerPolicy::default(),
                 },
             )
             .expect("cached fallback render");
@@ -2475,6 +2892,8 @@ mod tests {
             height: 4,
             format: lps_shared::TextureStorageFormat::Rgba16Unorm,
             time_seconds: 0.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
 
@@ -2564,6 +2983,8 @@ mod tests {
             height: 4,
             format: lps_shared::TextureStorageFormat::Rgba16Unorm,
             time_seconds: 0.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
 
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
@@ -2594,6 +3015,8 @@ mod tests {
                 output_width: 4,
                 output_height: 4,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             },
             VisualSampleTarget {
                 samples: &mut samples,
@@ -2658,6 +3081,8 @@ mod tests {
                 height: 4,
                 format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                 time_seconds: 0.0,
+                space: VisualSpace::TwoD,
+                policy: ConsumerPolicy::default(),
             };
             let mut texture = graphics.create_render_target(4, 4).expect("texture");
             node.render_texture_into(
@@ -2757,9 +3182,14 @@ mod tests {
             let QueryKey::ConsumedSlot { slot, .. } = query else {
                 return Err(ResolveError::new("PinResolver: unexpected query"));
             };
+            let path = slot.to_string();
+            if path == "space" || path == "space.OneD.in_2d" {
+                // The space sync shares this resolver; refuse it like any
+                // other unresolved slot so the loaded declaration stands.
+                return Err(ResolveError::new("space slot not faked here"));
+            }
             assert_eq!(
-                slot.to_string(),
-                "float_mode.some",
+                path, "float_mode.some",
                 "the pin sync must read the option payload, never the option itself"
             );
             let Some(pin) = self.pin else {
@@ -2852,6 +3282,8 @@ mod tests {
             height: 4,
             format: lps_shared::TextureStorageFormat::Rgba16Unorm,
             time_seconds: 0.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
         node.render_texture_into(

@@ -47,15 +47,26 @@ the same behavior.
 
 ## The rules that live here
 
-**Visibility.** A `Link` project is readable by anyone holding its uid,
-anonymous included — the uid *is* the share link. A `Private` project is
-readable by members. Writes always require membership.
+**Access ⊥ membership.** `Access` says what holding the *link* grants:
+`None` (nothing), `View` (read), or `Edit` (read and write, anonymous
+included — the uid *is* the credential, and an owner who set `Edit` said so
+on purpose). Membership is the orthogonal per-account grant, and a member
+always reads and writes whatever the link says.
 
-A private project the caller cannot see answers **`NotFound`, never
+A project the caller cannot see answers **`NotFound`, never
 `NotAuthorized`**. "This exists but is not yours" turns the API into an
 oracle for which project uids are real, and the uid is the credential. The
 one place `NotAuthorized` appears is an authenticated non-member writing to
-a `Link` project, whose existence they could already see.
+a project whose existence the link already shows them (`View`). Anonymous
+callers are always `NotAuthenticated`, uniformly, so the refusal itself
+never says whether the uid resolves.
+
+**Archiving is not deleting.** An archived project's link stops resolving —
+it reads as `Access::None` to everyone but its members — and every write is
+refused with `InvalidRequest("project is archived")`, members included.
+Only the owner can archive or restore, and restoring brings back the access
+level the project already had. Nothing is thrown away, and re-publishing
+does not silently un-archive.
 
 **Push is never blocked** (D5). A push whose parents do not match the
 current head is not a conflict to refuse — it becomes an additional head,

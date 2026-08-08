@@ -171,7 +171,7 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
 const INTERP_CASES: &[(&str, &str)] = &[
     (
         "mix_length_clamp",
-        "vec4 render(vec2 pos) {\n\
+        "vec4 render_2d(vec2 pos) {\n\
          \x20   vec2 t = pos / 16.0;\n\
          \x20   float a = mix(0.2, 0.8, t.x);\n\
          \x20   float b = clamp(length(t) * 0.5, 0.0, 1.0);\n\
@@ -181,7 +181,7 @@ const INTERP_CASES: &[(&str, &str)] = &[
     ),
     (
         "trig_exp",
-        "vec4 render(vec2 pos) {\n\
+        "vec4 render_2d(vec2 pos) {\n\
          \x20   vec2 t = pos / 16.0;\n\
          \x20   float s = sin(t.x * 6.2831853) * 0.25 + 0.5;\n\
          \x20   float c = cos(t.y * 3.1415926) * 0.25 + 0.5;\n\
@@ -191,7 +191,7 @@ const INTERP_CASES: &[(&str, &str)] = &[
     ),
     (
         "lpfn_hsv2rgb",
-        "vec4 render(vec2 pos) {\n\
+        "vec4 render_2d(vec2 pos) {\n\
          \x20   vec2 t = pos / 16.0;\n\
          \x20   vec3 rgb = lpfn_hsv2rgb(vec3(t.x, 0.8, 0.5 + t.y * 0.4));\n\
          \x20   return vec4(rgb, 1.0);\n\
@@ -306,8 +306,13 @@ fn interp_render(glsl: &str, x: f32, y: f32) -> Vec<f32> {
     let naga = lps_frontend::compile(&unit).expect("interp compile");
     let (ir, _meta) = lps_frontend::lower(&naga).expect("interp lower");
     let mut handler = StdMathHandler::default();
-    let out =
-        interpret(&ir, "render", &[Value::F32(x), Value::F32(y)], &mut handler).expect("interpret");
+    let out = interpret(
+        &ir,
+        "render_2d",
+        &[Value::F32(x), Value::F32(y)],
+        &mut handler,
+    )
+    .expect("interpret");
     out.iter()
         .map(|v| v.as_f32().expect("f32 result"))
         .collect()

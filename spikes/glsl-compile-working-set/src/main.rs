@@ -65,10 +65,10 @@ fn measure(source: &str) -> Option<(usize, usize)> {
 /// Grow a shader by repeating expression-heavy statements inside the entry
 /// point, so the HIR expression count scales with source size the way a real
 /// bigger shader's would. Shape follows `examples/basic/shader.glsl`: a
-/// `vec4 render(vec2)` entry point with `layout(binding = N) uniform` inputs.
+/// `vec4 render_2d(vec2)` entry point with `layout(binding = N) uniform` inputs.
 fn synthetic(repeats: usize) -> String {
     let mut s = String::from(
-        "layout(binding = 0) uniform vec2 outputSize;\n         layout(binding = 1) uniform float time;\n\n         vec4 render(vec2 pos) {\n         \x20 vec3 c = vec3(0.0);\n         \x20 float t = time + pos.x / outputSize.x;\n",
+        "layout(binding = 0) uniform vec2 outputSize;\n         layout(binding = 1) uniform float time;\n\n         vec4 render_2d(vec2 pos) {\n         \x20 vec3 c = vec3(0.0);\n         \x20 float t = time + pos.x / outputSize.x;\n",
     );
     for i in 0..repeats {
         s.push_str(&format!(

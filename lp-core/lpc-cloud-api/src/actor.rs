@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Actor {
-    /// No authenticated session. Only valid for requests that accept
-    /// anonymous access — currently just [`crate::request::CloudRequest::GetProject`]
-    /// on a [`crate::visibility::Visibility::Link`] project.
+    /// No authenticated session. Valid for every request that a project's
+    /// [`Access`](crate::access::Access) opens to link-holders: reads on a
+    /// `View` project, reads *and* writes on an `Edit` one.
     Anonymous,
     /// An authenticated user, identified by their account uid.
     User(PrefixedUid),
