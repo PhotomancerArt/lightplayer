@@ -27,12 +27,13 @@ pub(super) struct CreatedRuntime {
 }
 
 /// One completed GPU-tier present (timing header; frame is on the surface).
+/// Heap size rides the rig-level `wasm_memory_bytes` instead — per-frame
+/// consumers only read timings.
 pub(super) struct PresentedFrame {
     pub runtime_id: u32,
     pub tick_ms: f64,
     pub render_ms: f64,
     pub posted_epoch_ms: f64,
-    pub wasm_memory_bytes: f64,
 }
 
 pub(super) struct WorkerRig {
@@ -131,7 +132,6 @@ impl WorkerRig {
                         tick_ms,
                         render_ms,
                         posted_epoch_ms,
-                        wasm_memory_bytes,
                     });
                 }
                 BrowserOutputEnvelope::PreviewError {
