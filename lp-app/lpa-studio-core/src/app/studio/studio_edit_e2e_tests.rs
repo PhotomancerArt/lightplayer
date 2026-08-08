@@ -396,7 +396,9 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
 
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
-        HomeOp::CreateProject,
+        HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+        },
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
@@ -463,6 +465,102 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
     assert!(
         card.provenance.is_none(),
         "Created packages carry no provenance line"
+    );
+}
+
+/// The P4 gesture: `New → 1D pattern project` creates-and-opens a
+/// *library* project — the rig cards plus the `effect/` module card are on
+/// the canvas, and the manifest that reached the runtime already
+/// designates the export (which is what makes P3's exports rail appear
+/// with no further gesture).
+#[test]
+fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::{HOME_NODE_ID, HomeOp, ProjectTemplate};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [6u8; 16]),
+        Rc::new(|| "2026-08-07-0900".to_string()),
+    );
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 2.0),
+    )));
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CreateProject {
+            template: ProjectTemplate::Pattern1d,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
+
+    assert!(snapshot.home.is_none(), "the created project opened");
+    let editor = project_editor(&snapshot);
+    let root = &editor.nodes[0];
+    let children: Vec<&str> = root
+        .children
+        .iter()
+        .map(|child| child.label.as_str())
+        .collect();
+    // card labels are the humanized node names
+    for expected in [
+        "Clock",
+        "Effect",
+        "Strip 300",
+        "Strip 300 out",
+        "Matrix 32x16",
+        "Matrix 32x16 out",
+    ] {
+        assert!(
+            children.contains(&expected),
+            "the template's {expected} card is on the canvas, got {children:?}"
+        );
+    }
+
+    // the library slug came from the TEMPLATE's label, not "Project"
+    let summary = store
+        .list()
+        .expect("library lists")
+        .pop()
+        .expect("the create landed exactly one package");
+    assert_eq!(summary.slug, "2026-08-07-0900-1d-pattern");
+
+    // the manifest that reached the RUNTIME already designates the export
+    let pushed_manifest = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/project.json".as_path())
+            .expect("pushed manifest exists in the runtime");
+        String::from_utf8(bytes).expect("utf8 manifest")
+    };
+    let manifest = lpc_model::ProjectManifest::read_json(&pushed_manifest)
+        .expect("the pushed manifest parses");
+    assert_eq!(
+        manifest.project_kind(),
+        lpc_model::ProjectKind::Pattern {
+            exports: vec!["effect".to_string()]
+        },
+        "the template's designation reached the runtime: {pushed_manifest}"
+    );
+    assert!(
+        manifest.uid.is_some(),
+        "the library minted an identity over the template's manifest: {pushed_manifest}"
     );
 }
 

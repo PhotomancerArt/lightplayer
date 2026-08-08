@@ -45,9 +45,10 @@ pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, SIM_CARD_KEY, SetupSession, UiCardConnection, UiDeviceCard,
-    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
-    UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
+    HomePoolEvidence, HomeSimEvidence, ProjectTemplate, SIM_CARD_KEY, SetupSession,
+    UiCardConnection, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard,
+    UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes,
+    generate_board_project, setup_rail, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

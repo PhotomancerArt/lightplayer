@@ -13,6 +13,7 @@ pub mod embedded_example;
 pub mod home_op;
 pub mod home_view_builder;
 pub mod setup_wizard;
+pub mod template_project;
 pub mod ui_device_card;
 pub mod ui_example_card;
 pub mod ui_home_view;
@@ -23,11 +24,12 @@ pub use board_project::{
 };
 pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
-pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
+pub use home_op::{HOME_NODE_ID, HomeOp, ProjectTemplate, ZipBytes};
 pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};
 pub use setup_wizard::{
     SetupSession, UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, setup_rail,
 };
+pub use template_project::template_project_files;
 pub use ui_device_card::{SIM_CARD_KEY, UiDeviceCard, UiDeviceProjectChip};
 pub use ui_example_card::UiExampleCard;
 pub use ui_home_view::UiHomeView;
