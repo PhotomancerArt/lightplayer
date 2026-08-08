@@ -26,9 +26,9 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, ModuleExportOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp,
-    NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
-    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
-    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
+    NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp,
+    PanelWriteOp, PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun,
+    ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
     ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
     UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
     UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
@@ -2006,8 +2006,13 @@ impl StudioController {
         let open_elsewhere = host.open_elsewhere_uids().await;
         match host.catalog_snapshot().await {
             Ok(fs) => {
-                self.home_inputs =
-                    Some(home_view_builder::hydrate_home_inputs(fs, &open_elsewhere));
+                let inputs = home_view_builder::hydrate_home_inputs(fs, &open_elsewhere);
+                // The add-node picker's import source is derived from the
+                // same walk (P5) — one snapshot read feeds both the
+                // gallery and the picker.
+                self.project
+                    .set_import_patterns(home_view_builder::importable_patterns(&inputs));
+                self.home_inputs = Some(inputs);
             }
             Err(error) => {
                 log::warn!("library snapshot failed: {error}");
@@ -2782,6 +2787,27 @@ impl StudioController {
         })
     }
 
+    /// Every file of one library package, read through a fresh read-only
+    /// snapshot. No lock: the source of a vendoring is somebody else's
+    /// project, possibly open in another tab, and reading it must never
+    /// contend with them ([`Self::resolve_deploy_target`]'s precedent).
+    async fn read_library_package_files(
+        &mut self,
+        key: &str,
+    ) -> Result<Vec<(String, Vec<u8>)>, UiError> {
+        let host = self.library_host()?;
+        let fs = host.catalog_snapshot().await.map_err(UiError::from)?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store
+            .resolve_key(key)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+        store
+            .open(uid)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?
+            .read_all_files()
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))
+    }
+
     async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
         // Every deploy verb acts on ONE board: the card the gesture came
         // from (M4). Push rows, drift sheets and the Danger tab all live
@@ -3527,6 +3553,10 @@ impl StudioController {
                 let op = action.into_op::<NodePasteOp>()?;
                 return self.execute_node_paste_op(op).await;
             }
+            if action.op_as::<NodeImportOp>().is_some() {
+                let op = action.into_op::<NodeImportOp>()?;
+                return self.execute_node_import_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -4033,6 +4063,33 @@ impl StudioController {
                     .run_catalog_op(CatalogOp::Create {
                         name: template.default_project_name().to_string(),
                         files,
+                    })
+                    .await?;
+                let created = outcome.summary.ok_or_else(|| {
+                    UiError::MissingSession("create produced no package".to_string())
+                })?;
+                return self
+                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .await;
+            }
+            HomeOp::CreateFromPattern { uid, export, name } => {
+                // Read the SOURCE through a read-only snapshot (no lock —
+                // it may be open in another tab), compose the workbench
+                // around its export, then create-and-open like any other
+                // template. One catalog transaction, at the end.
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a project name cannot be empty".to_string(),
+                    ));
+                }
+                let source_files = self.read_library_package_files(&uid).await?;
+                let files =
+                    crate::app::home::project_files_from_export(&source_files, &export, &name)?;
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Create {
+                        name,
+                        files: Some(files),
                     })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
@@ -5609,6 +5666,23 @@ impl StudioController {
                 .set_module_export(server, &op.folder, op.export)
                 .await
         };
+        self.record_project_edit_run(run)
+    }
+
+    /// Vendor a library pattern export into the open project (module
+    /// authoring unit, P5). The source bytes come from the library, the
+    /// write goes over the wire as an ordinary `CreateNode`.
+    async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .import_pattern(server, &op.package_uid, &op.export)
+                .await
+        };
+        // The vendored files landed in the library through the create's
+        // save-pull, so the gallery — and the picker's own import list —
+        // are stale until the next settle.
+        self.request_library_refresh();
         self.record_project_edit_run(run)
     }
 

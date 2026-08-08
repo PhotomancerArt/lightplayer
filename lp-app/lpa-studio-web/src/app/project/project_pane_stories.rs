@@ -4,12 +4,12 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::app::project::format_lp_value;
-use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu};
+use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu, set_import_source};
 use lpa_studio_core::{
     ControllerId, DirtySummary, LpFeature, ProjectController, ProjectNodeAddress,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSyncPhase, SlotEditOp, SlotPath, UiAction, UiAttachTarget, UiPaneAction, UiPendingEdit,
-    UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    ProjectSyncPhase, SlotEditOp, SlotPath, UiAction, UiAttachTarget, UiImportablePattern,
+    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_model::{GradientConfig, ToLpValue};
@@ -300,6 +300,54 @@ pub(crate) fn add_node_picker() -> Element {
                 edits_in_flight: 0,
                 actions: false,
                 add_picker_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The picker's THIRD source (module authoring unit, P5): \"Import pattern\", one row per pattern export the library holds. A single-export package reads as its own name; a family expands to one row per export (`… · fire`, `… · ice`) — the spike §3 idiom. It is a section in the same flat list as the kinds and the clipboard, not a submenu, because \"what am I adding\" and \"where is it from\" are one decision. G1: does Import read as a peer of the other two sources, or as something bolted on below a kind list?"
+)]
+pub(crate) fn add_node_picker_imports() -> Element {
+    picker_with_imports(&[
+        ("prj_aurora", "2026-08-05-1412-aurora", "effect", false),
+        ("prj_pack", "2026-08-06-0930-sparkle-pack", "fire", true),
+        ("prj_pack", "2026-08-06-0930-sparkle-pack", "ice", true),
+    ])
+}
+
+#[story(
+    description = "The same picker against a library holding no pattern projects: the Import source STAYS, carrying one disabled row that says why. Hiding the section when empty would leave a hole where an affordance was, and no answer to \"where did import go?\" — the same rule the kind rows follow when a device cannot run them."
+)]
+pub(crate) fn add_node_picker_imports_empty() -> Element {
+    picker_with_imports(&[])
+}
+
+/// The project pane with its picker open on an import source built from
+/// `patterns` — through the controller's own constructors, so a story
+/// cannot drift from the shipped menu shape.
+fn picker_with_imports(patterns: &[(&str, &str, &str, bool)]) -> Element {
+    let patterns: Vec<UiImportablePattern> = patterns
+        .iter()
+        .map(|(uid, label, export, family)| UiImportablePattern {
+            package_uid: (*uid).to_string(),
+            package_label: (*label).to_string(),
+            export: (*export).to_string(),
+            family: *family,
+        })
+        .collect();
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    let mut menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+    set_import_source(&mut menu, &patterns, None);
+    view.add_node_menu = Some(menu);
+
+    rsx! {
+        div { class: "tw:min-h-[640px] tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
+                add_picker_initially_open: true,
             }
         }
     }

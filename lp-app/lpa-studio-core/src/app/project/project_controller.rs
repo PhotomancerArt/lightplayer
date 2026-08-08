@@ -71,6 +71,12 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
+    /// Every pattern export the local library offers, for the add-node
+    /// picker's import source (module authoring unit, P5). Pushed down from
+    /// the studio controller at each library settle — a view build must
+    /// never reach for a store, and the gallery snapshot it is derived
+    /// from is already being read there.
+    import_patterns: Vec<crate::UiImportablePattern>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -394,6 +400,7 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             lens_runtime_kind: None,
             lens_device_features: None,
+            import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -2315,6 +2322,14 @@ impl ProjectController {
         // already be built (and card-UI-overlaid) before it can be read.
         self.apply_module_faces(&mut nodes);
         let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        // The import source (P5) is attached before the device gate, so a
+        // board with no module runtime disables the vendoring rows too
+        // rather than offering a create it cannot run.
+        crate::app::project::node::set_import_source(
+            &mut root_add_node_menu,
+            &self.import_patterns,
+            self.active_library_uid().as_deref(),
+        );
         gate_add_node_menu(
             &mut root_add_node_menu,
             self.lens_device_features.as_deref(),
@@ -4050,6 +4065,14 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
+    /// Record what the library can be imported FROM (module authoring
+    /// unit, P5): every pattern export the gallery snapshot listed. Pushed
+    /// from the studio controller's library settle, the same chokepoint
+    /// the gallery cards are hydrated at.
+    pub fn set_import_patterns(&mut self, patterns: Vec<crate::UiImportablePattern>) {
+        self.import_patterns = patterns;
+    }
+
     /// The runtime-tiered visual probe resolution for the current lens.
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
         match self.lens_runtime_kind {
@@ -5067,6 +5090,90 @@ impl ProjectController {
         );
 
         self.run_create_request(server, request, parent, expected_name, name)
+            .await
+    }
+
+    /// Vendor one library pattern export into this project
+    /// ([`crate::NodeImportOp`], module authoring unit, P5).
+    ///
+    /// Copy-to-own: the source package is read through a fresh read-only
+    /// catalog snapshot (no lock, no write — the source project may well be
+    /// open in another tab), its `<export>/**` files are re-rooted under
+    /// `modules/<key>/`, and the whole folder goes out as ONE `CreateNode`
+    /// — the def plus every other file as assets. The folder's internal
+    /// refs are relative, so re-rooting preserves them untouched; nothing
+    /// here rewrites a path inside the copy.
+    ///
+    /// `key` is the export's own name, deduped against the project's taken
+    /// names (`fire`, then `fire_2`) exactly as the create and paste paths
+    /// do — so importing the same pattern twice lands two independent
+    /// copies rather than a rejection.
+    pub async fn import_pattern(
+        &mut self,
+        server: &mut StudioServerClient,
+        package_uid: &str,
+        export: &str,
+    ) -> Result<ProjectEditRun, UiError> {
+        use crate::app::project::node::import_pattern::{
+            VendoredExport, collect_export_folder, source_manifest, stamp_module_provenance,
+        };
+
+        let export = export.trim();
+        if export.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an import names an export folder".to_string(),
+            ));
+        }
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        // Read-only snapshot: the SOURCE is somebody else's project, and a
+        // read must never take its lock (the `package_export` precedent).
+        let snapshot = host.catalog_snapshot().await?;
+        let source_files = {
+            let store = crate::app::library::LibraryStore::read_only(snapshot);
+            let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
+            store
+                .open(uid)
+                .map_err(library_ui_error)?
+                .read_all_files()
+                .map_err(library_ui_error)?
+        };
+
+        let vendored = collect_export_folder(&source_files, export)?;
+        // R14 on the way out: an export with no attribution of its own
+        // inherits the source project's, so the copy can still say who
+        // wrote it. Written through the canonical writer, never spliced.
+        let body = stamp_module_provenance(
+            &vendored.body,
+            source_manifest(&source_files).as_ref(),
+            &self.slot_shapes,
+        )?;
+
+        let key = self.unique_node_name_from(export);
+        let (site, parent, expected_name) =
+            match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
+                Some(resolved) => resolved,
+                None => {
+                    return Ok(ProjectEditRun::notice(attach_unavailable_notice(
+                        &UiAttachTarget::ProjectRoot,
+                    )));
+                }
+            };
+
+        let request = WireCreateNodeRequest::new(
+            lpc_model::LpPathBuf::from(VendoredExport::def_path(&key).as_str()),
+            body,
+            vendored
+                .asset_paths(&key)
+                .into_iter()
+                .map(|(path, bytes)| (lpc_model::LpPathBuf::from(path.as_str()), bytes))
+                .collect(),
+            site,
+        );
+
+        self.run_create_request(server, request, parent, expected_name, key)
             .await
     }
 

@@ -693,6 +693,37 @@ fn last_seen_sort_key(card: &UiDeviceCard) -> f64 {
     }
 }
 
+/// The display label a pattern project's kind reads as
+/// ([`crate::app::library::package_manifest::kind_label`]).
+const PATTERN_KIND_LABEL: &str = "Pattern";
+
+/// Every pattern export the library offers, for the add-node picker's
+/// import source (module authoring unit, P5).
+///
+/// Derived from the ALREADY-hydrated gallery cards rather than from a
+/// second library read: the snapshot has been walked once at settle, and
+/// the picker's needs are exactly two fields that walk already produced.
+/// Blocked packages are skipped — a project this build cannot open is not
+/// a project it can vendor bytes out of.
+pub fn importable_patterns(inputs: &HomeInputs) -> Vec<crate::UiImportablePattern> {
+    inputs
+        .projects
+        .iter()
+        .filter(|card| card.project_kind == PATTERN_KIND_LABEL && card.health.is_openable())
+        .flat_map(|card| {
+            let family = card.exports.len() > 1;
+            card.exports
+                .iter()
+                .map(move |export| crate::UiImportablePattern {
+                    package_uid: card.uid.clone(),
+                    package_label: card.slug.clone(),
+                    export: export.clone(),
+                    family,
+                })
+        })
+        .collect()
+}
+
 fn package_card(
     store: &LibraryStore,
     registered: &[RegisteredDevice],
@@ -709,6 +740,7 @@ fn package_card(
     let target = manifest_fields.target;
     let project_kind =
         crate::app::library::package_manifest::kind_label(&manifest_fields.kind).to_string();
+    let exports = manifest_fields.exports;
 
     let last_saved_at = handle
         .history
@@ -734,6 +766,7 @@ fn package_card(
         uid,
         kind: summary.kind,
         project_kind,
+        exports,
         slug: summary.slug,
         last_saved_at,
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
@@ -759,6 +792,9 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
             &lpc_model::ProjectKind::General,
         )
         .to_string(),
+        // Same reason as the kind above: nothing was readable, so nothing
+        // is claimed.
+        exports: Vec::new(),
         slug: summary.slug,
         last_saved_at: None,
         provenance: None,
