@@ -20,6 +20,9 @@ const OPEN_ANIM_MS: f64 = 160.0;
 const CLOSE_ANIM_MS: f64 = 120.0;
 /// The outline swells this much around the trigger while open ("diving in").
 const TRIGGER_INFLATE_PX: f64 = 3.0;
+/// Paint-only override on the in-flow placeholder while attached. Also the
+/// marker [`trigger_rect_by_id`] keys its un-pinning on.
+const TRIGGER_PLACEHOLDER_CLASS: &str = "ux-popover-trigger-placeholder";
 /// Panel content starts fading in after this fraction of the open timeline.
 const CONTENT_FADE_DELAY: f64 = 0.10;
 
@@ -809,13 +812,46 @@ fn spawn_measure_trigger_element(
     position.set(PopoverPosition::from_anchor(anchor, size, placement));
 }
 
+/// The trigger's rect, measured free of its own placeholder pin.
+///
+/// While attached, the in-flow placeholder pins width/height to the LAST
+/// measurement ([`trigger_placeholder_style`]) — so re-measuring it just
+/// reads that pin back. A first measurement taken before the trigger's
+/// layout settled (a `w-full` grid item that had not yet resolved against
+/// its track, measuring as its shrink-to-fit content instead) then froze
+/// permanently: the stabilization passes and the fonts-ready pass all
+/// re-confirmed the wrong size, the top-layer copy painted at it — narrow
+/// enough to wrap the trigger's label into a second line spilling over the
+/// panel's first row — and the merged outline anchored on it.
+///
+/// The pin is dropped for the read and restored in the same task, so no
+/// frame ever paints without it.
 fn trigger_rect_by_id(trigger_id: &str) -> Option<RectSnapshot> {
     let window = web_sys::window()?;
     let document = window.document()?;
     let element = document.get_element_by_id(trigger_id)?;
-    Some(RectSnapshot::from_dom_rect(
-        element.get_bounding_client_rect(),
-    ))
+    let pinned = element.dyn_ref::<web_sys::HtmlElement>().filter(|element| {
+        element.get_attribute("class").is_some_and(|class| {
+            class
+                .split_whitespace()
+                .any(|c| c == TRIGGER_PLACEHOLDER_CLASS)
+        })
+    });
+    let saved = pinned.map(|element| {
+        let style = element.style();
+        let width = style.get_property_value("width").unwrap_or_default();
+        let height = style.get_property_value("height").unwrap_or_default();
+        let _ = style.remove_property("width");
+        let _ = style.remove_property("height");
+        (width, height)
+    });
+    let rect = RectSnapshot::from_dom_rect(element.get_bounding_client_rect());
+    if let (Some(element), Some((width, height))) = (pinned, saved) {
+        let style = element.style();
+        let _ = style.set_property("width", &width);
+        let _ = style.set_property("height", &height);
+    }
+    Some(rect)
 }
 
 fn panel_size_by_id(panel_id: &str) -> Option<SizeSnapshot> {
@@ -1142,7 +1178,7 @@ fn popover_button_class(open: bool, attached: bool, class: &str, open_class: &st
         // stay EXACTLY as when it was measured, with the placeholder class
         // (unlayered, so it wins over the utility layer) making it paint
         // nothing.
-        format!("{open_class} ux-popover-trigger-placeholder")
+        format!("{open_class} {TRIGGER_PLACEHOLDER_CLASS}")
     } else {
         open_class.to_string()
     }
@@ -1173,7 +1209,11 @@ fn trigger_placeholder_style(attached: bool, anchored: bool, rect: Option<RectSn
 /// footprint. Only the viewport-clamped case can get here: an unclamped
 /// panel starts at the trigger's seam edge, which always leaves the trigger
 /// body outside the panel.
-fn panel_covers_trigger(anchor: RectSnapshot, panel: SizeSnapshot, position: PopoverPosition) -> bool {
+fn panel_covers_trigger(
+    anchor: RectSnapshot,
+    panel: SizeSnapshot,
+    position: PopoverPosition,
+) -> bool {
     // Half-pixel slack: a welded panel edge lands EXACTLY on the inflated
     // trigger edge (`snap_to_trigger_edges` welds it), so strict comparisons
     // would flip coverage on sub-pixel measurement noise.
