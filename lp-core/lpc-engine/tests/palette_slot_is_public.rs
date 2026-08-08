@@ -52,7 +52,7 @@ const PALETTE_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
 fn palette_fs(panel: bool) -> LpFsMemory {
     let hint = if panel { r#", "panel": "show""# } else { "" };
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 7 }\n");
+    write(&fs, "/project.json", "{ \"format\": 8 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,

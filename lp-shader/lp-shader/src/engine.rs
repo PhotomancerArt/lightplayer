@@ -249,7 +249,7 @@ pub(crate) fn validate_render_sig(
         return Err(LpsError::Validation(format!(
             "`render` is no longer a shader entry point: rename `render` to `{}` \
              (a 2D shader's entry is `{}`, a 1D shader's is `{}`); \
-             projects saved before v7 are migrated automatically",
+             projects saved before v8 are migrated automatically",
             space.entry_name(),
             ShaderEntrySpace::TwoD.entry_signature(),
             ShaderEntrySpace::OneD.entry_signature(),

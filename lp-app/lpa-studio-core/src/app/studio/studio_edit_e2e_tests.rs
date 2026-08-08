@@ -618,7 +618,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":7,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":8,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -747,7 +747,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":7,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":8,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2679,7 +2679,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 7\n}\n";
+    let project_json = "{\n  \"format\": 8\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2758,7 +2758,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 7\n}\n"),
+        ("project.json", "{\n  \"format\": 8\n}\n"),
         (
             "module.json",
             r#"{

@@ -1,0 +1,64 @@
+{
+  "$id": "https://lightplayer.dev/schemas/project.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Workspace identity of a project folder: format version, library uid, display name, and provenance. Not a node artifact — the root module node lives in module.json.",
+  "properties": {
+    "author": {
+      "title": "Provenance: author attribution",
+      "type": "string"
+    },
+    "created": {
+      "title": "Provenance: ISO date the project was created",
+      "type": "string"
+    },
+    "exports": {
+      "description": "Module folder names this project exports, for other projects to import. Only meaningful alongside a \"pattern\" or \"rig\" kind.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Authored module export list",
+      "type": "array"
+    },
+    "format": {
+      "const": 7,
+      "title": "Authored format version"
+    },
+    "kind": {
+      "description": "General project (absent/\"general\"), or one of two library kinds (\"pattern\"/\"rig\") that export named modules via `exports`, or a \"show\" project. Never read by the engine — Studio-side lint and UI only.",
+      "enum": [
+        "general",
+        "pattern",
+        "show",
+        "rig"
+      ],
+      "title": "Authored project kind"
+    },
+    "license": {
+      "title": "Provenance: license identifier (e.g. \"CC0-1.0\")",
+      "type": "string"
+    },
+    "name": {
+      "title": "Human-readable project name",
+      "type": "string"
+    },
+    "target": {
+      "description": "A board catalog id in the registry's vendor/product vocabulary (e.g. espressif/esp32-c6-devkitc-1), the same strings as RegisteredDevice.board_id. Advisory only — the engine never reads it.",
+      "title": "Advisory board target",
+      "type": "string"
+    },
+    "uid": {
+      "title": "Stable project identity (prj…, base-32)",
+      "type": "string"
+    },
+    "version": {
+      "title": "Provenance: authored version string (no semver semantics yet)",
+      "type": "string"
+    }
+  },
+  "required": [
+    "format"
+  ],
+  "title": "LightPlayer project container manifest",
+  "type": "object"
+}

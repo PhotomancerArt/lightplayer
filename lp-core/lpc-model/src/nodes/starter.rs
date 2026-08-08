@@ -360,10 +360,9 @@ mod tests {
                 phase_offset: 0.0,
             }
         );
-        assert_eq!(
-            *shader.float_mode.value(),
-            crate::nodes::shader::FloatMode::Fixed
-        );
+        // The starter authors no pin: Auto is the target's native
+        // representation, which is what a new shader should get.
+        assert!(shader.float_mode.is_none());
         assert_eq!(
             starter.assets,
             vec![(

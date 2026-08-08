@@ -42,7 +42,31 @@ output reduction rounds it across a boundary and turns it into one LSB of one
 channel.
 
 **Fix** — None yet. Filed on discovery, per the registry's found-not-yet-fixed
-rule.
+rule. **Still open, and unchanged by the amendment below** — the Q32 last bit
+this entry is about has not been located or fixed, and `rt_emu` remains the host
+oracle for firmware work.
+
+> **Amendment, 2026-08-07 — one symptom filed here was never this defect.**
+> `2026-08-02-f32-shader-cannot-render-a-frame.md` recorded that removing the
+> `rt_wasmtime` frame guards made an **f32** shader render "uniformly one count
+> low against the rv32-emulator oracle", and attributed it to this entry; the
+> guards' own comment, and the float-native-mode plan's Q7, carried that
+> attribution forward and asked for the one count to be **classified** under
+> `docs/design/float.md` (Guaranteed → fix; Unspecified → drop the guard).
+>
+> Measured on 2026-08-07: the f32 one-count has a **separate and unrelated
+> cause** — `lpvm-wasm`'s inline `FloatMode::F32` unorm lowering used the GPU
+> `v * 65535` scale where the rest of the tier uses the documented
+> `floor(v * 65536)` clamped convention. It is a Guaranteed-class violation,
+> now fixed, with the wasm f32 frame path bit-identical to the oracle:
+> `2026-08-07-wasm-f32-unorm-scale-convention.md`. The frame guards were lifted
+> on that, not on a classification.
+>
+> The tell was in the data all along and is worth keeping: **this** defect is a
+> *sparse* divergence (one byte of 192, only when `smoothstep` has real edges),
+> and what was filed under it was *uniform* (every channel, every sample, always
+> exactly one). A rounding divergence and a scale error do not have the same
+> distribution. Nothing about the Q32 finding above is revised.
 
 **Regression coverage** — `lp-app/lpa-server/tests/shader_oracle_frame.rs`
 renders the committed project through both host engines every run and prints

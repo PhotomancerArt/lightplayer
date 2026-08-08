@@ -312,7 +312,7 @@ impl ShaderBuilder {
             source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs(&self.visual_bus),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),
             space: EnumSlot::default(),
