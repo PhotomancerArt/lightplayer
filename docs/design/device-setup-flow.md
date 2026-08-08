@@ -206,8 +206,8 @@ One probe pass, one verdict — a first-class enum, not scattered ifs:
 | `LightPlayer { known }` | a proto-matching `ServerHello` arrived — **and nothing else** | ALREADY_LP |
 | `StaleLightPlayer { known }` | the link classified the peer `DeviceState::Incompatible` — LightPlayer framing, no proto-matching hello | STALE_LP |
 | `Wled { known }` | a serial/Improv line names WLED | WLED_FOUND |
-| `Blank { known }` | a no-firmware boot signature (`invalid header: 0xffffffff`, ROM download mode, a known replaceable banner) | BOARD_PICK |
-| `Unresponsive { known }` | nothing intelligible | PROBE_FAILED |
+| `Blank { known }` | a no-firmware boot signature (`invalid header: 0xffffffff`, ROM download mode, a known replaceable banner) — **or** a bootloader that ANSWERED the escalation's SYNC handshake | BOARD_PICK |
+| `Unresponsive { known }` | nothing intelligible, and no bootloader answered either | PROBE_FAILED |
 
 `known: Option<RegisteredDevice>` comes from one registry lookup keyed by
 the probed MAC's derived uid. `Unresponsive` carries the field for
@@ -221,6 +221,19 @@ and the flash confirmation still guards the data. Over-claiming
 board into ALREADY_LP and offers to adopt it. So the hello is the ONLY
 evidence that yields `LightPlayer`, and WLED detection is deliberately
 conservative (a banner match; ambiguous Improv traffic alone is not enough).
+
+**A successful escalation is never `Unresponsive`.** The escalation (§8)
+runs only on `Unresponsive`, so its whole purpose is to move a board off
+that verdict; `ProbeEvidence::bootloader_conversation` is what carries the
+answer, and it is Blank-class evidence. It has to be carried explicitly
+because the escalation ends by rebuilding the link, and
+`DeviceSnapshot::link_mode` is recomputed PASSIVELY from a boot-line
+classifier the rebuild clears — the conversation is invisible in the
+snapshot one line later. On the bench (2026-08-08) a dig2go parked in the
+esptool stub answered the probe in full (chip identified, MAC read) and the
+wizard still said "nothing intelligible answered" and offered BOOT-hold
+advice. The probe's `chip_name` is banked with it: it is authoritative, and
+it is what filters the board pick.
 
 `StaleLightPlayer` is the one verdict that reads LightPlayer-ish and still
 must not be `LightPlayer`: the board speaks our framing but offers no
@@ -400,7 +413,7 @@ nothing. Each `SetupCommand` names machinery that already exists:
 | Command | Existing machinery |
 |---|---|
 | `RequestPort` | `DeviceOp::OpenProvider { BrowserSerialEsp32 }` — run as its two phases (`DeviceController::choose_provider_endpoint`, then `connect_endpoint`) so the executor can report `PortChosen` between them; that interim event is the one thing a command reports before it finishes, and it is state-only by construction (there is no queue to run commands on from inside a command) |
-| `ProbeBoard` | read `DeviceSession::snapshot()` (`detected_chip`, `probed_mac`, `recent_lines`) → `classify_board`; escalate with `DeviceOp::ProbeBootloaderMode` only when the passive read is `Unresponsive` |
+| `ProbeBoard` | read `DeviceSession::snapshot()` (`detected_chip`, `probed_mac`, `recent_lines`) → `classify_board`; escalate with `DeviceSession::probe_link_mode` only when the passive read is `Unresponsive`, folding that call's RETURN VALUE (a `SyncHandshake` bootloader + its chip) into the evidence — the snapshot cannot carry it (§4) — and its log lines into the bound session's console tail |
 | `ReleasePort` | `DeviceOp::DisconnectDevice { target }` |
 | `Flash` | `DeviceOp::ProvisionFirmware { target, setup_name: None, board_id }` — `setup_name` is `None` because naming is a Provision-time registry write |
 | `GenerateProject` | `CatalogOp::GenerateForBoard { board_id }` |
@@ -462,6 +475,22 @@ state beside it.
 | PROVISION | project box (compact line + ⓘ) + derived name field (hardware only) + the forward verb; any §7.10 failure above it |
 | DEVICE_HOME | nothing is drawn: the takeover ends and the board's own card body returns while the editor lens attaches (the component is kept for the exhaustive match) |
 | CLOSED | nothing is drawn: the flow is over and the card — if the flow had one — is already back to itself |
+
+**What the terminal is, and where its lines come from.** It renders the
+bound SESSION's console tail (D42's per-device console — the same tail the
+card's Console tab shows), not the global log ring. Everything that narrates
+a connect is a `UiLogDraft` already: the link session's own log/diagnostic
+surface, the device event sink's `[link]` lines, and the escalation probe's
+esptool terminal. So the whole job is routing them to the session rather
+than the ring, at every point the connect can end — including the FAILED
+attach, which used to record all of it to the ring on its way out and leave
+the wizard's terminal empty (bench, 2026-08-08: every line the user needed
+existed, in the browser console only).
+
+The tail fills at PHASE BOUNDARIES, not continuously: a setup op holds the
+controller across its awaits, so nothing can interleave, and
+`pump_setup_console` advances the tail where the flow asks. Streaming
+mid-connect needs a deeper pass.
 
 The two entry cards (**connect a device** / **simulate a device**, half
 height, one grid cell) are the only way in; the bare "open the port
