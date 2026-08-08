@@ -52,7 +52,7 @@ use lpa_studio_core::{
 
 use crate::app::node::{
     HFaderField, KnobField, PaletteSwatchField, PanelEmit, SlotDetailButton, SlotUnitSuffix,
-    ToggleField,
+    TapeTransport, ToggleField,
 };
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -67,6 +67,12 @@ const LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer t
 /// A fader's fixed footprint. Without it the control's width tracks its
 /// value string and the whole row shifts mid-drag.
 const FADER_CLASS: &str = "tw:grid tw:w-[184px] tw:flex-none tw:gap-1";
+
+/// The Transport's footprint: a whole instrument, so it takes the panel
+/// row's full width and wraps onto its own line rather than sharing one
+/// with the knobs. `basis-full` is what makes the phone layout work — the
+/// tape needs its width more than any neighbour does.
+const INSTRUMENT_CLASS: &str = "tw:grid tw:min-w-0 tw:basis-full tw:gap-1.5";
 
 /// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
 /// all occupy the same width and nothing moves during a drag.
@@ -122,14 +128,22 @@ pub fn ModulePanelControl(
         control.widget,
         UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch
     );
-    let column_class = if is_wide {
+    // The Transport is wider still: a whole instrument, not a control in a
+    // column. It takes the panel row's full width and wraps below the
+    // narrow controls at phone widths rather than squeezing the tape.
+    let is_instrument = matches!(control.widget, UiPanelWidget::Transport { .. });
+    let column_class = if is_instrument {
+        INSTRUMENT_CLASS
+    } else if is_wide {
         FADER_CLASS
     } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
         "tw:flex tw:min-w-[64px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
     };
-    let anchor_class = if is_wide {
+    let anchor_class = if is_instrument {
+        "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1.5"
+    } else if is_wide {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
     } else {
         "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-1"
@@ -328,6 +342,21 @@ fn ModulePanelControlBody(
                 }
             }
         }
+        // The one GROUPED control (P8): the shared tape instrument, rendered
+        // compactly. It gets no separate readout — the faceplate carries its
+        // own digits, its own ×rate, and its own off-live line — and its
+        // gestures resolve per dimension through `wires` rather than through
+        // the control's single `panel_target`.
+        UiPanelWidget::Transport { transport } => {
+            rsx! {
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2", {label} }
+                TapeTransport {
+                    transport,
+                    wires: control.wires.clone(),
+                    on_action,
+                }
+            }
+        }
         UiPanelWidget::Toggle => {
             let UiSlotValueKind::Bool(value) = control.value.kind else {
                 return mismatch(&control.label, &control.value.display);
@@ -429,6 +458,7 @@ mod tests {
                 unit: None,
                 state: UiSlotFieldState::editable(),
                 aspects: Vec::new(),
+                wires: Vec::new(),
             },
         )
         .with_state(state, source)

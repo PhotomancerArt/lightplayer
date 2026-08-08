@@ -7,6 +7,7 @@ area: clock node / studio node faces
 related:
   - "../adr/2026-08-01-debug-slots-taxonomy.md"
   - "../adr/2026-07-26-node-card-faces.md"
+  - "../adr/2026-08-07-clock-transport-is-a-panel-instrument.md"
   - "plan notes: ~/.photomancer/planning/lp2025/2026-07-31-1736-ephemeral-slots/notes.md (S9, D6)"
   - "plan: ~/.photomancer/planning/lp2025/2026-08-04-2355-clock-tape-hero/"
 ---
@@ -16,7 +17,8 @@ related:
 (`lp-core/lpc-model/src/nodes/clock/clock_transport.rs`, named
 `ClockControls` at `controls` until plan
 `2026-08-04-2355-clock-tape-hero` P1) exposes
-`running`, `rate`, and `scrub_offset_seconds` as Debug-role slots, and
+`running`, `rate`, and `scrub_offset_seconds` as Debug-role slots (P6 of
+the same plan retyped `running` to `play_state: PlayState`), and
 the engine consumes all three every frame. The UI for them is the
 generic slot renderer: a toggle, a number, and — for the scrub offset —
 a plain slider whose unit is "seconds added to the clock". There is no
@@ -76,13 +78,25 @@ produced state; Clear (per value or per node) returns to live time.
   (`retire_face_claimed_debug_rows`, `node_controller.rs`), and the
   tape carries the debug affordance itself — changed controls tint
   attention-orange and one `clear` affordance drops every override.
-  The surface is card-level (and P6 exposes it on the module panel),
+  The surface is card-level (and P8 puts the same instrument on the
+  module panel, as one grouped Transport control over the three
+  `clock.*` channels P6 materialized),
   not the project level the exit criteria guessed — the clock IS the
   project's timebase, so its card is the transport's natural home.
 
 **Exit criteria** — MET 2026-08-05, with one deliberate refinement: the
-transport surface lives on the clock card (+ module panel, P6) rather
+transport surface lives on the clock card (+ module panel, P8) rather
 than a separate project-level home. The `Debug` naming re-check
-(taxonomy follow-up (a)) is answered by this plan's ADR (P7): with the
-transport rows retired into a real instrument, the drawer's remaining
-in-tree example is pure diagnostics (`OutputDef::test_pattern`).
+(taxonomy follow-up (a)) is answered by
+`docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md` §6: with
+the transport rows retired into a real instrument, the drawer's
+remaining in-tree example is pure diagnostics (`OutputDef::test_pattern`).
+
+**Closed 2026-08-07** — the module-panel half (P6/P8) landed: one
+grouped Transport control on the panel, wired per-leaf onto the three
+`clock.*` bus channels, exposed by default (`panel = "show"` on the
+`transport` record). Every exit criterion above is now satisfied on both
+surfaces named in the refinement. See
+`docs/adr/2026-08-07-clock-transport-is-a-panel-instrument.md` for the
+full architecture record, including the option-B correctness argument
+that shaped the panel half.

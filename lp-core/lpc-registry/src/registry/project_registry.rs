@@ -1639,8 +1639,8 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("transport.running").unwrap(),
-                        LpValue::Bool(false),
+                        SlotPath::parse("transport.play_state").unwrap(),
+                        LpValue::String("paused".to_string()),
                     ),
                 },
             ],
@@ -1653,7 +1653,10 @@ mod tests {
         assert_accepted(&results[1], true);
 
         let def = effective_clock_def(&registry);
-        assert!(!*def.transport.running.value());
+        assert_eq!(
+            *def.transport.play_state.value(),
+            lpc_model::PlayState::Paused
+        );
         assert_eq!(*def.transport.rate.value(), 1.0);
     }
 
@@ -2136,7 +2139,7 @@ mod tests {
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
                     edit: SlotEdit::assign_value(
-                        SlotPath::parse("transport.running").unwrap(),
+                        SlotPath::parse("transport.play_state").unwrap(),
                         LpValue::F32(2.0),
                     ),
                 },
