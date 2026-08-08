@@ -37,10 +37,17 @@ lpa-board-editor = { path = "../lpa-board-editor" }
 lpa-boards = { path = "../lpa-boards", features = ["diagram"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
-# Share links carry a `prj_…` uid; the router parses it with the same type
+# Share links carry a `prj…` uid; the router parses it with the same type
 # the server's `page::share_path` does, so both halves agree about what a
-# `/p/<slug>-prj_x` link means.
+# `/p/<slug>-prjx` link means.
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
+# The cloud transport port + the message vocabulary. `default-features =
+# false` drops the `in-process` transport: the browser talks to a deployed
+# service over HTTP (`cloud::FetchCloudPort`), and the in-process one would
+# drag the whole server domain into the wasm bundle. `just check-wasm-cloud`
+# gates that combination cheaply.
+lpa-cloud-client = { path = "../lpa-cloud-client", default-features = false }
+lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
 # Markdown parsing for agent chat replies (parser only; rendering goes
 # through Dioxus nodes — never raw HTML).
 pulldown-cmark = { version = "0.13", default-features = false }

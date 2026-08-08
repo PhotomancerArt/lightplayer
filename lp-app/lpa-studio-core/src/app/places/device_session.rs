@@ -768,7 +768,7 @@ mod tests {
         let mut files = vec![
             (
                 "project.json".to_string(),
-                br#"{"format":6,"uid":"prj_zzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
+                br#"{"format":6,"uid":"prjzzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
             ),
             ("shader.glsl".to_string(), b"wild".to_vec()),
             (".lp/device.json".to_string(), b"{}".to_vec()),
@@ -778,7 +778,7 @@ mod tests {
         let summary = adopt_device_package(&store, &device, &files, 42.0).unwrap();
         assert_eq!(
             summary.uid.to_string(),
-            "prj_zzzzzzzzzzzzzzzz",
+            "prjzzzzzzzzzzzzzzzz",
             "adoption keeps the on-device uid so future connects match"
         );
         assert_eq!(summary.slug, "2026-07-10-0900-wild-one");
@@ -892,7 +892,7 @@ mod tests {
         let store = store();
         let registry = DeviceRegistry::new(store.fs_handle());
         let mut rekeyed = device();
-        rekeyed.previous_uids = vec!["dev_000000000000old1".to_string()];
+        rekeyed.previous_uids = vec!["dev00000000000past1".to_string()];
         rekeyed.hardware_id = Some("efuse:aa:bb:cc:dd:ee:ff".to_string());
         registry.upsert(rekeyed).unwrap();
 
@@ -903,7 +903,7 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(
             listed[0].previous_uids,
-            vec!["dev_000000000000old1".to_string()]
+            vec!["dev00000000000past1".to_string()]
         );
         assert_eq!(
             listed[0].hardware_id.as_deref(),

@@ -135,12 +135,12 @@ fn hard_reset_replays_the_current_boot() {
 
 #[tokio::test]
 async fn light_player_state_speaks_real_frames_through_the_real_transport() {
-    let identity = FakeDeviceIdentity::new("dev_fakefakefakefak0", "Bench fake");
+    let identity = FakeDeviceIdentity::new("devfakefakefakefake", "Bench fake");
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new()
             .with_project_files(vec![(
                 "project.json".to_string(),
-                br#"{"format":6,"uid":"prj_fakefakefakefak0","name":"Fake"}"#.to_vec(),
+                br#"{"format":6,"uid":"prjfakefakefakefake","name":"Fake"}"#.to_vec(),
             )])
             .with_identity(identity),
     )));
@@ -160,7 +160,7 @@ async fn light_player_state_speaks_real_frames_through_the_real_transport() {
     let hello = client.hello().await.unwrap();
     assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
     assert_eq!(hello.build.package, "fw-esp32c6");
-    assert_eq!(hello.device_uid.as_deref(), Some("dev_fakefakefakefak0"));
+    assert_eq!(hello.device_uid.as_deref(), Some("devfakefakefakefake"));
 
     let projects = client.project_list_available().await.unwrap();
     assert!(
@@ -199,12 +199,12 @@ async fn hello_reflects_a_runtime_root_identity_stamp() {
     client
         .fs_write(
             fw_host::DEVICE_IDENTITY_PATH.as_path(),
-            br#"{"uid":"dev_stampstampstamp","name":"Freshly named"}"#.to_vec(),
+            br#"{"uid":"devstampstampstamp","name":"Freshly named"}"#.to_vec(),
         )
         .await
         .unwrap();
     let hello = client.hello().await.unwrap();
-    assert_eq!(hello.device_uid.as_deref(), Some("dev_stampstampstamp"));
+    assert_eq!(hello.device_uid.as_deref(), Some("devstampstampstamp"));
 }
 
 #[test]

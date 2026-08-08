@@ -63,7 +63,7 @@ pub use node::{
     ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
     UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
 };
-pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
+pub use node_card_ui_state::{ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,

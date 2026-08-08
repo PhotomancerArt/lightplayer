@@ -30,7 +30,7 @@
       "type": "string"
     },
     "uid": {
-      "title": "Stable project identity (prj_…, base-62)",
+      "title": "Stable project identity (prj…, base-32)",
       "type": "string"
     },
     "version": {

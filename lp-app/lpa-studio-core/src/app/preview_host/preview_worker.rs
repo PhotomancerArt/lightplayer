@@ -2,8 +2,9 @@
 //!
 //! One `PreviewWorker` owns one explicit-tick Web Worker hosting several
 //! preview runtimes. It routes JSON envelopes (protocol frames by
-//! `runtime_id`, lifecycle events, preview errors) and hands binary pixel
-//! frames straight through — pixels never touch the JSON path. This is the
+//! `runtime_id`, lifecycle events, published output frames, preview errors)
+//! and hands binary pixel frames straight through — pixels never touch the
+//! JSON path, while the far smaller output samples do. This is the
 //! productized shape of the preview-lab's rig, owned by the host so no
 //! product code imports exploration modules.
 
@@ -13,6 +14,7 @@ use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
     BrowserWorkerHandle, BrowserWorkerOptions, PreviewPixelFrame,
 };
+use lpc_wire::OutputFrameEntry;
 
 /// One failed `preview_frame` / `present_frame` / `attach_surface`
 /// request (`frame_id` 0 marks attach/lifecycle failures).
@@ -35,12 +37,21 @@ pub(super) struct PresentedFrame {
     pub(super) runtime_id: u32,
 }
 
+/// One `preview_output_frame` answer: the project's published lamps, plus
+/// the engine's control-first verdict for it.
+pub(super) struct SlotOutputFrame {
+    pub(super) runtime_id: u32,
+    pub(super) control_first: bool,
+    pub(super) outputs: Vec<OutputFrameEntry>,
+}
+
 pub(super) struct PreviewWorker {
     handle: BrowserWorkerHandle,
     protocol: HashMap<u32, VecDeque<String>>,
     created: HashMap<String, CreatedRuntime>,
     surfaces_attached: Vec<u32>,
     presented: Vec<PresentedFrame>,
+    output_frames: Vec<SlotOutputFrame>,
     preview_errors: Vec<SlotPreviewError>,
     /// Worker-fatal errors (crash, uncaught script error). One entry is
     /// enough to condemn the worker to a recycle.
@@ -64,6 +75,7 @@ impl PreviewWorker {
             created: HashMap::new(),
             surfaces_attached: Vec::new(),
             presented: Vec::new(),
+            output_frames: Vec::new(),
             preview_errors: Vec::new(),
             worker_errors: Vec::new(),
         })
@@ -127,6 +139,18 @@ impl PreviewWorker {
                 BrowserOutputEnvelope::PreviewPresented { runtime_id, .. } => {
                     self.presented.push(PresentedFrame { runtime_id });
                 }
+                BrowserOutputEnvelope::PreviewOutputFrame {
+                    runtime_id,
+                    control_first,
+                    outputs,
+                    ..
+                } => {
+                    self.output_frames.push(SlotOutputFrame {
+                        runtime_id,
+                        control_first,
+                        outputs,
+                    });
+                }
                 BrowserOutputEnvelope::PreviewError {
                     runtime_id,
                     frame_id,
@@ -173,6 +197,11 @@ impl PreviewWorker {
         core::mem::take(&mut self.presented)
     }
 
+    /// Take published output frames received since the last call.
+    pub(super) fn take_output_frames(&mut self) -> Vec<SlotOutputFrame> {
+        core::mem::take(&mut self.output_frames)
+    }
+
     /// Take worker-fatal error notes received since the last call.
     pub(super) fn take_worker_errors(&mut self) -> Vec<String> {
         core::mem::take(&mut self.worker_errors)
@@ -209,6 +238,8 @@ impl PreviewWorker {
         self.protocol.remove(&runtime_id);
         self.surfaces_attached.retain(|id| *id != runtime_id);
         self.presented
+            .retain(|frame| frame.runtime_id != runtime_id);
+        self.output_frames
             .retain(|frame| frame.runtime_id != runtime_id);
         self.preview_errors
             .retain(|error| error.runtime_id != runtime_id);

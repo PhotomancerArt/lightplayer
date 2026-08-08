@@ -2,8 +2,10 @@
 //! panel surface.
 //!
 //! [`ModulePanel`] at play density is what Studio's play tab shows — the
-//! same widgets, the same engaged/read colors, the same detail popups. The
-//! docs embed adds exactly two things around it: fan-out and a reset chip.
+//! same widgets, the same engaged/read colors, the same detail popups, and
+//! the same transient reset affordances (they exist only while something
+//! is held, so an untouched panel shows no reset chrome at all). The docs
+//! embed adds exactly one thing around it: fan-out.
 //!
 //! # Fan-out (Q12)
 //!
@@ -99,7 +101,7 @@ pub(crate) fn PanelEmbed(
     // Display state is the PRIMARY sim's: one panel, one set of values.
     let panel = root_panel(&primary.view.read());
 
-    let dispatch_sims = sims.clone();
+    let dispatch_sims = sims;
     let on_action = EventHandler::new(move |action: UiAction| {
         if fans_out(&action) {
             for sim in &dispatch_sims {
@@ -111,17 +113,12 @@ pub(crate) fn PanelEmbed(
             sim.dispatch(action);
         }
     });
-    // Reset puts every named sim back: the article's Reset means "put this
-    // page back the way it was", not "put one of these two back".
-    let reset_sims = sims;
-    let on_reset = EventHandler::new(move |()| {
-        for sim in &reset_sims {
-            reset_docs_sim(sim);
-        }
-    });
-
+    // No chrome Reset here: the panel's own transient reset (held > 0)
+    // raises PanelClearOp, which fans out above — so "put these knobs
+    // back" already reaches every named sim, and it only exists while
+    // there is something to put back.
     rsx! {
-        DocsPanelSurface { panel, mode, on_action, on_reset }
+        DocsPanelSurface { panel, mode, on_action }
     }
 }
 
@@ -140,9 +137,6 @@ pub(crate) fn DocsPanelSurface(
     /// Where gestures go. Absent (read-only, stories) means nowhere.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
-    /// The reset chip; absent hides it.
-    #[props(default)]
-    on_reset: Option<EventHandler<()>>,
     #[props(default)] caption: Option<String>,
 ) -> Element {
     let readonly = mode == PanelMode::Readonly;
@@ -165,7 +159,6 @@ pub(crate) fn DocsPanelSurface(
         EmbedFrame {
             caption,
             note,
-            on_reset: if readonly { None } else { on_reset },
             match panel {
                 Some(panel) => rsx! {
                     div { class: "{body_class}",
@@ -177,10 +170,11 @@ pub(crate) fn DocsPanelSurface(
                             play: true,
                             on_panel: live.map(panel_gesture_actions),
                             on_action: live,
-                            // R6: the chrome's always-mounted Reset is this
-                            // embed's one reset — the panel's transient
-                            // glyph would double it and reflow on hold.
-                            show_reset: false,
+                            // Studio's own transient reset (held > 0)
+                            // carries the verb: an always-mounted chrome
+                            // chip read as a shout on an untouched panel
+                            // (G1 round 3 ruling — R6 reversed).
+                            show_reset: !readonly,
                         }
                     }
                 },
@@ -195,9 +189,10 @@ pub(crate) fn DocsPanelSurface(
     }
 }
 
-/// The docs Reset, shared by every embed that offers one: "put this page
-/// back the way it started" is one gesture, so the panel's chip and the
-/// editor's chip must do the identical thing.
+/// The docs Reset — today only the editor's chrome chip raises it (the
+/// panel embed leans on Studio's own transient reset instead, G1 round 3):
+/// "put this page back the way it started" as one gesture, source and
+/// knobs alike.
 ///
 /// THREE steps, and each earns its place:
 ///

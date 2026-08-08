@@ -179,7 +179,7 @@ mod tests {
             title: "Zook Dome".to_string(),
             description: "A LightPlayer project.".to_string(),
             image: Some("http://host/b/abc".to_string()),
-            url: "http://host/p/zook-dome-prj_x".to_string(),
+            url: "http://host/p/zook-dome-prjx".to_string(),
         }
     }
 }

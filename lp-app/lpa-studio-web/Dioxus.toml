@@ -9,6 +9,31 @@ out_dir = "dist"
 title = "LightPlayer Studio"
 base_path = "/"
 
+# Dev same-origin (Q14). The app talks to the cloud service with RELATIVE
+# URLs so the session cookie rides along with no CORS posture the deployed
+# site does not have — which only works if the two are one origin. In
+# production they are (lp-cloud serves the app). In dev they are two ports,
+# so dx forwards these prefixes to a locally running lp-cloud:
+#
+#   LP_CLOUD_PORT=2812 just cloud-serve     # dev auth is on in that recipe
+#   just studio-dev
+#
+# dx matches on the backend URL's PATH, so one entry per prefix, and the port
+# is pinned here (the one place in the repo that pins a dev port — a proxy
+# target cannot be discovered at request time). Override lp-cloud's port only
+# if you also change these.
+[[web.proxy]]
+backend = "http://localhost:2812/api"
+
+[[web.proxy]]
+backend = "http://localhost:2812/auth"
+
+[[web.proxy]]
+backend = "http://localhost:2812/b"
+
+[[web.proxy]]
+backend = "http://localhost:2812/t"
+
 [web.watcher]
 watch_path = ["lp-app/lpa-studio-web/src", "lp-app/lpa-studio-web/public", "lp-app/lpa-studio-web/tailwind.css"]
 

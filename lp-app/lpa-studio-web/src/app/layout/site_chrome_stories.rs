@@ -101,7 +101,7 @@ pub(crate) fn session_strip_states() -> Element {
             {strip_frame(
                 1000,
                 vec![
-                    device_session("dev_a1", "the-remarkably-long-device-name-from-the-hall", true, UiChromeSessionStatus::Run),
+                    device_session("deva1", "the-remarkably-long-device-name-from-the-hall", true, UiChromeSessionStatus::Run),
                     sim_session("2026-08-05-2053-xiao-esp32-c6", false, UiChromeSessionStatus::Attention),
                 ],
                 true,
@@ -159,9 +159,9 @@ fn device_session(
 fn three_sessions() -> Vec<UiChromeSession> {
     vec![
         sim_session("plasma", false, UiChromeSessionStatus::Empty),
-        device_session("dev_b2", "Desk C6", true, UiChromeSessionStatus::Run),
+        device_session("devb2", "Desk C6", true, UiChromeSessionStatus::Run),
         device_session(
-            "dev_c3",
+            "devc3",
             "Dome quad",
             false,
             UiChromeSessionStatus::Attention,
@@ -172,15 +172,15 @@ fn three_sessions() -> Vec<UiChromeSession> {
 fn five_sessions() -> Vec<UiChromeSession> {
     vec![
         sim_session("zook-dome", true, UiChromeSessionStatus::Run),
-        device_session("dev_b2", "Desk C6", false, UiChromeSessionStatus::Run),
+        device_session("devb2", "Desk C6", false, UiChromeSessionStatus::Run),
         device_session(
-            "dev_c3",
+            "devc3",
             "Dome quad",
             false,
             UiChromeSessionStatus::Attention,
         ),
-        device_session("dev_d4", "Stair strip", false, UiChromeSessionStatus::Empty),
-        device_session("dev_e5", "Porch sign", false, UiChromeSessionStatus::Run),
+        device_session("devd4", "Stair strip", false, UiChromeSessionStatus::Empty),
+        device_session("deve5", "Porch sign", false, UiChromeSessionStatus::Run),
     ]
 }
 

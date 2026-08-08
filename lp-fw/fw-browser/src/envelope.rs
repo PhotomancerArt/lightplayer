@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use lpc_wire::OutputFrameEntry;
+
 /// Message sent from JavaScript into one browser firmware runtime.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -50,4 +52,46 @@ pub(crate) enum BrowserOutputEnvelope {
     /// `runtime_id` demultiplexes protocol streams when one worker hosts
     /// several runtimes (e.g. the Studio preview lab).
     ProtocolOut { runtime_id: u32, frame: String },
+}
+
+/// The `preview_output_frame` answer to a `preview_frame` / `present_frame`
+/// that asked for the output side.
+///
+/// It is composed here rather than in the worker script so the whole shape —
+/// discriminator included — stays one Rust type: the script only parses this
+/// JSON and posts it. Unlike the runtime outbox envelopes this one is not
+/// queued; it belongs to exactly one preview frame and carries that frame's
+/// correlation id.
+#[derive(Debug, Serialize)]
+pub(crate) struct PreviewOutputFrameMessage {
+    /// Message discriminator (always `preview_output_frame`), matching the
+    /// host's `BrowserOutputEnvelope::PreviewOutputFrame`.
+    kind: &'static str,
+    runtime_id: u32,
+    /// The requesting frame's correlation id, echoed back.
+    frame_id: u32,
+    /// Whether this project's ROOT scope resolves `control.out` — the
+    /// engine-side "leads with lamps" fact, decided where the graph is, never
+    /// re-derived from the manifest by the host.
+    control_first: bool,
+    /// One entry per output node with a published buffer, in tree order.
+    /// Empty for a project that drives no outputs (or has not published yet).
+    outputs: Vec<OutputFrameEntry>,
+}
+
+impl PreviewOutputFrameMessage {
+    pub(crate) fn new(
+        runtime_id: u32,
+        frame_id: u32,
+        control_first: bool,
+        outputs: Vec<OutputFrameEntry>,
+    ) -> Self {
+        Self {
+            kind: "preview_output_frame",
+            runtime_id,
+            frame_id,
+            control_first,
+            outputs,
+        }
+    }
 }
