@@ -3,9 +3,9 @@
 //! `docs/adr/2026-07-26-card-view-state-ownership.md`, explicitly deferred
 //! this slice).
 //!
-//! What a node card's face is disclosing: whether the code/advanced/debug
-//! drawers are expanded, whether the agent section is collapsed, and the
-//! last MIRRORED composer draft. This used to live in the web renderer's
+//! What a node card is disclosing: whether the whole card is folded to its
+//! header, whether the code/advanced/debug drawers are expanded, whether
+//! the agent section is collapsed, and the last MIRRORED composer draft. This used to live in the web renderer's
 //! `use_signal`s (`NodeCardDrawers`, `AgentChatPane`), which meant it died
 //! with the component instance — amnesia across re-renders and mode
 //! changes, and unreachable by e2e. Core ownership fixes both, exactly as
@@ -33,6 +33,16 @@
 /// for), no mirrored draft.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeCardUiState {
+    /// Whether the whole card is folded to its header (the pane grammar's
+    /// leftmost collapse rail). Default `false`: a card discloses itself
+    /// until the user folds it.
+    ///
+    /// This is the bit the G1 R-B follow-up moves into core: with rigs in
+    /// the child column every card — root and children alike — folds, the
+    /// fold survives re-renders and remounts, and under the sim lens a
+    /// collapsed card's subtree stops streaming previews (the
+    /// `node_subscribes_products` gate reads exactly this state).
+    pub collapsed: bool,
     /// Whether the code drawer (inline GLSL editor) is expanded.
     pub code_open: bool,
     /// Whether the advanced drawer (generic slot rows) is expanded.
@@ -65,6 +75,7 @@ pub struct NodeCardUiState {
 impl Default for NodeCardUiState {
     fn default() -> Self {
         Self {
+            collapsed: false,
             code_open: false,
             advanced_open: false,
             wiring_open: false,
@@ -87,6 +98,9 @@ impl NodeCardUiState {
                 NodeCardDrawer::Debug => self.debug_open = *open,
                 NodeCardDrawer::Wiring => self.wiring_open = *open,
             },
+            NodeUiOp::SetCollapsed { collapsed, .. } => {
+                self.collapsed = *collapsed;
+            }
             NodeUiOp::SetAgentCollapsed { collapsed, .. } => {
                 self.agent_collapsed = *collapsed;
             }
@@ -142,6 +156,9 @@ pub enum NodeCardDrawer {
 /// regardless of which widget rendered it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NodeUiOp {
+    /// Fold the whole card to its header (or open it back up) — the pane
+    /// grammar's leftmost collapse rail, root and child cards alike.
+    SetCollapsed { node: String, collapsed: bool },
     /// Expand or collapse one of the card's drawers.
     SetDrawer {
         node: String,
@@ -165,7 +182,8 @@ impl NodeUiOp {
     /// The node address this op targets.
     pub fn node(&self) -> &str {
         match self {
-            Self::SetDrawer { node, .. }
+            Self::SetCollapsed { node, .. }
+            | Self::SetDrawer { node, .. }
             | Self::SetAgentCollapsed { node, .. }
             | Self::SetDraft { node, .. }
             | Self::SetHeroProduct { node, .. } => node,
@@ -202,6 +220,10 @@ mod tests {
     fn ops_round_trip_through_the_state() {
         let node = "/demo.module/orbit.shader".to_string();
         let mut state = NodeCardUiState::default();
+        assert!(
+            !state.collapsed,
+            "a fresh card discloses itself until the user folds it"
+        );
         assert!(!state.code_open && !state.advanced_open);
         assert!(
             state.agent_collapsed,
@@ -255,9 +277,14 @@ mod tests {
             node: node.clone(),
             product: ModuleHeroProduct::Visual,
         });
+        state.apply(&NodeUiOp::SetCollapsed {
+            node: node.clone(),
+            collapsed: true,
+        });
         assert_eq!(
             state,
             NodeCardUiState {
+                collapsed: true,
                 code_open: true,
                 advanced_open: true,
                 wiring_open: true,
@@ -276,6 +303,15 @@ mod tests {
         });
         assert_eq!(state.composer_draft, "make it pulse");
 
+        // The card-level fold is its own bit: expanding the card leaves
+        // every drawer where the user last had it.
+        state.apply(&NodeUiOp::SetCollapsed {
+            node: node.clone(),
+            collapsed: false,
+        });
+        assert!(!state.collapsed);
+        assert!(state.code_open && state.advanced_open && state.debug_open);
+
         state.apply(&NodeUiOp::SetDrawer {
             node,
             drawer: NodeCardDrawer::Code,
@@ -287,6 +323,10 @@ mod tests {
     #[test]
     fn every_op_names_its_node() {
         let ops = [
+            NodeUiOp::SetCollapsed {
+                node: "/a.module/b.shader".into(),
+                collapsed: true,
+            },
             NodeUiOp::SetDrawer {
                 node: "/a.module/b.shader".into(),
                 drawer: NodeCardDrawer::Advanced,
