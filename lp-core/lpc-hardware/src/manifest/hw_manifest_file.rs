@@ -6,7 +6,8 @@ use lp_collection::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwResource, HwSoftLimits,
+    HardwareTarget, HwAddress, HwCapability, HwError, HwGateLevel, HwManifest, HwPowerGate,
+    HwResource, HwSoftLimits,
 };
 
 /// Serializable board manifest file (authored as JSON).
@@ -37,6 +38,11 @@ pub struct HardwareManifestFile {
     pub gpio: Vec<HardwareResourceFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resource: Vec<HardwareResourceFile>,
+    /// Board-level power-gate descriptors (see [`HwPowerGate`]). Additive and
+    /// optional, like `soft_limits`: older firmware parsing a manifest that
+    /// carries one simply never sees it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub power_gate: Vec<HardwarePowerGateFile>,
 }
 
 impl HardwareManifestFile {
@@ -58,6 +64,7 @@ impl HardwareManifestFile {
             board_label: Vec::new(),
             gpio: Vec::new(),
             resource: Vec::new(),
+            power_gate: Vec::new(),
         }
     }
 
@@ -120,16 +127,25 @@ impl HardwareManifestFile {
                 });
             }
         }
+
+        for gate in &self.power_gate {
+            HwAddress::new(gate.gpio.clone())?;
+            for feed in &gate.feeds {
+                HwAddress::new(feed.clone())?;
+            }
+        }
         Ok(())
     }
 
     pub fn to_manifest(&self) -> Result<HwManifest, HardwareManifestFileError> {
         self.validate()?;
         let resources = self.resources()?;
+        let power_gates = self.power_gates()?;
         let mut manifest = HwManifest::new(self.id.clone(), self.product.clone(), resources)
             .with_target(self.target)
             .with_vendor(self.vendor.clone())
-            .with_product(self.product.clone());
+            .with_product(self.product.clone())
+            .with_power_gates(power_gates);
         if let Some(description) = &self.description {
             manifest = manifest.with_description(description.clone());
         }
@@ -147,6 +163,13 @@ impl HardwareManifestFile {
             .iter()
             .chain(self.resource.iter())
             .map(HardwareResourceFile::to_resource)
+            .collect()
+    }
+
+    fn power_gates(&self) -> Result<Vec<HwPowerGate>, HardwareManifestFileError> {
+        self.power_gate
+            .iter()
+            .map(HardwarePowerGateFile::to_power_gate)
             .collect()
     }
 }
@@ -251,6 +274,53 @@ impl HardwareResourceFile {
     }
 }
 
+/// Serializable power-gate entry in a board manifest file (see
+/// [`HwPowerGate`]). `gpio`/`feeds` are plain address strings here, parsed
+/// into [`HwAddress`] by [`Self::to_power_gate`], the same split as
+/// [`HardwareResourceFile`]/[`HwResource`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct HardwarePowerGateFile {
+    pub gpio: String,
+    pub active_level: HwGateLevel,
+    #[serde(default)]
+    pub open_drain: bool,
+    pub settle_ms: u32,
+    #[serde(default = "default_off_debounce_ms")]
+    pub off_debounce_ms: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feeds: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl HardwarePowerGateFile {
+    fn to_power_gate(&self) -> Result<HwPowerGate, HardwareManifestFileError> {
+        let gpio = HwAddress::new(self.gpio.clone())?;
+        let feeds = self
+            .feeds
+            .iter()
+            .cloned()
+            .map(HwAddress::new)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut gate = HwPowerGate::new(gpio, self.active_level, self.settle_ms)
+            .with_open_drain(self.open_drain)
+            .with_off_debounce_ms(self.off_debounce_ms)
+            .with_feeds(feeds);
+        if let Some(note) = &self.note {
+            gate = gate.with_note(note.clone());
+        }
+        Ok(gate)
+    }
+}
+
+/// `off_debounce_ms` default for a manifest file that omits it. Ties to
+/// [`HwPowerGate::DEFAULT_OFF_DEBOUNCE_MS`] so the file-format default and the
+/// runtime default can never drift apart.
+fn default_off_debounce_ms() -> u32 {
+    HwPowerGate::DEFAULT_OFF_DEBOUNCE_MS
+}
+
 /// Errors produced while parsing, validating, or converting a manifest file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HardwareManifestFileError {
@@ -328,6 +398,7 @@ mod tests {
                 HardwareResourceFile::new("/gpio/1", "GPIO1", [HwCapability::GpioInput]),
             ],
             resource: Vec::new(),
+            power_gate: Vec::new(),
         };
 
         assert!(manifest.validate().is_err());
@@ -375,5 +446,114 @@ mod tests {
         }"#;
         let file = HardwareManifestFile::read_json(without).unwrap();
         assert!(file.soft_limits.is_none(), "absence must stay valid");
+    }
+
+    /// One power gate survives the JSON round trip and the runtime
+    /// conversion, every field lands, and an absent block parses to an empty
+    /// slice (older manifests stay valid).
+    #[test]
+    fn power_gate_round_trip_and_default_to_absent() {
+        let json = r#"{
+            "id": "quinled/dig2go",
+            "target": "esp32",
+            "vendor": "quinled",
+            "product": "dig2go",
+            "power_gate": [
+                {
+                    "gpio": "/gpio/12",
+                    "active_level": "low",
+                    "open_drain": false,
+                    "settle_ms": 50,
+                    "off_debounce_ms": 5000,
+                    "feeds": ["/rmt/ws281x0"],
+                    "note": "MTDI strap; must idle low at boot"
+                }
+            ]
+        }"#;
+        let file = HardwareManifestFile::read_json(json).unwrap();
+        assert_eq!(file.power_gate.len(), 1);
+        let gate = &file.power_gate[0];
+        assert_eq!(gate.gpio, "/gpio/12");
+        assert_eq!(gate.active_level, HwGateLevel::Low);
+        assert!(!gate.open_drain);
+        assert_eq!(gate.settle_ms, 50);
+        assert_eq!(gate.off_debounce_ms, 5000);
+        assert_eq!(gate.feeds, alloc::vec![String::from("/rmt/ws281x0")]);
+        assert_eq!(gate.note.as_deref(), Some("MTDI strap; must idle low at boot"));
+
+        let runtime = file.to_manifest().unwrap();
+        let gates = runtime.power_gates();
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].gpio(), &HwAddress::gpio(12));
+        assert_eq!(gates[0].active_level(), HwGateLevel::Low);
+        assert!(!gates[0].open_drain());
+        assert_eq!(gates[0].settle_ms(), 50);
+        assert_eq!(gates[0].off_debounce_ms(), 5000);
+        assert_eq!(gates[0].feeds(), [HwAddress::rmt_ws281x(0)]);
+        assert_eq!(gates[0].note(), Some("MTDI strap; must idle low at boot"));
+
+        let rewritten = file.write_json().unwrap();
+        assert_eq!(HardwareManifestFile::read_json(&rewritten).unwrap(), file);
+
+        let without = r#"{
+            "id": "vendor/board",
+            "target": "esp32",
+            "vendor": "vendor",
+            "product": "board"
+        }"#;
+        let file = HardwareManifestFile::read_json(without).unwrap();
+        assert!(file.power_gate.is_empty(), "absence must stay valid");
+        assert!(file.to_manifest().unwrap().power_gates().is_empty());
+    }
+
+    /// `off_debounce_ms` and `open_drain` are the two fields with defaults —
+    /// omitting them must not fail parsing, and must land on the documented
+    /// defaults (5000 ms, not open-drain).
+    #[test]
+    fn power_gate_off_debounce_and_open_drain_default() {
+        let json = r#"{
+            "id": "vendor/board",
+            "target": "esp32",
+            "vendor": "vendor",
+            "product": "board",
+            "power_gate": [
+                { "gpio": "/gpio/12", "active_level": "high", "settle_ms": 20 }
+            ]
+        }"#;
+        let file = HardwareManifestFile::read_json(json).unwrap();
+        let gate = &file.power_gate[0];
+        assert_eq!(gate.off_debounce_ms, 5000);
+        assert!(!gate.open_drain);
+        assert_eq!(gate.off_debounce_ms, HwPowerGate::DEFAULT_OFF_DEBOUNCE_MS);
+    }
+
+    /// An invalid gpio path in a gate entry fails `to_manifest()` with a
+    /// clear error — the same treatment as an invalid resource address.
+    #[test]
+    fn rejects_invalid_power_gate_gpio() {
+        let manifest = HardwareManifestFile {
+            id: "board".into(),
+            target: HardwareTarget::Esp32,
+            vendor: "vendor".into(),
+            product: "product".into(),
+            description: None,
+            url: None,
+            soft_limits: None,
+            board_label: Vec::new(),
+            gpio: Vec::new(),
+            resource: Vec::new(),
+            power_gate: alloc::vec![HardwarePowerGateFile {
+                gpio: "gpio/12".into(), // missing the leading slash
+                active_level: HwGateLevel::High,
+                open_drain: false,
+                settle_ms: 20,
+                off_debounce_ms: 5000,
+                feeds: Vec::new(),
+                note: None,
+            }],
+        };
+
+        assert!(manifest.validate().is_err());
+        assert!(manifest.to_manifest().is_err());
     }
 }
