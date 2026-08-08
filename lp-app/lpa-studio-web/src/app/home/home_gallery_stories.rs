@@ -453,7 +453,7 @@ fn thumb_product_faces() -> Element {
         section { class: "tw:grid tw:w-[480px] tw:grid-cols-2 tw:gap-3.5 tw:p-4",
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                    seed: "prj3fkq8zr21btxyw0a".to_string(),
                     label: "porch-sign".to_string(),
                     static_lamps: Some(thumb_lamp_frame()),
                     static_badge: Some(ThumbPreviewBadge::Gpu),
@@ -462,7 +462,7 @@ fn thumb_product_faces() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                    seed: "prj9sm2xc44dqnv7bgw".to_string(),
                     label: "plasma".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
