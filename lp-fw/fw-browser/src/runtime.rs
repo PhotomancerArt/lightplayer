@@ -14,7 +14,10 @@ use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::{ClientMessage, json};
+use lpc_wire::{
+    ClientMessage, ControlDisplayLayoutRead, OutputFrameEntry, OutputFrameProbeRequest,
+    OutputFrameProbeResult, json,
+};
 use lpfs::LpFsMemory;
 use lps_shared::TextureStorageFormat;
 
@@ -68,6 +71,14 @@ pub(crate) struct BrowserFirmwareRuntime {
     /// resolved once per channel and re-resolved only after a render error
     /// (e.g. a project reload invalidated the handle).
     bus_visual_product: Option<(String, VisualProduct)>,
+    /// Cached "does the root scope resolve `control.out`?" answer.
+    ///
+    /// A property of the loaded project, not of a frame, and the resolve that
+    /// answers it may re-run producer nodes — so it is decided once, on the
+    /// first output-frame read, and reused for every later frame. Preview
+    /// runtimes are deployed once and never reloaded, so there is nothing to
+    /// invalidate it against.
+    control_first: Option<bool>,
     /// The tier chosen at creation (fidelity-tiers ADR: recorded, surfaced,
     /// never silently changed).
     tier: TierSelection,
@@ -175,6 +186,7 @@ impl BrowserFirmwareRuntime {
             running: false,
             outbox: Vec::new(),
             bus_visual_product: None,
+            control_first: None,
             tier,
             gpu,
         };
@@ -286,6 +298,53 @@ impl BrowserFirmwareRuntime {
                 .to_string()
         })?;
         Ok(crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes))
+    }
+
+    /// Read the frame this runtime's project has ALREADY published, together
+    /// with the engine-side control-first fact.
+    ///
+    /// The lamp counterpart of [`Self::render_bus_texture_rgba8`], and it
+    /// renders nothing: the tick that just ran published these buffers, so a
+    /// card drawing lamps costs one buffer clone plus — only when
+    /// `display_layout` asks — an O(lamps) geometry read. That is why this
+    /// rides the preview frame the host already schedules instead of being a
+    /// second render.
+    ///
+    /// A runtime with no project loaded answers `(false, [])`: "nothing is
+    /// driving lamps here" is a state, not an error.
+    pub(crate) fn read_output_frame(
+        &mut self,
+        display_layout: ControlDisplayLayoutRead,
+    ) -> (bool, Vec<OutputFrameEntry>) {
+        let handle = self
+            .server
+            .project_manager()
+            .list_loaded_projects()
+            .first()
+            .map(|project| project.handle);
+        let Some(handle) = handle else {
+            return (false, Vec::new());
+        };
+        let cached = self.control_first;
+        let Some(project) = self.server.project_manager_mut().get_project_mut(handle) else {
+            return (false, Vec::new());
+        };
+        let control_first = cached.unwrap_or_else(|| {
+            match project.resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL) {
+                Ok(_) => true,
+                Err(error) => {
+                    // The ordinary state of a shader-only project, but it is
+                    // also the only place a genuine resolve failure would
+                    // read as "no lamps" — so say why, once (this is cached).
+                    log::debug!("preview runtime: project is not control-first: {error}");
+                    false
+                }
+            }
+        });
+        let OutputFrameProbeResult::Frame { outputs } =
+            project.read_output_frame(OutputFrameProbeRequest { display_layout });
+        self.control_first = Some(control_first);
+        (control_first, outputs)
     }
 
     /// Attach a transferred `OffscreenCanvas` as this runtime's card surface.

@@ -1,3 +1,37 @@
+//! The host half of the browser-worker vocabulary: one type per message the
+//! page sends a preview worker, and one per message it sends back.
+//!
+//! This is an INTERNAL boundary between two halves of the same build (the
+//! worker's mirror lives in `lp-fw/fw-browser/src/envelope.rs`), not the
+//! device wire — nothing here is versioned or compatibility-shimmed.
+//!
+//! # Output-frame delivery rides the frame, it is not a second poll
+//!
+//! A slot draws either the raster (`visual.out`, presented or blitted) or the
+//! project's lamps, and both come from the same tick. So the output frame is
+//! requested by the `preview_frame` / `present_frame` the host ALREADY
+//! schedules at the slot's fps — `output_frame: Some(gate)` — and answered by
+//! one extra [`BrowserOutputEnvelope::PreviewOutputFrame`] carrying that
+//! frame's `frame_id`. A separate host-driven poll (the shape the device card
+//! feed must use, because a device is at the far end of a serial link) would
+//! buy nothing here and could only drift off the present cadence.
+//!
+//! Two consequences worth keeping:
+//!
+//! - **Samples ride JSON, pixels never do.** A raster is width × height × 4
+//!   bytes and gets a transferable `ArrayBuffer`; an output frame is
+//!   `lamps × 3 × 2` bytes, which is the size the device already sends
+//!   base64 over a serial link. It rides the ordinary envelope path.
+//! - **Geometry travels once.** The request carries the same
+//!   [`ControlDisplayLayoutRead`] gate the device feed pulls with, so a
+//!   steady card asks `Always` once and `IfChanged` thereafter; the layout
+//!   crosses only when it actually moved, never per frame.
+//!
+//! `output_frame: None` means the host is not reading the output side at all
+//! — which is every tick of a shader-only slot once the worker's first answer
+//! reported `control_first: false` — so those slots pay nothing.
+
+use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 use serde::{Deserialize, Serialize};
 
 /// How the browser worker advances the firmware clock.
@@ -92,6 +126,10 @@ pub enum BrowserInputEnvelope {
         height: u32,
         /// Caller correlation id echoed back on the pixel frame.
         frame_id: u32,
+        /// Also deliver the project's published output frame this tick — see
+        /// the type's docs for why the request rides the frame it belongs to.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_frame: Option<ControlDisplayLayoutRead>,
     },
     /// Tick a GPU-tier runtime and present its bus visual product directly
     /// to the card surface attached via `attach_preview_surface` — zero
@@ -108,6 +146,10 @@ pub enum BrowserInputEnvelope {
         channel: String,
         /// Caller correlation id echoed back on the completion envelope.
         frame_id: u32,
+        /// Also deliver the project's published output frame this tick — see
+        /// the type's docs for why the request rides the frame it belongs to.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_frame: Option<ControlDisplayLayoutRead>,
     },
     Start,
     Stop,
@@ -173,6 +215,24 @@ pub enum BrowserOutputEnvelope {
         render_ms: f64,
         posted_epoch_ms: f64,
         wasm_memory_bytes: f64,
+    },
+    /// The published output frame for a `preview_frame` / `present_frame`
+    /// that asked for it (`output_frame: Some(…)`), carrying that frame's
+    /// `frame_id`.
+    ///
+    /// It arrives AFTER the visual answer for the same frame, so a slot's
+    /// present accounting and backpressure never wait on the lamp half.
+    PreviewOutputFrame {
+        runtime_id: u32,
+        frame_id: u32,
+        /// Whether the project's ROOT scope resolves `control.out` — decided
+        /// engine-side (where the graph is), never re-derived from the
+        /// manifest by the host. `false` is the host's cue to stop asking.
+        control_first: bool,
+        /// One entry per output node with a published buffer, in tree order;
+        /// empty when the project drives no outputs. Same shape the device
+        /// card feed consumes, so hosts share one reader.
+        outputs: Vec<OutputFrameEntry>,
     },
     /// A `preview_frame` / `present_frame` / `attach_surface` request failed;
     /// carries the caller's `frame_id` (0 for surface attachment).

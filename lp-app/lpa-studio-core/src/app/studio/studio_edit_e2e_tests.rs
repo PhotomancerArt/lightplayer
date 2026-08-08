@@ -2558,7 +2558,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     let clock_json = r#"{
   "kind": "Clock",
   "transport": {
-    "running": true,
+    "play_state": "playing",
     "rate": 1.0
   }
 }"#;
@@ -2640,7 +2640,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
             r#"{
   "kind": "Clock",
   "transport": {
-    "running": true,
+    "play_state": "playing",
     "rate": 1.0
   }
 }"#,
