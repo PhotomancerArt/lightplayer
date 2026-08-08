@@ -576,6 +576,8 @@
           "type": "object"
         },
         "float_mode": {
+          "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+          "title": "Float mode",
           "type": "string"
         },
         "kind": {
@@ -647,6 +649,8 @@
           "type": "object"
         },
         "float_mode": {
+          "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+          "title": "Float mode",
           "type": "string"
         },
         "kind": {

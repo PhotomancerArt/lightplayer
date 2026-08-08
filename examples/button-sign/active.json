@@ -7,7 +7,6 @@
       "source": "node:..#entry_time"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "value",

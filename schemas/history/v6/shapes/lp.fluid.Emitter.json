@@ -1,0 +1,44 @@
+{
+  "value": {
+    "shape": {
+      "editor": "plain",
+      "id": 2405894887,
+      "meta": {},
+      "ty": {
+        "struct": {
+          "fields": [
+            {
+              "name": "id",
+              "ty": "u32"
+            },
+            {
+              "name": "pos",
+              "ty": "vec2"
+            },
+            {
+              "name": "dir",
+              "ty": "vec2"
+            },
+            {
+              "name": "radius",
+              "ty": "f32"
+            },
+            {
+              "name": "color",
+              "ty": "vec3"
+            },
+            {
+              "name": "velocity",
+              "ty": "f32"
+            },
+            {
+              "name": "intensity",
+              "ty": "f32"
+            }
+          ],
+          "name": "FluidEmitter"
+        }
+      }
+    }
+  }
+}

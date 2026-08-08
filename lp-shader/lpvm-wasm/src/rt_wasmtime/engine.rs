@@ -133,14 +133,16 @@ impl LpvmEngine for WasmLpvmEngine {
         })
     }
 
-    /// Fixed at construction ([`WasmOptions::float_mode`]): the override below
-    /// takes the middle-end config per call but not the numeric mode, so this
-    /// claims only the mode it was built with. `TargetLpvmGraphics` builds it
-    /// from `WasmOptions::default()`, which is Q32 — so a Float shader
-    /// previewed on the host CPU tier gets a compile error naming the backend
-    /// rather than a quietly-Fixed render.
+    /// Both modes, per compile — not "the mode I was built with".
+    ///
+    /// The wasm emitter lowers each mode natively (`wasm.f32` is in the
+    /// filetest `DEFAULT_TARGETS`), and [`Self::compile_with_params`] below
+    /// threads `params.float_mode` into the per-compile [`WasmOptions`], so
+    /// this claims nothing the next call does not emit. `compile` (no params)
+    /// still uses `self.compile_options.float_mode`; the instance reads its
+    /// mode off the compiled module's `opts`, not off the engine.
     fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
-        mode == self.compile_options.float_mode
+        matches!(mode, lpir::FloatMode::Q32 | lpir::FloatMode::F32)
     }
 
     fn compile_with_params(
@@ -151,6 +153,7 @@ impl LpvmEngine for WasmLpvmEngine {
     ) -> Result<Self::Module, Self::Error> {
         let mut opts = self.compile_options.clone();
         opts.config = params.config.clone();
+        opts.float_mode = params.float_mode;
         let artifact = compile_lpir(ir, meta, &opts)?;
         let bytes = artifact.wasm_module().bytes.clone();
         WasmLpvmModule::validate_shader(&self.engine, &bytes)?;
@@ -185,6 +188,17 @@ impl lpvm::LpvmModule for WasmLpvmModule {
 
     fn signatures(&self) -> &LpsModuleSig {
         &self.signatures
+    }
+
+    /// Read off the module's own `opts`, so a Float module never discloses
+    /// `Fixed` just because the engine was constructed Q32. `HardwareF32` and
+    /// not `SoftF32`: wasmtime lowers `f32.*` to the host's FP instructions,
+    /// so there is no soft-float library in the path.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        match self.opts.float_mode {
+            lpir::FloatMode::Q32 => lpvm::FloatImpl::Fixed,
+            lpir::FloatMode::F32 => lpvm::FloatImpl::HardwareF32,
+        }
     }
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {

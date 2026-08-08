@@ -24,7 +24,14 @@
   browser GPU-tier runtimes unable to render fixture-bearing projects
   (carried as `docs/debt/gpu-tier-cannot-sample-led-output.md`, now
   retired); the browser GPU tier now samples via an async readback with
-  one frame of latency.
+  one frame of latency. **Amended 2026-08-08** by
+  `2026-08-08-float-semantics-per-target-representation.md`: it retires nothing
+  further here, but it **generalizes decision 2's GPU-tier latitude** (an
+  authored `Fixed` rendering IEEE f32 is a documented product decision, not a
+  dropped request) from one tier into the general rule — float is the product's
+  one authored semantics, and numeric representation is a per-target execution
+  detail. Decision 4 is load-bearing in that ADR and is carried forward
+  unweakened; see the note under it.
 
 ## Context
 
@@ -68,6 +75,17 @@ saturation by design.
    as user-visible state (badge/log/wire-queryable). Rationale: a silent
    downgrade can mask a regression that looks correct while consuming an
    order of magnitude more power.
+
+   > **Note, 2026-08-08 — scope clarified, not narrowed.**
+   > `2026-08-08-float-semantics-per-target-representation.md` generalizes
+   > decision 2's numeric latitude across targets, and the two rules are easy
+   > to confuse from outside because they look alike. The distinction that
+   > ADR fixes: **latitude** is a target executing a request in the
+   > representation it carries (documented per target); **fallback** is a
+   > target silently answering a request it cannot serve. This decision is
+   > about the second, and it stands unchanged — a board whose image linked no
+   > f32 backend still *errors* on a pinned Float rather than quietly
+   > compiling Q32.
 
 ## Consequences
 
