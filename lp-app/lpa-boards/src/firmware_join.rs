@@ -675,6 +675,23 @@ mod tests {
         );
     }
 
+    /// The dig2go states `family: "esp32"` and a probed `flash_mb: 4`, which
+    /// is exactly what `esp32v3-4mb` declares — so the classic build is
+    /// offered for it with zero headroom, computed, with no pin. The board
+    /// needed no new firmware; this test is what says so.
+    #[test]
+    fn the_dig2go_computes_onto_the_classic_4mb_build() {
+        let dig2go = board("quinled/dig2go");
+        let matches = compatible_builds_for(&dig2go);
+        assert_eq!(ids(&matches), ["esp32v3-4mb"]);
+        assert_eq!(matches[0].headroom_mb, Some(0));
+        assert_eq!(matches[0].basis, CompatibilityBasis::Computed);
+        assert_eq!(
+            picked(Some(&dig2go), Some("esp32"), ALL_SERVED),
+            Some("esp32v3-4mb")
+        );
+    }
+
     /// The generic-install path, and the common one: no board picked, but
     /// the probe named the chip. This is the case that made the old
     /// single-image flow write a C6 image onto everything.

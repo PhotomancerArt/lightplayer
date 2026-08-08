@@ -30,6 +30,10 @@ pub const RUNTIME_MANIFEST_SOURCES: &[(&str, &str)] = &[
         "domraem/dom-z-102",
         include_str!("../../../lp-core/lpc-hardware/boards/domraem/dom-z-102.json"),
     ),
+    (
+        "quinled/dig2go",
+        include_str!("../../../lp-core/lpc-hardware/boards/quinled/dig2go.json"),
+    ),
 ];
 
 /// The checked-in runtime manifest JSON for `board_id`, verbatim — `None`
@@ -48,6 +52,7 @@ mod tests {
     #[test]
     fn lookup_hits_and_misses() {
         assert!(runtime_manifest_json("domraem/dom-z-102").is_some());
+        assert!(runtime_manifest_json("quinled/dig2go").is_some());
         // Display-only boards have no runtime manifest.
         assert!(runtime_manifest_json("quinled/dig-uno").is_none());
         assert!(runtime_manifest_json("nope/nope").is_none());

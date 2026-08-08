@@ -242,6 +242,98 @@ fn every_board_declares_a_default_led_wire_the_runtime_manifest_allows() {
     }
 }
 
+/// A power-gate pin is never a wire. The descriptor's whole promise is that
+/// the LED rail hangs off this GPIO, so the runtime manifest must declare it
+/// **and** reserve it (no driver may claim it), the resources it feeds must
+/// exist, and the catalog must not offer it as somewhere to plug pixels in.
+#[test]
+fn power_gate_pins_are_declared_reserved_and_never_wires() {
+    for (board_id, (display, runtime)) in manifest_pairs() {
+        let Some(runtime) = runtime else { continue };
+        for gate in &runtime.power_gate {
+            let resource = runtime
+                .gpio
+                .iter()
+                .find(|resource| resource.address == gate.gpio)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{board_id}: power gate names {} but no gpio resource declares it",
+                        gate.gpio
+                    )
+                });
+            assert!(
+                resource.reserved_reason.is_some(),
+                "{board_id}: power-gate pin {} is claimable — a driver could take the pin \
+                 the output rail hangs on",
+                gate.gpio
+            );
+            for feed in &gate.feeds {
+                assert!(
+                    runtime
+                        .resource
+                        .iter()
+                        .chain(runtime.gpio.iter())
+                        .any(|resource| &resource.address == feed),
+                    "{board_id}: power gate feeds {feed}, which this manifest does not declare"
+                );
+            }
+            let Some(display) = display.as_ref() else {
+                continue;
+            };
+            let gate_gpio: u8 = gate
+                .gpio
+                .strip_prefix("/gpio/")
+                .and_then(|number| number.parse().ok())
+                .unwrap_or_else(|| panic!("{board_id}: power gate address {}", gate.gpio));
+            for (label, gpio) in display.output_wires() {
+                assert_ne!(
+                    gpio, gate_gpio,
+                    "{board_id}: wire {label} is the power-gate pin — generation would author \
+                     an endpoint onto the gate that powers the rail"
+                );
+            }
+        }
+    }
+}
+
+/// The dig2go is the board that forced the descriptor: GPIO12 is both the
+/// LED-supply gate and the MTDI flash-voltage strap, so it must be reserved
+/// in the runtime manifest AND named by a power gate — never one without the
+/// other.
+#[test]
+fn the_dig2go_gates_gpio12_and_reserves_it() {
+    let (_, runtime) = manifest_pairs()
+        .remove("quinled/dig2go")
+        .expect("the dig2go is checked in");
+    let runtime = runtime.expect("the dig2go has a runtime manifest");
+    let gate = match runtime.power_gate.as_slice() {
+        [gate] => gate,
+        gates => panic!(
+            "expected exactly one dig2go power gate, got {}",
+            gates.len()
+        ),
+    };
+    assert_eq!(gate.gpio, "/gpio/12");
+    // Empty on purpose, and load-bearing: `feeds` names ENDPOINT addresses
+    // (the classic's RMT slots are per-transmission, not identities), and an
+    // entry that matched nothing would leave the rail permanently down — a
+    // dark board that reads as a driver bug. The board's one gate switches
+    // its only LED supply, so "all outputs" is also simply true.
+    assert_eq!(gate.feeds, Vec::<String>::new());
+    let pin = runtime
+        .gpio
+        .iter()
+        .find(|resource| resource.address == "/gpio/12")
+        .expect("the gate pin is a declared resource");
+    assert!(
+        pin.reserved_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("MTDI")),
+        "the reservation must say why the pin is dangerous: {:?}",
+        pin.reserved_reason
+    );
+}
+
 #[test]
 fn display_pins_agree_with_runtime_manifests() {
     for (board_id, (display, runtime)) in manifest_pairs() {

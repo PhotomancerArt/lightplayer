@@ -4363,7 +4363,12 @@ impl StudioController {
                 self.run_setup_port_request(provider_id, updates).await
             }
             SetupDispatch::ReadProbe => {
+                // Before AND after: the connect's lines are what PROBING
+                // has to show while it reads, and the escalation (a ROM
+                // reset) adds its own.
+                self.pump_setup_console(&updates);
                 let probe = self.read_setup_probe().await;
+                self.pump_setup_console(&updates);
                 (UiNotices::new(), Some(SetupEvent::ProbeCompleted { probe }))
             }
             SetupDispatch::Device(op @ DeviceOp::ProvisionFirmware { .. }) => {
@@ -4578,6 +4583,12 @@ impl StudioController {
 
     /// `RequestPort`: the browser's own chooser, then a connect. The port
     /// grant is what gives the flow a session — and therefore a card key.
+    ///
+    /// The two phases are awaited SEPARATELY so the wizard can narrate
+    /// them apart (bench, 2026-08-08): the chooser resolving is reported
+    /// as `PortChosen` the moment it happens, and the several seconds of
+    /// open/reset/boot/hello that follow are PORT_PICKING's copy no
+    /// longer — they are CONNECTING's.
     async fn run_setup_port_request(
         &mut self,
         provider_id: LinkProviderKind,
@@ -4592,7 +4603,16 @@ impl StudioController {
         // the await below emits views while the session installs, and the
         // bind only lands after it returns.
         self.setup_port_snapshot = Some(before.clone());
-        let outcome = self.device.open_provider(provider_id).await;
+        let outcome = match self.device.choose_provider_endpoint(provider_id).await {
+            // A port is in hand: the flow leaves PORT_PICKING here, not
+            // after the connect below.
+            Ok(crate::PortChoice::Endpoint(endpoint_id)) => {
+                self.note_setup_progress(crate::SetupEvent::PortChosen, &updates);
+                self.device.connect_endpoint(provider_id, endpoint_id).await
+            }
+            Ok(crate::PortChoice::Ended(outcome)) => Ok(outcome),
+            Err(error) => Err(error),
+        };
         // The chooser's own vocabulary: a grant that produced no session
         // is a cancel. Web Serial cannot tell "cancelled" from "the list
         // was empty" — both are one `NotFoundError` — so the flow only
@@ -4604,7 +4624,7 @@ impl StudioController {
         );
         let failed = outcome.is_err();
         let settled = self
-            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates.clone())
             .await;
         let notices = match settled {
             Ok(notices) => notices,
@@ -4636,10 +4656,63 @@ impl StudioController {
         match granted {
             Some(device_id) => {
                 self.bind_setup_device(device_id);
+                // Everything the connect narrated belongs on the wizard's
+                // terminal now that there is a session to hang it on.
+                self.pump_setup_console(&updates);
                 (notices, Some(crate::SetupEvent::PortGranted))
             }
             None => (notices, Some(crate::SetupEvent::PortPickerCancelled)),
         }
+    }
+
+    /// Report an interim outcome to the machine WHILE the command that
+    /// produced it is still running.
+    ///
+    /// [`Self::run_setup_command`] reports one event, at the end. An op
+    /// with an honest mid-point — the chooser resolving, seconds before
+    /// the connect it starts finishes — has to say so as it happens, or
+    /// the wizard narrates the step the user already finished.
+    ///
+    /// Interim events are STATE-ONLY by construction: there is no queue to
+    /// run commands on from inside a command, so a transition that asks
+    /// for work does not belong here. The reducer's transition table
+    /// asserts exactly that for every interim event it defines.
+    fn note_setup_progress(&mut self, event: crate::SetupEvent, updates: &UxUpdateSink) {
+        let Some(session) = self.setup.as_mut() else {
+            return;
+        };
+        let commands = session.flow.handle(event);
+        debug_assert!(
+            commands.is_empty(),
+            "an interim setup event cannot ask for work: {commands:?}"
+        );
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+    }
+
+    /// Drain what the link has said into the bound session's console tail,
+    /// so the wizard's terminal shows the connect's own lines instead of
+    /// only the browser console.
+    ///
+    /// The heartbeat does this on a tick; a setup op holds the controller
+    /// across its awaits, so no tick can interleave and the tail only
+    /// advances where the flow asks. Called at the boundaries the flow can
+    /// actually observe — after the connect, and around the probe.
+    fn pump_setup_console(&mut self, updates: &UxUpdateSink) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        let mut drafts = self.device.take_pending_device_logs();
+        if let Some(session) = self.pool.session_mut(device_id) {
+            drafts.extend(session.take_pending_logs());
+            drafts.extend(session.take_device_console_logs());
+        }
+        if drafts.is_empty() {
+            return;
+        }
+        self.record_session_logs(device_id, drafts);
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
     }
 
     /// Remember which session the flow drives, and give the executor the
@@ -4704,6 +4777,12 @@ impl StudioController {
         );
         crate::ProbeEvidence {
             hello_seen: hello.is_some(),
+            // `Incompatible` is the link's own diagnosis of LightPlayer
+            // framing with no proto-matching hello — firmware too old for
+            // this Studio. Its one affordance is a reflash, which is what
+            // the verdict routes to; without this the flow read the board
+            // as unresponsive and offered BOOT-hold advice instead.
+            stale_lightplayer: matches!(device_state, Some(DeviceState::Incompatible { .. })),
             no_firmware_signature: state_says_blank
                 || snapshot
                     .as_ref()

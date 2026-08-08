@@ -107,6 +107,12 @@ is why `just clippy-fw-esp32v3` passes `--profile release-esp32v3` where
 | sequencing | `output/rmt/shared_driver.rs` | the one `Ws281xDriver` static, the IRAM interrupt trampoline, the optional telemetry tap |
 | seam | `output/rmt/esp32v3_rmt_ws281x_driver.rs` | `lpc-hardware` endpoints, leases, open-time pin binding |
 
+Boards whose manifest declares `power_gate` entries (the dig2go's GPIO12 LED
+relay) additionally get `output/power_gate.rs`: an esp-hal pin + `Instant`
+clock handed to `fw-esp32-common`'s rail state machine at boot. Gateless
+boards construct the provider exactly as before. See
+`docs/adr/2026-08-08-switched-power-rail-mechanism.md`.
+
 Ported from the experiment repo's hardware-validated classic backend
 (`2026-esp32s3-experiment`, `fw/led-lab-esp32/src/esp32_rmt.rs`). All
 sequencing stays in `lp-ws281x`, whose host suite (`cargo test -p lp-ws281x`)

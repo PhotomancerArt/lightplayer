@@ -16,6 +16,7 @@
     "5-24 V input"
   ],
   "blurb": "LED controller with fuse, level shifter, and screw terminals; 5-24 V input.",
+  "support_note": "Aux header GPIOs (Q1 15, Q2 12, Q3 2, Q4 32) are from the vendor pinout guide and are not yet verified against hardware. LED1 is jumper-selectable between GPIO16 and GPIO1; only GPIO16 is declared here. Flash depends on the fitted module, not the board.",
   "purchase_urls": [
     {
       "label": "quinled.info",
@@ -84,21 +85,22 @@
       {
         "label": "Q1",
         "role": "io",
-        "gpio": 1
+        "gpio": 15,
+        "caps": [
+          {
+            "text": "ADC2_3",
+            "kind": "adc"
+          }
+        ]
       },
       {
         "label": "Q2",
-        "role": "io",
-        "gpio": 2
-      },
-      {
-        "label": "Q4",
-        "role": "io",
-        "gpio": 4,
+        "role": "strap",
+        "gpio": 12,
         "caps": [
           {
-            "text": "Touch0",
-            "kind": "touch"
+            "text": "strap",
+            "kind": "strap"
           }
         ]
       },
@@ -113,24 +115,24 @@
         "role": "pwr3"
       },
       {
-        "label": "15",
-        "role": "io",
-        "gpio": 15,
-        "caps": [
-          {
-            "text": "ADC2_3",
-            "kind": "adc"
-          }
-        ]
-      },
-      {
-        "label": "12",
+        "label": "Q3",
         "role": "strap",
-        "gpio": 12,
+        "gpio": 2,
         "caps": [
           {
             "text": "strap",
             "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "Q4",
+        "role": "io",
+        "gpio": 32,
+        "caps": [
+          {
+            "text": "ADC1_4",
+            "kind": "adc"
           }
         ]
       },

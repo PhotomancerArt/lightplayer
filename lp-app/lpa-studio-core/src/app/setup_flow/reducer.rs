@@ -158,6 +158,15 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
         (SetupState::BoardFirst { .. }, SetupEvent::Back) => SetupStep::go(connect_intro()),
 
         // ---- PORT_PICKING --------------------------------------------------
+        // The chooser answered, and the connect it started is ALREADY
+        // running: this asks for nothing, it only stops the wizard
+        // claiming the browser is still asking (the executor reports it
+        // mid-op — `note_setup_progress`).
+        (SetupState::PortPicking { preseeded_board }, SetupEvent::PortChosen) => {
+            SetupStep::go(SetupState::Connecting { preseeded_board })
+        }
+        // A grant with no CONNECTING in between: the port was already
+        // open, or a caller that does not narrate the two phases apart.
         (SetupState::PortPicking { preseeded_board }, SetupEvent::PortGranted) => SetupStep::with(
             SetupState::Probing { preseeded_board },
             vec![SetupCommand::ProbeBoard],
@@ -170,6 +179,21 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
         (SetupState::PortPicking { .. }, SetupEvent::PortPickerEmpty) => {
             SetupStep::go(SetupState::ConnectIntro {
                 hint: ConnectHint::NoPortsSeen,
+            })
+        }
+
+        // ---- CONNECTING ----------------------------------------------------
+        (SetupState::Connecting { preseeded_board }, SetupEvent::PortGranted) => SetupStep::with(
+            SetupState::Probing { preseeded_board },
+            vec![SetupCommand::ProbeBoard],
+        ),
+        // The connect ended with no session (the ladder's soft failure, or
+        // a grant that produced nothing). The flow comes back through the
+        // same door a dismissed chooser does — there is no port to release
+        // that the connect did not already give up.
+        (SetupState::Connecting { .. }, SetupEvent::PortPickerCancelled) => {
+            SetupStep::go(SetupState::ConnectIntro {
+                hint: ConnectHint::PickerClosed,
             })
         }
 
@@ -241,6 +265,21 @@ pub fn reduce(context: &SetupContext, state: SetupState, event: SetupEvent) -> S
             }))
         }
         (SetupState::WledFound { .. }, SetupEvent::Back) => {
+            SetupStep::with(connect_intro(), vec![SetupCommand::ReleasePort])
+        }
+
+        // ---- STALE_LP ------------------------------------------------------
+        // The board runs LightPlayer this Studio cannot talk to, so the
+        // update IS a flash: the same board pick, with the replacement flag
+        // that makes the confirmation warn before anything is overwritten.
+        (SetupState::StaleLp { probe }, SetupEvent::UpdateFirmware) => {
+            SetupStep::go(SetupState::BoardPick(BoardPickState {
+                probe: Some(probe),
+                selected: None,
+                replaces_firmware: true,
+            }))
+        }
+        (SetupState::StaleLp { .. }, SetupEvent::Back) => {
             SetupStep::with(connect_intro(), vec![SetupCommand::ReleasePort])
         }
 
@@ -576,10 +615,13 @@ fn release_port_if(release: bool) -> Vec<SetupCommand> {
     }
 }
 
-/// PROBING's four-way branch — the verdict enum's whole purpose.
+/// PROBING's branch — the verdict enum's whole purpose.
 fn route_probe(probe: BoardProbe, preseeded_board: Option<String>) -> SetupState {
     match probe.verdict {
         BoardVerdict::LightPlayer { .. } => SetupState::AlreadyLp { probe },
+        // Recognised firmware, no protocol: like WLED, the board is offered
+        // a replacement rather than a preseeded shortcut.
+        BoardVerdict::StaleLightPlayer { .. } => SetupState::StaleLp { probe },
         BoardVerdict::Wled { .. } => SetupState::WledFound { probe },
         BoardVerdict::Unresponsive { .. } => SetupState::ProbeFailed { probe },
         BoardVerdict::Blank { .. } => {
@@ -709,6 +751,9 @@ mod tests {
             SetupStateKind::PortPicking => SetupState::PortPicking {
                 preseeded_board: None,
             },
+            SetupStateKind::Connecting => SetupState::Connecting {
+                preseeded_board: None,
+            },
             SetupStateKind::Probing => SetupState::Probing {
                 preseeded_board: None,
             },
@@ -722,6 +767,9 @@ mod tests {
             },
             SetupStateKind::AlreadyLp => SetupState::AlreadyLp {
                 probe: probe(BoardVerdict::LightPlayer { known: None }),
+            },
+            SetupStateKind::StaleLp => SetupState::StaleLp {
+                probe: probe(BoardVerdict::StaleLightPlayer { known: None }),
             },
             SetupStateKind::ProbeFailed => SetupState::ProbeFailed {
                 probe: probe(BoardVerdict::Unresponsive { known: None }),
@@ -767,12 +815,14 @@ mod tests {
                 board_id: S3.to_string(),
             },
             SetupEventKind::Confirm => SetupEvent::Confirm,
+            SetupEventKind::PortChosen => SetupEvent::PortChosen,
             SetupEventKind::PortGranted => SetupEvent::PortGranted,
             SetupEventKind::PortPickerCancelled => SetupEvent::PortPickerCancelled,
             SetupEventKind::PortPickerEmpty => SetupEvent::PortPickerEmpty,
             SetupEventKind::ProbeCompleted => SetupEvent::ProbeCompleted { probe: blank() },
             SetupEventKind::PortLost => SetupEvent::PortLost,
             SetupEventKind::WipeAndSetUp => SetupEvent::WipeAndSetUp,
+            SetupEventKind::UpdateFirmware => SetupEvent::UpdateFirmware,
             SetupEventKind::AdoptDone => SetupEvent::AdoptDone,
             SetupEventKind::AdoptAndOpen => SetupEvent::AdoptAndOpen,
             SetupEventKind::SetUpFresh => SetupEvent::SetUpFresh,
@@ -824,10 +874,19 @@ mod tests {
                 (E::CloseRequested, S::Closed, &[]),
             ],
             S::PortPicking => &[
+                (E::PortChosen, S::Connecting, &[]),
                 (E::PortGranted, S::Probing, &["probe-board"]),
                 (E::PortPickerCancelled, S::ConnectIntro, &[]),
                 (E::PortPickerEmpty, S::ConnectIntro, &[]),
                 (E::CloseRequested, S::Closed, &[]),
+            ],
+            // The connect the chooser started. It holds the grant, so its
+            // exits release the port.
+            S::Connecting => &[
+                (E::PortGranted, S::Probing, &["probe-board"]),
+                (E::PortPickerCancelled, S::ConnectIntro, &[]),
+                (E::PortLost, S::ConnectIntro, &["release-port"]),
+                (E::CloseRequested, S::Closed, &["release-port"]),
             ],
             S::Probing => &[
                 (E::ProbeCompleted, S::BoardPick, &[]),
@@ -858,6 +917,14 @@ mod tests {
                     &["record-sighting", "open-device-home"],
                 ),
                 (E::SetUpFresh, S::BoardPick, &[]),
+                (E::PortLost, S::ConnectIntro, &["release-port"]),
+                (E::CloseRequested, S::Closed, &["release-port"]),
+            ],
+            // Old firmware: the update is the only way forward, and it is
+            // a flash — so this row is WLED_FOUND's, verb for verb.
+            S::StaleLp => &[
+                (E::UpdateFirmware, S::BoardPick, &[]),
+                (E::Back, S::ConnectIntro, &["release-port"]),
                 (E::PortLost, S::ConnectIntro, &["release-port"]),
                 (E::CloseRequested, S::Closed, &["release-port"]),
             ],
@@ -984,6 +1051,10 @@ mod tests {
                 SetupStateKind::AlreadyLp,
             ),
             (
+                BoardVerdict::StaleLightPlayer { known: None },
+                SetupStateKind::StaleLp,
+            ),
+            (
                 BoardVerdict::Unresponsive { known: None },
                 SetupStateKind::ProbeFailed,
             ),
@@ -1014,6 +1085,9 @@ mod tests {
                 known: Some(remembered("Porch sign")),
             },
             BoardVerdict::LightPlayer {
+                known: Some(remembered("Porch sign")),
+            },
+            BoardVerdict::StaleLightPlayer {
                 known: Some(remembered("Porch sign")),
             },
         ] {
@@ -1113,6 +1187,12 @@ mod tests {
                     probe: probe(BoardVerdict::Wled { known: None }),
                 },
                 SetupEvent::WipeAndSetUp,
+            ),
+            (
+                SetupState::StaleLp {
+                    probe: probe(BoardVerdict::StaleLightPlayer { known: None }),
+                },
+                SetupEvent::UpdateFirmware,
             ),
             (
                 SetupState::AlreadyLp {
@@ -1627,6 +1707,73 @@ mod tests {
     }
 
     #[test]
+    fn the_chooser_and_the_connect_are_two_steps_the_user_can_read() {
+        // Bench, 2026-08-08: PORT_PICKING's "the browser is asking which
+        // port…" stayed up through the whole reset/boot/hello wait,
+        // because the grant was only reported once the connect had already
+        // happened. The chooser's answer now lands on its own.
+        let (flow, commands) = trace(
+            hardware(),
+            vec![
+                SetupEvent::ItsConnected,
+                SetupEvent::PortChosen,
+                SetupEvent::PortGranted,
+            ],
+        );
+        assert_eq!(commands, vec!["request-port", "probe-board"]);
+        assert_eq!(flow.state().kind(), SetupStateKind::Probing);
+
+        // And the interim event asks for NOTHING: it is reported from
+        // inside the command that is still running, where there is no
+        // queue to run anything on (`note_setup_progress`).
+        let step = reduce(
+            &hardware(),
+            SetupState::PortPicking {
+                preseeded_board: Some(C6.to_string()),
+            },
+            SetupEvent::PortChosen,
+        );
+        assert!(step.commands.is_empty());
+        assert_eq!(
+            step.state,
+            SetupState::Connecting {
+                preseeded_board: Some(C6.to_string()),
+            },
+            "the board-first choice survives the connect"
+        );
+    }
+
+    #[test]
+    fn golden_stale_lightplayer_update_path() {
+        // The dead end this state exists to remove: a board on old
+        // firmware used to land on PROBE_FAILED's replug advice. It reaches
+        // the flash instead, and the name it was remembered under survives.
+        let (flow, commands) = trace(
+            hardware(),
+            vec![
+                SetupEvent::ItsConnected,
+                SetupEvent::PortGranted,
+                SetupEvent::ProbeCompleted {
+                    probe: probe(BoardVerdict::StaleLightPlayer {
+                        known: Some(remembered("Porch sign")),
+                    }),
+                },
+                SetupEvent::UpdateFirmware,
+                SetupEvent::BoardChosen {
+                    board_id: C6.to_string(),
+                },
+                SetupEvent::Confirm,
+                SetupEvent::FlashSucceeded,
+            ],
+        );
+        assert_eq!(commands, vec!["request-port", "probe-board", "flash"]);
+        let SetupState::Provision(provision) = flow.state() else {
+            panic!("an updated board provisions like any other")
+        };
+        assert_eq!(provision.name, "Porch sign");
+    }
+
+    #[test]
     fn golden_flash_fail_retry_twice_then_replug_guidance() {
         let (flow, commands) = trace(
             hardware(),
@@ -1797,6 +1944,7 @@ mod tests {
             SetupStateKind::BoardPick,
             SetupStateKind::WledFound,
             SetupStateKind::AlreadyLp,
+            SetupStateKind::StaleLp,
             SetupStateKind::ProbeFailed,
         ] {
             let step = reduce(&hardware(), state_of(kind), SetupEvent::CloseRequested);

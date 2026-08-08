@@ -7,6 +7,10 @@
 //! driver init (see [`rmt::v3_rmt::plan_for_declared`]), backed by the
 //! portable `lp-ws281x` transmitter.
 
+//! A board may also put the LED supply behind a GPIO ([`power_gate`]); the
+//! same split applies there — the state machine is shared, the pad is ours.
+
+pub mod power_gate;
 pub mod rmt;
 
 pub use fw_esp32_common::output::provider::Esp32OutputProvider;

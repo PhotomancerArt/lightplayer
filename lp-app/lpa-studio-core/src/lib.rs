@@ -40,7 +40,7 @@ pub use app::bus::{
 pub use app::device::{
     BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
     DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, DeviceTarget, EndpointChoice,
-    ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
+    PortChoice, ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{

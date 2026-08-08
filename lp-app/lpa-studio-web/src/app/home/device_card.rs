@@ -1192,14 +1192,24 @@ pub(crate) fn card_op_activity(op: &lpa_studio_core::CardOp, tail: &[UiLogEntry]
             div { class: bar_class,
                 span { style: "{fill_style}" }
             }
-            details { class: "ux-card-op-term", open: true,
-                summary { "Technical details" }
-                if tail.is_empty() {
-                    div { "Waiting for device output…" }
-                } else {
-                    for entry in tail.iter() {
-                        div { class: console_line_class(entry.level), "{entry.message}" }
-                    }
+            {card_op_terminal(tail)}
+        }
+    }
+}
+
+/// The op overlay's TERMINAL alone — the log tail under a "Technical
+/// details" disclosure. Split out for the setup wizard's waiting steps
+/// (CONNECTING, PROBING), which have link output to show but no op to draw
+/// a labelled bar for; one definition so the two cannot drift.
+pub(crate) fn card_op_terminal(tail: &[UiLogEntry]) -> Element {
+    rsx! {
+        details { class: "ux-card-op-term", open: true,
+            summary { "Technical details" }
+            if tail.is_empty() {
+                div { "Waiting for device output…" }
+            } else {
+                for entry in tail.iter() {
+                    div { class: console_line_class(entry.level), "{entry.message}" }
                 }
             }
         }

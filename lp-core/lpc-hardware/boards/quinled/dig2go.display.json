@@ -1,0 +1,86 @@
+{
+  "board_id": "quinled/dig2go",
+  "display_name": "QuinLED-dig2go",
+  "manufacturer": "QuinLED",
+  "soc": "ESP32",
+  "family": "esp32",
+  "flash": "4 MB",
+  "flash_mb": 4,
+  "price_usd": 24.99,
+  "tier": "silver",
+  "capabilities": [
+    "enclosed",
+    "USB-C powered",
+    "15 W max",
+    "1 LED port",
+    "level shifter",
+    "switched LED power rail",
+    "touch button"
+  ],
+  "blurb": "Single-output controller in a closed case: one level-shifted LED pigtail on GPIO16, sitting on a power rail GPIO12 switches. USB-C carries both power and the serial link; a capacitive touch button sits on the case. ESP32-D0WD-V3, 4 MB flash.",
+  "support_note": "The USB bridge enumerates as 1a86:7523, a VID:PID the CH340C and CH340G share, and the case hides the silkscreen — the exact part is unconfirmed, though driver guidance is the same for both.",
+  "purchase_urls": [
+    {
+      "label": "quinled.shop",
+      "href": "https://quinled.shop/product/dig2go/"
+    }
+  ],
+  "usb_bridge": "ch340c",
+  "notes": [
+    {
+      "text": "The LED output only has power while GPIO12 is asserted: with the rail off the strip is dark, not dim. GPIO12 is also the MTDI flash-voltage strap, so it is low at boot and driven high afterwards."
+    },
+    {
+      "text": "LightPlayer registers no driver for the onboard MEMS microphone or the IR receiver, so this board runs neither audio-reactive effects nor IR remotes."
+    },
+    {
+      "text": "The vendor pinout guide lists a dupont header carrying 3V3, switched 5 V, GND and GPIO21/22/23/25. None of those pins are declared here — they are not verified on the desk unit."
+    }
+  ],
+  "default_led_wires": [
+    "LED"
+  ],
+  "hw": {
+    "width": 120,
+    "module": {
+      "x": 21,
+      "y": 12,
+      "w": 78,
+      "h": 48,
+      "label": "ESP32-D0WD-V3",
+      "antenna": true
+    },
+    "usb": [
+      {
+        "x": 60,
+        "label": "USB-C"
+      }
+    ],
+    "buttons": [
+      {
+        "x": 60,
+        "y": -16,
+        "label": "TOUCH"
+      }
+    ],
+    "terminals": [
+      {
+        "label": "LED",
+        "role": "io",
+        "gpio": 16,
+        "caps": [
+          {
+            "text": "level-shift",
+            "kind": "note"
+          },
+          {
+            "text": "switched rail",
+            "kind": "pwr"
+          }
+        ]
+      }
+    ],
+    "left": [],
+    "right": []
+  }
+}
