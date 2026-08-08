@@ -38,10 +38,19 @@ lpc-wire's no-compat policy, because a browser tab can sit open for
 days across server deploys. Refusals travel as HTTP 200 `CloudError`
 answers: they are message-plane answers, not transport failures.
 The durable public contracts are elsewhere: share URLs
-(`/p/<slug>-prj_<uid>`, uid-authoritative) and the persisted event
+(`/p/<slug>-<uid>`, uid-authoritative) and the persisted event
 format are forever; the message vocabulary is the least durable layer.
+**Amended 2026-08-08** (`2026-08-08-project-url-identity-and-sharing.md`):
+the uid spelling lost its underscore with the single-token format, and
+the "forever" clause is precisely the uid-extractability contract — the
+uid appears in the URL and is mechanically extractable; everything else
+about the shape is revisable behind canonicalization.
 
-**Blob reads are open; the hash is the capability.** `GET /b/{hash}`
+**Blob reads are open; the hash is the capability.** (Amended
+2026-08-08: writes are now anonymous-legal too — an `Access::Edit`
+link-holder pushes without a session, and the upload half rides the
+same plane; hash-verified and idempotent, abuse surface owned by
+`docs/debt/cloud-abuse-quota-posture.md`.) `GET /b/{hash}`
 and `/t/{hash}` require no session: content addresses are 256-bit
 unguessable, there is no listing, and the no-login viewer and OG
 `og:image` fetches have no session to present. Writes are
