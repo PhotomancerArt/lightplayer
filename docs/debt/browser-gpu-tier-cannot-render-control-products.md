@@ -1,12 +1,28 @@
 ---
-status: carried
+status: retired
 since: 2026-08-05      # honest-device-preview G1 walk surfaced it as "not tracked"
 logged: 2026-08-05
+retired: 2026-08-07
 area: lp-gfx (browser GPU tier) / lpa-server preview host — control-product sampling
 related:
   - ../adr/2026-07-16-preview-host.md
   - ../adr/2026-06-26-control-product-preview-probes.md
+  - ../adr/2026-08-05-browser-sample-readback-is-async.md
 ---
+
+> **Retired 2026-08-07.** This file was logged hours before its own fix
+> merged: the async one-frame-latency `sample_rgba16` pipeline (fix
+> direction 1 below) shipped 2026-08-05/06 with
+> `../adr/2026-08-05-browser-sample-readback-is-async.md` (PR #367),
+> which also retired this condition's earlier file,
+> `gpu-tier-cannot-sample-led-output.md` — two sessions crossed and
+> nobody circled back to this one. Verified live 2026-08-07 (control-
+> first product display work, PR #387): GPU-tier preview slots publish
+> real control output frames — the Explore/Projects lamp cards render
+> from them — with a clean console and no per-tick retry storm (the
+> restate-every-frame half was separately fixed by
+> `../defects/2026-07-28-tick-error-restated-every-frame.md`'s
+> rate-limiting in `lpa-server`).
 # The browser GPU preview tier cannot render control products
 
 **Shape** — rendering a CONTROL product (fixture sampling its visual into

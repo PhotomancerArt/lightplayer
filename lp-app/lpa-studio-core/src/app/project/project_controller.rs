@@ -2758,6 +2758,7 @@ impl ProjectController {
                 view_sections(node),
                 &node.children,
                 node.card_ui.wiring_open,
+                node.card_ui.hero_product,
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2781,6 +2782,7 @@ impl ProjectController {
                 &child.sections,
                 &child.children,
                 child.card_ui.wiring_open,
+                child.card_ui.hero_product,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2946,6 +2948,7 @@ impl ProjectController {
         sections: &[crate::UiNodeSection],
         children: &[crate::UiNodeChild],
         wiring_open: bool,
+        hero_product: crate::ModuleHeroProduct,
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
         let node = self.node(&address)?;
@@ -2992,55 +2995,94 @@ impl ProjectController {
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
 
-        // The module's own visual mirror (R7); a module with no output
-        // simply has no hero (E6). The mirror ROW supplies identity and
-        // meta, but its bytes ride the scope's resolved `visual.out`
-        // product: the mirror's own product ref is outside the preview
-        // stream (only always-live products and the focused node's are
-        // tracked), so without this rehoming the root hero renders
-        // black while the shader card below it is live.
-        let mut preview =
-            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
+        // The hero: whichever of the scope's two primary products the card's
+        // preference names, defaulting to `control.out` — a fixture
+        // project's output IS the lamps, and the raster behind them is the
+        // intermediate (Yona's ruling 2026-08-07, reversing R7's
+        // visual-first reading). The named kind not resolving falls back to
+        // the other, so a single-product module renders the same either way,
+        // and a scope resolving neither keeps the cleared R7 mirror (E6).
         let scope_visual = self
             .scope_channel_product(graph, scope, lpc_model::PRIMARY_VISUAL_CHANNEL)
             .filter(|product| matches!(product, UiProductRef::Visual { .. }));
+        let scope_control = self
+            .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .filter(|product| matches!(product, UiProductRef::Control { .. }));
+        // Only a scope resolving BOTH offers a choice; anything else has one
+        // hero and no toggle to draw.
+        let hero_choice =
+            (scope_visual.is_some() && scope_control.is_some()).then_some(hero_product);
+        let chosen = match hero_product {
+            crate::ModuleHeroProduct::Control => scope_control.or(scope_visual),
+            crate::ModuleHeroProduct::Visual => scope_visual.or(scope_control),
+        };
+
+        // The R7 mirror ROW supplies identity and meta, but its bytes ride
+        // the scope's resolved product: the mirror's own product ref is
+        // outside the preview stream (only always-live products and the
+        // focused node's are tracked), so without this rehoming the root
+        // hero renders black while the shader card below it is live.
+        let mut preview =
+            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
+        if preview.is_none() && matches!(chosen, Some(UiProductRef::Control { .. })) {
+            // The asymmetry control-first exposes: the R7 mirror is a
+            // VISUAL row, so a module publishing no mirror at all would get
+            // NO hero even though its scope drives lamps — "control-first"
+            // with nothing to show. Synthesize the row from the module's
+            // own control product when it has one, else from the kind
+            // alone; the rehoming below fills it exactly as it fills the
+            // mirror. The visual side keeps its old rule (no mirror row, no
+            // hero): R7 guarantees the row for every module, so a
+            // synthesized visual hero would only paper over a broken walk.
+            preview = super::node::node_face_builder::product_of_kind(
+                sections,
+                crate::UiProductKind::Control,
+            )
+            .or_else(|| {
+                Some(crate::UiProducedProduct::new(
+                    MODULE_OUTPUT_SLOT,
+                    crate::UiProductKind::Control,
+                ))
+            });
+        }
         if let Some(hero) = preview.as_mut() {
-            if let Some(product) = scope_visual {
-                if let Some(bytes) = self
-                    .sync
-                    .as_ref()
-                    .and_then(|sync| sync.product_preview(&product))
-                {
-                    hero.preview = bytes.clone();
+            match chosen {
+                Some(product @ UiProductRef::Visual { .. }) => {
+                    if let Some(bytes) = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))
+                    {
+                        hero.preview = bytes.clone();
+                        hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                        hero.product = Some(product);
+                    }
+                }
+                Some(product) => {
+                    // A control hero: the visual mirror would render CLEARED
+                    // (or stale) here — a black square is not this module's
+                    // output, its fixtures' lamps are. The hero becomes the
+                    // control product outright (kind included, so the shared
+                    // preview draws the lamp layout), and says "not tracked"
+                    // honestly when the bytes are not in the stream instead
+                    // of showing the mirror.
+                    hero.kind = ui_product_kind(product);
                     hero.tracking = borrowed_tracking(&self.always_live_products(), product);
                     hero.product = Some(product);
+                    hero.preview = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))
+                        .cloned()
+                        .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
                 }
-            } else if let Some(product) = self
-                .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
-                .filter(|product| matches!(product, UiProductRef::Control { .. }))
-            {
-                // A control-first module: nothing writes the scope's
-                // visual, so the mirror node renders CLEARED — a black
-                // square is not this module's output, its fixtures' lamps
-                // are. The hero becomes the control product outright
-                // (kind included, so the shared preview draws the lamp
-                // layout), and says "not tracked" honestly when the bytes
-                // are not in the stream instead of showing the cleared
-                // mirror.
-                hero.kind = ui_product_kind(product);
-                hero.tracking = borrowed_tracking(&self.always_live_products(), product);
-                hero.product = Some(product);
-                hero.preview = self
-                    .sync
-                    .as_ref()
-                    .and_then(|sync| sync.product_preview(&product))
-                    .cloned()
-                    .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
+                None => {}
             }
         }
 
         Some(crate::UiModuleFace {
             preview,
+            hero_choice,
             panel: crate::UiPanelGroup::new(label, path)
                 .with_target(scope)
                 .with_controls(controls)
@@ -6076,6 +6118,10 @@ fn count_nodes(node: &NodeController) -> usize {
 /// `project`, and `show` all read as one kind).
 const MODULE_KIND_LABEL: &str = "Module";
 
+/// The name every module's output row wears — the R7 mirror's slot name,
+/// reused when a control-first hero has to be synthesized without one.
+const MODULE_OUTPUT_SLOT: &str = "output";
+
 /// The main tab's anatomy sections for a built card, empty for a card whose
 /// body is text.
 fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
@@ -8846,10 +8892,11 @@ mod tests {
     }
 
     #[test]
-    fn a_control_first_module_heroes_its_control_output() {
+    fn a_control_only_module_heroes_its_control_output_with_no_toggle() {
         // No visual writer anywhere in the scope: the module's own mirror
         // renders CLEARED, so the hero is the scope's control product —
-        // family included, since that is what picks the lamp layout.
+        // family included, since that is what picks the lamp layout. One
+        // product means no choice, so no toggle rides the face.
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -8874,12 +8921,17 @@ mod tests {
             Some(UiProductRef::from_control_product(fixture_control_product()))
         );
         assert_eq!(hero.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(
+            face.hero_choice, None,
+            "one product is not a choice — the face offers no toggle"
+        );
     }
 
     #[test]
-    fn a_module_with_a_visual_keeps_its_visual_hero() {
-        // The control fallback is exactly that: a scope that resolves a
-        // visual still heroes the visual, control channel or not.
+    fn a_module_resolving_both_products_heroes_the_control_and_offers_the_toggle() {
+        // Yona's ruling (2026-08-07): the lamps ARE the project's output,
+        // so a scope resolving both leads with `control.out` and keeps the
+        // R7 raster one gesture away.
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -8902,7 +8954,52 @@ mod tests {
             panic!("the root module card wears a module face");
         };
         let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Control);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_control_product(fixture_control_product()))
+        );
+        assert_eq!(
+            face.hero_choice,
+            Some(crate::ModuleHeroProduct::Control),
+            "both products resolve, so the hero is a choice and the card's \
+             current one rides the face"
+        );
+    }
+
+    #[test]
+    fn a_visual_only_module_falls_back_to_its_visual_hero() {
+        // The control-first preference names a kind this scope does not
+        // resolve, so the hero falls back to the R7 mirror — today's rule,
+        // mirrored.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        let visual = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(2),
+            0,
+        ));
+        let mut graph = control_out_graph(scope, Some(visual));
+        graph
+            .channels
+            .retain(|channel| channel.name != lpc_model::PRIMARY_CONTROL_CHANNEL);
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
         assert_eq!(hero.kind, crate::UiProductKind::Visual);
+        assert_eq!(face.hero_choice, None);
     }
 
     #[test]
