@@ -77,7 +77,7 @@ fn process_messages(
     reason = "async client integration tests are being rewritten"
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
-    let project_json = format!("{{\n  \"format\": 5,\n  \"name\": \"{name}\"\n}}\n");
+    let project_json = format!("{{\n  \"format\": 6,\n  \"name\": \"{name}\"\n}}\n");
     fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
         .map_err(|_| todo!())?;
 
@@ -132,7 +132,7 @@ fn test_create_command_structure() {
 
     let project_json = format!(
         r#"{{
-  "format": 5,
+  "format": 6,
   "name": "{project_name}"
 }}
 "#

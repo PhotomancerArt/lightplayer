@@ -443,7 +443,7 @@ impl Harness {
         let fs = self.base_fs.borrow();
         fs.write_file(
             self.project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 5\n}\n",
+            b"{\n  \"format\": 6\n}\n",
         )
         .expect("write container manifest");
         fs.write_file(
