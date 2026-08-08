@@ -248,7 +248,7 @@ fn clock_transport_control(
     let (anchor, anchor_row) = wired.iter().find(|(wire, _)| wire.panel_target.is_some())?;
 
     Some(UiPanelControl {
-        label: "Transport".to_string(),
+        label: "Time".to_string(),
         address: anchor.address.clone(),
         widget: UiPanelWidget::Transport {
             transport: transport.clone(),
@@ -2824,7 +2824,7 @@ mod tests {
 
         assert_eq!(controls.len(), 1, "three channels, ONE control");
         let control = &controls[0];
-        assert_eq!(control.label, "Transport");
+        assert_eq!(control.label, "Time");
         let UiPanelWidget::Transport { transport } = &control.widget else {
             panic!("the grouped control wears the Transport widget");
         };

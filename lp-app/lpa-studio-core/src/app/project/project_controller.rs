@@ -2954,16 +2954,36 @@ impl ProjectController {
 
         let controls = self.scoped_panel_controls(graph, scope, children);
 
+        // An INSTRUMENT control (the clock's Transport) gets its own child
+        // group wearing the owning node's name, not a slot in the module's
+        // flat strip — a tape deck between a brightness fader and a hue
+        // knob read as clutter (G2 feedback 2026-08-08). The group carries
+        // NO reset target: a group reset clears a whole scope's writers,
+        // which here is the module's, and the instrument already has
+        // per-dimension clears.
+        let (instruments, controls): (Vec<_>, Vec<_>) = controls.into_iter().partition(|view| {
+            matches!(view.control.widget, crate::UiPanelWidget::Transport { .. })
+        });
+        let mut groups: Vec<crate::UiPanelGroup> = instruments
+            .into_iter()
+            .map(|view| {
+                let node_path = view
+                    .control
+                    .address
+                    .as_ref()
+                    .map(|address| address.node.to_string())
+                    .unwrap_or_default();
+                let label = child_label(children, &node_path).unwrap_or_else(|| "Clock".into());
+                crate::UiPanelGroup::new(label, node_path).with_controls(vec![view])
+            })
+            .collect();
         // Presentation recursion (R8): each direct child module's finished
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
-        let mut groups: Vec<crate::UiPanelGroup> = children
-            .iter()
-            .filter_map(|child| match &child.face {
-                Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
-                _ => None,
-            })
-            .collect();
+        groups.extend(children.iter().filter_map(|child| match &child.face {
+            Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+            _ => None,
+        }));
         // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
         // scope is a SINK, not a module, so its controls match no module
         // panel by scope and would otherwise be visible only on the entry's
@@ -6142,6 +6162,22 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     let mut out = Vec::new();
     walk(children, &mut out);
     out
+}
+
+/// The display label of the subtree card at `node_path` (`UiNodeChild::
+/// detail` is the node's path string). Same walk shape as
+/// [`subtree_panel_controls`] — an instrument control found by that walk
+/// always has its owning card in the same subtree.
+fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<String> {
+    for child in children {
+        if child.detail == node_path {
+            return Some(child.label.clone());
+        }
+        if let Some(label) = child_label(&child.children, node_path) {
+            return Some(label);
+        }
+    }
+    None
 }
 
 /// The product a channel's resolved value carries, when it carries one.

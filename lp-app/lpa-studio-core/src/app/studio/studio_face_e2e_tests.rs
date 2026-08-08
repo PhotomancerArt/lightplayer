@@ -864,14 +864,21 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["clock.rate", "brightness"],
-        "nothing is AUTHORED in the root scope itself — the two controls \
-         are default-bound and promoted by a declared `panel = \"show\"`: \
-         the clock's grouped Transport (anchored on its rate channel, P8) \
-         and the fixture's brightness fader"
+        vec!["brightness"],
+        "nothing is AUTHORED in the root scope itself — the flat strip \
+         carries only the fixture's promoted brightness fader; the clock's \
+         instrument sits in its own child group (G2 feedback 2026-08-08)"
     );
-    assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
-    let entry_group = &face.panel.groups[0];
+    assert_eq!(
+        face.panel.groups.len(),
+        2,
+        "two groups: the clock's instrument, then the active entry"
+    );
+    assert_eq!(
+        face.panel.groups[0].label, "Clock",
+        "the instrument group leads (G2 feedback 2026-08-08)"
+    );
+    let entry_group = &face.panel.groups[1];
     assert_eq!(
         entry_group.label, "idle",
         "the group wears the ACTIVE entry's name"
@@ -928,7 +935,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.groups[0].controls[0];
+    let glow = &face.panel.groups[1].controls[0];
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::Engaged,
@@ -989,29 +996,45 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["clock.rate", "brightness", "glow"],
-        "the BOUND uniform lists, plus the two promoted default bindings: \
-         the clock's grouped Transport (anchored on its rate channel, P8) \
-         and the fixture's brightness fader — `speed` is wired to nothing \
-         and stays off (Q13 + the hint amendment)"
+        vec!["brightness", "glow"],
+        "the BOUND uniform lists plus the fixture's promoted brightness \
+         fader in the FLAT strip — the clock's instrument moved to its own \
+         child group (G2 feedback 2026-08-08), and `speed` is wired to \
+         nothing and stays off (Q13 + the hint amendment)"
     );
     // The clock contributes EXACTLY ONE control however many channels its
-    // transport rides: grouping is the whole point (P8 item 3). Panel
-    // controls only come from explicit per-kind arms, so no suppression
-    // pass is needed to keep the other two channels off the panel.
-    assert_eq!(
-        face.panel
-            .controls
-            .iter()
-            .filter(|control| {
+    // transport rides (grouping is the whole point, P8 item 3), and that
+    // control lives in its own child group wearing the clock node's name —
+    // an instrument never sits in the flat strip (G2 feedback 2026-08-08).
+    let clock_groups: Vec<_> = face
+        .panel
+        .groups
+        .iter()
+        .filter(|group| {
+            group.controls.iter().any(|control| {
                 matches!(
                     control.control.widget,
                     crate::UiPanelWidget::Transport { .. }
                 )
             })
-            .count(),
+        })
+        .collect();
+    assert_eq!(clock_groups.len(), 1, "one clock, one instrument group");
+    let clock_group = clock_groups[0];
+    assert_eq!(
+        clock_group.label, "Clock",
+        "the instrument group wears the clock NODE's name, not a widget label"
+    );
+    assert_eq!(
+        clock_group.controls.len(),
         1,
-        "one clock, one Transport control"
+        "the instrument group holds exactly the one grouped Transport"
+    );
+    assert_eq!(clock_group.controls[0].channel, "clock.rate");
+    assert!(
+        clock_group.target.is_none(),
+        "no group reset — it would clear the whole module scope's writers; \
+         the instrument carries per-dimension clears"
     );
     let brightness = control_for_channel(&face, "brightness");
     assert!(
@@ -1218,7 +1241,7 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     let face = module_face(&snapshot);
     let scope = face.panel.target.expect("the root panel targets its scope");
     let transport_control = control_for_channel(&face, "clock.rate");
-    assert_eq!(transport_control.control.label, "Transport");
+    assert_eq!(transport_control.control.label, "Time");
     let crate::UiPanelWidget::Transport { transport } = &transport_control.control.widget else {
         panic!(
             "the grouped control wears the Transport widget, got {:?}",
@@ -2581,16 +2604,24 @@ fn module_face(view: &UiStudioView) -> crate::UiModuleFace {
 }
 
 /// The module panel's control for `channel` (channel-keyed — the control
-/// list is dedupe-ordered, so index-addressing is brittle).
+/// list is dedupe-ordered, so index-addressing is brittle). Searches the
+/// flat strip AND nested groups: the clock's instrument lives in its own
+/// child group (G2 feedback 2026-08-08).
 fn control_for_channel<'a>(
     face: &'a crate::UiModuleFace,
     channel: &str,
 ) -> &'a crate::UiPanelControlView {
-    face.panel
-        .controls
-        .iter()
-        .find(|control| control.channel == channel)
-        .unwrap_or_else(|| panic!("module panel carries a {channel} control"))
+    fn find<'a>(
+        group: &'a crate::UiPanelGroup,
+        channel: &str,
+    ) -> Option<&'a crate::UiPanelControlView> {
+        group
+            .controls
+            .iter()
+            .find(|control| control.channel == channel)
+            .or_else(|| group.groups.iter().find_map(|child| find(child, channel)))
+    }
+    find(&face.panel, channel).unwrap_or_else(|| panic!("module panel carries a {channel} control"))
 }
 
 fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {
