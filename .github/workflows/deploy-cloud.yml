@@ -10,8 +10,11 @@ name: Deploy Cloud Service
 # with the 2026-08-06 DNS cutover; the last-deployed Pages site remains as
 # the DNS-rollback target — see docs/runbooks/godaddy-dns-cutover.md §5).
 
-# Deploys ride CI, not raw pushes: "Main push" green on main is the
-# trigger, so a red main never ships. workflow_dispatch remains the manual
+# Deploys ride the "Main push" workflow (tag + release, ~90 s) — NOT the
+# full "CI" validation workflow, so a red CI run on main does not block a
+# deploy today. Retargeting workflow_run to "CI" would close that gap at
+# the cost of ~20 min extra merge→live latency; that trade is still open
+# (post-merge CI audit, 2026-08-08). workflow_dispatch remains the manual
 # override for re-deploys and incident response.
 on:
   workflow_run:
