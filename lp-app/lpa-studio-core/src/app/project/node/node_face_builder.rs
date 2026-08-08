@@ -56,6 +56,7 @@ use lpc_model::{
 };
 
 use crate::app::project::format_lp_value;
+use crate::app::project::node::node_space_section;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
@@ -85,9 +86,10 @@ pub(in crate::app::project) fn kind_face(
     address: &ProjectNodeAddress,
     sections: &[UiNodeSection],
     children: &mut Vec<UiNodeChild>,
+    status_detail: Option<&str>,
 ) -> Option<UiNodeFace> {
     match ty {
-        ShaderDef::KIND => shader_face(sections).map(UiNodeFace::Shader),
+        ShaderDef::KIND => shader_face(sections, status_detail).map(UiNodeFace::Shader),
         FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
         PlaylistDef::KIND => {
             let (face, active_child) = playlist_face(address, sections, children)?;
@@ -334,9 +336,14 @@ fn editable_row_address(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
     row_edit_address(row)
 }
 
-/// The shader card's face: visual hero, panel knobs, code drawer. `None`
-/// when the node produces no visual output row (nothing to be a face of).
-fn shader_face(sections: &[UiNodeSection]) -> Option<UiShaderFace> {
+/// The shader card's face: visual hero, panel knobs, space section, code
+/// drawer. `None` when the node produces no visual output row (nothing to
+/// be a face of).
+///
+/// `status_detail` is the node's error text, which is where the D1
+/// declared-vs-entry mismatch surfaces — see
+/// [`node_space_section::shader_space_section`].
+fn shader_face(sections: &[UiNodeSection], status_detail: Option<&str>) -> Option<UiShaderFace> {
     let preview = product_of_kind(sections, UiProductKind::Visual)?;
     Some(UiShaderFace {
         preview,
@@ -345,6 +352,7 @@ fn shader_face(sections: &[UiNodeSection]) -> Option<UiShaderFace> {
         // walk stays agent-free, same rule as the sections path).
         agent: None,
         code_drawer: glsl_inline_editor(sections),
+        space: node_space_section::shader_space_section(&config_rows(sections), status_detail),
     })
 }
 
@@ -392,6 +400,7 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         brightness,
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
         power: fixture_power(sections),
+        space: node_space_section::fixture_space_section(&rows),
     })
 }
 
@@ -1408,6 +1417,19 @@ mod tests {
     /// actions carry it (P7's runtime command channel).
     fn test_address() -> ProjectNodeAddress {
         ProjectNodeAddress::parse("/demo.module/node.playlist").expect("valid address")
+    }
+
+    /// [`super::kind_face`] for a HEALTHY node — the status detail is only
+    /// read for the shader face's space mismatch (D1), and every test that
+    /// cares calls the real function directly. Shadows the glob import on
+    /// purpose so the face tests stay about faces.
+    fn kind_face(
+        ty: &str,
+        address: &ProjectNodeAddress,
+        sections: &[UiNodeSection],
+        children: &mut Vec<UiNodeChild>,
+    ) -> Option<UiNodeFace> {
+        super::kind_face(ty, address, sections, children, None)
     }
 
     #[test]

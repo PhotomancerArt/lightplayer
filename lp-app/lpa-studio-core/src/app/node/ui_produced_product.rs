@@ -208,7 +208,10 @@ pub struct UiControlProductPreview {
 
 /// UI mirror of `lpc_wire::WireVisualSpace` — which coordinate space a
 /// visual producer renders in, or a preview probe asked for.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// Ordered (1D before 2D) because per-space caches key on
+/// `(product, space)` and the stacked preview renders in the same order.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum UiVisualSpace {
     OneD,
     TwoD,
@@ -232,6 +235,38 @@ pub enum UiProjectionOrigin {
     Declared,
     ConsumerDefault,
     Forced,
+}
+
+/// UI mirror of `lpc_wire::WireConsumerPolicy` — the projection preference
+/// a probe requests with, and whether it overrides an authored producer
+/// opinion.
+///
+/// The tile picker's live tiles (P4) are exactly this with `force: true`:
+/// "show me what THIS cell would look like", regardless of what the
+/// producer declared.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiConsumerPolicy {
+    pub default_1d_to_2d: UiCellProjection,
+    pub force: bool,
+}
+
+impl UiConsumerPolicy {
+    /// The defaults-only policy (extrude, never force) — what a caller
+    /// that has never heard of spaces effectively sends.
+    pub const AUTO: Self = Self {
+        default_1d_to_2d: UiCellProjection::Extrude,
+        force: false,
+    };
+
+    /// The policy a live tile for `projection` probes with: force it, so
+    /// the tile shows that cell and not the producer's declared answer.
+    #[must_use]
+    pub const fn forcing(projection: UiCellProjection) -> Self {
+        Self {
+            default_1d_to_2d: projection,
+            force: true,
+        }
+    }
 }
 
 /// Space metadata a render-product probe answered alongside its preview
@@ -302,6 +337,30 @@ impl UiProductPreview {
     }
 }
 
+/// One space's preview of a visual product — the unit the D15 preview
+/// checkboxes stack.
+///
+/// A card that checks both spaces gets two of these for one product: the
+/// same producer rendered along its strip and rendered into 2D texture
+/// space, each with the metadata its caption needs (`native · 1D`,
+/// `in 2D · radial (declared)`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiProductSpaceView {
+    /// The space this view was probed in.
+    pub space: UiVisualSpace,
+    /// Preview state for that probe, exactly like
+    /// [`UiProducedProduct::preview`].
+    pub preview: UiProductPreview,
+    /// Frame geometry the probe asked for (a 1D probe is `N × 1`).
+    pub frame: UiProductPreviewFrame,
+    /// What the producer answered: resolved space, projection, origin,
+    /// primary. `None` until a space-tagged result has landed.
+    pub meta: Option<UiVisualProductSpace>,
+    /// Whether this is the view [`UiProducedProduct::preview`] mirrors —
+    /// the card's hero, and the one every space-unaware surface renders.
+    pub hero: bool,
+}
+
 /// A produced output that deserves primary visual treatment in the node pane.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedProduct {
@@ -311,8 +370,16 @@ pub struct UiProducedProduct {
     pub kind: UiProductKind,
     /// Concrete product identity used by controllers to attach preview state.
     pub product: Option<UiProductRef>,
-    /// Current preview state for this product.
+    /// Current preview state for this product — the HERO space's, when the
+    /// card previews more than one (see [`Self::spaces`]).
     pub preview: UiProductPreview,
+    /// Per-space previews for a visual product, when the card's D15
+    /// checkboxes ask for them. **Empty is the ordinary state**: every
+    /// space-unaware surface (module heroes, playlist thumbs, story
+    /// fixtures) reads [`Self::preview`] and is unaffected. When populated
+    /// it always CONTAINS the hero view too, so the stacked renderer can
+    /// draw one uniform list.
+    pub spaces: Vec<UiProductSpaceView>,
     /// Whether Studio is watching this product now.
     pub tracking: UiProductTrackingState,
     /// Stable preview frame used even before bytes are available.
@@ -335,6 +402,7 @@ impl UiProducedProduct {
             kind,
             product: None,
             preview: UiProductPreview::for_kind(kind),
+            spaces: Vec::new(),
             tracking: UiProductTrackingState::Untracked,
             frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             detail: None,

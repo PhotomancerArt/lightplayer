@@ -2296,6 +2296,9 @@ impl ProjectController {
         // (D10) — it lands here, before the module pass, the same way the
         // output face's board facts do.
         self.apply_clock_faces(&mut nodes);
+        // Same shape, one card kind over: the shader face's per-space
+        // preview stack is probe state the section DTOs cannot carry.
+        self.apply_face_preview_spaces(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -3137,6 +3140,39 @@ impl ProjectController {
             };
             clock.timebase = state;
             clock.phasors = phasors;
+        }
+        fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
+            for child in children {
+                walk(controller, child.face.as_mut());
+                walk_children(controller, &mut child.children);
+            }
+        }
+        for node in nodes {
+            walk(self, node.face.as_mut());
+            walk_children(self, &mut node.children);
+        }
+    }
+
+    /// Attach each shader face's PER-SPACE previews (D15's checkboxes and
+    /// their origin captions).
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one:
+    /// the per-space frames live in the probe cache, which the face
+    /// builder (deriving from section DTOs alone) cannot see. The face's
+    /// `preview` keeps carrying the hero frame, so nothing that renders a
+    /// product without knowing about spaces changes at all.
+    fn apply_face_preview_spaces(&self, nodes: &mut [UiNodeView]) {
+        fn walk(controller: &ProjectController, face: Option<&mut crate::UiNodeFace>) {
+            let Some(crate::UiNodeFace::Shader(shader)) = face else {
+                return;
+            };
+            let Some(product) = shader.preview.product else {
+                return;
+            };
+            let Some(sync) = controller.sync.as_ref() else {
+                return;
+            };
+            shader.preview.spaces = sync.product_space_views(&product);
         }
         fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
             for child in children {
@@ -4206,9 +4242,68 @@ impl ProjectController {
     /// lens, and requests must always reflect the current one.
     fn sync_for_request(&mut self) -> Result<&mut ProjectSync, UiError> {
         let frame = self.visual_preview_frame();
+        let spaces = self.preview_space_requests();
         let sync = self.sync_mut()?;
         sync.set_visual_preview_frame(frame);
+        sync.set_preview_spaces(spaces);
         Ok(sync)
+    }
+
+    /// Which spaces each shader card wants its visual product previewed in
+    /// (D15), resolved from the card's checkbox state against the
+    /// producer's PRIMARY space.
+    ///
+    /// Shader cards only: they are the cards that grow the checkboxes, and
+    /// leaving every other product unregistered is what keeps playlist
+    /// thumbs, module heroes, and the always-live primary visual on
+    /// exactly today's single 2D probe.
+    ///
+    /// The primary space is a probe ANSWER, so the first read of a fresh
+    /// project resolves against the 2D default, learns the real primary
+    /// from the result, and asks for it on the next read — a one-cycle
+    /// convergence, stable thereafter (nothing here depends on the frame
+    /// it produced).
+    fn preview_space_requests(&self) -> BTreeMap<UiProductRef, crate::UiProductSpaceRequest> {
+        let mut requests = BTreeMap::new();
+        for node in &self.root_nodes {
+            self.collect_preview_space_requests(node, &mut requests);
+        }
+        requests
+    }
+
+    fn collect_preview_space_requests(
+        &self,
+        node: &NodeController,
+        requests: &mut BTreeMap<UiProductRef, crate::UiProductSpaceRequest>,
+    ) {
+        if node.kind().eq_ignore_ascii_case("shader") {
+            let state = self.node_card_ui.get(&node.address().to_string());
+            let mut products = Vec::new();
+            node.collect_produced_product_refs(&mut products);
+            for product in products {
+                if !matches!(product, UiProductRef::Visual { .. }) {
+                    continue;
+                }
+                let primary = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_space(&product))
+                    .map_or(crate::UiVisualSpace::TwoD, |space| space.primary);
+                let spaces = state
+                    .map(|state| state.preview_spaces_for(primary))
+                    .unwrap_or_else(|| crate::UiPreviewSpaces::only(primary));
+                requests.insert(
+                    product,
+                    crate::UiProductSpaceRequest {
+                        spaces,
+                        hero: primary,
+                    },
+                );
+            }
+        }
+        for child in node.children() {
+            self.collect_preview_space_requests(child, requests);
+        }
     }
 
     fn clear_loaded_project_state(&mut self) {

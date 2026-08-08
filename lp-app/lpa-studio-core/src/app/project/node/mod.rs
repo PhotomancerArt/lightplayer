@@ -17,6 +17,7 @@ pub mod node_remove_op;
 pub mod node_remove_preflight;
 pub mod node_revert_op;
 pub mod node_share_op;
+pub(in crate::app::project) mod node_space_section;
 pub mod panel_write_op;
 pub mod playlist_activate_op;
 pub mod project_node_address;
