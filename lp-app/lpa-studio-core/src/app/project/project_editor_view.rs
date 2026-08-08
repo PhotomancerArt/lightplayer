@@ -11,6 +11,12 @@ pub struct UiProjectManifest {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// Display label for the project's authored kind (`"General"` |
+    /// `"Pattern"` | `"Show"` | `"Rig"`; module authoring unit, P1) — the
+    /// resolved [`lpc_model::ProjectKind`]'s label
+    /// ([`crate::app::library::package_manifest::kind_label`]), never the
+    /// raw JSON spelling.
+    pub kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]

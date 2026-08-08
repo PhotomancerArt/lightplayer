@@ -589,32 +589,14 @@ impl LpvmInstance for WasmLpvmInstance {
         width: u32,
         height: u32,
     ) -> Result<(), Self::Error> {
-        // Deliberately still Q32-only, unlike lpvm-native's two backends — but
-        // NOT because anything is unimplemented. f32 builtin id resolution
-        // landed in M5 (`emit/imports.rs::resolve_builtin_id_for_mode`) and the
-        // whole `wasm.f32` corpus compiles and runs: 850/850 files, 0
-        // compile-fail, including `@glsl` (`builtins/trig-sin.glsl` 10/10) and
-        // `@lpfn` (`lpfn/` 89/89). Do not restate the old "no f32 builtin
-        // lowering" reason; it was measured false on 2026-08-02.
-        //
-        // The measured reason: with this guard removed, the frame path renders
-        // *structurally correct* output that is uniformly *one count low*
-        // against the rv32-emulator oracle (16383 for 16384, 8191 for 8192) —
-        // the known wasmtime last-bit divergence
-        // (`docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`), which
-        // is why `rt_emu` and not wasmtime is the host oracle. The guard stays
-        // until that one count is classified under `docs/design/float.md`
-        // (Guaranteed → fix it; Unspecified → drop the guard and stop asserting
-        // cross-backend equality here). Lift it on that decision, not on a
-        // capability landing.
-        if self.float_mode != FloatMode::Q32 {
-            return Err(WasmError::runtime(
-                "WasmLpvmInstance::call_render_texture requires FloatMode::Q32 \
-                 (the wasm f32 frame path renders one count low vs the rv32 oracle; \
-                 see the q32-native-vs-wasmtime-last-bit defect)",
-            ));
-        }
-
+        // Both modes. This was Q32-only while the f32 frame path read one
+        // count low against the rv32 oracle; that turned out to be a wrong
+        // scale constant in this crate's own unorm lowering, not a
+        // target-defined rounding difference
+        // (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`), and
+        // the codes are Guaranteed-class — `docs/design/float.md` §7. Assert
+        // them against the rv32 table exactly:
+        // `lps-filetests/tests/f32_render_entry_wasm.rs`.
         let func = self.resolve_render_texture(fn_name)?;
         let tex_offset = i32::try_from(texture.guest_base()).map_err(|_| {
             WasmError::runtime(format!(
@@ -651,16 +633,7 @@ impl LpvmInstance for WasmLpvmInstance {
         out: &mut LpvmBuffer,
         count: u32,
     ) -> Result<(), Self::Error> {
-        // See `call_render_texture` for why this one stays — a measured
-        // one-count divergence, not a missing capability.
-        if self.float_mode != FloatMode::Q32 {
-            return Err(WasmError::runtime(
-                "WasmLpvmInstance::call_render_samples requires FloatMode::Q32 \
-                 (the wasm f32 frame path renders one count low vs the rv32 oracle; \
-                 see the q32-native-vs-wasmtime-last-bit defect)",
-            ));
-        }
-
+        // See `call_render_texture` for why both modes run here.
         let func = self.resolve_render_samples(fn_name)?;
         let points_offset = i32::try_from(points.guest_base()).map_err(|_| {
             WasmError::runtime(format!(

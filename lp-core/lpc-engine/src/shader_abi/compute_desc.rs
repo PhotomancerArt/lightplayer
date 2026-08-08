@@ -24,15 +24,20 @@ pub fn compute_desc_from_model_def<'a>(
     registry: &SlotShapeRegistry,
     compiler_config: CompilerConfig,
 ) -> Result<CompileComputeDesc<'a>, ComputeDescError> {
-    // The authored numeric mode travels with the descriptor. Compute shaders
-    // have no `ShaderSemantics` tier to pick from — they only ever run on a
-    // CPU backend (`LpsEngine::compile_compute_desc`) — so the model's slot
-    // maps straight onto the LPIR mode, and a backend that cannot compile it
-    // refuses rather than substituting Fixed.
+    // The authored pin travels with the descriptor. Compute shaders have no
+    // `ShaderSemantics` tier to pick from — they only ever run on a CPU
+    // backend (`LpsEngine::compile_compute_desc`) — so the mode is decided
+    // here, and a backend that cannot compile it refuses rather than
+    // substituting Fixed.
+    //
+    // Auto (no pin) and a pinned Fixed both mean Q32: Q32 is the native
+    // representation of every CPU backend a compute shader can reach. The
+    // two arms stay distinct because only one of them is an alias.
     let mut desc = CompileComputeDesc::new(glsl, compiler_config).with_float_mode(
-        match def.float_mode.value() {
-            FloatMode::Fixed => lpir::FloatMode::Q32,
-            FloatMode::Float => lpir::FloatMode::F32,
+        match def.float_mode.data.as_ref().map(|slot| *slot.value()) {
+            None => lpir::FloatMode::Q32,
+            Some(FloatMode::Fixed) => lpir::FloatMode::Q32,
+            Some(FloatMode::Float) => lpir::FloatMode::F32,
         },
     );
 
@@ -212,7 +217,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: lpc_model::AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
-            float_mode: lpc_model::ValueSlot::default(),
+            float_mode: lpc_model::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
@@ -298,7 +303,7 @@ void tick() {{
         let def = ComputeShaderDef {
             source: lpc_model::AssetSlot::path("events.glsl"),
             bindings: BindingDefs::default(),
-            float_mode: lpc_model::ValueSlot::default(),
+            float_mode: lpc_model::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
