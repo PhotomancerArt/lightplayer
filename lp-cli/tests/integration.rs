@@ -132,7 +132,7 @@ fn test_create_command_structure() {
 
     let project_json = format!(
         r#"{{
-  "format": 5,
+  "format": 6,
   "name": "{project_name}"
 }}
 "#
