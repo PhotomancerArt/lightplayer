@@ -1,25 +1,35 @@
-//! The clock card's permanent face: the published time product and the
-//! per-reading phasor trace cards riding this timebase (clock-face v2 —
-//! the direction converged at the TimeProduct G2 gate).
+//! The clock card's permanent face: the tape transport instrument, and
+//! below it the published time product's per-reading phasor trace cards
+//! (clock-face v2 at the TimeProduct G2 gate; the tape transport, plan
+//! 2026-08-04-2355-clock-tape-hero P3–P5).
 //!
-//! Since the M2 break `bus:time` carries a `TimeProduct` handle, and
-//! everything behind that handle — effective seconds, this tick's delta,
-//! every phasor a consumer materialized — lives in the engine's timebase
-//! store rather than in any slot. The probe now reports each integrator's
-//! downstream READINGS too, so the face can answer "what is riding this
-//! clock" the way a consumer would: one little black-and-white scrolling
-//! trace per reading, drawing the SHAPED value that consumer actually
-//! reads. Sharing is the violet border + id (bound-violet convention); the
-//! trace itself stays monochrome. Seconds shrank into the section header;
-//! the Delta row is gone ("isn't useful at all" — G2).
+//! The face is two surfaces stacked in one "output" section, and they are
+//! opposite in kind:
 //!
-//! **This is a debug listing, not a control panel.** There is no gesture
-//! here at all: nothing creates, retunes, or deletes a phasor, because
-//! phasors materialize on query and despawn on silence and both are the
-//! consuming node's business. The one place a period IS editable is the
-//! consuming shader's own speed knob.
+//! - **The tape transport (top) IS a control panel.** It renders whenever
+//!   `face.transport` is `Some` (an unread project falls back to the
+//!   compact [`ProducedProductView`]) and dispatches real gestures — drag
+//!   to scrub, the speed fader, run/pause, per-control clears — through
+//!   [`TapeTransport`]'s wires, the SAME derivation the module panel's
+//!   grouped Transport control renders (plan P8): holding the speed here
+//!   holds it there too.
+//! - **The phasor listing (below) is a read-only debug surface.** There is
+//!   no gesture here at all: nothing creates, retunes, or deletes a
+//!   phasor, because phasors materialize on query and despawn on silence
+//!   and both are the consuming node's business. The one place a period IS
+//!   editable is the consuming shader's own speed knob. Since the M2 break
+//!   `bus:time` carries a `TimeProduct` handle, and everything behind that
+//!   handle — effective seconds, this tick's delta, every phasor a
+//!   consumer materialized — lives in the engine's timebase store rather
+//!   than in any slot. The probe reports each integrator's downstream
+//!   READINGS too, so the listing can answer "what is riding this clock"
+//!   the way a consumer would: one little black-and-white scrolling trace
+//!   per reading, drawing the SHAPED value that consumer actually reads.
+//!   Sharing is the violet border + id (bound-violet convention); the
+//!   trace itself stays monochrome.
 //!
-//! Three states have to read differently, and the middle one is the trap:
+//! Three states have to read differently in the phasor listing, and the
+//! middle one is the trap:
 //!
 //! | state | reads |
 //! |---|---|
