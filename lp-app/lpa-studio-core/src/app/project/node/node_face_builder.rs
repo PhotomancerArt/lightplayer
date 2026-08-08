@@ -126,6 +126,11 @@ fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
     let product = product_of_kind(sections, UiProductKind::Time)?;
     let mut face = crate::UiClockFace::new(product);
     face.transport = clock_transport(sections);
+    if let Some(transport) = face.transport.as_ref() {
+        face.controls = clock_transport_control(sections, transport)
+            .into_iter()
+            .collect();
+    }
     Some(face)
 }
 
@@ -145,25 +150,139 @@ fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
 /// section is absent, or a differently-shaped clock). Numeric `seconds`
 /// starts at `0.0`; only `ProjectController::apply_clock_faces` can fill it
 /// in, from the cached timebase probe.
+///
+/// **A wired dimension shows its LIVE reading** (P8, the same rule
+/// [`crate::UiPanelControl::shown_display`] follows): once a leaf's
+/// gestures are panel writes on its `clock.*` channel, the slot's authored
+/// default is no longer what the transport is doing, and the channel's
+/// reading — echoed locally the instant a write is dispatched — is. An
+/// UNWIRED dimension keeps the staged slot value, which is what its
+/// slot-edit gestures move.
 fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport> {
     let rows = debug_rows(sections);
-    let running_row = rows.iter().find(|row| row.key == "transport.running")?;
-    let rate_row = rows.iter().find(|row| row.key == "transport.rate")?;
-    let scrub_row = rows
+    let play_state_row = rows
         .iter()
-        .find(|row| row.key == "transport.scrub_offset_seconds")?;
+        .find(|row| row.key == TRANSPORT_PLAY_STATE_ROW)?;
+    let rate_row = rows.iter().find(|row| row.key == TRANSPORT_RATE_ROW)?;
+    let scrub_row = rows.iter().find(|row| row.key == TRANSPORT_SCRUB_ROW)?;
     Some(crate::UiClockTransport {
         seconds: 0.0,
-        running: row_bool(running_row)?,
-        rate: row_f32(rate_row)?,
-        scrub_offset_seconds: row_f32(scrub_row)?,
-        running_address: editable_row_address(running_row),
+        play_state: live_play_state(play_state_row).or_else(|| row_play_state(play_state_row))?,
+        rate: live_f32(rate_row).or_else(|| row_f32(rate_row))?,
+        scrub_offset_seconds: live_f32(scrub_row).or_else(|| row_f32(scrub_row))?,
+        play_state_address: editable_row_address(play_state_row),
         rate_address: editable_row_address(rate_row),
         scrub_address: editable_row_address(scrub_row),
-        running_override: row_override(running_row),
+        play_state_override: row_override(play_state_row),
         rate_override: row_override(rate_row),
         scrub_override: row_override(scrub_row),
     })
+}
+
+/// The flattened Debug row each transport leaf lands on (D4: a Debug field
+/// inside a record becomes a top-level row keyed by its full path).
+const TRANSPORT_PLAY_STATE_ROW: &str = "transport.play_state";
+/// See [`TRANSPORT_PLAY_STATE_ROW`].
+const TRANSPORT_RATE_ROW: &str = "transport.rate";
+/// See [`TRANSPORT_PLAY_STATE_ROW`].
+const TRANSPORT_SCRUB_ROW: &str = "transport.scrub_offset_seconds";
+
+/// The clock's ONE grouped panel control (P8): the whole tape transport —
+/// fader, run/pause, scrub strip — as a single control on the enclosing
+/// module's panel, derived from the model-declared grouping.
+///
+/// The `transport` record carries `panel = "show"`
+/// ([`lpc_model::CLOCK_TRANSPORT_SHAPE_NAME`]) and its three leaves each
+/// declare a `clock.*` `default_bind`, so the promotion reaches every leaf
+/// endpoint. That is what this arm reads — one match arm on the clock kind,
+/// deliberately, not a shape→widget registry: there is exactly one grouped
+/// widget, and a match that has to be widened is a better signal than a
+/// lookup that silently accepts anything.
+///
+/// Three facts, three different rules (settled 2026-08-07):
+///
+/// - **Rendering is a shape fact.** The faceplate is whole whatever the
+///   wiring says; nothing here subtracts a dimension from it.
+/// - **Membership is a wiring fact.** `None` — no panel presence at all —
+///   unless at least one leaf is panel-public.
+/// - **Dispatch is a per-leaf fact.** Each [`crate::UiPanelWire`] carries
+///   its own target-or-address, so a partially wired transport dispatches
+///   mixed (panel writes on the wired dimensions, slot edits on the rest).
+///
+/// **Anchor** (Q22): the group's identity is the RATE leaf's channel, since
+/// the fader is the control people mean by "the speed"; if rate
+/// specifically is unwired, the next wired sibling in declaration order
+/// (play_state, then scrub) stands in, so the group keeps a stable
+/// `(scope, channel)` to dedup, reset, and read panel state through.
+fn clock_transport_control(
+    sections: &[UiNodeSection],
+    transport: &crate::UiClockTransport,
+) -> Option<UiPanelControl> {
+    use crate::{UiPanelWire, UiPanelWireRole};
+
+    let rows = debug_rows(sections);
+    // Anchor order, not declaration order: rate leads (Q22).
+    let dimensions = [
+        (UiPanelWireRole::Rate, TRANSPORT_RATE_ROW),
+        (UiPanelWireRole::PlayState, TRANSPORT_PLAY_STATE_ROW),
+        (UiPanelWireRole::Scrub, TRANSPORT_SCRUB_ROW),
+    ];
+    let wired: Vec<(UiPanelWire, Option<&UiConfigSlot>)> = dimensions
+        .into_iter()
+        .map(|(role, key)| {
+            let row = rows.iter().copied().find(|row| row.key == key);
+            (
+                UiPanelWire {
+                    role,
+                    address: row.and_then(editable_row_address),
+                    panel_target: row.and_then(public_panel_target),
+                    live_value: row.and_then(bound_live_value),
+                },
+                row,
+            )
+        })
+        .collect();
+    // Membership: zero panel-public leaves means no panel presence. The
+    // card's own tape hero is unaffected — it renders off the transport
+    // block, wired or not.
+    let (anchor, anchor_row) = wired.iter().find(|(wire, _)| wire.panel_target.is_some())?;
+
+    Some(UiPanelControl {
+        label: "Time".to_string(),
+        address: anchor.address.clone(),
+        widget: UiPanelWidget::Transport {
+            transport: transport.clone(),
+        },
+        // The group's scalar stand-in is the rate: it is the dimension a
+        // generic reader (the readout, the panel-emit ladder) can say
+        // anything true about. The faceplate shows all three itself.
+        value: UiSlotValue::f32(transport.rate),
+        emit: crate::UiPanelEmit::Value,
+        live_value: anchor.live_value.clone(),
+        live_gradient: None,
+        panel_target: anchor.panel_target.clone(),
+        unit: None,
+        state: anchor_row
+            .map(|row| row.state.clone())
+            .unwrap_or_else(crate::UiSlotFieldState::editable),
+        aspects: anchor_row
+            .map(UiConfigSlot::visible_aspects)
+            .unwrap_or_default(),
+        wires: wired.into_iter().map(|(wire, _)| wire).collect(),
+    })
+}
+
+/// A wired row's live channel reading as an `f32` — what a panel-written
+/// dimension is actually doing, echo included.
+fn live_f32(row: &UiConfigSlot) -> Option<f32> {
+    bound_live_value(row)?.parse().ok()
+}
+
+/// A wired row's live channel reading as a [`lpc_model::PlayState`]. The
+/// channel carries the state's wire tag, so an unknown tag reads as "no
+/// live reading" and the staged slot value stands.
+fn live_play_state(row: &UiConfigSlot) -> Option<lpc_model::PlayState> {
+    lpc_model::PlayState::parse(&bound_live_value(row)?)
 }
 
 /// The row's active debug-override entry: `Some` while the row is dirty
@@ -191,11 +310,13 @@ fn row_f32(row: &UiConfigSlot) -> Option<f32> {
     }
 }
 
-/// A row's scalar `bool` value, when its body is a plain value of that kind.
-fn row_bool(row: &UiConfigSlot) -> Option<bool> {
+/// A row's [`PlayState`], when its body is the state's wire tag. The slot
+/// carries the enum as a string leaf, so an unknown tag reads as "no
+/// transport" rather than a guessed state.
+fn row_play_state(row: &UiConfigSlot) -> Option<lpc_model::PlayState> {
     match &row.body {
-        UiConfigSlotBody::Value(value) => match value.kind {
-            UiSlotValueKind::Bool(value) => Some(value),
+        UiConfigSlotBody::Value(value) => match &value.kind {
+            UiSlotValueKind::String(value) => lpc_model::PlayState::parse(value),
             _ => None,
         },
         _ => None,
@@ -555,6 +676,7 @@ fn phasor_period_control(
         unit: None,
         state: config_row.state.clone(),
         aspects: config_row.visible_aspects(),
+        wires: Vec::new(),
     };
     // The wiring facts live on the binding-derived row keyed by the bare
     // uniform name, exactly as they do for a value uniform's knob.
@@ -647,6 +769,7 @@ fn palette_swatch_control(
         unit: None,
         state: config_row.state.clone(),
         aspects: config_row.visible_aspects(),
+        wires: Vec::new(),
     };
     // The wiring facts live on the binding-derived row keyed by the bare
     // uniform name, exactly as they do for a knob.
@@ -1220,6 +1343,8 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
+        // One row, one channel: only a GROUPED control carries wires.
+        wires: Vec::new(),
     })
 }
 
@@ -2538,7 +2663,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(false)),
+                transport_row("play_state", UiSlotValue::string("paused")),
                 transport_row("rate", UiSlotValue::f32(2.0)),
                 transport_row("scrub_offset_seconds", UiSlotValue::f32(-12.4)),
             ]),
@@ -2550,7 +2675,7 @@ mod tests {
             panic!("expected a clock face");
         };
         let transport = face.transport.expect("three rows present → block present");
-        assert!(!transport.running);
+        assert_eq!(transport.play_state, lpc_model::PlayState::Paused);
         assert_eq!(transport.rate, 2.0);
         assert_eq!(transport.scrub_offset_seconds, -12.4);
         assert_eq!(transport.seconds, 0.0, "numeric seconds is probe-only");
@@ -2559,7 +2684,7 @@ mod tests {
             Some(clock_slot_address("transport.rate")),
             "editable row → dispatch address"
         );
-        assert!(transport.running_address.is_some());
+        assert!(transport.play_state_address.is_some());
         assert!(transport.scrub_address.is_some());
     }
 
@@ -2576,7 +2701,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("play_state", UiSlotValue::string("playing")),
                 transport_row("rate", UiSlotValue::f32(1.0)).with_state(read_only),
                 transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
             ]),
@@ -2590,7 +2715,10 @@ mod tests {
         let transport = face.transport.expect("values still lift");
         assert_eq!(transport.rate, 1.0);
         assert_eq!(transport.rate_address, None, "read-only → no dispatch");
-        assert!(transport.running_address.is_some(), "siblings unaffected");
+        assert!(
+            transport.play_state_address.is_some(),
+            "siblings unaffected"
+        );
     }
 
     /// A dirty Debug row (an active session override) lifts its own edit
@@ -2604,7 +2732,7 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::DebugSlots(vec![
-                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("play_state", UiSlotValue::string("playing")),
                 transport_row("rate", UiSlotValue::f32(2.0))
                     .with_state(dirty)
                     .with_edit_entry_address(clock_slot_address("transport.rate")),
@@ -2623,8 +2751,232 @@ mod tests {
             Some(clock_slot_address("transport.rate")),
             "dirty row → its edit entry is the Clear target"
         );
-        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.play_state_override, None, "clean row → no tint");
         assert_eq!(transport.scrub_override, None);
+    }
+
+    // -- the grouped Transport control (P8) ---------------------------------
+
+    /// A transport leaf as the default-binding overlay decorates it: a
+    /// default-origin bound endpoint carrying the promoted `panel = "show"`
+    /// hint and its own `clock.*` panel target — which is exactly what
+    /// makes the leaf panel-PUBLIC.
+    fn wired_transport_row(field: &str, value: UiSlotValue, channel: &str) -> UiConfigSlot {
+        let endpoint = crate::UiBindingEndpoint::new(format!("bus:{channel}"))
+            .with_default_origin()
+            .with_panel_hint()
+            .with_panel_target(crate::UiPanelTarget {
+                scope: test_scope(),
+                channel: channel.to_string(),
+                engaged: false,
+            });
+        transport_row(field, value).with_source(UiSlotSourceState::Bound(endpoint))
+    }
+
+    fn test_scope() -> lpc_wire::WireScopeRef {
+        lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        }
+    }
+
+    fn clock_sections(rows: Vec<UiConfigSlot>) -> Vec<UiNodeSection> {
+        vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(rows),
+        ]
+    }
+
+    fn clock_controls(rows: Vec<UiConfigSlot>) -> Vec<UiPanelControl> {
+        let sections = clock_sections(rows);
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        face.controls
+    }
+
+    /// The default project's shape: all three leaves default-bound and
+    /// promoted by the record's `panel = "show"`. ONE control — the whole
+    /// faceplate — anchored on the rate channel, carrying a wire per
+    /// dimension.
+    #[test]
+    fn a_promoted_transport_derives_exactly_one_grouped_control() {
+        let controls = clock_controls(vec![
+            wired_transport_row(
+                "play_state",
+                UiSlotValue::string("playing"),
+                lpc_model::bus::well_known::CLOCK_PLAY_STATE_CHANNEL,
+            ),
+            wired_transport_row(
+                "rate",
+                UiSlotValue::f32(2.0),
+                lpc_model::bus::well_known::CLOCK_RATE_CHANNEL,
+            ),
+            wired_transport_row(
+                "scrub_offset_seconds",
+                UiSlotValue::f32(0.0),
+                lpc_model::bus::well_known::CLOCK_SCRUB_CHANNEL,
+            ),
+        ]);
+
+        assert_eq!(controls.len(), 1, "three channels, ONE control");
+        let control = &controls[0];
+        assert_eq!(control.label, "Time");
+        let UiPanelWidget::Transport { transport } = &control.widget else {
+            panic!("the grouped control wears the Transport widget");
+        };
+        assert_eq!(transport.rate, 2.0, "the faceplate carries the whole block");
+        // Anchor (Q22): the group's identity is the rate leaf's channel.
+        assert_eq!(
+            control
+                .panel_target
+                .as_ref()
+                .map(|target| target.channel.as_str()),
+            Some("clock.rate")
+        );
+        // And every dimension carries its own dispatch facts.
+        let channels: Vec<Option<&str>> = control
+            .wires
+            .iter()
+            .map(|wire| {
+                wire.panel_target
+                    .as_ref()
+                    .map(|target| target.channel.as_str())
+            })
+            .collect();
+        assert_eq!(
+            channels,
+            vec![
+                Some("clock.rate"),
+                Some("clock.play_state"),
+                Some("clock.scrub"),
+            ]
+        );
+        assert_eq!(
+            control
+                .wire(crate::UiPanelWireRole::Scrub)
+                .and_then(|wire| wire.address.clone()),
+            Some(clock_slot_address("transport.scrub_offset_seconds")),
+            "the slot-edit fallback address rides each wire too"
+        );
+    }
+
+    /// Membership is a WIRING fact: a transport nothing has wired has no
+    /// panel presence at all. Its card face is untouched — the tape hero
+    /// still renders, it just dispatches slot edits.
+    #[test]
+    fn an_unwired_transport_reaches_no_panel() {
+        let sections = clock_sections(vec![
+            transport_row("play_state", UiSlotValue::string("playing")),
+            transport_row("rate", UiSlotValue::f32(1.0)),
+            transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+        ]);
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+
+        assert!(face.controls.is_empty(), "no wired leaf, no panel control");
+        assert!(
+            face.transport.is_some(),
+            "the card's own tape hero is a shape fact, not a wiring one"
+        );
+        assert!(face.transport_wires().is_empty());
+    }
+
+    /// PARTIAL wiring: only play_state is public. The faceplate still
+    /// renders whole, the group anchors on the next wired sibling in
+    /// declaration order (Q22 — rate is unwired, so play_state stands in),
+    /// and the unwired dimensions keep their slot-edit addresses.
+    #[test]
+    fn a_partly_wired_transport_renders_whole_and_dispatches_mixed() {
+        let controls = clock_controls(vec![
+            wired_transport_row(
+                "play_state",
+                UiSlotValue::string("paused"),
+                lpc_model::bus::well_known::CLOCK_PLAY_STATE_CHANNEL,
+            ),
+            transport_row("rate", UiSlotValue::f32(1.0)),
+            transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+        ]);
+
+        assert_eq!(controls.len(), 1, "one wired leaf is enough to be on");
+        let control = &controls[0];
+        assert_eq!(
+            control
+                .panel_target
+                .as_ref()
+                .map(|target| target.channel.as_str()),
+            Some("clock.play_state"),
+            "rate is unwired, so the anchor migrates to the next wired sibling"
+        );
+        let rate = control
+            .wire(crate::UiPanelWireRole::Rate)
+            .expect("the fader dimension is still on the faceplate");
+        assert!(rate.panel_target.is_none(), "…but it is not wired");
+        assert_eq!(
+            rate.address,
+            Some(clock_slot_address("transport.rate")),
+            "so its gesture falls back to a slot edit at its own address"
+        );
+    }
+
+    /// A wired dimension's LIVE channel reading leads on the faceplate (the
+    /// panel-write echo path): once gestures are panel writes, the authored
+    /// slot default is no longer what the transport is doing. An unwired
+    /// sibling keeps its staged slot value.
+    #[test]
+    fn a_wired_dimension_shows_its_live_reading() {
+        let live_rate = {
+            let endpoint = crate::UiBindingEndpoint::new("bus:clock.rate")
+                .with_default_origin()
+                .with_panel_hint()
+                .with_live_value("4")
+                .with_panel_target(crate::UiPanelTarget {
+                    scope: test_scope(),
+                    channel: "clock.rate".to_string(),
+                    engaged: true,
+                });
+            transport_row("rate", UiSlotValue::f32(1.0))
+                .with_source(UiSlotSourceState::Bound(endpoint))
+        };
+        let sections = clock_sections(vec![
+            wired_transport_row(
+                "play_state",
+                UiSlotValue::string("playing"),
+                lpc_model::bus::well_known::CLOCK_PLAY_STATE_CHANNEL,
+            )
+            .with_source(UiSlotSourceState::Bound(
+                crate::UiBindingEndpoint::new("bus:clock.play_state")
+                    .with_default_origin()
+                    .with_panel_hint()
+                    .with_live_value("paused")
+                    .with_panel_target(crate::UiPanelTarget {
+                        scope: test_scope(),
+                        channel: "clock.play_state".to_string(),
+                        engaged: true,
+                    }),
+            )),
+            live_rate,
+            transport_row("scrub_offset_seconds", UiSlotValue::f32(-2.0)),
+        ]);
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+
+        let transport = face.transport.expect("block present");
+        assert_eq!(transport.rate, 4.0, "the channel reading leads");
+        assert_eq!(transport.play_state, lpc_model::PlayState::Paused);
+        assert_eq!(
+            transport.scrub_offset_seconds, -2.0,
+            "the unwired dimension keeps its staged slot value"
+        );
     }
 
     /// A clock with no produced product row keeps the generic sections —

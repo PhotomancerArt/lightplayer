@@ -28,8 +28,24 @@ pub(crate) fn panel_or_slot_action(
     address: ProjectSlotAddress,
     value: LpValue,
 ) -> UiAction {
+    panel_write_or_slot_action(panel_target.as_ref(), Some(&address), value)
+        .expect("an address is always a dispatch")
+}
+
+/// [`panel_or_slot_action`] for one DIMENSION of a grouped control, whose
+/// slot address may be absent (a wired row the projection marked read-only).
+///
+/// The target-or-address fallback is per dimension, not per control (the
+/// clock's Transport, P8): a wired dimension writes its channel, an unwired
+/// one edits its own slot, and one with neither has nothing to dispatch —
+/// `None`, so the widget renders inert rather than firing a dead handler.
+pub(crate) fn panel_write_or_slot_action(
+    panel_target: Option<&UiPanelTarget>,
+    address: Option<&ProjectSlotAddress>,
+    value: LpValue,
+) -> Option<UiAction> {
     match panel_target {
-        Some(target) => UiAction::from_op(
+        Some(target) => Some(UiAction::from_op(
             ControllerId::new(ProjectController::NODE_ID),
             PanelWriteOp {
                 scope: target.scope,
@@ -37,8 +53,8 @@ pub(crate) fn panel_or_slot_action(
                 value,
                 ttl_ms: None,
             },
-        ),
-        None => slot_set_value_action(address, value),
+        )),
+        None => Some(slot_set_value_action(address?.clone(), value)),
     }
 }
 
@@ -144,4 +160,54 @@ pub(crate) fn slot_move_entry_action(
             to_key,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::{
+        LpValue, NodeId, PanelWriteOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot,
+        SlotEditOp, SlotPath, UiPanelTarget,
+    };
+
+    use super::panel_write_or_slot_action;
+
+    /// The per-dimension target-or-address fallback (P8): a wired dimension
+    /// writes its channel, an unwired one edits its own slot, and one with
+    /// neither has nothing to dispatch — the three states the clock's
+    /// transport can be in leaf by leaf.
+    #[test]
+    fn a_dimension_writes_its_channel_else_edits_its_slot_else_nothing() {
+        let target = UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: NodeId::new(1),
+            },
+            channel: "clock.rate".to_string(),
+            engaged: false,
+        };
+        let address = ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.module/node.clock").expect("valid address"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("transport.rate").expect("valid path"),
+        );
+
+        // Wired: the channel wins even though the slot address rides along
+        // as the fallback.
+        let wired = panel_write_or_slot_action(Some(&target), Some(&address), LpValue::F32(2.0))
+            .expect("a wired dimension dispatches");
+        assert_eq!(
+            wired.op_as::<PanelWriteOp>().map(|op| op.channel.clone()),
+            Some("clock.rate".to_string())
+        );
+
+        // Unwired: the slot edit at this dimension's OWN address.
+        let unwired = panel_write_or_slot_action(None, Some(&address), LpValue::F32(2.0))
+            .expect("an unwired dimension still edits its slot");
+        assert!(matches!(
+            unwired.op_as::<SlotEditOp>(),
+            Some(SlotEditOp::SetValue { address: at, .. }) if *at == address
+        ));
+
+        // Neither: a read-only, unwired dimension is inert.
+        assert!(panel_write_or_slot_action(None, None, LpValue::F32(2.0)).is_none());
+    }
 }

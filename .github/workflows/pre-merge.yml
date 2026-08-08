@@ -42,7 +42,10 @@ env:
 #                   └─ validate-stories(story baseline capture)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
-# docs-only PR runs nothing but detect-changes. All gates follow the same
+# docs-only PR runs nothing but detect-changes — with one carve-out:
+# `docs/user-guide/**` is compiled INTO lpa-studio-web (`include_str!`ed
+# articles with build-generated embed/sim/link checks), so a user-guide-only
+# PR still runs validate-x64 and validate-stories. All gates follow the same
 # philosophy: conservative dependency-closure filters on PRs, and pushes to
 # main force every gate true, so anything a filter miss lets through surfaces
 # on the very next merge.
@@ -83,7 +86,11 @@ jobs:
     # trivial (p95 0.1 min); the budget is checkout + the filter action.
     timeout-minutes: 10
     outputs:
-      core: ${{ github.event_name != 'pull_request' && 'true' || steps.core.outputs.core }}
+      # docs_guide ORs into core: the user-guide articles are include_str!ed
+      # into lpa-studio-web, so a markdown-only edit can break the generated
+      # docs checks (embed names, sim declarations, links) that validate-x64
+      # runs — the negative gate below would otherwise skip them.
+      core: ${{ github.event_name != 'pull_request' && 'true' || steps.core.outputs.core == 'true' && 'true' || steps.some.outputs.docs_guide }}
       shader: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.shader }}
       gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.gfx }}
       browser: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.browser }}
@@ -174,8 +181,15 @@ jobs:
             studio:
               - 'lp-app/lpa-studio-web/**'
               - 'lp-app/lpa-studio-core/**'
+              - 'docs/user-guide/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+            # The user-guide articles are compiled into lpa-studio-web
+            # (include_str!), so editing only their markdown must still run
+            # the generated docs checks in validate-x64. ORed into `core`
+            # in the job outputs above.
+            docs_guide:
+              - 'docs/user-guide/**'
             # firmware gates the esp32c6 image size check. This list is
             # deliberately broad — it is the link closure of the device image,
             # and size regressions arrive through shared crates far more often

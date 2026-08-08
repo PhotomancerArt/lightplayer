@@ -572,7 +572,7 @@ mod tests {
         let registry = SlotShapeRegistry::default();
         let mut clock = crate::ClockDef::default();
         clock.transport.rate = crate::ValueSlot::new(3.0);
-        clock.transport.running = crate::ValueSlot::new(false);
+        clock.transport.play_state = crate::ValueSlot::new(crate::PlayState::Paused);
 
         let json = crate::NodeDef::Clock(clock).write_json(&registry).unwrap();
         assert!(!json.contains("transport"), "{json}");
@@ -581,7 +581,10 @@ mod tests {
         let back = crate::NodeDef::read_json(&registry, &json).unwrap();
         let back = back.as_clock().expect("clock def");
         assert_eq!(*back.transport.rate.value(), 1.0);
-        assert!(*back.transport.running.value());
+        assert_eq!(
+            *back.transport.play_state.value(),
+            crate::PlayState::Playing
+        );
     }
 
     #[test]

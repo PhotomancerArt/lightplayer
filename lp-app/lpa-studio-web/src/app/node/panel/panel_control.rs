@@ -74,9 +74,9 @@ pub fn PanelControl(
     // row's width and stack label-over-widget, where a knob or a toggle is
     // a fixed-width column.
     let outer_class = match control.widget {
-        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
-            "tw:grid tw:min-w-0 tw:gap-1.5"
-        }
+        UiPanelWidget::Fader { .. }
+        | UiPanelWidget::PaletteSwatch
+        | UiPanelWidget::Transport { .. } => "tw:grid tw:min-w-0 tw:gap-1.5",
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
             "tw:flex tw:min-w-[52px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
         }
@@ -84,7 +84,9 @@ pub fn PanelControl(
     // The top-layer copy of the control painted over the anchor while the
     // popover is open — same component, same data, sized to the anchor rect.
     let anchor_visual_class = match control.widget {
-        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
+        UiPanelWidget::Fader { .. }
+        | UiPanelWidget::PaletteSwatch
+        | UiPanelWidget::Transport { .. } => {
             "tw:grid tw:h-full tw:w-full tw:min-w-0 tw:content-start tw:gap-1.5"
         }
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
@@ -232,6 +234,12 @@ fn PanelControlBody(
     };
 
     match control.widget.clone() {
+        // Unreachable in practice — `value_matches_widget` already routed a
+        // grouped Transport to the read-only fallback, since the clock's
+        // card renders the tape as its OUTPUT hero and never as one of
+        // these per-slot controls. Spelled out rather than wildcarded so a
+        // future grouped widget has to decide what this surface does.
+        UiPanelWidget::Transport { .. } => mismatch_fallback(&control),
         UiPanelWidget::Knob { min, max, step } => {
             let Some((value, emit)) = numeric_value(&control) else {
                 return mismatch_fallback(&control);
@@ -376,6 +384,11 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
         // palette (`UiPanelControl::shown_palette`) — the same guard the
         // render arm falls back on.
         UiPanelWidget::PaletteSwatch => control.shown_palette().is_some(),
+        // The grouped Transport belongs to the MODULE panel: the clock's
+        // own card renders the tape as its output hero, not as a panel
+        // control, so one arriving here is a derivation mistake and reads
+        // as the honest read-only fallback rather than a broken faceplate.
+        UiPanelWidget::Transport { .. } => false,
     }
 }
 
@@ -444,6 +457,7 @@ mod tests {
             unit: None,
             state,
             aspects: aspect_slot.visible_aspects(),
+            wires: Vec::new(),
         }
     }
 

@@ -9,8 +9,10 @@ use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
-    RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiIssue,
-    UiPackageCard,
+    ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision, RosterCardState,
+    UiControlProductPreview, UiControlSampleFormat, UiDeviceCard, UiDeviceProjectChip,
+    UiExampleCard, UiHomeView, UiIssue, UiPackageCard,
 };
 
 use lpa_studio_core::UiAction;
@@ -436,6 +438,91 @@ fn live_thumb_states() -> Element {
 
 fn thumb_state_caption_class() -> &'static str {
     "tw:m-0 tw:p-3 tw:text-xs tw:text-muted-foreground"
+}
+
+#[story]
+fn thumb_product_faces() -> Element {
+    // The two faces a card thumb can wear (root-module-product-display Q2):
+    // a CONTROL-FIRST project — its root scope resolves `control.out` — shows
+    // the fixture's lamps, and everything else keeps the raster. Story mode
+    // leases no slot, so the lamp field is injected; the live thumb draws the
+    // identical `LampView` from the slot's output frames, and the shader-only
+    // card's raster is its live canvas (here: the placeholder it reveals
+    // over).
+    rsx! {
+        section { class: "tw:grid tw:w-[480px] tw:grid-cols-2 tw:gap-3.5 tw:p-4",
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                    label: "porch-sign".to_string(),
+                    static_lamps: Some(thumb_lamp_frame()),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "Control-first — lamps" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                    label: "plasma".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "Shader-only — raster" }
+            }
+        }
+    }
+}
+
+/// The canned lamp field the control-first thumb story draws: a three-row
+/// sign of 72 lamps under a fixed rainbow sweep.
+///
+/// Deterministic by construction — no clock, no worker, no re-simulation —
+/// because these baselines are CI-canonical. The bytes are LINEAR unorm16,
+/// which is what the wire carries and what `LampView` decodes; feeding it
+/// display-sRGB here would make the story disagree with the real card.
+fn thumb_lamp_frame() -> UiControlProductPreview {
+    const COLS: u32 = 24;
+    const ROWS: u32 = 3;
+    const LAMPS: u32 = COLS * ROWS;
+    let mut lamps = Vec::with_capacity(LAMPS as usize);
+    let mut bytes = Vec::with_capacity(LAMPS as usize * 6);
+    for index in 0..LAMPS {
+        let (column, row) = (index % COLS, index / COLS);
+        lamps.push(ControlLamp2d {
+            lamp_index: index,
+            sample_start: index * 3,
+            center: [
+                (column as f32 + 0.5) / COLS as f32,
+                (row as f32 + 0.5) / ROWS as f32,
+            ],
+            radius: 0.02,
+        });
+        let phase = column as f32 / COLS as f32 + row as f32 * 0.08;
+        for channel in 0..3_u32 {
+            let turn = (phase + channel as f32 / 3.0) * core::f32::consts::TAU;
+            let level = (turn.sin() * 0.5 + 0.5).powi(2);
+            bytes.extend_from_slice(&((level * f32::from(u16::MAX)) as u16).to_le_bytes());
+        }
+    }
+    UiControlProductPreview {
+        revision: 7,
+        extent: ControlExtent::new(1, LAMPS * 3),
+        sample_format: UiControlSampleFormat::U16,
+        sample_layout: ControlSampleLayout {
+            spans: vec![ControlSampleSpan {
+                row: 0,
+                start: 0,
+                len: LAMPS * 3,
+                encoding: ControlSampleEncoding::RgbPixels {
+                    count: LAMPS,
+                    color_order: ColorOrder::Rgb,
+                },
+            }],
+        },
+        display_layout: Some(std::rc::Rc::new(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(Revision::new(7), COLS, ROWS, lamps),
+        ))),
+        bytes: bytes.into(),
+    }
 }
 
 /// The live sim card (D36) as the pool evidence produces it: Running with

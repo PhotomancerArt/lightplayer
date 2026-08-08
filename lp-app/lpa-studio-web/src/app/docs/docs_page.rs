@@ -77,13 +77,12 @@ pub fn DocsPage(
                 }
             }
             article { class: "tw:min-w-0 tw:flex-1",
-                // KEYED BY SLUG on purpose: switching articles must remount
-                // the provider, because that is what runs the docs sims'
-                // teardown (`DocsSimProvider`'s `use_drop` → the enqueued
-                // StopSimulator that terminates the Worker). A shared,
-                // un-keyed provider would carry one article's sims into the
-                // next and leak them.
-                DocsSimProvider { key: "{page.slug}", sims: page.sims,
+                // NOT keyed by slug: a component `key` does not force a
+                // remount here, so the provider handles article switches
+                // itself — it watches the `sims` slice, retires the old
+                // page's hosts, and boots the new page's before the
+                // article renders (see `DocsSimProvider`'s docs).
+                DocsSimProvider { sims: page.sims,
                     MarkdownDocs { text: page.markdown.to_string(), embeds: Some(embeds) }
                 }
             }

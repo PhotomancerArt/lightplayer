@@ -10,6 +10,13 @@
 //! eviction, and recycles a poisoned worker (respawn + re-lease of
 //! still-visible slots) on device loss or present errors.
 //!
+//! A slot has two halves. The visual half is the raster (`visual.out`,
+//! presented to the GPU-tier surface or blitted from CPU-tier pixel frames);
+//! the lamp half is the project's published output frame, requested on the
+//! same scheduled frame and observed through [`PreviewSlotHandle`] rather
+//! than drawn by the host. Which one a consumer shows follows the engine's
+//! control-first verdict, which rides those answers.
+//!
 //! Concurrency model: everything is single-threaded. `run()` keeps a list
 //! of cooperative sub-tasks (worker boots, lease pipelines) and polls them
 //! once per scheduler tick with a no-op waker — their awaits are timer- or
@@ -33,6 +40,7 @@ use crate::app::library::LibraryHost;
 use super::frame_schedule::{FrameDecision, FrameSchedule};
 use super::preview_client_io::PreviewClientIo;
 use super::preview_content::{catalog_deploy_files, example_deploy_files};
+use super::preview_output_feed::PreviewOutputFeed;
 use super::preview_sleep::PreviewSleeper;
 use super::preview_types::{
     PreviewHostConfig, PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier,
@@ -130,6 +138,9 @@ struct Slot {
     /// Attach failure routed from the worker (`PreviewError` frame 0).
     attach_error: Option<String>,
     schedule: FrameSchedule,
+    /// The slot's lamp half: the published output frames its preview frames
+    /// asked for, and the engine's control-first verdict for its project.
+    output: PreviewOutputFeed,
     last_active_ms: f64,
     presented_frames: u64,
     status: PreviewSlotStatus,
@@ -217,6 +228,7 @@ impl PreviewHost {
             presentable: false,
             attach_error: None,
             schedule: FrameSchedule::new(fps),
+            output: PreviewOutputFeed::default(),
             last_active_ms: now_ms(),
             presented_frames: 0,
             status: if shut_down {
@@ -564,6 +576,7 @@ impl PreviewHost {
         slot.presentable = false;
         slot.schedule.pause();
         slot.schedule.frame_failed();
+        slot.output.invalidate_runtime();
         if !slot.terminal {
             slot.set_status(PreviewSlotStatus::Suspended);
         }
@@ -598,12 +611,18 @@ impl PreviewHost {
                             shared.next_frame_id = shared.next_frame_id.wrapping_add(1).max(1);
                             frame_id
                         };
+                        // The lamp half rides this frame: the feed asks until
+                        // the engine says the project is not control-first,
+                        // then stops for good (shader-only slots carry no
+                        // output traffic). Both tiers ask the same way.
+                        let output_frame = slot.output.next_read();
                         let envelope = if slot.tier == Some(PreviewTier::Gpu) {
                             BrowserInputEnvelope::PresentFrame {
                                 runtime_id,
                                 delta_ms: Some(delta_ms),
                                 channel: PREVIEW_CHANNEL.to_string(),
                                 frame_id,
+                                output_frame,
                             }
                         } else {
                             BrowserInputEnvelope::PreviewFrame {
@@ -613,6 +632,7 @@ impl PreviewHost {
                                 width: slot.cpu_size.0,
                                 height: slot.cpu_size.1,
                                 frame_id,
+                                output_frame,
                             }
                         };
                         (
@@ -666,12 +686,13 @@ impl PreviewHost {
                 .collect()
         };
         for (worker_index, worker) in workers {
-            let (pixel_frames, presented, errors, worker_errors) = {
+            let (pixel_frames, presented, output_frames, errors, worker_errors) = {
                 let mut worker = worker.borrow_mut();
                 worker.drain_outputs();
                 (
                     worker.take_preview_frames(),
                     worker.take_presented_frames(),
+                    worker.take_output_frames(),
                     worker.take_preview_errors(),
                     worker.take_worker_errors(),
                 )
@@ -698,6 +719,16 @@ impl PreviewHost {
                         cause_runtime: Some(error.runtime_id),
                         reason: error.message,
                     });
+                }
+            }
+            // Lamp answers land before the visual accounting below: they
+            // never touch the schedule, so a slot's cadence and backpressure
+            // stay exactly what the raster half makes them.
+            for frame in output_frames {
+                if let Some(slot) = self.slot_by_runtime(worker_index, frame.runtime_id) {
+                    slot.borrow_mut()
+                        .output
+                        .apply(frame.control_first, &frame.outputs);
                 }
             }
             for done in presented {
@@ -811,6 +842,7 @@ impl PreviewHost {
             slot.presentable = false;
             slot.schedule.pause();
             slot.schedule.frame_failed();
+            slot.output.invalidate_runtime();
             if Some(slot.id) == cause_slot_id {
                 slot.strikes = slot.strikes.saturating_add(1);
             }
@@ -854,6 +886,45 @@ impl PreviewSlotHandle {
     /// present" signal.
     pub fn presented_frames(&self) -> u64 {
         self.slot.borrow().presented_frames
+    }
+
+    /// Whether this slot's project leads with lamps — its ROOT scope
+    /// resolves `control.out`. `None` until the first output-frame answer
+    /// lands (a slot that has not presented yet has no verdict).
+    ///
+    /// The engine decides this, on the worker side where the graph is; the
+    /// host only carries it. Consumers switch what they draw on it.
+    pub fn control_first(&self) -> Option<bool> {
+        self.slot.borrow().output.control_first()
+    }
+
+    /// The slot's newest published output frame, ready for the lamp
+    /// renderer. `None` until the first frame lands (and always, for a
+    /// project that is not control-first).
+    pub fn output_frame(&self) -> Option<crate::UiControlProductPreview> {
+        self.slot.borrow().output.frame().cloned()
+    }
+
+    /// Bumped on every genuinely new output frame (a moved publish
+    /// revision) — poll this to re-read [`Self::output_frame`] cheaply.
+    pub fn output_frame_revision(&self) -> u64 {
+        self.slot.borrow().output.frame_revision()
+    }
+
+    /// Whether the slot has output frames but no geometry to draw them with,
+    /// because the engine refused the layout (dome-scale) or none has
+    /// arrived yet. The consumer synthesizes one and installs it with
+    /// [`Self::set_synthesized_display_layout`].
+    pub fn wants_display_layout(&self) -> bool {
+        self.slot.borrow().output.wants_display_layout()
+    }
+
+    /// Install a consumer-synthesized display layout for the slot's lamps.
+    pub fn set_synthesized_display_layout(
+        &self,
+        layout: std::rc::Rc<lpc_model::ControlDisplayLayout>,
+    ) {
+        self.slot.borrow_mut().output.set_synthesized_layout(layout);
     }
 
     /// Suspend (`false`) or resume (`true`) presenting. Hiding pauses the
