@@ -8,7 +8,7 @@ use lpa_link::{
     DeviceState, LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind,
 };
 
-use crate::app::device::device_event_adapter::management_event_sink;
+use crate::app::device::device_event_adapter::{management_event_sink, probe_event_sink};
 use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
 use crate::app::home::home_view_builder::HomeInputs;
@@ -3905,7 +3905,6 @@ impl StudioController {
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
-                self.record_logs(logs);
                 // Chrome's chooser cannot say which port is already
                 // connected (identical VID:PID, no OS path), so mis-picks
                 // are routine with several boards. The pool's per-endpoint
@@ -3922,6 +3921,12 @@ impl StudioController {
                         })
                     });
                 let id = self.install_session(payload).await?;
+                // The connect's own link lines belong to the session it
+                // just opened (D42), so they are recorded AFTER the install
+                // that gives them a session to land on — the wizard's
+                // terminal reads that tail, and the ring it used to reach
+                // is not on any card.
+                self.record_session_logs(id, logs);
                 let outcome = self.attach_runtime(id, updates).await?;
                 if repicked_live {
                     Ok(outcome.with_notice(UiNotice::info(
@@ -4743,13 +4748,40 @@ impl StudioController {
         // never automatic — but a board that said nothing intelligible has
         // nothing to lose, and this is what turns "it's dead" into "it's
         // blank, here are your boards".
-        let Some(session) = self.hardware_session_for(device_id) else {
-            return probe;
+        // The probe narrates itself (esptool's own terminal), and the
+        // wizard's PROBING terminal is where those seconds belong. The
+        // session borrow ends with the block so the lines can be recorded.
+        let probe_logs = Rc::new(RefCell::new(Vec::new()));
+        let probed = {
+            let Some(session) = self.hardware_session_for(device_id) else {
+                return probe;
+            };
+            session
+                .probe_link_mode(probe_event_sink(Rc::clone(&probe_logs)))
+                .await
         };
-        let _ = session
-            .probe_link_mode(lpa_link::DeviceEventSink::noop())
-            .await;
-        let escalated = self.setup_probe_evidence(device_id);
+        let drafts = core::mem::take(&mut *probe_logs.borrow_mut());
+        self.record_session_logs(device_id, drafts);
+        let mut escalated = self.setup_probe_evidence(device_id);
+        // The escalation's answer lives ONLY in this return value. The
+        // probe ends by rebuilding the link, and `DeviceSnapshot::link_mode`
+        // is recomputed passively from a boot-line classifier that the
+        // rebuild clears — so a re-read alone lands back on `Unresponsive`
+        // however well the conversation went (bench, 2026-08-08: a board
+        // parked in the esptool stub was told to hold BOOT).
+        if let Ok(lpa_link::DeviceLinkMode::Bootloader {
+            chip_name,
+            evidence: lpa_link::BootloaderEvidence::SyncHandshake,
+        }) = &probed
+        {
+            escalated.bootloader_conversation = true;
+            // The probe's chip identity is authoritative and it is what
+            // filters the board pick; the passive read has none once the
+            // rebuild wiped the classifier.
+            if escalated.detected_chip.is_none() {
+                escalated.detected_chip.clone_from(chip_name);
+            }
+        }
         crate::classify_board(&escalated, &registry)
     }
 
@@ -4787,6 +4819,11 @@ impl StudioController {
                 || snapshot
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
+            // This is the PASSIVE read, and no passive evidence can carry a
+            // conversation: `snapshot.link_mode` is derived from boot lines
+            // alone. Only `read_setup_probe`, holding the escalation's
+            // return value, can set this.
+            bootloader_conversation: false,
             lines: snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.recent_lines.clone())
@@ -5950,14 +5987,22 @@ impl StudioController {
                 let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
+                        // This session's own streams, onto this session's
+                        // console tail (D42) — the ring would swallow them.
+                        // A failed attach is exactly when they are worth
+                        // reading, and the setup wizard's terminal renders
+                        // that same tail: on the bench (2026-08-08) the
+                        // connect's whole narration was recorded here, into
+                        // the global ring, moments before the wizard looked
+                        // at the session and found nothing.
                         let pending_logs = self
                             .pool
                             .session_mut(id)
                             .map(|session| session.take_pending_logs())
                             .unwrap_or_default();
-                        self.record_logs(pending_logs);
+                        self.record_session_logs(id, pending_logs);
                         let device_logs = self.device.take_pending_device_logs();
-                        self.record_logs(device_logs);
+                        self.record_session_logs(id, device_logs);
                         // Quiesce the editor only when it is a lens on the
                         // failing session (P2: a project open on the sim
                         // survives a failed device attach).
@@ -7530,6 +7575,18 @@ impl StudioController {
     pub(crate) async fn refresh_device_sync_for_test(&mut self) {
         let id = self.the_device_for_test();
         self.refresh_device_sync_for(id).await;
+    }
+
+    /// Test-only: the setup flow's `ProbeBoard` read against the one
+    /// attached device, bound as the flow's device first.
+    ///
+    /// The escalation inside it needs a REAL link session (a stub has no
+    /// hardware session to probe), so its rows live in
+    /// `studio_link_e2e_tests` — a sibling module that cannot reach
+    /// `setup_device` or `read_setup_probe`.
+    pub(crate) async fn setup_probe_for_test(&mut self) -> crate::BoardProbe {
+        self.setup_device = Some(self.the_device_for_test());
+        self.read_setup_probe().await
     }
 
     /// Test-only: [`Self::device_sync_for`] against the one attached

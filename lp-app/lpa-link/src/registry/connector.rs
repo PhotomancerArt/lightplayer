@@ -81,10 +81,14 @@ impl LinkConnector {
         session_id: &LinkSessionId,
         events: LinkManagementEventSink,
     ) -> Result<Option<String>, LinkError> {
-        // Only the host provider surfaces probe progress as management
-        // events; the browser provider collects its logs into the probe
-        // result, and the rest have no bootloader to probe. Which arms exist
-        // is feature-dependent, so bind it unconditionally.
+        // The host provider streams probe progress as management events;
+        // the browser provider collects its esptool terminal into the probe
+        // RESULT, so those lines are replayed onto the same sink when it
+        // returns — dropping them left the studio's device console with no
+        // account of the seconds a probe takes (they reached the browser's
+        // own console and nowhere else). The rest have no bootloader to
+        // probe. Which arms exist is feature-dependent, so bind it
+        // unconditionally.
         let _ = &events;
         match self {
             Self::Fake(provider) => provider.probe_target(session_id).await,
@@ -95,10 +99,17 @@ impl LinkConnector {
             #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
             Self::BrowserWorker(_) => Err(LinkError::unsupported("probe_target")),
             #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-            Self::BrowserSerialEsp32(provider) => provider
-                .probe_target_for_session(session_id)
-                .await
-                .map(|result| result.chip_name),
+            Self::BrowserSerialEsp32(provider) => {
+                let result = provider.probe_target_for_session(session_id).await?;
+                // Fully qualified: the type is used only by this
+                // target-gated arm, and an import would be dead on native.
+                for line in result.logs {
+                    events.emit(crate::provider::management_event::LinkManagementEvent::log(
+                        line,
+                    ));
+                }
+                Ok(result.chip_name)
+            }
         }
     }
 }
