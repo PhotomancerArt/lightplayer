@@ -234,7 +234,7 @@ mod tests {
                 &[
                     (
                         "project.json".to_string(),
-                        br#"{"format":7,"name":"demo"}"#.to_vec(),
+                        br#"{"format":8,"name":"demo"}"#.to_vec(),
                     ),
                     ("module.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
                     ("shader.glsl".to_string(), b"void main() {}".to_vec()),

@@ -6,7 +6,6 @@
       "target": "bus:fluid.emitters"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "seconds",

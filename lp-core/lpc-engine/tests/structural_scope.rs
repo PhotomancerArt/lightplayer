@@ -12,7 +12,7 @@ use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -318,7 +318,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     // pinned: writer accounting that omits module publishes works at
     // depth 1 by coincidence and resolves C to ROOT's visual at depth 2.
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -438,7 +438,7 @@ fn r7_authored_export_and_root_module_runtime() {
     // the export's name; the root wears a real module runtime (its output
     // interface exists like any module's).
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 7\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 8\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),

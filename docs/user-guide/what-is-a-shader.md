@@ -75,7 +75,7 @@ You don't need any of this yet — come back when you want the machinery.
 space the shader lives in: a 2D shader defines `vec4 render_2d(vec2 pos)`,
 a 1D (strip) shader defines `vec4 render_1d(float pos)` — normalize with
 `pos / outputSize.x`. The entry must match the node's declared space, and
-a bare `render` is an error (projects saved before format v7 are migrated
+a bare `render` is an error (projects saved before format v8 are migrated
 automatically). `render_2d(vec2 pos)` returns the color at `pos`, called for every
 position each frame. Inputs arrive as `layout(binding = N) uniform`
 declarations. No `main()`, no varyings, no version pragma.

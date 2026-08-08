@@ -10,7 +10,6 @@
       "target": "bus:visual.out"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "held": {
       "kind": "map",

@@ -20,11 +20,10 @@ use lp_gfx::{
 };
 use lpc_model::{
     AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
-    OptionSlot, PhasorConfig, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
+    OptionSlot, PhasorConfig, Revision, ShaderDef, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
     ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TimeProduct, ValueSlot,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct, ValueSlot,
 };
-use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
@@ -75,10 +74,13 @@ pub struct ShaderNode {
     source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
-    /// Authored numeric mode, and the compile request it produces. A change
-    /// flips `needs_compile`; [`semantics_for`] turns it into the
-    /// [`lp_gfx::ShaderSemantics`] tier the backend is asked for.
-    float_mode: ValueSlot<FloatMode>,
+    /// Authored representation pin, and the compile request it produces.
+    /// `None` is Auto — the target's native representation, the state of
+    /// every shader that does not author the key. A change in EITHER
+    /// direction (pin, unpin, or repin) flips `needs_compile`;
+    /// [`semantics_for`] turns it into the [`lp_gfx::ShaderSemantics`] tier
+    /// the backend is asked for.
+    float_mode: Option<FloatMode>,
     /// Authored declared space, as the compiler's entry contract. Read from
     /// the `space` slot (`ShaderDef::space`) and re-read per tick like
     /// `float_mode`; a change flips `needs_compile`, because the entry a
@@ -99,7 +101,6 @@ pub struct ShaderNode {
     /// by evaluating a 1D program per pixel).
     projected_samples: Option<lp_gfx::SampleOutHandle>,
     visual_uniforms: Vec<VisualUniform>,
-    config_accessors: Option<ShaderConfigAccessors>,
     /// The last successfully compiled program. Kept through source/config
     /// refreshes and failed recompiles (keep-last-good); replaced only by
     /// the next successful compile.
@@ -147,13 +148,12 @@ impl ShaderNode {
             source_revision: source.revision,
             glsl_source: source.text,
             consumed_slots: def.consumed_slots,
-            float_mode: def.float_mode,
+            float_mode: def.float_mode.data.as_ref().map(|slot| *slot.value()),
             space: entry_space_for(def.space.value()),
             space_answer_2: space_answer_2_for(def.space.value()),
             projected_points: None,
             projected_samples: None,
             visual_uniforms,
-            config_accessors: None,
             shader: None,
             compilation_error: None,
             input_resolve_failures: Vec::new(),
@@ -267,7 +267,7 @@ impl ShaderNode {
         // dropped request. A backend that cannot honour the tier it named
         // fails `compile_shader`, and the error lands on this node's status
         // through the keep-last-good path below.
-        let semantics = semantics_for(graphics, *self.float_mode.value());
+        let semantics = semantics_for(graphics, self.float_mode);
         let compile_opts = ShaderCompileOptions {
             semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
@@ -330,13 +330,17 @@ impl ShaderNode {
         }
     }
 
+    /// Re-read the authored representation pin.
+    ///
+    /// Read through the option's `some` branch rather than through a compiled
+    /// option reader: an absent pin reads as an *unresolved slot* rather than
+    /// as the "option slot is none" a reader recognises (the same reason
+    /// `FixtureNode` reads `power.some` by path), and absent is now the
+    /// common case — every unpinned shader.
     fn update_config_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let accessors =
-            ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
-                .map_err(err_ctx("compile shader config view"))?;
-        let next_float_mode = accessors.float_mode.get(ctx)?;
-        if *self.float_mode.value() != next_float_mode {
-            self.float_mode = ValueSlot::with_version(ctx.revision(), next_float_mode);
+        let next_float_mode = try_read_authored_value::<FloatMode>(ctx, "float_mode.some")?;
+        if self.float_mode != next_float_mode {
+            self.float_mode = next_float_mode;
             self.needs_compile = true;
             self.compilation_error = None;
         }
@@ -854,7 +858,7 @@ impl NodeRuntime for ShaderNode {
     }
 }
 
-/// The semantics tier to request for a shader authored in `float_mode`.
+/// The semantics tier to request for a shader's `float_mode` pin.
 ///
 /// Both answers come from the backend rather than from a table here: which
 /// tier a backend runs for Fixed and which for Float are its own product
@@ -864,11 +868,19 @@ impl NodeRuntime for ShaderNode {
 /// slot maps.
 pub(super) fn semantics_for(
     graphics: &dyn lp_gfx::LpGraphics,
-    float_mode: FloatMode,
+    float_mode: Option<FloatMode>,
 ) -> lp_gfx::ShaderSemantics {
     match float_mode {
-        FloatMode::Fixed => graphics.native_semantics(),
-        FloatMode::Float => graphics.float_semantics(),
+        // Auto — no pin. The target's own representation, which is what an
+        // unpinned shader means and what every project authored before the
+        // pin existed already got.
+        None => graphics.native_semantics(),
+        // Pinned Fixed is an alias for native on every shipping backend
+        // (all of them are Q32-native). It stops being an alias the day one
+        // is not; that is the S31-era question the posture ADR records, not
+        // something to pre-solve here.
+        Some(FloatMode::Fixed) => graphics.native_semantics(),
+        Some(FloatMode::Float) => graphics.float_semantics(),
     }
 }
 
@@ -1062,15 +1074,6 @@ pub(super) fn sync_shader_slot_def_from_authored(
     Ok(changed)
 }
 
-pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
-    ctx: &mut TickContext<'_>,
-    path: &str,
-) -> Result<T, NodeError> {
-    ctx.resolve_consumed_slot_value(&SlotPath::parse(path).map_err(|e| {
-        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
-    })?)
-}
-
 /// The compiler's entry contract for an authored [`lpc_model::ShaderSpace`]
 /// declaration: the model carries the per-target answer cells too, but which
 /// entry the source must define depends only on the primary variant.
@@ -1228,6 +1231,31 @@ where
     })
 }
 
+/// Re-read the authored `float_mode` pin onto a runtime def copy.
+///
+/// Unlike [`sync_optional_value_from_authored`], this CLEARS the option when
+/// the authored side has no pin. Clearing is the point: unpinning is a real
+/// authoring gesture (back to Auto), and an option sync that could only ever
+/// set would make the pin one-way — pinned Float would keep compiling as
+/// Float long after the author removed the key.
+///
+/// Returns whether the pin moved, which the caller turns into a recompile.
+pub(super) fn sync_float_mode_pin(
+    ctx: &mut TickContext<'_>,
+    slot: &mut OptionSlot<ValueSlot<FloatMode>>,
+) -> Result<bool, NodeError> {
+    let next = try_read_authored_value::<FloatMode>(ctx, "float_mode.some")?;
+    let current = slot.data.as_ref().map(|value| *value.value());
+    if current == next {
+        return Ok(false);
+    }
+    match next {
+        Some(mode) => slot.set_some(ValueSlot::new(mode)),
+        None => slot.set_none(),
+    }
+    Ok(true)
+}
+
 pub(super) fn set_slot_if_changed<T>(slot: &mut ValueSlot<T>, value: T) -> bool
 where
     T: PartialEq,
@@ -1237,46 +1265,6 @@ where
     }
     slot.set(value);
     true
-}
-
-struct ShaderConfigAccessors {
-    registry_revision: lpc_model::Revision,
-    float_mode: SlotAccessor,
-}
-
-impl ShaderConfigAccessors {
-    fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
-        Ok(Self {
-            registry_revision: registry.revision(),
-            float_mode: compile_shader_config_value_accessor("float_mode", registry)?,
-        })
-    }
-
-    fn get_or_compile<'a>(
-        cache: &'a mut Option<Self>,
-        registry: &SlotShapeRegistry,
-    ) -> Result<&'a Self, lpc_model::SlotAccessorError> {
-        let needs_compile = cache
-            .as_ref()
-            .is_none_or(|view| view.registry_revision != registry.revision());
-        if needs_compile {
-            *cache = Some(Self::compile(registry)?);
-        }
-        Ok(cache
-            .as_ref()
-            .expect("shader config accessors were just compiled"))
-    }
-}
-
-fn compile_shader_config_value_accessor(
-    path: &str,
-    registry: &SlotShapeRegistry,
-) -> Result<SlotAccessor, lpc_model::SlotAccessorError> {
-    SlotAccessor::compile_value(
-        ShaderDef::SHAPE_ID,
-        SlotPath::parse(path).expect("shader config accessor path is valid"),
-        registry,
-    )
 }
 
 pub fn shader_output_path() -> SlotPath {
@@ -2160,8 +2148,8 @@ mod tests {
     use lp_collection::VecMap;
 
     use super::*;
-    use crate::dataflow::resolver::QueryKey;
     use crate::dataflow::resolver::ResolveLogLevel;
+    use crate::dataflow::resolver::{Production, ProductionSource, QueryKey, ResolveError};
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     #[cfg(feature = "node-texture")]
@@ -2176,7 +2164,7 @@ mod tests {
     use lpc_model::TextureDef;
     use lpc_model::{
         ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
-        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TreePath,
+        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, ToLpValue, TreePath,
     };
     use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -3046,8 +3034,14 @@ mod tests {
         );
     }
 
-    /// The authored `float_mode` slot decides which tier the node asks the
+    /// The authored `float_mode` pin decides which tier the node asks the
     /// backend for — the plumbing this whole seam exists to provide.
+    ///
+    /// The `None` row is the load-bearing one: an unpinned (Auto) shader must
+    /// request exactly what a pinned-Fixed shader requested before the pin
+    /// became optional, on every backend. If those two rows ever diverge,
+    /// every project that never authored the key has silently changed
+    /// numerics.
     ///
     /// Asserted on the *request* rather than the rendered output because the
     /// request is the part that used to be missing: before this, every shader
@@ -3056,12 +3050,15 @@ mod tests {
     #[test]
     fn the_authored_float_mode_picks_the_requested_semantics_tier() {
         for (float_mode, expected) in [
-            (FloatMode::Fixed, lp_gfx::ShaderSemantics::Q32),
-            (FloatMode::Float, lp_gfx::ShaderSemantics::F32Cpu),
+            (None, lp_gfx::ShaderSemantics::Q32),
+            (Some(FloatMode::Fixed), lp_gfx::ShaderSemantics::Q32),
+            (Some(FloatMode::Float), lp_gfx::ShaderSemantics::F32Cpu),
         ] {
             let graphics = Arc::new(CountingGraphics::new());
             let def = ShaderDef {
-                float_mode: ValueSlot::new(float_mode),
+                float_mode: float_mode
+                    .map(ValueSlot::new)
+                    .map_or_else(OptionSlot::none, OptionSlot::some),
                 ..ShaderDef::default()
             };
             let mut node = ShaderNode::new(
@@ -3104,20 +3101,165 @@ mod tests {
         }
     }
 
+    /// The change-latch must fire in BOTH directions across the pin boundary.
+    ///
+    /// This is the transition the `Option` exists for and the old
+    /// `ValueSlot<FloatMode>` could not represent: unpinning was previously
+    /// unspellable, so nothing ever had to notice it. If an unpin does not
+    /// flip `needs_compile`, a shader keeps running Float code long after its
+    /// author removed the key — a stale program with no signal, which is the
+    /// same class of failure as a board given numerics nobody asked for.
+    #[test]
+    fn pinning_and_unpinning_both_force_a_recompile() {
+        for (start, authored) in [
+            (Some(FloatMode::Float), None),
+            (None, Some(FloatMode::Float)),
+            (Some(FloatMode::Fixed), Some(FloatMode::Float)),
+        ] {
+            let mut node = shader_node_pinned(start);
+            // The constructor asks for a compile; clear it so the assertion
+            // below can only be satisfied by the latch.
+            node.needs_compile = false;
+
+            let mut resolver = PinResolver { pin: authored };
+            let shapes = SlotShapeRegistry::default();
+            let mut ctx =
+                TickContext::new(NodeId::new(1), Revision::new(2), &mut resolver, &shapes);
+
+            node.update_config_from_view(&mut ctx).expect("sync");
+
+            assert_eq!(node.float_mode, authored, "{start:?} → {authored:?}");
+            assert!(
+                node.needs_compile,
+                "{start:?} → {authored:?} must force a recompile"
+            );
+        }
+    }
+
+    /// The latch must NOT fire when the pin is unchanged — including the
+    /// unpinned case, which every project now sits in. A latch that fired on
+    /// a steady Auto would recompile every shader every frame.
+    #[test]
+    fn an_unchanged_pin_does_not_force_a_recompile() {
+        for pin in [None, Some(FloatMode::Fixed), Some(FloatMode::Float)] {
+            let mut node = shader_node_pinned(pin);
+            node.needs_compile = false;
+
+            let mut resolver = PinResolver { pin };
+            let shapes = SlotShapeRegistry::default();
+            let mut ctx =
+                TickContext::new(NodeId::new(1), Revision::new(2), &mut resolver, &shapes);
+
+            node.update_config_from_view(&mut ctx).expect("sync");
+
+            assert!(!node.needs_compile, "steady {pin:?} must not recompile");
+        }
+    }
+
+    fn shader_node_pinned(pin: Option<FloatMode>) -> ShaderNode {
+        let def = ShaderDef {
+            float_mode: pin
+                .map(ValueSlot::new)
+                .map_or_else(OptionSlot::none, OptionSlot::some),
+            ..ShaderDef::default()
+        };
+        ShaderNode::new(
+            NodeId::new(1),
+            def,
+            shader_asset_text(DEMO_GLSL, Revision::new(1)),
+        )
+    }
+
+    /// Answers `float_mode.some` with a pin, or refuses it the way the real
+    /// resolver refuses an absent option — an unresolved slot, not a
+    /// recognisable "none".
+    struct PinResolver {
+        pin: Option<FloatMode>,
+    }
+
+    impl crate::dataflow::resolver::TickResolver for PinResolver {
+        fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
+            let QueryKey::ConsumedSlot { slot, .. } = query else {
+                return Err(ResolveError::new("PinResolver: unexpected query"));
+            };
+            let path = slot.to_string();
+            if path == "space" || path == "space.OneD.in_2d" {
+                // The space sync shares this resolver; refuse it like any
+                // other unresolved slot so the loaded declaration stands.
+                return Err(ResolveError::new("space slot not faked here"));
+            }
+            assert_eq!(
+                path, "float_mode.some",
+                "the pin sync must read the option payload, never the option itself"
+            );
+            let Some(pin) = self.pin else {
+                return Err(ResolveError::new("option slot is none"));
+            };
+            Ok(Production::leaf(
+                lpc_model::WithRevision::new(Revision::new(1), pin.to_lp_value()),
+                ProductionSource::Default,
+            ))
+        }
+
+        fn resolve_static_consumed(
+            &mut self,
+            _node: NodeId,
+            _path: &'static str,
+        ) -> Result<Production, ResolveError> {
+            Err(ResolveError::new("PinResolver: unused"))
+        }
+
+        fn publish_produced_slot(
+            &mut self,
+            _node: NodeId,
+            _slot: SlotPath,
+            _production: Production,
+        ) -> Result<(), ResolveError> {
+            Err(ResolveError::new("PinResolver: unused"))
+        }
+
+        fn render_texture(
+            &mut self,
+            _product: VisualProduct,
+            _request: &crate::products::visual::RenderTextureRequest,
+        ) -> Result<crate::products::visual::TextureRenderProduct, ResolveError> {
+            Err(ResolveError::new("PinResolver: unused"))
+        }
+
+        fn render_control(
+            &mut self,
+            _product: crate::products::control::ControlProduct,
+            _request: &crate::products::control::ControlRenderRequest,
+            _target: crate::products::control::ControlRenderTarget<'_>,
+        ) -> Result<crate::products::control::ControlLayout, ResolveError> {
+            Err(ResolveError::new("PinResolver: unused"))
+        }
+
+        fn runtime_buffer_mut(
+            &mut self,
+            _id: crate::resource::RuntimeBufferId,
+            _frame: Revision,
+        ) -> Result<&mut crate::resource::RuntimeBuffer, ResolveError> {
+            Err(ResolveError::new("PinResolver: unused"))
+        }
+    }
+
     /// A Float shader on a backend that cannot compile it goes to the node's
     /// error status and renders black — never a silent Q32 render.
     ///
     /// This is the C6 case, and the whole reason the tier request is explicit:
     /// a board given different numerics than the author asked for, with no
     /// signal, is the failure `2026-07-09-preview-fidelity-tiers.md` §4
-    /// forbids. Here the real `TargetLpvmGraphics` does the refusing — the
-    /// host engine is Q32-only, exactly like a device image without the float
-    /// backend linked.
+    /// forbids. The refusing backend is `CountingGraphics::fixed_only` rather
+    /// than the real `TargetLpvmGraphics`, which used to refuse here only
+    /// because the host engine happened to be Q32-only — it compiles Float as
+    /// of 2026-08-07. What is under test is the *node's* handling of a
+    /// refusal, so the refusal belongs in the stand-in.
     #[test]
     fn a_float_shader_on_a_fixed_only_backend_errors_instead_of_rendering_fixed() {
-        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
+        let graphics = Arc::new(CountingGraphics::fixed_only());
         let def = ShaderDef {
-            float_mode: ValueSlot::new(FloatMode::Float),
+            float_mode: OptionSlot::some(ValueSlot::new(FloatMode::Float)),
             ..ShaderDef::default()
         };
         let mut node = ShaderNode::new(
@@ -3175,6 +3317,8 @@ mod tests {
         inner: TargetLpvmGraphics,
         compile_count: AtomicU32,
         fail_compile: AtomicBool,
+        /// Refuse `F32Cpu` the way a board without the float lowering does.
+        refuse_float: AtomicBool,
         /// The tier of the last compile request, so a test can assert what the
         /// node *asked for* rather than only what came back.
         last_semantics: core::sync::atomic::AtomicU8,
@@ -3186,6 +3330,7 @@ mod tests {
                 inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
                 compile_count: AtomicU32::new(0),
                 fail_compile: AtomicBool::new(false),
+                refuse_float: AtomicBool::new(false),
                 last_semantics: core::sync::atomic::AtomicU8::new(u8::MAX),
             }
         }
@@ -3193,6 +3338,19 @@ mod tests {
         fn failing() -> Self {
             let graphics = Self::new();
             graphics.set_fail(true);
+            graphics
+        }
+
+        /// A backend without the float lowering linked — the ESP32-C6 case.
+        ///
+        /// It has to be modelled rather than borrowed: the host's real
+        /// backend compiles Float since 2026-08-07, so nothing reachable from
+        /// a host test refuses it any more. Standing this up explicitly also
+        /// stops the assertion from depending on an incidental property of
+        /// whichever engine the host build happened to link.
+        fn fixed_only() -> Self {
+            let graphics = Self::new();
+            graphics.refuse_float.store(true, Ordering::Relaxed);
             graphics
         }
 
@@ -3228,6 +3386,18 @@ mod tests {
                 },
                 Ordering::Relaxed,
             );
+            // Refuse before counting: a backend that cannot compile the tier
+            // never reaches its compiler, and the message mirrors the real
+            // one (`LpvmGraphics::compile_shader`) down to naming the slot.
+            if self.refuse_float.load(Ordering::Relaxed)
+                && _options.semantics == lp_gfx::ShaderSemantics::F32Cpu
+            {
+                return Err(GfxError::Backend(format!(
+                    "this build's {} backend does not compile Float shaders; \
+                     the shader's float_mode must be Fixed on this device",
+                    self.backend_name()
+                )));
+            }
             let count = self.compile_count.fetch_add(1, Ordering::Relaxed) + 1;
             if self.fail_compile.load(Ordering::Relaxed) {
                 return Err(GfxError::Compile(String::from("test compile failure")));

@@ -1,35 +1,33 @@
-//! Format 6 → 7: shader GLSL entries are dimension-explicit.
+//! Format 6 → 7: `float_mode` is an optional pin, not a required choice.
 //!
-//! The break (`40b936fbe`, "explicit render entries — render_1d(float) /
-//! render_2d(vec2), declaration-driven", dimensionality plan D19/Q11):
-//! `vec4 render(vec2 pos)` stopped being a recognized shader entry. A shader
-//! now declares a space (`TwoD` or `OneD`, `lp-shader/lp-shader/src/
-//! entry_space.rs`) and must define the matching entry — `render_2d` for
-//! `TwoD`, `render_1d` for `OneD`. A bare `render` is a hard compile error.
-//! No version-6 project could author `OneD` through a released build (the
-//! declaration shipped with this bump), so every pre-v7 GLSL asset defines
-//! the 2D entry under the old name. (v6 itself was the uid re-render —
-//! this step renumbered from v5→v6 when that one merged first.)
+//! `ShaderDef.float_mode` and `ComputeShaderDef.float_mode` went from
+//! `ValueSlot<FloatMode>` (always present, defaulting to `Fixed`) to
+//! `OptionSlot<ValueSlot<FloatMode>>`, where **absence means Auto**: the
+//! target's native representation. On every backend shipping today that is
+//! Q32 on a CPU and `F32Gpu` on the GPU tier — exactly what a `"fixed"`
+//! shader already got.
 //!
-//! ## What this step does
+//! So a format-6 `"float_mode": "fixed"` is the pre-posture default spelled
+//! out: a pin that pins nothing. This step deletes it. `"float"` is a real
+//! pin — the author asked for numerics the target would not have chosen —
+//! and passes through untouched.
 //!
-//! Rewrites the entry function **definition** in every `.glsl` asset:
-//! `vec4 render(` → `vec4 render_2d(`. Behavior-preserving — `render_2d`
-//! under a default `TwoD` declaration runs the identical program; only the
-//! name changes. Non-shader `.glsl` assets (compute shaders, whose entry is
-//! `void tick()`) contain no such signature and pass through untouched.
+//! ## Behavior preservation
 //!
-//! The rewrite is signature-anchored, not a parser: it looks for the literal
-//! token sequence `vec4` · whitespace · `render` · optional whitespace ·
-//! `(`, as a whole word in both directions. A comment mentioning the word
-//! `render` — `// define helpers before render().` — never carries that
-//! exact four-token shape immediately adjacent, so it survives untouched;
-//! the corpus fixture `basic` (pulled from `examples/basic/shader.glsl`,
-//! which has exactly such a comment right above its entry) proves it.
+//! Dropping `"fixed"` is behavior-preserving *because* Auto resolves to the
+//! native representation, and every current backend is Q32-native. The
+//! upgrade is a spelling change, not a numerics change: the same shader
+//! compiles to the same code on the same board before and after.
 //!
-//! `project.json`'s own `format` field is bumped `6` → `7` the same way
-//! `v4_to_v5` bumps its manifest; no other JSON content changes; P1's new
-//! space-declaration slots are additive defaults, not migrated content.
+//! Note which direction that argument runs. It licenses dropping `"fixed"`,
+//! and nothing else — it does not license adding `"fixed"` to shaders that
+//! omit the key, nor rewriting `"float"` into anything.
+//!
+//! ## Keying off meaning
+//!
+//! The signal is the *value*, on a node whose *kind* has this field —
+//! never the name alone. A `float_mode` value the format never had is a
+//! shape this step refuses rather than guesses at.
 
 use crate::json::JsonNode;
 use crate::json_file_edit::edit_json_files;
@@ -40,6 +38,18 @@ use crate::upgrade_report::UpgradeReport;
 const FROM: u32 = 6;
 const TO: u32 = 7;
 
+/// The authored key this step migrates.
+const FLOAT_MODE: &str = "float_mode";
+
+/// The value that was the format-6 default spelled out, and so pins nothing.
+const REDUNDANT_PIN: &str = "fixed";
+
+/// The value that is a real pin and must survive.
+const REAL_PIN: &str = "float";
+
+/// The two node kinds that carry a `float_mode` slot at format 5.
+const SHADER_KINDS: &[&str] = &["Shader", "ComputeShader"];
+
 pub(crate) fn apply(
     files: &mut ProjectFiles,
     report: &mut UpgradeReport,
@@ -48,13 +58,11 @@ pub(crate) fn apply(
         if is_manifest_path(path) {
             bump_manifest_format(path, document, report);
         }
-        Ok(())
-    })?;
-    rewrite_glsl_entries(files, report)?;
-    Ok(())
+        drop_redundant_pins(path, document, report)
+    })
 }
 
-/// R1: the manifest's own version stamp, `5` → `6`.
+/// R1: the manifest's own version stamp.
 fn bump_manifest_format(path: &str, document: &mut JsonNode, report: &mut UpgradeReport) {
     if document.get("format").and_then(JsonNode::as_u32) == Some(FROM) {
         document.set("format", JsonNode::u32(TO));
@@ -62,106 +70,78 @@ fn bump_manifest_format(path: &str, document: &mut JsonNode, report: &mut Upgrad
     }
 }
 
-/// Rewrite the `render` entry definition in every `.glsl` asset, only
-/// rewriting files that actually changed.
-fn rewrite_glsl_entries(
-    files: &mut ProjectFiles,
+/// R2: walk every object, and on each one carrying a shader `kind`, drop a
+/// `float_mode` that says `fixed`.
+///
+/// Walking rather than only inspecting the file root is what covers a node
+/// inlined inside another artifact (a playlist entry's `node`).
+fn drop_redundant_pins(
+    path: &str,
+    node: &mut JsonNode,
     report: &mut UpgradeReport,
 ) -> Result<(), UpgradeError> {
-    let paths: Vec<String> = files
-        .paths()
-        .filter(|path| path.ends_with(".glsl"))
-        .map(String::from)
-        .collect();
-
-    for path in paths {
-        let bytes = files.get(&path).unwrap_or_default();
-        let text = std::str::from_utf8(bytes).map_err(|e| UpgradeError::Malformed {
-            file: path.clone(),
-            detail: e.to_string(),
-        })?;
-        if let Some(rewritten) = rename_render_entry(text) {
-            files.replace(&path, rewritten.into_bytes());
-            report.record_changed(&path);
-            report.note(format!(
-                "{path}: entry `vec4 render(` → `vec4 render_2d(` (D19/Q11 explicit \
-                 render entries — render is no longer a recognized shader entry)"
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Rename every `vec4 render(` entry definition to `vec4 render_2d(` in
-/// `source`. Returns `None` when nothing matched (byte-identical), matching
-/// the convention every step in this crate follows for untouched files.
-fn rename_render_entry(source: &str) -> Option<String> {
-    let mut out = String::with_capacity(source.len() + 4);
-    let mut changed = false;
-    let mut prev_char: Option<char> = None;
-    let mut i = 0;
-    while i < source.len() {
-        let at_word_start = prev_char.is_none_or(|c| !is_ident_continue(c));
-        if at_word_start {
-            if let Some(match_len) = match_render_definition(&source[i..]) {
-                let piece = &source[i..i + match_len];
-                out.push_str(&piece.replacen("render", "render_2d", 1));
-                i += match_len;
-                changed = true;
-                prev_char = Some('(' /* any non-ident char */);
-                continue;
+    match node {
+        JsonNode::Object(_) => {
+            if node_kind(node).is_some_and(|kind| SHADER_KINDS.contains(&kind.as_str())) {
+                drop_redundant_pin(path, node, report)?;
             }
+            let members = node.object_mut().expect("object");
+            for (_, child) in members.iter_mut() {
+                drop_redundant_pins(path, child, report)?;
+            }
+            Ok(())
         }
-        let ch = source[i..].chars().next().expect("non-empty slice");
-        out.push(ch);
-        i += ch.len_utf8();
-        prev_char = Some(ch);
-    }
-    changed.then_some(out)
-}
-
-/// If `s` starts with `vec4` · whitespace · `render` (each a whole word,
-/// with `(` — optionally past more whitespace — right after), returns the
-/// byte length of the matched span up to and including `render` (the
-/// trailing whitespace and `(` are left for the caller to copy verbatim).
-fn match_render_definition(s: &str) -> Option<usize> {
-    let after_vec4 = match_word(s, "vec4")?;
-    let ws1 = skip_ws(&s[after_vec4..]);
-    if ws1 == 0 {
-        return None;
-    }
-    let render_start = after_vec4 + ws1;
-    let after_render = match_word(&s[render_start..], "render")?;
-    let render_end = render_start + after_render;
-    let ws2 = skip_ws(&s[render_end..]);
-    if s[render_end + ws2..].starts_with('(') {
-        Some(render_end)
-    } else {
-        None
+        JsonNode::Array(items) => {
+            for item in items.iter_mut() {
+                drop_redundant_pins(path, item, report)?;
+            }
+            Ok(())
+        }
+        JsonNode::Scalar(_) => Ok(()),
     }
 }
 
-/// If `s` starts with the whole word `word` — not a prefix of a longer
-/// identifier — returns `word.len()`.
-fn match_word(s: &str, word: &str) -> Option<usize> {
-    if !s.starts_with(word) {
-        return None;
-    }
-    match s[word.len()..].chars().next() {
-        Some(c) if is_ident_continue(c) => None,
-        _ => Some(word.len()),
+fn drop_redundant_pin(
+    path: &str,
+    artifact: &mut JsonNode,
+    report: &mut UpgradeReport,
+) -> Result<(), UpgradeError> {
+    let Some(pin) = artifact.get(FLOAT_MODE) else {
+        return Ok(());
+    };
+    // A non-string here never loaded at format 5, and neither the old nor the
+    // new model can say what it meant.
+    let Some(pin) = pin.as_str() else {
+        return Err(refuse(path, "a value that is not a string"));
+    };
+    match pin.as_str() {
+        REDUNDANT_PIN => {
+            artifact.remove(FLOAT_MODE);
+            report.note(format!(
+                "{path}: dropped `\"{FLOAT_MODE}\": \"{REDUNDANT_PIN}\"` (the format-6 default; \
+                 an unpinned shader runs the target's native representation, which is the same \
+                 thing on every current target)"
+            ));
+            Ok(())
+        }
+        // A real pin, left verbatim.
+        REAL_PIN => Ok(()),
+        other => Err(refuse(path, &format!("`{other}`"))),
     }
 }
 
-fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+fn refuse(path: &str, found: &str) -> UpgradeError {
+    UpgradeError::Refused {
+        file: String::from(path),
+        reason: format!(
+            "`{FLOAT_MODE}` is {found}, but format 5 only ever had `{REDUNDANT_PIN}` or \
+             `{REAL_PIN}` — fix it by hand and re-open the project"
+        ),
+    }
 }
 
-fn skip_ws(s: &str) -> usize {
-    s.chars()
-        .take_while(|c| c.is_whitespace())
-        .map(char::len_utf8)
-        .sum()
+fn node_kind(node: &JsonNode) -> Option<String> {
+    node.get("kind").and_then(JsonNode::as_str)
 }
 
 #[cfg(test)]
@@ -169,84 +149,144 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_bare_two_d_entry_is_renamed() {
-        let source = "layout(binding = 0) uniform vec2 outputSize;\n\nvec4 render(vec2 pos) {\n    return vec4(1.0);\n}\n";
-        let rewritten = rename_render_entry(source).expect("renamed");
-        assert!(
-            rewritten.contains("vec4 render_2d(vec2 pos) {"),
-            "{rewritten}"
+    fn a_fixed_pin_is_dropped() {
+        let migrated = migrate_one(
+            "shader.json",
+            r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "float_mode": "fixed",
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "value": "f32"
+    }
+  }
+}"#,
+        )
+        .expect("migrates");
+        assert_eq!(
+            migrated,
+            r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "value": "f32"
+    }
+  }
+}
+"#
         );
-        assert!(!rewritten.contains("render("), "{rewritten}");
     }
 
     #[test]
-    fn a_comment_mentioning_render_survives_untouched() {
-        let source = "// Naga GLSL-in resolves calls in source order; define helpers before render().\n\
-                       // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.\n\
-                       vec4 render(vec2 pos) {\n    return vec4(0.0);\n}\n";
-        let rewritten = rename_render_entry(source).expect("renamed");
-        assert!(
-            rewritten.contains("define helpers before render()."),
-            "{rewritten}"
-        );
-        assert!(rewritten.contains("32x32 render regardless"), "{rewritten}");
-        assert!(
-            rewritten.contains("vec4 render_2d(vec2 pos) {"),
-            "{rewritten}"
+    fn a_float_pin_is_kept_verbatim() {
+        // The whole reason this step reads the value instead of the key: a
+        // `float` shader asked for numerics the target would not have picked,
+        // and dropping it would silently move it back to Q32.
+        assert_eq!(
+            migrate_one(
+                "shader.json",
+                r#"{
+  "kind": "Shader",
+  "float_mode": "float"
+}"#
+            ),
+            None
         );
     }
 
     #[test]
-    fn a_shader_with_no_render_entry_is_untouched() {
-        // Compute-shader assets: `void tick()`, no `render` at all.
-        let source = "void tick() {\n    events[0].id = 1u;\n}\n";
-        assert_eq!(rename_render_entry(source), None);
+    fn a_shader_with_no_pin_is_already_at_the_new_shape() {
+        assert_eq!(
+            migrate_one("shader.json", r#"{"kind":"Shader","source":"s.glsl"}"#),
+            None
+        );
     }
 
     #[test]
-    fn an_identifier_only_sharing_the_word_render_is_left_alone() {
-        // `prerender` and `renderTarget` must not partially match.
-        let source = "vec4 prerender(vec2 pos) { return vec4(0.0); }\nfloat renderTarget;\n";
-        assert_eq!(rename_render_entry(source), None);
+    fn a_compute_shader_pin_is_dropped_too() {
+        let migrated = migrate_one(
+            "compute.json",
+            r#"{"kind":"ComputeShader","float_mode":"fixed","produced":{}}"#,
+        )
+        .expect("migrates");
+        assert_eq!(
+            migrated,
+            "{\n  \"kind\": \"ComputeShader\",\n  \"produced\": {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn a_non_shader_node_keeps_its_own_float_mode_key() {
+        // Nothing else authors this key today, but the rule is "this field on
+        // this kind", not "this name anywhere" — the same discipline v4→v5
+        // needed for its `time` slots.
+        assert_eq!(
+            migrate_one("fixture.json", r#"{"kind":"Fixture","float_mode":"fixed"}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn an_inlined_shader_node_is_migrated_in_place() {
+        let migrated = migrate_one(
+            "playlist.json",
+            r#"{"kind":"Playlist","entries":{"1":{"node":{"kind":"Shader","float_mode":"fixed"}}}}"#,
+        )
+        .expect("migrates");
+        assert!(!migrated.contains("float_mode"), "{migrated}");
+    }
+
+    #[test]
+    fn an_unknown_pin_is_refused_rather_than_guessed_at() {
+        let refused = apply_to("shader.json", r#"{"kind":"Shader","float_mode":"q32"}"#)
+            .expect_err("refuses");
+        let UpgradeError::Refused { file, reason } = refused else {
+            panic!("expected a refusal, got {refused:?}");
+        };
+        assert_eq!(file, "shader.json");
+        assert!(reason.contains("`q32`"), "{reason}");
+
+        let refused =
+            apply_to("shader.json", r#"{"kind":"Shader","float_mode":true}"#).expect_err("refuses");
+        assert!(
+            matches!(&refused, UpgradeError::Refused { reason, .. } if reason.contains("not a string")),
+            "{refused:?}"
+        );
     }
 
     #[test]
     fn only_the_manifest_format_is_bumped() {
-        let mut files: ProjectFiles = [(
-            "project.json",
-            b"{\n  \"format\": 6,\n  \"name\": \"x\"\n}".to_vec(),
-        )]
-        .into_iter()
-        .collect();
-        let mut report = UpgradeReport::new(FROM);
-        apply(&mut files, &mut report).expect("upgrades");
+        // `*.map2d.json` carries its own unrelated `format` key.
         assert_eq!(
-            files.get("project.json"),
-            Some(b"{\n  \"format\": 7,\n  \"name\": \"x\"\n}\n".as_slice())
+            migrate_one("fyeah.map2d.json", r#"{"format":1,"objects":[]}"#),
+            None
+        );
+        assert_eq!(
+            migrate_one("project.json", "{\n  \"format\": 6,\n  \"name\": \"x\"\n}"),
+            Some(String::from("{\n  \"format\": 7,\n  \"name\": \"x\"\n}\n"))
         );
     }
 
-    #[test]
-    fn a_glsl_asset_is_rewritten_alongside_the_manifest() {
-        let mut files: ProjectFiles = [
-            ("project.json", b"{\"format\": 6}".to_vec()),
-            (
-                "shader.glsl",
-                b"vec4 render(vec2 pos) {\n    return vec4(1.0);\n}\n".to_vec(),
-            ),
-        ]
-        .into_iter()
-        .collect();
+    /// Runs the step over a one-file package; `None` means byte-identical.
+    fn migrate_one(path: &str, source: &str) -> Option<String> {
+        let (files, report) = apply_to(path, source).expect("migrates");
+        if report.changed_files.is_empty() {
+            assert_eq!(files.get(path), Some(source.as_bytes()));
+            return None;
+        }
+        assert_eq!(report.changed_files, vec![String::from(path)]);
+        Some(String::from_utf8(files.get(path).unwrap().to_vec()).unwrap())
+    }
+
+    fn apply_to(path: &str, source: &str) -> Result<(ProjectFiles, UpgradeReport), UpgradeError> {
+        let mut files: ProjectFiles = [(path, source.as_bytes().to_vec())].into_iter().collect();
         let mut report = UpgradeReport::new(FROM);
-        apply(&mut files, &mut report).expect("upgrades");
-        let rewritten = std::str::from_utf8(files.get("shader.glsl").unwrap()).unwrap();
-        assert!(
-            rewritten.contains("vec4 render_2d(vec2 pos)"),
-            "{rewritten}"
-        );
-        assert_eq!(
-            report.changed_files,
-            vec![String::from("project.json"), String::from("shader.glsl")]
-        );
+        apply(&mut files, &mut report)?;
+        report.to = TO;
+        Ok((files, report))
     }
 }
