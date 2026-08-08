@@ -1,0 +1,104 @@
+{
+  "id": "quinled/dig2go",
+  "target": "esp32",
+  "vendor": "QuinLED",
+  "product": "dig2go",
+  "description": "QuinLED dig2go single-output WS281x controller in a closed case. Probed on the desk 2026-08-06: ESP32-D0WD-V3 revision v3.1, 4 MB flash, CH34x USB bridge enumerating as 1a86:7523. Pin facts agree between the vendor pinout guide and QuinLED's own WLED build config (platformio_override.ini in intermittech/QuinLED-Firmware): LED data GPIO16 on the pigtail, touch button GPIO0, LED power relay enable GPIO12. GPIO12 carries two roles at once: it gates the LED supply (the vendor's \"custom relay\" circuit cuts LED power completely when off, and the header's 5 V is switched with it), and it is MTDI, the classic-ESP32 flash-voltage strap — high at boot selects 1.8 V VDD_SDIO and the board does not boot, so it must be low at boot and only asserted afterwards. It is declared here as a reserved GPIO plus a power_gate entry, never as a claimable wire; un-asserted, the strip is dark rather than dim. UART0 (GPIO1/3) runs the CH340 host link and the LED wiring does not touch it. Pins the case does not expose are omitted rather than guessed (boards/README.md): the IR receiver on GPIO5 and the ICS-43434 microphone (SD 19 / WS 4 / SCK 18), which LightPlayer registers no driver for, and GPIO21/22/23/25, which the vendor's pinout guide lists on a dupont header but which are not verified on this unit.",
+  "url": "https://quinled.info/quinled-dig2go/",
+  "board_label": [
+    {
+      "label": "LED",
+      "gpio": "/gpio/16",
+      "status": "assigned",
+      "note": "the LED pigtail/connector — the board's only LED output, level-shifted, and powered through the GPIO12 gate"
+    }
+  ],
+  "gpio": [
+    {
+      "address": "/gpio/0",
+      "display_label": "GPIO0",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO0"
+      ],
+      "reserved_reason": "capacitive touch button on the case, and the BOOT strapping pin; not exposed as an output"
+    },
+    {
+      "address": "/gpio/1",
+      "display_label": "GPIO1",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO1",
+        "U0TXD"
+      ],
+      "reserved_reason": "UART0 TX into the CH340 bridge — the host serial link; driving it drops the link"
+    },
+    {
+      "address": "/gpio/3",
+      "display_label": "GPIO3",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO3",
+        "U0RXD"
+      ],
+      "reserved_reason": "UART0 RX from the CH340 bridge — the host serial link; driving it drops the link"
+    },
+    {
+      "address": "/gpio/12",
+      "display_label": "GPIO12",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO12",
+        "MTDI"
+      ],
+      "reserved_reason": "LED power gate (see power_gate) + MTDI flash-voltage strap — must be low at boot (high selects 1.8 V VDD_SDIO and the board will not boot); never claimable as a wire"
+    },
+    {
+      "address": "/gpio/16",
+      "display_label": "LED",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO16",
+        "GPIO16"
+      ]
+    }
+  ],
+  "resource": [
+    {
+      "address": "/rmt/ws281x0",
+      "display_label": "RMT WS281x 0",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    }
+  ],
+  "power_gate": [
+    {
+      "gpio": "/gpio/12",
+      "active_level": "high",
+      "open_drain": false,
+      "settle_ms": 25,
+      "off_debounce_ms": 5000,
+      "feeds": [
+        "/rmt/ws281x0"
+      ],
+      "note": "Pre-walk placeholders, both to be measured and confirmed on the bench before this board ships to users: active-high is inferred from the vendor calling GPIO12 the \"LED Relay enable pin\" of a solid-state \"custom relay\" circuit (assert to enable), and 25 ms is a chosen settle time, not a measured one. Rail-off is also the strap-safe boot state, since GPIO12 is MTDI and must be low at reset."
+    }
+  ]
+}
