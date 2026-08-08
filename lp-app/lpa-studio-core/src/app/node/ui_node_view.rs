@@ -19,10 +19,10 @@ pub struct UiNodeView {
     /// Kind-specific permanent face for this node's card. `None` (any kind
     /// without a hand-built face) renders the generic tab/section fallback.
     pub face: Option<UiNodeFace>,
-    /// Core-owned card UI view-state (drawer disclosure, agent collapse,
-    /// mirrored composer draft), overlaid by the project controller from
-    /// its address-keyed store. `Default` for fresh cards and unit
-    /// contexts.
+    /// Core-owned card UI view-state (whole-card fold, drawer disclosure,
+    /// agent collapse, mirrored composer draft), overlaid by the project
+    /// controller from its address-keyed store. `Default` for fresh cards
+    /// and unit contexts.
     pub card_ui: NodeCardUiState,
     /// Tabs rendered inside the node pane.
     pub tabs: Vec<UiNodeTab>,
@@ -32,8 +32,6 @@ pub struct UiNodeView {
     pub focused: bool,
     /// Action that focuses this node as the current Studio selection.
     pub action: Option<UiAction>,
-    /// Whether the pane starts collapsed.
-    pub collapsed: bool,
     /// Projection or runtime issues for the whole node.
     pub issues: Vec<String>,
     /// The add-node picker for container nodes (playlists): entries create
@@ -63,7 +61,6 @@ impl UiNodeView {
             children: Vec::new(),
             focused: false,
             action: None,
-            collapsed: false,
             issues: Vec::new(),
             add_node_menu: None,
             exports: None,
