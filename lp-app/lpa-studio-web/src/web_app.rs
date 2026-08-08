@@ -28,8 +28,11 @@ use crate::app::layout::{
     ChromeProjectMenu, CloudAccountControl, PlayToggle, SiteChrome, SiteSection,
     StudioSettingsPopover, VersionBadge,
 };
-use crate::app::share::{ProjectShareControl, archive_project};
+use crate::app::share::{
+    ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, use_visitor_session,
+};
 use crate::base::{ToastHost, use_toast_provider};
+use crate::cloud::SharedOpenState;
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -595,6 +598,30 @@ pub fn App() -> Element {
         })
     });
 
+    // The P6 visitor coordinator: who is looking at the open `/p/`
+    // project, the strip banner's state, the pull loop, fork and discard.
+    // Provided as context for the chrome slot and the banner host below.
+    let _visitor_session = use_visitor_session(bridge.tx.clone(), view, route);
+
+    // A `/p/` link whose uid the library does not hold (P3's pending
+    // intent), consumed here: fetch → tracking copy in the library → the
+    // ordinary open funnel; or the calm not-found line on Home.
+    let shared_open_state = use_context_provider(|| Signal::new(SharedOpenState::Idle));
+    let consume_bridge = bridge.clone();
+    let consume_pending_route_open = Rc::clone(&pending_route_open);
+    use_effect(move || {
+        let Some(uid) = shared_project().0 else {
+            return;
+        };
+        consume_shared_intent(
+            uid,
+            shared_open_state,
+            shared_project,
+            consume_bridge.tx.clone(),
+            Rc::clone(&consume_pending_route_open),
+        );
+    });
+
     // The local project library: probed in the startup hook below (which
     // also attaches the library host and only then fires the connect
     // action).
@@ -819,6 +846,11 @@ pub fn App() -> Element {
                         uid,
                         initially_open: share_request() > 0,
                     }
+                    // The same slot, visitor variant (P6, spike §2-D).
+                    // Each door self-gates on the service's answer —
+                    // members get the pill above, link-holders get this
+                    // one, and never both.
+                    VisitorShareSlot {}
                 }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
@@ -832,6 +864,11 @@ pub fn App() -> Element {
                 CloudAccountControl { on_account: section == SiteSection::Account }
             }
             LocalStoreBanner { status: store_status.read().clone() }
+            // The visitor strip (P6, spike §3-A): full-width under the
+            // chrome, only for an open tracking copy without write.
+            // Self-gating — renders nothing for members and non-project
+            // routes.
+            VisitorBannerHost {}
             match current_route {
                 StudioRoute::Home => rsx! {
                     crate::app::HomePage { on_action }
@@ -934,6 +971,52 @@ fn resolve_project_route(
         route.set(StudioRoute::Home);
     }
     true
+}
+
+/// Consume one pending shared-project intent (P6): fetch the project as a
+/// tracking copy into the library, then open it through the same funnel a
+/// gallery card uses. A refusal lands in `state` for Home's one quiet
+/// line; the URL stays exactly as the sender wrote it, so a reload
+/// retries.
+#[cfg(target_arch = "wasm32")]
+fn consume_shared_intent(
+    uid: PrefixedUid,
+    mut state: Signal<SharedOpenState>,
+    mut shared_project: Signal<router::PendingSharedProject>,
+    tx: CommandSender,
+    pending_route_open: Rc<Cell<bool>>,
+) {
+    state.set(SharedOpenState::Opening);
+    spawn(async move {
+        match crate::cloud::shared_open::open_shared_into_library(uid).await {
+            Ok(summary) => {
+                state.set(SharedOpenState::Idle);
+                pending_route_open.set(true);
+                tx.send(StudioCommand::Action(UiAction::from_op(
+                    HOME_NODE_ID,
+                    HomeOp::OpenPackage {
+                        key: summary.uid.to_string(),
+                    },
+                )));
+            }
+            Err(failure) => state.set(failure),
+        }
+        // Consumed either way: a fresh navigation (or reload) re-arms it.
+        shared_project.set(router::PendingSharedProject(None));
+    });
+}
+
+/// Host builds never navigate; the intent simply clears.
+#[cfg(not(target_arch = "wasm32"))]
+fn consume_shared_intent(
+    _uid: PrefixedUid,
+    mut state: Signal<SharedOpenState>,
+    mut shared_project: Signal<router::PendingSharedProject>,
+    _tx: CommandSender,
+    _pending_route_open: Rc<Cell<bool>>,
+) {
+    state.set(SharedOpenState::Idle);
+    shared_project.set(router::PendingSharedProject(None));
 }
 
 /// The pull loop's per-request progress-deadline timer on wasm: a `setTimeout`

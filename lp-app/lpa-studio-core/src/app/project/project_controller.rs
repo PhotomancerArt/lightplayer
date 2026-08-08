@@ -2351,6 +2351,53 @@ impl ProjectController {
         Ok(loaded.logs)
     }
 
+    /// Re-push the ACTIVE library project's on-disk content to the running
+    /// runtime — the "apply into the open editor" half of the visitor pull
+    /// loop (P6). The platform edge fast-forwarded (or reset) the library
+    /// copy through the open project's own mounted stores; this re-loads
+    /// the handle from those same handles — the appended events and the
+    /// checked-out files are already there — and replaces the runtime's
+    /// loaded project with that content.
+    ///
+    /// No lock is taken (the open already holds it), and no format
+    /// migration runs: a tracking copy must not be diverged from its own
+    /// history by a local rewrite, so content this build cannot load
+    /// surfaces as the open error it is.
+    pub(crate) async fn reload_active_from_library(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let (uid, slug, package_fs, history_fs) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::MissingSession("no active library project to reload".to_string())
+            })?;
+            (
+                active.handle.uid,
+                active.handle.slug.clone(),
+                std::rc::Rc::clone(&active.handle.package_fs),
+                std::rc::Rc::clone(&active.handle.history_fs),
+            )
+        };
+        let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+            .map_err(library_ui_error)?;
+        let title = handle.slug.clone();
+        let files = handle.read_all_files().map_err(library_ui_error)?;
+        let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
+        let loaded = server
+            .open_library_project(&self.runtime_storage_id, &files, &expected_hash)
+            .await?;
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced: loaded.synced_version,
+        });
+        self.mark_ready(title, loaded.handle_id, loaded.inventory);
+        self.project_fs_root = loaded.fs_root;
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
     /// The open pre-flight (D11): classify the package, migrate it if this
     /// build can, and refuse — with a classified issue, not a parser string
     /// — if it cannot.

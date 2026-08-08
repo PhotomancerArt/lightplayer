@@ -88,6 +88,76 @@ fn viewer_edits_diverges_then_forks() {
     assert_eq!(copy.bound_to(), Some(dome.uid()));
 }
 
+/// The P6 visitor flow, end to end: a share link opened as a tracking
+/// copy, the owner's pushes arriving as fast-forwards, a local edit whose
+/// push the service refuses, and the fork that gives that work a home —
+/// which, signed in, publishes as the visitor's own project. The refused
+/// push must leave the tracking copy's binding untouched (refusal is an
+/// answer, not damage), and the fork must not disturb the copy's tracking.
+#[test]
+fn visitor_tracks_edits_is_refused_forks_and_publishes() {
+    let td = TestWorld::new();
+    let owner = td.user();
+    // Signed in but never invited: the refusal is NotAuthorized (the
+    // anonymous twin of this story gets NotAuthenticated — see
+    // `anonymous_cannot_push_a_view_link`).
+    let visitor = td.user();
+
+    let dome = owner.project();
+    let link = dome.publish(Access::View);
+
+    // open_shared: uid preserved, real history, a binding that tracks
+    let copy = visitor.open_shared(&link);
+    assert_eq!(copy.uid(), dome.uid());
+    assert_eq!(copy.bound_to(), Some(dome.uid()));
+    assert_eq!(copy.head(), dome.head());
+
+    // the owner keeps working; the visitor's pull is a fast-forward —
+    // and a link-holder's pull never carries the roster
+    dome.edit("brighter");
+    assert!(dome.push().advanced());
+    let pulled = copy.pull();
+    assert!(pulled.can_fast_forward());
+    assert!(
+        pulled.members.is_none(),
+        "write access is never access to the roster"
+    );
+    copy.fast_forward(&pulled);
+    assert_eq!(copy.shader(), "brighter");
+    assert_eq!(copy.head(), dome.head());
+
+    // the visitor edits and saves; the push is refused, terminally —
+    // the service is unchanged and so is the copy's binding
+    copy.edit("the visitor's take");
+    assert!(matches!(
+        copy.push_error(),
+        SyncError::Cloud(CloudError::NotAuthorized)
+    ));
+    assert_eq!(copy.bound_to(), Some(dome.uid()));
+    assert_eq!(dome.server_heads(), vec![dome.head()]);
+    // unpushed local work on a tracking copy reads as ahead, not lost
+    assert!(copy.pull().local_ahead());
+
+    // fork: a NEW project at the visitor's version — new uid, no binding,
+    // history rooted at the parent's version
+    let mine = copy.fork();
+    assert_ne!(mine.uid(), copy.uid());
+    assert_eq!(mine.shader(), "the visitor's take");
+    assert_eq!(mine.bound_to(), None);
+    assert_eq!(mine.relation_to(copy.head()), SyncRelation::AtHead);
+
+    // signed in, the fork publishes as the visitor's own project at its
+    // own address
+    let mine_link = mine.publish(Access::View);
+    assert_eq!(mine_link.uid, mine.uid());
+    assert_eq!(mine.bound_to(), Some(mine.uid()));
+    assert_eq!(mine.server_heads(), vec![mine.head()]);
+
+    // and the tracking copy still tracks the ORIGINAL, edits intact
+    assert_eq!(copy.bound_to(), Some(dome.uid()));
+    assert_eq!(copy.shader(), "the visitor's take");
+}
+
 /// Two people on one project: an invitation that predates the account, a
 /// fast-forward each way, a collision, and the loser still reachable.
 #[test]

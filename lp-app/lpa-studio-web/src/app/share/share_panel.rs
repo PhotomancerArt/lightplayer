@@ -166,9 +166,10 @@ pub fn SharePanel(
 }
 
 /// The hero: the whole link on one line, and the one button that matters.
+/// Shared with the visitor popover (P6) — same link, same powers, same box.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ShareUrlHero(url: ShareUrl, on_copy: Option<EventHandler<()>>) -> Element {
+pub(crate) fn ShareUrlHero(url: ShareUrl, on_copy: Option<EventHandler<()>>) -> Element {
     let absolute = url.absolute();
     rsx! {
         div { class: URL_HERO_CLASS,

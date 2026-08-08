@@ -12,7 +12,7 @@
 //! deferred trip: the next save, the next sign-in, or the coarse sweep
 //! re-derives everything worth doing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Rapid saves collapse into one push (the `asset_editor` debounce cadence).
 pub const SAVE_DEBOUNCE_MS: f64 = 2_000.0;
@@ -65,6 +65,13 @@ pub enum TripResult {
     /// repeating will not fix (not ours, malformed slug, archived). Drop it
     /// — the next save or sign-in will ask again if the situation changed.
     Refused,
+    /// The service knows the project and this caller may not write it — a
+    /// visitor's push against a `View` link, or a session that expired
+    /// mid-trip. Terminal **and latched** (P6): unlike [`Self::Refused`],
+    /// later saves must not keep asking a server that will keep saying no.
+    /// The latch clears only when something that could change the answer is
+    /// observed — an access/membership change on a pull, or a sign-in.
+    Denied,
 }
 
 /// One project that is due, and what its trip must do.
@@ -79,6 +86,10 @@ pub struct DueProject {
 #[derive(Debug, Default)]
 pub struct SyncQueue {
     entries: BTreeMap<String, Entry>,
+    /// Uids whose last trip was [`TripResult::Denied`]: requests for them
+    /// are suppressed until [`Self::clear_denied`] (an observed access
+    /// change) or [`Self::clear`] (sign-out / account switch).
+    denied: BTreeSet<String>,
 }
 
 impl SyncQueue {
@@ -94,6 +105,12 @@ impl SyncQueue {
     /// the entry so the pump comes back for it afterwards.
     pub fn request(&mut self, uid: &str, trigger: SyncTrigger, now: f64) -> f64 {
         let delay = trigger.delay_ms();
+        // A denied uid stays quiet whatever the trigger: the server said
+        // "not yours to write" and repeating the question is churn. The
+        // latch is lifted by an observed change, never by another save.
+        if self.denied.contains(uid) {
+            return delay;
+        }
         let entry = self.entries.entry(uid.to_string()).or_default();
         entry.due_at = now + delay;
         entry.restate |= trigger.restates();
@@ -140,10 +157,30 @@ impl SyncQueue {
                 // but keep anything that arrived while the trip was running.
                 entry.restate = false;
             }
+            TripResult::Denied => {
+                // Latch: drop the entry outright — including work that
+                // arrived mid-flight, which the same answer awaits — and
+                // suppress every request until the latch is cleared.
+                entry.pending = false;
+                self.denied.insert(uid.to_string());
+            }
         }
         if !entry.pending {
             self.entries.remove(uid);
         }
+    }
+
+    /// Whether a uid's pushes are currently latched off by a denial.
+    pub fn is_denied(&self, uid: &str) -> bool {
+        self.denied.contains(uid)
+    }
+
+    /// Lift a uid's denial latch — called when a pull observed an access
+    /// or membership change that could make the server's answer different.
+    /// Returns whether there was a latch to lift, so the caller knows to
+    /// re-offer the project.
+    pub fn clear_denied(&mut self, uid: &str) -> bool {
+        self.denied.remove(uid)
     }
 
     /// Everything still waiting or in flight — the driver's "is there work"
@@ -170,8 +207,11 @@ impl SyncQueue {
 
     /// Forget everything (sign-out): the cloud is not ours to converge on
     /// anymore, and a stale queue would push the next account's first pump.
+    /// Denials go too — they were answers to a caller that no longer
+    /// exists, and the next account deserves its own first answer.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.denied.clear();
     }
 }
 
@@ -317,6 +357,64 @@ mod tests {
                 restate: false,
             }]
         );
+    }
+
+    /// The P6 latch: a denied push stops the conversation. Saves keep
+    /// landing locally, but none of them asks the server again.
+    #[test]
+    fn a_denied_push_latches_and_later_saves_stay_quiet() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Saved, 0.0);
+        queue.take_due(2_000.0);
+        queue.finish("prj1", TripResult::Denied, 2_000.0);
+        assert!(queue.is_idle());
+        assert!(queue.is_denied("prj1"));
+
+        queue.request("prj1", SyncTrigger::Saved, 3_000.0);
+        queue.request("prj1", SyncTrigger::Swept, 4_000.0);
+        assert!(queue.take_due(1e9).is_empty(), "the latch holds");
+    }
+
+    /// Lifting the latch (an access change observed on a pull) lets the
+    /// next request through — and only lifting it does.
+    #[test]
+    fn clearing_a_denial_reopens_the_door() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Saved, 0.0);
+        queue.take_due(2_000.0);
+        queue.finish("prj1", TripResult::Denied, 2_000.0);
+
+        assert!(queue.clear_denied("prj1"));
+        assert!(!queue.is_denied("prj1"));
+        assert!(!queue.clear_denied("prj1"), "already lifted");
+
+        queue.request("prj1", SyncTrigger::Saved, 3_000.0);
+        assert_eq!(queue.take_due(5_000.0).len(), 1);
+    }
+
+    /// A denial latched mid-flight swallows the mid-flight work too: the
+    /// arrived save would get the same answer.
+    #[test]
+    fn work_arriving_mid_denied_flight_is_dropped() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Saved, 0.0);
+        queue.take_due(2_000.0);
+        queue.request("prj1", SyncTrigger::Saved, 2_100.0);
+        queue.finish("prj1", TripResult::Denied, 2_500.0);
+        assert!(queue.is_idle());
+        assert!(queue.take_due(1e9).is_empty());
+    }
+
+    /// Sign-out forgets denials with everything else — the next account's
+    /// pushes deserve their own first answer.
+    #[test]
+    fn clearing_forgets_denials_too() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Saved, 0.0);
+        queue.take_due(2_000.0);
+        queue.finish("prj1", TripResult::Denied, 2_000.0);
+        queue.clear();
+        assert!(!queue.is_denied("prj1"));
     }
 
     #[test]

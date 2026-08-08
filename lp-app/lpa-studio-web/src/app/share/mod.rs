@@ -16,10 +16,13 @@
 //!   renders from, host-tested away from the markup.
 //! - [`archived_projects`] — the Projects page's collapsed archive drawer
 //!   and its one loud verb, Restore.
+//! - [`visitor_mode`] / [`visitor_banner`] / [`visitor_popover`] — the P6
+//!   visitor surface: who this viewer is per the service, the strip under
+//!   the chrome, and the read-only share door in the pill slot.
 //!
-//! Visual reference: `spikes/project-share/index.html` §1-A, §2-B and §5
-//! (gate rulings G1/G2/G4 + Q12). Production code never imports from
-//! `spikes/`.
+//! Visual reference: `spikes/project-share/index.html` §1-A, §2-B, §2-D,
+//! §3-A and §5 (gate rulings G1/G2/G3/G4 + Q12). Production code never
+//! imports from `spikes/`.
 
 pub mod archived_projects;
 #[cfg(feature = "stories")]
@@ -30,9 +33,20 @@ pub mod share_panel;
 pub(crate) mod share_panel_stories;
 pub mod share_person;
 pub mod share_url;
+pub mod visitor_banner;
+#[cfg(feature = "stories")]
+pub(crate) mod visitor_banner_stories;
+pub mod visitor_mode;
+pub mod visitor_popover;
+pub mod visitor_session;
 
 pub use archived_projects::{ArchivedProject, ArchivedProjectsList, ArchivedProjectsSection};
 pub use project_share_control::{ProjectShareControl, archive_project};
 pub use share_panel::{SharePanel, SharePillPopover};
 pub use share_person::{SharePerson, people_of};
 pub use share_url::ShareUrl;
+pub use visitor_banner::{BannerState, VisitorBanner, VisitorBannerView};
+pub use visitor_mode::ShareMode;
+pub use visitor_popover::VisitorSharePopover;
+pub(crate) use visitor_session::use_visitor_session;
+pub use visitor_session::{VisitorBannerHost, VisitorShareSlot};
