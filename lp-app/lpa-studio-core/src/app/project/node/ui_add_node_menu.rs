@@ -5,6 +5,7 @@ use lpc_model::{LpFeature, NodeKind};
 use crate::{ControllerId, UiAction};
 
 use super::node_create_op::{NodeCreateOp, UiAttachTarget};
+use super::node_import_op::NodeImportOp;
 use super::node_naming::{node_kind_label, node_kind_slug};
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
@@ -37,6 +38,100 @@ pub struct UiAddNodeMenu {
     /// action for — paste needs the clipboard's contents, which only the
     /// browser edge can read (`docs/adr/2026-07-28-share-envelopes.md`).
     pub attach: UiAttachTarget,
+    /// The **import** source (module authoring unit, P5): one row per
+    /// pattern export the local library offers, each dispatching a
+    /// [`NodeImportOp`] that vendors the folder into this project.
+    ///
+    /// The picker's third source after kinds and the clipboard. Empty on
+    /// every non-root menu — this round vendors into the project `nodes`
+    /// map only — in which case [`Self::imports_empty`] is `None` too and
+    /// the renderer draws no section at all.
+    pub imports: Vec<UiAddNodeMenuEntry>,
+    /// Why the import section has nothing to offer, when the section is
+    /// still worth drawing: an empty library should say so (one disabled
+    /// row) rather than leave a hole where a source used to be. `None`
+    /// means "draw nothing" — either the rows are there, or this menu is
+    /// not an import site.
+    pub imports_empty: Option<String>,
+}
+
+/// One pattern export the local library can vendor into the open project.
+///
+/// Built from the same gallery snapshot the home cards come from (the
+/// studio controller pushes it in at each library settle) — the picker is
+/// a view, and a view never reaches for a store.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiImportablePattern {
+    /// Source package `prj_…` uid — what the import op resolves.
+    pub package_uid: String,
+    /// The package's slug: the row's package half.
+    pub package_label: String,
+    /// The export folder's name inside that package (`effect`, `fire`).
+    pub export: String,
+    /// The package designates more than one export, so the row has to say
+    /// WHICH one (`sparkle-pack · fire`). A single-export package reads as
+    /// its own name — the common case, and the quieter row.
+    pub family: bool,
+}
+
+/// Copy for the empty import section.
+const NO_PATTERNS_COPY: &str = "No patterns in your library";
+
+/// Attach the import source to a menu: one row per `patterns` entry,
+/// skipping `exclude_uid` (the open project cannot import from itself —
+/// its export folder is already right there).
+///
+/// Only the project-root site gets the source this round; a playlist's
+/// picker keeps the two it had, with no empty-state row to explain a
+/// section it never offered.
+pub fn set_import_source(
+    menu: &mut UiAddNodeMenu,
+    patterns: &[UiImportablePattern],
+    exclude_uid: Option<&str>,
+) {
+    if !matches!(menu.attach, UiAttachTarget::ProjectRoot) {
+        menu.imports = Vec::new();
+        menu.imports_empty = None;
+        return;
+    }
+    menu.imports = patterns
+        .iter()
+        .filter(|pattern| exclude_uid != Some(pattern.package_uid.as_str()))
+        .map(|pattern| import_entry(pattern, &menu.attach))
+        .collect();
+    menu.imports_empty = menu
+        .imports
+        .is_empty()
+        .then(|| NO_PATTERNS_COPY.to_string());
+}
+
+/// One import row. Same entry shape as a kind row — glyph, label, ready
+/// action — so the picker renders both through one component.
+fn import_entry(pattern: &UiImportablePattern, attach: &UiAttachTarget) -> UiAddNodeMenuEntry {
+    let label = if pattern.family {
+        format!("{} · {}", pattern.package_label, pattern.export)
+    } else {
+        pattern.package_label.clone()
+    };
+    UiAddNodeMenuEntry {
+        kind: NodeKind::Module,
+        label,
+        icon: node_kind_slug(NodeKind::Module).to_string(),
+        action: UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            NodeImportOp {
+                package_uid: pattern.package_uid.clone(),
+                export: pattern.export.clone(),
+                attach: attach.clone(),
+            },
+        )
+        .with_label(format!("Import {}", pattern.export))
+        .with_summary(format!(
+            "Copy {}'s {} module into this project.",
+            pattern.package_label, pattern.export
+        )),
+        unavailable: None,
+    }
 }
 
 /// One picker entry. `action` is the ready-to-dispatch create (pane grammar:
@@ -68,6 +163,11 @@ pub struct UiAddNodeMenuEntry {
 pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
     UiAddNodeMenu {
         attach: attach.clone(),
+        // The import source is attached afterwards by [`set_import_source`],
+        // where the library snapshot is known — same "build then narrow"
+        // shape as the device gate below.
+        imports: Vec::new(),
+        imports_empty: None,
         entries: PICKER_KINDS
             .iter()
             .map(|kind| {
@@ -103,7 +203,9 @@ pub fn gate_add_node_menu(menu: &mut UiAddNodeMenu, device_features: Option<&[Lp
     let Some(features) = device_features else {
         return;
     };
-    for entry in &mut menu.entries {
+    // Imports land as module nodes, so they take the same gate — a board
+    // with no module runtime cannot run what the vendoring would write.
+    for entry in menu.entries.iter_mut().chain(menu.imports.iter_mut()) {
         if entry.unavailable.is_none() && kind_is_missing(entry.kind, features) {
             entry.unavailable = Some(UNAVAILABLE_COPY.to_string());
         }
@@ -196,6 +298,70 @@ mod tests {
                 .filter(|entry| matches!(entry.kind, NodeKind::Shader | NodeKind::ComputeShader))
                 .all(|entry| entry.unavailable.is_none())
         );
+    }
+
+    fn pattern(uid: &str, label: &str, export: &str, family: bool) -> UiImportablePattern {
+        UiImportablePattern {
+            package_uid: uid.to_string(),
+            package_label: label.to_string(),
+            export: export.to_string(),
+            family,
+        }
+    }
+
+    /// P5: the import source lists one row per export, names the export
+    /// only when the package has more than one, and never offers the
+    /// project you are standing in.
+    #[test]
+    fn the_import_source_lists_library_patterns_minus_the_open_one() {
+        let patterns = [
+            pattern("prj_a", "aurora", "effect", false),
+            pattern("prj_b", "sparkle-pack", "fire", true),
+            pattern("prj_b", "sparkle-pack", "ice", true),
+            pattern("prj_self", "this-one", "effect", false),
+        ];
+        let mut menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        set_import_source(&mut menu, &patterns, Some("prj_self"));
+
+        let labels: Vec<&str> = menu.imports.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec!["aurora", "sparkle-pack · fire", "sparkle-pack · ice"],
+        );
+        assert_eq!(menu.imports_empty, None);
+        let op = menu.imports[1]
+            .action
+            .op_as::<NodeImportOp>()
+            .expect("import op");
+        assert_eq!(op.package_uid, "prj_b");
+        assert_eq!(op.export, "fire");
+        assert_eq!(op.attach, UiAttachTarget::ProjectRoot);
+        assert_eq!(menu.imports[1].kind, NodeKind::Module);
+    }
+
+    /// An empty library says so on a row rather than dropping the source.
+    #[test]
+    fn an_empty_library_keeps_the_section_and_explains_itself() {
+        let mut menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        set_import_source(&mut menu, &[], None);
+        assert!(menu.imports.is_empty());
+        assert_eq!(menu.imports_empty.as_deref(), Some(NO_PATTERNS_COPY));
+    }
+
+    /// This round vendors into the project `nodes` map only, so a
+    /// playlist's picker gets no import section at all — not an empty one.
+    #[test]
+    fn a_playlist_menu_offers_no_import_section() {
+        let mut menu = add_node_menu(&UiAttachTarget::Playlist {
+            node: crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
+        });
+        set_import_source(
+            &mut menu,
+            &[pattern("prj_a", "aurora", "effect", false)],
+            None,
+        );
+        assert!(menu.imports.is_empty());
+        assert_eq!(menu.imports_empty, None);
     }
 
     /// No device has reported: nothing is gated. A sim lens must never be

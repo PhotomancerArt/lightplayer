@@ -12,9 +12,27 @@
       "title": "Provenance: ISO date the project was created",
       "type": "string"
     },
+    "exports": {
+      "description": "Module folder names this project exports, for other projects to import. Only meaningful alongside a \"pattern\" or \"rig\" kind.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Authored module export list",
+      "type": "array"
+    },
     "format": {
       "const": 7,
       "title": "Authored format version"
+    },
+    "kind": {
+      "description": "General project (absent/\"general\"), or one of two library kinds (\"pattern\"/\"rig\") that export named modules via `exports`, or a \"show\" project. Never read by the engine — Studio-side lint and UI only.",
+      "enum": [
+        "general",
+        "pattern",
+        "show",
+        "rig"
+      ],
+      "title": "Authored project kind"
     },
     "license": {
       "title": "Provenance: license identifier (e.g. \"CC0-1.0\")",
