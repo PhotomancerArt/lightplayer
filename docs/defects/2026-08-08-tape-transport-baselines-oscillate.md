@@ -57,6 +57,38 @@ via the class, so the unmarked canvas sailed past it.
 (`STUDIO_STORY_PNGS_CONCURRENCY=1 just studio-story-pngs clock-face
 panel-state`) produce byte-identical PNGs.
 
+**Reading the post-fix refreshes (do not mistake them for a failed fix).**
+The two CI runs on the fix branch each auto-committed a baseline refresh
+that still touched clock-face and transport stories, which looks exactly
+like the churn being fixed. Measure before concluding, as ever — the two
+variants of `clock-face__shared__lg` say which direction the change went:
+
+| | ruler | label baseline | label height |
+|---|---|---|---|
+| replaced bytes | 22 px/s (5 s majors 110 px apart) | 47 px below canvas top | 3 px |
+| written bytes | **14 px/s** (majors 70 px) | **29 px** | **7 px** |
+
+The written side is the render the code specifies: `TAPE_BASE_PX_PER_SEC`
+is 14, and `label_y = h - 32` on a 62 px canvas is 30. The replaced side
+is a bitmap drawn for the **300×150 intrinsic default** and stretched
+into the real 471×62 box — 471/300 = 1.571 = 22/14 horizontally, and
+(150-32)×62/150 = 48.8 vertically. So each refresh was CORRECTING a
+degraded baseline, not recording a fresh flap.
+
+Those degraded baselines are the pre-fix era's, still sitting on main:
+an oscillating baseline leaves the set MIXED (the 2026-08-05 entry says
+so in as many words), and **merging main re-imports main's copy for
+every file the branch has not itself touched** — which is why a second
+refresh followed the merge commit and touched a DIFFERENT subset than
+the first. `clock-face__paused__lg` is the control: byte-identical
+(`b4844c34ea80`) across refresh #1 → merge → refresh #2, two
+consecutive CI runs of the fixed code.
+
+The signature to actually watch for, per the 2026-08-05 lesson, is a
+blob hash returning to an EARLIER value with no merge in between. A
+return that straddles a merge from main is main's stale baseline coming
+back, not the app rendering two ways.
+
 **Lesson** — A defect fixed in one component recurs when the mechanism is
 re-implemented elsewhere; the class guard (`ux-box-sized-canvas` + gate)
 only protects canvases that opt in. Any NEW imperatively-painted canvas
