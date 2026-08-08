@@ -221,18 +221,27 @@ impl MetaStore for SqliteMetaStore {
         // user's sessions away underneath them.
         self.execute(
             "MetaStore::put_user",
-            "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
-             VALUES (?1, ?2, ?3, ?4, ?5)\n\
+            "INSERT INTO users\n\
+                 (uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)\n\
              ON CONFLICT (uid) DO UPDATE SET\n\
                  google_sub = excluded.google_sub,\n\
                  email = excluded.email,\n\
                  display_name = excluded.display_name,\n\
+                 given_name = excluded.given_name,\n\
+                 family_name = excluded.family_name,\n\
+                 picture_url = excluded.picture_url,\n\
+                 provider = excluded.provider,\n\
                  created_at = excluded.created_at",
             params![
                 user.uid.to_string(),
                 user.google_sub,
                 user.email,
                 user.display_name,
+                user.given_name,
+                user.family_name,
+                user.picture_url,
+                user.provider,
                 user.created_at,
             ],
         );
@@ -241,7 +250,8 @@ impl MetaStore for SqliteMetaStore {
     fn user(&self, uid: PrefixedUid) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user",
-            "SELECT uid, google_sub, email, display_name, created_at FROM users WHERE uid = ?1",
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+             FROM users WHERE uid = ?1",
             params![uid.to_string()],
             decode_user,
         )
@@ -250,8 +260,8 @@ impl MetaStore for SqliteMetaStore {
     fn user_by_google_sub(&self, google_sub: &str) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user_by_google_sub",
-            "SELECT uid, google_sub, email, display_name, created_at FROM users\n\
-             WHERE google_sub = ?1 ORDER BY rowid DESC LIMIT 1",
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+             FROM users WHERE google_sub = ?1 ORDER BY rowid DESC LIMIT 1",
             params![google_sub],
             decode_user,
         )
@@ -260,9 +270,19 @@ impl MetaStore for SqliteMetaStore {
     fn user_by_email(&self, email: &str) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user_by_email",
-            "SELECT uid, google_sub, email, display_name, created_at FROM users\n\
-             WHERE email = ?1 ORDER BY rowid DESC LIMIT 1",
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+             FROM users WHERE email = ?1 ORDER BY rowid DESC LIMIT 1",
             params![email],
+            decode_user,
+        )
+    }
+
+    fn users(&self, limit: usize) -> Vec<CloudUser> {
+        self.query_all(
+            "MetaStore::users",
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+             FROM users ORDER BY created_at, uid LIMIT ?1",
+            params![limit as i64],
             decode_user,
         )
     }
@@ -272,14 +292,19 @@ impl MetaStore for SqliteMetaStore {
     fn put_session(&mut self, session: SessionRecord) {
         self.execute(
             "MetaStore::put_session",
-            "INSERT INTO sessions (token_hash, user_uid, expires_at) VALUES (?1, ?2, ?3)\n\
+            "INSERT INTO sessions (token_hash, user_uid, created_at, expires_at, user_agent)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5)\n\
              ON CONFLICT (token_hash) DO UPDATE SET\n\
                  user_uid = excluded.user_uid,\n\
-                 expires_at = excluded.expires_at",
+                 created_at = excluded.created_at,\n\
+                 expires_at = excluded.expires_at,\n\
+                 user_agent = excluded.user_agent",
             params![
                 session.token_hash.to_string(),
                 session.user.to_string(),
+                session.created_at,
                 session.expires_at,
+                session.user_agent,
             ],
         );
     }
@@ -287,7 +312,8 @@ impl MetaStore for SqliteMetaStore {
     fn session(&self, token_hash: ContentHash) -> Option<SessionRecord> {
         self.query_one(
             "MetaStore::session",
-            "SELECT token_hash, user_uid, expires_at FROM sessions WHERE token_hash = ?1",
+            "SELECT token_hash, user_uid, created_at, expires_at, user_agent\n\
+             FROM sessions WHERE token_hash = ?1",
             params![token_hash.to_string()],
             decode_session,
         )
@@ -299,6 +325,16 @@ impl MetaStore for SqliteMetaStore {
             "DELETE FROM sessions WHERE token_hash = ?1",
             params![token_hash.to_string()],
         );
+    }
+
+    fn sessions_for_user(&self, user: PrefixedUid) -> Vec<SessionRecord> {
+        self.query_all(
+            "MetaStore::sessions_for_user",
+            "SELECT token_hash, user_uid, created_at, expires_at, user_agent\n\
+             FROM sessions WHERE user_uid = ?1 ORDER BY created_at, token_hash",
+            params![user.to_string()],
+            decode_session,
+        )
     }
 
     // ---- projects ----------------------------------------------------
@@ -516,7 +552,11 @@ fn decode_user(row: &Row<'_>) -> rusqlite::Result<CloudUser> {
         google_sub: row.get(1)?,
         email: row.get(2)?,
         display_name: row.get(3)?,
-        created_at: row.get(4)?,
+        given_name: row.get(4)?,
+        family_name: row.get(5)?,
+        picture_url: row.get(6)?,
+        provider: row.get(7)?,
+        created_at: row.get(8)?,
     })
 }
 
@@ -524,7 +564,9 @@ fn decode_session(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {
     Ok(SessionRecord {
         token_hash: parse_hash(&row.get::<_, String>(0)?),
         user: parse_uid(&row.get::<_, String>(1)?),
-        expires_at: row.get(2)?,
+        created_at: row.get(2)?,
+        expires_at: row.get(3)?,
+        user_agent: row.get(4)?,
     })
 }
 
@@ -647,6 +689,10 @@ mod tests {
                 google_sub: "g-7".into(),
                 email: "seven@example.com".into(),
                 display_name: "Seven".into(),
+                given_name: None,
+                family_name: None,
+                picture_url: None,
+                provider: "google".into(),
                 created_at: 7.5,
             });
         }

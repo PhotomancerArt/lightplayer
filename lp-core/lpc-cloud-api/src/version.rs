@@ -16,7 +16,10 @@ use crate::error::CloudError;
 /// [`crate::response::CloudResponse`], or [`crate::error::CloudError`].
 /// Carried in every [`crate::envelope::CloudCall`] and
 /// [`crate::envelope::CloudReply`].
-pub const CLOUD_API_VERSION: u32 = 1;
+///
+/// v2 = account/session/login-options calls (2026-08-07): `GetMe`,
+/// `UpdateMe`, `ListSessions`, `RevokeSession`, `LoginOptions`.
+pub const CLOUD_API_VERSION: u32 = 2;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///

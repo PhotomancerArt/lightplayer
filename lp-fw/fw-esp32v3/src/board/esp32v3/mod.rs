@@ -10,4 +10,9 @@
 
 // The app entrypoint's sole source of the peripheral singleton. See the module
 // doc for the hazard that makes it the *only* one.
+/// Arming the FPU for the context that runs compiled float code. Unconditional,
+/// not gated on `float-f32`: the two instructions cost nothing, and a board that
+/// only arms when a feature is on is a board whose failure mode depends on how
+/// it was built.
+pub mod fpu;
 pub mod init;

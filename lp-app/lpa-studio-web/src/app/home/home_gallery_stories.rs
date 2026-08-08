@@ -33,7 +33,7 @@ fn examples() -> Vec<UiExampleCard> {
 fn packages() -> Vec<UiPackageCard> {
     vec![
         UiPackageCard {
-            uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
             kind: "Module".to_string(),
             slug: "2026-07-02-0930-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
@@ -46,7 +46,7 @@ fn packages() -> Vec<UiPackageCard> {
             health: PackageHealth::Ready,
         },
         UiPackageCard {
-            uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             kind: "Module".to_string(),
             slug: "2026-07-04-1102-basic".to_string(),
             last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
@@ -59,7 +59,7 @@ fn packages() -> Vec<UiPackageCard> {
             health: PackageHealth::Ready,
         },
         UiPackageCard {
-            uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
+            uid: "prj1aBc3De56fGhIj8KlMnOpq".to_string(),
             kind: "Module".to_string(),
             slug: "2026-05-28-1740-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
@@ -83,12 +83,12 @@ fn devices() -> Vec<UiDeviceCard> {
             frame_fps: None,
             port_label: None,
             session_key: None,
-            uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
+            uid: Some("dev7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
             state: RosterCardState::RunningUpToDate,
             project: Some(UiDeviceProjectChip {
-                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
@@ -106,14 +106,14 @@ fn devices() -> Vec<UiDeviceCard> {
             frame_fps: None,
             port_label: None,
             session_key: None,
-            uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
+            uid: Some("dev4hJk6Lm01nPqRs3TuVwXyz".to_string()),
             name: "Luna's porch sign".to_string(),
             transport: "USB".to_string(),
             state: RosterCardState::Offline {
                 last_seen_at: Some(STORY_NOW - 3.0 * 86_400.0),
             },
             project: Some(UiDeviceProjectChip {
-                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
@@ -205,7 +205,7 @@ fn project_format_states() -> Element {
             .to_string(),
     };
     projects.push(UiPackageCard {
-        uid: "prj_5tYu7Vw90xZaBc4DeFgHi".to_string(),
+        uid: "prj5tYu7Vw90xZaBc4DeFgHi".to_string(),
         kind: "Module".to_string(),
         slug: "2026-06-11-0815-half-written".to_string(),
         last_saved_at: None,
@@ -293,7 +293,7 @@ fn connected_device_and_project_chip() -> Element {
         frame_fps: None,
         port_label: None,
         session_key: None,
-        uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
+        uid: Some("dev4hJk6Lm01nPqRs3T".to_string()),
         name: "Fresh board".to_string(),
         transport: "USB".to_string(),
         state: RosterCardState::ReadyToSetUp,
@@ -391,12 +391,12 @@ fn live_thumb_states() -> Element {
     rsx! {
         section { class: "tw:grid tw:w-[720px] tw:grid-cols-4 tw:gap-3.5 tw:p-4",
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
-                CardThumb { seed: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(), label: "placeholder".to_string() }
+                CardThumb { seed: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(), label: "placeholder".to_string() }
                 p { class: thumb_state_caption_class(), "Placeholder" }
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                    seed: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
                     label: "gpu".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
@@ -404,7 +404,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
+                    seed: "prj1aBc3De56fGhIj8KlMnOpq".to_string(),
                     label: "cpu".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Cpu {
                         reason: Some("WebGPU unavailable".to_string()),
@@ -448,7 +448,7 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
             RosterCardState::ConnectedEmpty
         },
         project: with_project.then(|| UiDeviceProjectChip {
-            uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
             name: "2026-07-02-0930-porch-sign".to_string(),
         }),
         fw: None,
@@ -476,7 +476,7 @@ fn sim_and_live_device_home() -> UiHomeView {
     });
     let mut device = devices().remove(0);
     device.project = Some(UiDeviceProjectChip {
-        uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+        uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
         name: "2026-07-04-1102-basic".to_string(),
     });
     UiHomeView {

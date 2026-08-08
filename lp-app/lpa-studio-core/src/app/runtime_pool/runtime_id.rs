@@ -7,7 +7,7 @@ use core::fmt;
 ///
 /// Minted by the pool when a session is installed — stable within the tab,
 /// never reused — so the id exists BEFORE any device identity is known
-/// (a hardware session's `dev_` uid only arrives with the wire hello).
+/// (a hardware session's `dev` uid only arrives with the wire hello).
 /// The device-uid association is a derivation on the session
 /// ([`RuntimeSession::device_uid`](super::RuntimeSession::device_uid)):
 /// once the hello lands the session state carries the uid, keyed under the

@@ -4,7 +4,7 @@
 //! Instantiate the whole battery for an adapter with
 //! [`meta_store_conformance_tests!`].
 
-use lp_cloud_domain::{CloudProject, MemberRole, MetaStore};
+use lp_cloud_domain::{CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord};
 use lpc_cloud_api::Visibility;
 use lpc_history::ContentHash;
 
@@ -28,6 +28,9 @@ macro_rules! meta_store_conformance_tests {
             sessions_round_trip_by_token_hash,
             deleting_a_session_is_idempotent,
             expired_sessions_are_still_returned,
+            sessions_for_user_lists_all_and_isolates_by_account,
+            users_are_ordered_oldest_first_and_capped_at_the_limit,
+            profile_fields_and_session_metadata_round_trip,
             projects_round_trip_by_uid,
             replacing_a_project_keeps_its_members_refs_events_and_sidecar,
             projects_for_user_lists_only_resolved_memberships,
@@ -128,6 +131,77 @@ pub fn expired_sessions_are_still_returned(store: &mut dyn MetaStore) {
     let session = sample_session(user, b"stale", 0.0);
     store.put_session(session.clone());
 
+    assert_eq!(store.session(session.token_hash), Some(session));
+}
+
+/// A caller's own sessions, and nothing belonging to anyone else — the
+/// isolation `ListSessions` depends on.
+pub fn sessions_for_user_lists_all_and_isolates_by_account(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    store.put_session(sample_session(alice, b"a1", 100.0));
+    store.put_session(sample_session(alice, b"a2", 100.0));
+    store.put_session(sample_session(bob, b"b1", 100.0));
+
+    let mut alice_hashes: Vec<ContentHash> = store
+        .sessions_for_user(alice)
+        .into_iter()
+        .map(|session| session.token_hash)
+        .collect();
+    alice_hashes.sort();
+    let mut expected = vec![ContentHash::of(b"a1"), ContentHash::of(b"a2")];
+    expected.sort();
+    assert_eq!(alice_hashes, expected);
+
+    let bob_sessions = store.sessions_for_user(bob);
+    assert_eq!(bob_sessions.len(), 1);
+    assert_eq!(bob_sessions[0].token_hash, ContentHash::of(b"b1"));
+
+    assert!(store.sessions_for_user(user_uid(9)).is_empty());
+}
+
+/// The dev picker's candidate order: oldest account first, capped at the
+/// limit, not insertion order or uid order.
+pub fn users_are_ordered_oldest_first_and_capped_at_the_limit(store: &mut dyn MetaStore) {
+    let first = sample_user(user_uid(1), "a@example.com");
+    let second = CloudUser {
+        created_at: 2.0,
+        ..sample_user(user_uid(2), "b@example.com")
+    };
+    let third = CloudUser {
+        created_at: 3.0,
+        ..sample_user(user_uid(3), "c@example.com")
+    };
+    // Stored out of `created_at` order, to prove the store sorts rather
+    // than echoing insertion order.
+    store.put_user(third.clone());
+    store.put_user(first.clone());
+    store.put_user(second.clone());
+
+    assert_eq!(store.users(2), vec![first.clone(), second.clone()]);
+    assert_eq!(store.users(10), vec![first, second, third]);
+}
+
+/// The new profile columns and session metadata survive a put/get
+/// round-trip, on both adapters.
+pub fn profile_fields_and_session_metadata_round_trip(store: &mut dyn MetaStore) {
+    let uid = user_uid(1);
+    let user = CloudUser {
+        given_name: Some("Yona".to_string()),
+        family_name: Some("Appletree".to_string()),
+        picture_url: Some("https://example.com/photo.jpg".to_string()),
+        provider: "dev".to_string(),
+        ..sample_user(uid, "yona@example.com")
+    };
+    store.put_user(user.clone());
+    assert_eq!(store.user(uid), Some(user));
+
+    let session = SessionRecord {
+        created_at: 5.0,
+        user_agent: Some("Mozilla/5.0".to_string()),
+        ..sample_session(uid, b"tok", 100.0)
+    };
+    store.put_session(session.clone());
     assert_eq!(store.session(session.token_hash), Some(session));
 }
 

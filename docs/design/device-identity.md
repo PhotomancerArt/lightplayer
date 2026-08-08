@@ -5,7 +5,7 @@ Status: as-built 2026-08-04 (ADR: 2026-08-04-device-identity-anchored-in-silicon
 ## §1 · Problem (the pre-2026-08-04 scheme)
 
 A LightPlayer device's only instance identity used to be one Studio
-invents: a random `dev_` uid minted at provisioning
+invents: a random `dev` uid minted at provisioning
 (`run_identity_stamp`), written to `/.lp/device.json` on the device
 filesystem, and read back through the hello and a direct fs read at
 connect. Consequences, all observed on the bench:
@@ -17,7 +17,7 @@ connect. Consequences, all observed on the bench:
   mid-provision. Blank, WLED, and erased boards can never be
   recognized, so the setup flow cannot say "this is Porch sign".
 - **The key flip wart.** An anonymous live card keys by session
-  (`runtime-N`); the stamp flips its key to `dev_…` mid-flow, orphaning
+  (`runtime-N`); the stamp flips its key to `dev…` mid-flow, orphaning
   `CardUiState` (`ui_device_card.rs:90` cascade).
 - **Grant-heuristic continuity.** Replug continuity rides the Web
   Serial grant endpoint id (`migrate_card_op`) — a fact about the
@@ -49,13 +49,13 @@ pub enum HardwareId {
     /// (HardwareFacts::base_mac / a download-mode ROM read).
     EspEfuse { mac: [u8; 6] },
     /// Host-class embedders (fw-host, lp-cli) and legacy/stamped
-    /// devices: a random `dev_` uid (today's scheme, demoted to
+    /// devices: a random `dev` uid (today's scheme, demoted to
     /// fallback).
     Minted { uid: PrefixedUid },
 }
 ```
 
-**I2 — the registry key stays a `dev_` uid; its ORIGIN changes.**
+**I2 — the registry key stays a `dev` uid; its ORIGIN changes.**
 `HardwareId::device_uid()` maps to a `PrefixedUid`:
 
 - `Minted { uid }` → `uid` (unchanged).
@@ -63,13 +63,13 @@ pub enum HardwareId {
   `bytes` = 16 bytes: `[0u8; 9] ‖ [0x01] ‖ mac48`. Deterministic and
   injective; `mint` already takes caller-supplied bytes (no rng in
   `lpc-history`). The derived body renders zero-prefixed
-  (`dev_00000000XXXXXXXX`-ish), so origin is readable at a glance and
-  collision with the random ~95-bit mint space is ignorable.
+  (`dev00000000xxxxxxxx`-ish), so origin is readable at a glance and
+  collision with the random 80-bit mint space is ignorable.
 
 This is the blast-radius decision (D1). `RegisteredDevice.uid`,
 `DeviceAssociation.device`, the Connected/Pushed history events, the
 card `identity_key()` cascade, `device_id_for_card_key`, and the wire
-all keep the `dev_` strings they already speak. Project history files
+all keep the `dev` strings they already speak. Project history files
 — durable, and they travel with the project — need no format change.
 The alternative (keying everything on a new `HardwareId` string form)
 re-types durable files for zero user-visible gain.
@@ -111,7 +111,7 @@ erased by a flash tool, so the file is honest there.
 
 ```rust
 pub struct RegisteredDevice {
-    /// `dev_…` — now DERIVED from silicon when the source is EspEfuse
+    /// `dev…` — now DERIVED from silicon when the source is EspEfuse
     /// (I2); minted only for host-class/legacy rows.
     pub uid: String,
     /// The identity source, canonical string form
@@ -182,7 +182,7 @@ additive, old rows parse as legacy (`hardware_id: None`).
   2026-08-05). Silicon-anchored identity is re-derivable by
   construction, so a registry-only forget is undone by the next page
   load: the Web Serial grant outlives the page, the app re-enumerates
-  the granted port, auto-probes, re-derives the same `dev_` uid, and
+  the granted port, auto-probes, re-derives the same `dev` uid, and
   the sighting write recreates the deleted row. `HomeOp::ForgetDevice`
   therefore disconnects the live session, revokes the grant through
   `LinkProvider::forget_endpoint` (`SerialPort.forget()`), and only

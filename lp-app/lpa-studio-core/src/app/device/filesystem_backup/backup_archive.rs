@@ -208,7 +208,7 @@ mod tests {
         let image = fixture_image(&[
             (
                 "/.lp/device.json",
-                br#"{"uid":"dev_7pQr5St89uVwXy2C","name":"porch sign"}"#.to_vec(),
+                br#"{"uid":"dev7pQr5St89uVwXy2C","name":"porch sign"}"#.to_vec(),
             ),
             (
                 "/projects/porch/project.json",
@@ -249,7 +249,7 @@ mod tests {
     fn the_manifest_records_the_captured_identity_and_partition() {
         let image = fixture_image(&[(
             "/.lp/device.json",
-            br#"{"uid":"dev_7pQr5St89uVwXy2C","name":"porch sign"}"#.to_vec(),
+            br#"{"uid":"dev7pQr5St89uVwXy2C","name":"porch sign"}"#.to_vec(),
         )]);
 
         let archive = build_backup_archive(&image, &source(), NOW).expect("archive builds");
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(archive.manifest.format_version, BACKUP_FORMAT_VERSION);
         assert_eq!(
             archive.manifest.device_uid.as_deref(),
-            Some("dev_7pQr5St89uVwXy2C")
+            Some("dev7pQr5St89uVwXy2C")
         );
         assert_eq!(archive.manifest.chip.as_deref(), Some("esp32c6"));
         assert_eq!(archive.manifest.partition_offset, 0x0031_0000);

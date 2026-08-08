@@ -91,6 +91,11 @@ members = [
     "lp-xt/lp-xt-inst",
     "lp-xt/lp-xt-emu",
     "lp-xt/lp-xt-fp-vectors",
+    # NOT in default-members: a device-target crate. It depends on `esp-println`,
+    # which resolves against a chip and a bare-metal target, so a host `cargo
+    # check` cannot build it. Both firmwares compile it for their real target in
+    # their clippy harness loops, which is stronger coverage than a host check.
+    "lp-xt/lp-xt-fp-harness",
     "lp-xt/lp-xt-elf",
     "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",

@@ -155,11 +155,11 @@ fn project_picker_open() -> Element {
                 now_secs: Some(STORY_NOW),
                 project_choices: vec![
                     UiDeviceProjectChip {
-                        uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+                        uid: "prj3fKq8Zr21bTxYw0A".to_string(),
                         name: "porch-sign".to_string(),
                     },
                     UiDeviceProjectChip {
-                        uid: "prj_9dLm2Xw44cRvZq1B".to_string(),
+                        uid: "prj9dLm2Xw44cRvZq1B".to_string(),
                         name: "2026-07-18-bedroom-lamp".to_string(),
                     },
                 ],
@@ -1042,12 +1042,12 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         frame_fps: None,
         port_label: None,
         session_key: None,
-        uid: Some("dev_7pQr5St89uVwXy2C".to_string()),
+        uid: Some("dev7pQr5St89uVwXy2C".to_string()),
         name: "Luna's porch sign".to_string(),
         transport: "USB".to_string(),
         state,
         project: with_project.then(|| UiDeviceProjectChip {
-            uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+            uid: "prj3fKq8Zr21bTxYw0A".to_string(),
             name: "porch-sign".to_string(),
         }),
         fw: None,
@@ -1080,7 +1080,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
             RosterCardState::ConnectedEmpty
         },
         project: with_project.then(|| UiDeviceProjectChip {
-            uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+            uid: "prj3fKq8Zr21bTxYw0A".to_string(),
             name: "porch-sign".to_string(),
         }),
         fw: None,
