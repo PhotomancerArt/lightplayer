@@ -8,6 +8,7 @@
 //! crate README and `just format-bump`.
 
 pub(crate) mod v4_to_v5;
+pub(crate) mod v5_to_v6;
 
 use crate::project_files::ProjectFiles;
 use crate::upgrade_error::UpgradeError;
@@ -32,8 +33,15 @@ impl std::fmt::Debug for UpgradeStep {
     }
 }
 
-pub(crate) const STEPS: &[UpgradeStep] = &[UpgradeStep {
-    from: 4,
-    to: 5,
-    apply: v4_to_v5::apply,
-}];
+pub(crate) const STEPS: &[UpgradeStep] = &[
+    UpgradeStep {
+        from: 4,
+        to: 5,
+        apply: v4_to_v5::apply,
+    },
+    UpgradeStep {
+        from: 5,
+        to: 6,
+        apply: v5_to_v6::apply,
+    },
+];

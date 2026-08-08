@@ -1,0 +1,61 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "down",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "held",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "up",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

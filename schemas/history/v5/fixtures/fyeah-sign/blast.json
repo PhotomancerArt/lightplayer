@@ -1,0 +1,30 @@
+{
+  "kind": "Shader",
+  "source": "blast.glsl",
+  "render_order": 0,
+  "bindings": {
+    "progress": {
+      "source": "node:..#entry_progress"
+    },
+    "time": {
+      "source": "node:..#entry_time"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "progress": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    },
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    }
+  }
+}

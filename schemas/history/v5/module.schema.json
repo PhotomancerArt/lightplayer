@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "LpAnyValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/LpAnyValue"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Dynamically typed value: string, number, bool, or an array of these (objects and null are rejected by the reader)."
+    },
+    "lpc_model::binding::binding_def::BindingDef": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/LpAnyValue"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::module::channel_meta_def::ChannelMetaDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::provenance_def::ProvenanceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "created": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/module.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bindings": {
+      "additionalProperties": {
+        "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+      },
+      "type": "object"
+    },
+    "exports": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "const": "Module"
+    },
+    "meta": {
+      "additionalProperties": {
+        "$ref": "#/$defs/lpc_model::nodes::module::channel_meta_def::ChannelMetaDef"
+      },
+      "type": "object"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "unset": {
+                "description": "Unit slot: any value is accepted and ignored on read; written as {}."
+              }
+            },
+            "required": [
+              "unset"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "ref": {
+                "description": "Path to an authored artifact file.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "provenance": {
+      "$ref": "#/$defs/lpc_model::nodes::provenance_def::ProvenanceDef"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "type": "object"
+}
