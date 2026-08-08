@@ -31,6 +31,8 @@ pub enum SetupGesture {
     Confirm,
     /// WLED_FOUND's "Wipe and set up".
     WipeAndSetUp,
+    /// STALE_LP's "Update the firmware".
+    UpdateFirmware,
     /// ALREADY_LP's PRIMARY "Done": adopt and stay on the gallery.
     AdoptDone,
     /// ALREADY_LP's SECONDARY "Open in the editor →": adopt and land in
@@ -60,6 +62,7 @@ impl From<SetupGesture> for SetupEvent {
             SetupGesture::BoardChosen { board_id } => Self::BoardChosen { board_id },
             SetupGesture::Confirm => Self::Confirm,
             SetupGesture::WipeAndSetUp => Self::WipeAndSetUp,
+            SetupGesture::UpdateFirmware => Self::UpdateFirmware,
             SetupGesture::AdoptDone => Self::AdoptDone,
             SetupGesture::AdoptAndOpen => Self::AdoptAndOpen,
             SetupGesture::SetUpFresh => Self::SetUpFresh,
@@ -78,7 +81,8 @@ mod tests {
     use crate::app::setup_flow::event::SetupEventKind;
 
     /// The events NO gesture may produce: things the world reports.
-    const OUTCOMES: [SetupEventKind; 10] = [
+    const OUTCOMES: [SetupEventKind; 11] = [
+        SetupEventKind::PortChosen,
         SetupEventKind::PortGranted,
         SetupEventKind::PortPickerCancelled,
         SetupEventKind::PortPickerEmpty,
@@ -102,6 +106,7 @@ mod tests {
             },
             SetupGesture::Confirm,
             SetupGesture::WipeAndSetUp,
+            SetupGesture::UpdateFirmware,
             SetupGesture::AdoptDone,
             SetupGesture::AdoptAndOpen,
             SetupGesture::SetUpFresh,

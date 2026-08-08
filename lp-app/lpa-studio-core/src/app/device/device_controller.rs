@@ -111,6 +111,21 @@ pub enum DeviceOpenOutcome {
     SoftFailed,
 }
 
+/// What phase one of a port request produced
+/// ([`DeviceController::choose_provider_endpoint`]).
+///
+/// No derives, for the same reason [`DeviceOpenOutcome`] has none: it
+/// carries one.
+pub enum PortChoice {
+    /// An endpoint is in hand, and phase two will connect it. A caller can
+    /// say so before starting that wait — those are the several seconds a
+    /// user otherwise spends reading the chooser's copy.
+    Endpoint(LinkEndpointId),
+    /// Nothing to connect: the picker is showing its choices, or the user
+    /// dismissed it. Carries the outcome `open_provider` reports.
+    Ended(DeviceOpenOutcome),
+}
+
 impl DeviceController {
     pub const NODE_ID: &'static str = "studio|device";
 
@@ -211,12 +226,37 @@ impl DeviceController {
     /// auto-connect when the provider has exactly one endpoint and is an
     /// auto-connecting kind (BrowserWorker/HostProcess). Browser serial
     /// goes through the port-permission picker instead of discovery.
+    ///
+    /// The two phases below, back to back — the composition every caller
+    /// that has nothing to say in between should use.
     pub async fn open_provider(
         &mut self,
         provider_id: LinkProviderKind,
     ) -> Result<DeviceOpenOutcome, UiError> {
+        match self.choose_provider_endpoint(provider_id).await? {
+            PortChoice::Endpoint(endpoint_id) => {
+                self.connect_endpoint(provider_id, endpoint_id).await
+            }
+            PortChoice::Ended(outcome) => Ok(outcome),
+        }
+    }
+
+    /// **Phase one** of [`Self::open_provider`]: the browser's port chooser
+    /// (or endpoint discovery, for every other provider), stopping the
+    /// moment an endpoint is in hand — before the multi-second connect that
+    /// [`Self::connect_endpoint`] performs.
+    ///
+    /// The split exists so a caller can NARRATE the two apart. They took
+    /// several seconds under one label, which left the setup wizard still
+    /// saying "the browser is asking which port…" through the whole reset,
+    /// boot wait and hello deadline (bench, 2026-08-08). Behaviour is
+    /// unchanged: `open_provider` above is exactly these two, back to back.
+    pub async fn choose_provider_endpoint(
+        &mut self,
+        provider_id: LinkProviderKind,
+    ) -> Result<PortChoice, UiError> {
         if provider_id == LinkProviderKind::BrowserSerialEsp32 {
-            return self.open_browser_serial_provider().await;
+            return self.choose_browser_serial_endpoint().await;
         }
 
         self.discover_provider_endpoints(provider_id).await?;
@@ -225,10 +265,11 @@ impl DeviceController {
             _ => Vec::new(),
         };
         if endpoints.len() == 1 && provider_auto_connects(provider_id) {
-            let endpoint_id = endpoints[0].id.clone();
-            return self.connect_endpoint(provider_id, endpoint_id).await;
+            return Ok(PortChoice::Endpoint(endpoints[0].id.clone()));
         }
-        Ok(DeviceOpenOutcome::Opened)
+        // Several endpoints (or a provider that does not auto-connect):
+        // the picker state IS the answer, and no connect follows.
+        Ok(PortChoice::Ended(DeviceOpenOutcome::Opened))
     }
 
     async fn discover_provider_endpoints(
@@ -268,7 +309,7 @@ impl DeviceController {
     }
 
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-    async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+    async fn choose_browser_serial_endpoint(&mut self) -> Result<PortChoice, UiError> {
         self.set_flow(ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Requesting browser serial access"),
@@ -292,7 +333,7 @@ impl DeviceController {
             Ok(endpoint) => endpoint,
             Err(UiError::Cancelled(message)) => {
                 self.reset_to_provider_selection(None);
-                return Ok(DeviceOpenOutcome::Cancelled { message });
+                return Ok(PortChoice::Ended(DeviceOpenOutcome::Cancelled { message }));
             }
             Err(error) => {
                 self.recover_to_provider_selection(error.message());
@@ -305,12 +346,11 @@ impl DeviceController {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         });
-        self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
-            .await
+        Ok(PortChoice::Endpoint(endpoint_id))
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-    async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+    async fn choose_browser_serial_endpoint(&mut self) -> Result<PortChoice, UiError> {
         Err(UiError::UnsupportedFeature(
             "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
@@ -364,7 +404,15 @@ impl DeviceController {
             }
         };
         let Some(endpoint) = endpoints.into_iter().next() else {
-            return self.open_browser_serial_provider().await;
+            // No grant yet: fall back to the chooser, then connect what it
+            // hands over — this caller narrates the two as one connect.
+            return match self.choose_browser_serial_endpoint().await? {
+                PortChoice::Endpoint(endpoint_id) => {
+                    self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+                        .await
+                }
+                PortChoice::Ended(outcome) => Ok(outcome),
+            };
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();

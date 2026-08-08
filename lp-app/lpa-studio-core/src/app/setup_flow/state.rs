@@ -106,6 +106,12 @@ pub enum SetupState {
     PortPicking {
         preseeded_board: Option<String>,
     },
+    /// The chooser is done and the port is being opened, reset, and waited
+    /// on. Its own state because it is the SEVERAL SECONDS the wizard used
+    /// to spend claiming the browser was still asking (bench, 2026-08-08).
+    Connecting {
+        preseeded_board: Option<String>,
+    },
     Probing {
         preseeded_board: Option<String>,
     },
@@ -114,6 +120,11 @@ pub enum SetupState {
         probe: BoardProbe,
     },
     AlreadyLp {
+        probe: BoardProbe,
+    },
+    /// LightPlayer firmware this Studio cannot talk to. Recognised, and
+    /// never adoptable: the only way forward is a re-flash.
+    StaleLp {
         probe: BoardProbe,
     },
     ProbeFailed {
@@ -154,10 +165,12 @@ impl SetupState {
             Self::ConnectIntro { .. } => SetupStateKind::ConnectIntro,
             Self::BoardFirst { .. } => SetupStateKind::BoardFirst,
             Self::PortPicking { .. } => SetupStateKind::PortPicking,
+            Self::Connecting { .. } => SetupStateKind::Connecting,
             Self::Probing { .. } => SetupStateKind::Probing,
             Self::BoardPick(_) => SetupStateKind::BoardPick,
             Self::WledFound { .. } => SetupStateKind::WledFound,
             Self::AlreadyLp { .. } => SetupStateKind::AlreadyLp,
+            Self::StaleLp { .. } => SetupStateKind::StaleLp,
             Self::ProbeFailed { .. } => SetupStateKind::ProbeFailed,
             Self::Flashing { .. } => SetupStateKind::Flashing,
             Self::FlashFailed { .. } => SetupStateKind::FlashFailed,
@@ -172,9 +185,10 @@ impl SetupState {
     pub fn probe(&self) -> Option<&BoardProbe> {
         match self {
             Self::BoardPick(pick) => pick.probe.as_ref(),
-            Self::WledFound { probe } | Self::AlreadyLp { probe } | Self::ProbeFailed { probe } => {
-                Some(probe)
-            }
+            Self::WledFound { probe }
+            | Self::AlreadyLp { probe }
+            | Self::StaleLp { probe }
+            | Self::ProbeFailed { probe } => Some(probe),
             Self::Flashing { probe, .. }
             | Self::FlashFailed { probe, .. }
             | Self::AbandonGuard { probe, .. } => probe.as_ref(),
@@ -188,14 +202,17 @@ impl SetupState {
     /// needs connecting; the caller gates on that capability.
     ///
     /// PROVISION counts: on hardware the board is still on the wire, and
-    /// the push goes over it.
+    /// the push goes over it. CONNECTING counts too — the chooser already
+    /// handed the grant over; opening it is what that state IS.
     pub fn holds_port(&self) -> bool {
         matches!(
             self.kind(),
-            SetupStateKind::Probing
+            SetupStateKind::Connecting
+                | SetupStateKind::Probing
                 | SetupStateKind::BoardPick
                 | SetupStateKind::WledFound
                 | SetupStateKind::AlreadyLp
+                | SetupStateKind::StaleLp
                 | SetupStateKind::ProbeFailed
                 | SetupStateKind::Flashing
                 | SetupStateKind::FlashFailed
@@ -211,10 +228,12 @@ pub enum SetupStateKind {
     ConnectIntro,
     BoardFirst,
     PortPicking,
+    Connecting,
     Probing,
     BoardPick,
     WledFound,
     AlreadyLp,
+    StaleLp,
     ProbeFailed,
     Flashing,
     FlashFailed,
@@ -228,14 +247,16 @@ impl SetupStateKind {
     /// Every state, for the exhaustive transition table. Kept honest by
     /// [`Self::ordinal`]: a new variant fails to compile there, and the
     /// bijection test then fails until it is listed here too.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::ConnectIntro,
         Self::BoardFirst,
         Self::PortPicking,
+        Self::Connecting,
         Self::Probing,
         Self::BoardPick,
         Self::WledFound,
         Self::AlreadyLp,
+        Self::StaleLp,
         Self::ProbeFailed,
         Self::Flashing,
         Self::FlashFailed,
@@ -250,17 +271,19 @@ impl SetupStateKind {
             Self::ConnectIntro => 0,
             Self::BoardFirst => 1,
             Self::PortPicking => 2,
-            Self::Probing => 3,
-            Self::BoardPick => 4,
-            Self::WledFound => 5,
-            Self::AlreadyLp => 6,
-            Self::ProbeFailed => 7,
-            Self::Flashing => 8,
-            Self::FlashFailed => 9,
-            Self::AbandonGuard => 10,
-            Self::Provision => 11,
-            Self::DeviceHome => 12,
-            Self::Closed => 13,
+            Self::Connecting => 3,
+            Self::Probing => 4,
+            Self::BoardPick => 5,
+            Self::WledFound => 6,
+            Self::AlreadyLp => 7,
+            Self::StaleLp => 8,
+            Self::ProbeFailed => 9,
+            Self::Flashing => 10,
+            Self::FlashFailed => 11,
+            Self::AbandonGuard => 12,
+            Self::Provision => 13,
+            Self::DeviceHome => 14,
+            Self::Closed => 15,
         }
     }
 
@@ -283,6 +306,7 @@ impl SetupStateKind {
             Self::BoardPick
                 | Self::WledFound
                 | Self::AlreadyLp
+                | Self::StaleLp
                 | Self::ProbeFailed
                 | Self::Flashing
                 | Self::FlashFailed
@@ -299,10 +323,12 @@ impl SetupStateKind {
             Self::ConnectIntro => "connect-intro",
             Self::BoardFirst => "board-first",
             Self::PortPicking => "port-picking",
+            Self::Connecting => "connecting",
             Self::Probing => "probing",
             Self::BoardPick => "board-pick",
             Self::WledFound => "wled-found",
             Self::AlreadyLp => "already-lp",
+            Self::StaleLp => "stale-lp",
             Self::ProbeFailed => "probe-failed",
             Self::Flashing => "flashing",
             Self::FlashFailed => "flash-failed",
@@ -348,6 +374,7 @@ mod tests {
                 SetupStateKind::BoardPick
                     | SetupStateKind::WledFound
                     | SetupStateKind::AlreadyLp
+                    | SetupStateKind::StaleLp
                     | SetupStateKind::ProbeFailed
                     | SetupStateKind::Flashing
                     | SetupStateKind::FlashFailed
