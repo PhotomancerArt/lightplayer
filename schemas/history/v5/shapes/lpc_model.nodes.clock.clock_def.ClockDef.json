@@ -1,0 +1,84 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "transport",
+        "shape": {
+          "record": {
+            "fields": [
+              {
+                "name": "running",
+                "role": "debug",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": "plain",
+                      "id": 1196386242,
+                      "meta": {},
+                      "ty": "bool"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "rate",
+                "role": "debug",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 8.0,
+                          "min": 0.25
+                        }
+                      },
+                      "id": 885023043,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "scrub_offset_seconds",
+                "role": "debug",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 10.0,
+                          "min": -10.0,
+                          "step": 0.01666666753590107
+                        }
+                      },
+                      "id": 3375024484,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              }
+            ],
+            "meta": {}
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
