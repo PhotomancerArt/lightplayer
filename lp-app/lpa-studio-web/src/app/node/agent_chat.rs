@@ -520,9 +520,8 @@ fn ModelChip(model: UiAgentModelView, busy: bool) -> Element {
         }
     };
     rsx! {
-        // The font classes live on this wrapper: the app stylesheet's
-        // unlayered `select { font: inherit }` beats layered utilities on
-        // the select itself, so the chip's type is set by inheritance.
+        // The font classes live on this wrapper; the select's `font:
+        // inherit` reset (style.css, base layer) picks them up.
         span { class: "tw:min-w-0 tw:flex-none tw:font-mono tw:text-[10px]",
             select {
                 class: model_chip_class(busy),
