@@ -65,6 +65,18 @@ impl BrowserSerialEsp32Provider {
         label: impl Into<String>,
         port_id: u32,
     ) -> LinkEndpointId {
+        self.create_granted_endpoint_with_usb(label, port_id, None)
+    }
+
+    /// [`Self::create_granted_endpoint`], recording the port's USB
+    /// vendor:product pair when the browser exposed one — what lets a
+    /// grant be matched against a board's declared `usb_bridge` (D7).
+    pub fn create_granted_endpoint_with_usb(
+        &self,
+        label: impl Into<String>,
+        port_id: u32,
+        usb_vid_pid: Option<(u16, u16)>,
+    ) -> LinkEndpointId {
         let endpoint_index = self.next_endpoint_index.get();
         self.next_endpoint_index.set(endpoint_index + 1);
         let endpoint_id =
@@ -84,7 +96,11 @@ impl BrowserSerialEsp32Provider {
             .with_capabilities(capabilities);
         self.endpoints.borrow_mut().insert(
             endpoint_id.clone(),
-            BrowserSerialEndpointState { endpoint, port_id },
+            BrowserSerialEndpointState {
+                endpoint,
+                port_id,
+                usb_vid_pid,
+            },
         );
         endpoint_id
     }
@@ -112,14 +128,33 @@ impl BrowserSerialEsp32Provider {
     /// pre-connect, so callers connect first and reconcile identity from
     /// the hello.
     pub async fn discover_granted_endpoints(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
+        Ok(self
+            .discover_granted_endpoints_with_usb()
+            .await?
+            .into_iter()
+            .map(|granted| granted.endpoint)
+            .collect())
+    }
+
+    /// [`Self::discover_granted_endpoints`], keeping each grant's USB
+    /// vendor:product pair alongside its endpoint — the D7 grant-aware
+    /// picker's enumeration (a board's `usb_bridge` is matched against
+    /// these pairs, never against label prose).
+    pub async fn discover_granted_endpoints_with_usb(
+        &self,
+    ) -> Result<Vec<GrantedSerialEndpoint>, LinkError> {
         let ports = browser_serial::granted_ports().await?;
         let mut endpoints = Vec::with_capacity(ports.len());
         for port in ports {
+            let usb_vid_pid = port.usb_vid_pid();
             let endpoint_id = match self.endpoint_id_for_port(port.id) {
                 Some(endpoint_id) => endpoint_id,
-                None => self.create_granted_endpoint(port.label, port.id),
+                None => self.create_granted_endpoint_with_usb(port.label, port.id, usb_vid_pid),
             };
-            endpoints.push(self.endpoint(&endpoint_id)?);
+            endpoints.push(GrantedSerialEndpoint {
+                endpoint: self.endpoint(&endpoint_id)?,
+                usb_vid_pid: self.endpoint_state(&endpoint_id)?.usb_vid_pid,
+            });
         }
         Ok(endpoints)
     }
@@ -136,9 +171,10 @@ impl BrowserSerialEsp32Provider {
         // over the same port would put two Rust sessions on one
         // reader/writer. With the pool's one-session-per-endpoint rule,
         // re-picking a connected port now REPLACES its session cleanly.
+        let usb_vid_pid = port.usb_vid_pid();
         let endpoint_id = match self.endpoint_id_for_port(port.id) {
             Some(endpoint_id) => endpoint_id,
-            None => self.create_granted_endpoint(port.label, port.id),
+            None => self.create_granted_endpoint_with_usb(port.label, port.id, usb_vid_pid),
         };
         self.endpoint(&endpoint_id)
     }
@@ -717,10 +753,20 @@ fn map_progress(progress: Vec<BrowserEsp32FlashProgress>) -> Vec<LinkManagementP
         .collect()
 }
 
+/// One granted Web Serial port: its endpoint plus the USB identity the
+/// browser exposed for it (`getInfo()` — VID:PID only, which is why two
+/// identical bridge chips stay indistinguishable until opened).
+#[derive(Clone, Debug)]
+pub struct GrantedSerialEndpoint {
+    pub endpoint: LinkEndpoint,
+    pub usb_vid_pid: Option<(u16, u16)>,
+}
+
 #[derive(Clone, Debug)]
 struct BrowserSerialEndpointState {
     endpoint: LinkEndpoint,
     port_id: u32,
+    usb_vid_pid: Option<(u16, u16)>,
 }
 
 #[derive(Clone, Debug)]
