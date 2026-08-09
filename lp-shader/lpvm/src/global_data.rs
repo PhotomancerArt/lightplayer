@@ -218,6 +218,35 @@ fn decode_q32_memory_value(
             },
         )),
         LpsType::Array { element, len } => {
+            // Buffer-legal element arrays decode as one packed buffer,
+            // matching the F32-mode reader — float lanes transcode Q32 →
+            // f32 bits in the same pass.
+            if let Some(elem) = lps_shared::LpsBufferElem::from_lps_type(element) {
+                let buffer = if elem.is_float() {
+                    crate::lpvm_data_q32::read_buffer_words(
+                        elem,
+                        *len,
+                        element,
+                        rules,
+                        bytes,
+                        |b| {
+                            Q32::from_fixed(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                                .to_f32()
+                                .to_bits()
+                        },
+                    )?
+                } else {
+                    crate::lpvm_data_q32::read_buffer_words(
+                        elem,
+                        *len,
+                        element,
+                        rules,
+                        bytes,
+                        |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+                    )?
+                };
+                return Ok(LpsValueF32::Buffer(buffer));
+            }
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
             let mut elems = Vec::with_capacity(*len as usize);

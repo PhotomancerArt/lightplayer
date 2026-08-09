@@ -15,6 +15,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod layout;
+pub mod lps_buffer;
 pub mod lps_value_f32;
 pub mod lps_value_q32;
 pub mod path;
@@ -28,6 +29,7 @@ mod types;
 pub mod value_path;
 
 pub use layout::{VMCTX_HEADER_SIZE, array_stride, round_up, type_alignment, type_size};
+pub use lps_buffer::{LpsBuffer, LpsBufferElem};
 pub use lps_value_f32::LpsValueF32;
 pub use lps_value_q32::{
     FloatLaneAbi, LpsValueQ32, LpsValueQ32Error, lanes_to_lps_value_f32, lps_value_f32_to_lanes,

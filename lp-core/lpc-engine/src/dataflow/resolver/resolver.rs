@@ -248,6 +248,13 @@ pub(crate) fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
+        LpValue::Buffer(buffer) => Ok(LpsValueF32::Buffer(
+            lps_shared::LpsBuffer::from_words(
+                crate::shader_abi::model_buffer_elem_to_lps(buffer.elem),
+                buffer.words().to_vec().into_boxed_slice(),
+            )
+            .map_err(|e| ResolveError::new(alloc::format!("buffer value: {e}")))?,
+        )),
         LpValue::Unset
         | LpValue::String(_)
         | LpValue::Enum { .. }

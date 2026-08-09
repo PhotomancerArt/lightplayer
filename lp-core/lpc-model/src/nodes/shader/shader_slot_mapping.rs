@@ -29,17 +29,6 @@ impl ShaderSlotMappingDef {
             empty_key: crate::ValueSlot::new(empty_key),
         }
     }
-
-    /// A dense mapping needs only `len`: every element IS its index, so the
-    /// `key`/`empty_key` fields stay at their defaults and mean nothing.
-    pub fn dense(len: u32) -> Self {
-        Self {
-            kind: crate::ValueSlot::new(ShaderSlotMappingKind::Dense),
-            len: crate::ValueSlot::new(len),
-            key: crate::ValueSlot::default(),
-            empty_key: crate::ValueSlot::new(0),
-        }
-    }
 }
 
 impl Default for ShaderSlotMappingDef {
@@ -49,30 +38,26 @@ impl Default for ShaderSlotMappingDef {
 }
 
 /// Supported shader slot mapping strategies.
+///
+/// Exactly one kind: a fixed array of struct values interpreted as a map,
+/// each element carrying its own key in a named field, elements whose key
+/// equals `empty_key` absent. Per-cell state over builtin elements is NOT a
+/// mapping — that is [`crate::ShaderSlotKind::Buffer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderSlotMappingKind {
-    /// A fixed array of struct values interpreted as a map: each element
-    /// carries its own key in a named field, and elements whose key equals
-    /// `empty_key` are absent. Struct values only.
     Sentinel,
-    /// A fixed array of builtin scalar/vector values where the map key IS
-    /// the element index (`float heat[N];`). Every index is always present,
-    /// so only `len` applies — there is no key field and no empty sentinel.
-    Dense,
 }
 
 impl ShaderSlotMappingKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sentinel => "sentinel",
-            Self::Dense => "dense",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "sentinel" => Some(Self::Sentinel),
-            "dense" => Some(Self::Dense),
             _ => None,
         }
     }
@@ -146,18 +131,6 @@ mod tests {
         assert_eq!(*mapping.kind.value(), ShaderSlotMappingKind::Sentinel);
         assert_eq!(*mapping.len.value(), 4);
         assert_eq!(mapping.key.value(), "id");
-        assert_eq!(*mapping.empty_key.value(), 0);
-    }
-
-    /// A dense mapping is `{len}` only: `key`/`empty_key` are sentinel-kind
-    /// vocabulary and stay at their defaults when the JSON omits them.
-    #[test]
-    fn dense_mapping_reads_without_key_fields() {
-        let mapping = read_mapping(r#"{ "kind": "dense", "len": 64 }"#);
-
-        assert_eq!(*mapping.kind.value(), ShaderSlotMappingKind::Dense);
-        assert_eq!(*mapping.len.value(), 64);
-        assert_eq!(mapping.key.value(), "");
         assert_eq!(*mapping.empty_key.value(), 0);
     }
 

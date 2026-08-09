@@ -892,6 +892,11 @@ pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
             | (crate::ProductRef::Time(_), ProductKind::Time) => true,
             _ => false,
         },
+        // A buffer is always exactly its declared size — unlike Array below,
+        // there is no sparse tail.
+        (LpValue::Buffer(buffer), LpType::Buffer { elem, len }) => {
+            buffer.elem == *elem && buffer.len() == *len
+        }
         // Fixed-size arrays accept up to the declared length: the declared
         // size is the maximum, and a shorter value's absent tail is
         // type-default (fixed sizes are maxima, not required lengths).

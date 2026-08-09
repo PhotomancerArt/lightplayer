@@ -65,11 +65,8 @@ pub fn compute_desc_from_model_def<'a>(
                     .data
                     .as_ref()
                     .ok_or(ComputeDescError::MissingMapping { slot: name.clone() })?;
-                // Both mapping kinds are the same uniform array to the
-                // compiler; they differ only in how the host marshals the
-                // slot map into it (key field vs element index).
                 match mapping.kind.value() {
-                    ShaderSlotMappingKind::Sentinel | ShaderSlotMappingKind::Dense => {
+                    ShaderSlotMappingKind::Sentinel => {
                         desc = desc.with_consumed(
                             name.clone(),
                             LpsType::Array {
@@ -79,6 +76,18 @@ pub fn compute_desc_from_model_def<'a>(
                         );
                     }
                 }
+            }
+            // A consumed buffer is the same bounded uniform array a sentinel
+            // map builds; only the host-side marshal differs.
+            ShaderSlotKind::Buffer => {
+                let len = buffer_len(name, slot)?;
+                desc = desc.with_consumed(
+                    name.clone(),
+                    LpsType::Array {
+                        element: alloc::boxed::Box::new(ty),
+                        len,
+                    },
+                );
             }
         }
     }
@@ -112,19 +121,20 @@ pub fn compute_desc_from_model_def<'a>(
                             mapping.key.value().clone(),
                         );
                     }
-                    // A dense output is a plain array global: no key field
-                    // to validate, so the plain value ABI already says
-                    // everything there is to say about it.
-                    ShaderSlotMappingKind::Dense => {
-                        desc = desc.with_produced(
-                            name.clone(),
-                            LpsType::Array {
-                                element: alloc::boxed::Box::new(ty),
-                                len: *mapping.len.value(),
-                            },
-                        );
-                    }
                 }
+            }
+            // A produced buffer is a plain array global: no key field to
+            // validate, so the plain value ABI already says everything
+            // there is to say about it.
+            ShaderSlotKind::Buffer => {
+                let len = buffer_len(name, slot)?;
+                desc = desc.with_produced(
+                    name.clone(),
+                    LpsType::Array {
+                        element: alloc::boxed::Box::new(ty),
+                        len,
+                    },
+                );
             }
         }
     }
@@ -177,6 +187,12 @@ fn lps_type_for_slot_value(
             value_ref.as_str(),
         )))
     }
+}
+
+fn buffer_len(name: &str, slot: &ShaderSlotDef) -> Result<u32, ComputeDescError> {
+    slot.buffer_len().ok_or_else(|| {
+        ComputeDescError::Unsupported(format!("shader buffer slot {name:?} is missing len"))
+    })
 }
 
 fn ensure_u32_map_key(slot: &ShaderSlotDef) -> Result<(), ComputeDescError> {
@@ -309,6 +325,7 @@ void tick() {{
                 max: lpc_model::OptionSlot::none(),
                 step: lpc_model::OptionSlot::none(),
                 mapping: lpc_model::OptionSlot::none(),
+                len: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
                 unit: lpc_model::OptionSlot::none(),
@@ -355,13 +372,13 @@ void tick() {{
         );
     }
 
-    /// The fire2012 shape: per-cell scalar state in dense arrays on both
-    /// sides, indexed at RUNTIME — a loop over the consumed array and a
+    /// The fire2012 shape: per-cell scalar state in buffer slots on both
+    /// sides, indexed at RUNTIME — a loop over the consumed buffer and a
     /// uniform-derived index into the produced global. This is exactly what
     /// sentinel struct arrays cannot do on `Frontend::Lp` (constant-index
-    /// -only), and the reason the dense mapping kind exists.
+    /// -only), and the reason the buffer slot kind exists.
     #[test]
-    fn compute_desc_executes_dense_arrays_with_runtime_indexing() {
+    fn compute_desc_executes_buffer_slots_with_runtime_indexing() {
         let registry = SlotShapeRegistry::default();
 
         let mut consumed = VecMap::new();
@@ -371,13 +388,13 @@ void tick() {{
         );
         consumed.insert(
             String::from("seed"),
-            ShaderSlotDef::map_dense_builtin("f32", 4),
+            ShaderSlotDef::buffer_builtin("f32", 4),
         );
 
         let mut produced = VecMap::new();
         produced.insert(
             String::from("heat"),
-            ShaderSlotDef::map_dense_builtin("f32", 4),
+            ShaderSlotDef::buffer_builtin("f32", 4),
         );
 
         let def = ComputeShaderDef {
@@ -411,28 +428,39 @@ void tick() {{
             .compile_compute_shader(desc)
             .expect("compile compute");
 
+        let seed = lps_shared::LpsBuffer::from_words(
+            lps_shared::LpsBufferElem::F32,
+            Box::new([
+                f32::to_bits(1.0),
+                f32::to_bits(2.0),
+                f32::to_bits(3.0),
+                f32::to_bits(4.0),
+            ]),
+        )
+        .expect("seed buffer");
         shader
             .tick(&[
                 ("cursor", LpsValueF32::F32(2.0)),
-                (
-                    "seed",
-                    LpsValueF32::Array(Box::new([
-                        LpsValueF32::F32(1.0),
-                        LpsValueF32::F32(2.0),
-                        LpsValueF32::F32(3.0),
-                        LpsValueF32::F32(4.0),
-                    ])),
-                ),
+                ("seed", LpsValueF32::Buffer(seed)),
             ])
             .expect("tick");
 
+        // The produced global reads back as ONE packed buffer — the whole
+        // point of the slot kind: no boxed enum per cell anywhere between
+        // the guest memory and the slot value.
         let heat = shader.get_output("heat").expect("heat");
-        let expected = LpsValueF32::Array(Box::new([
-            LpsValueF32::F32(2.0),
-            LpsValueF32::F32(4.0),
-            LpsValueF32::F32(106.0),
-            LpsValueF32::F32(8.0),
-        ]));
+        let expected = LpsValueF32::Buffer(
+            lps_shared::LpsBuffer::from_words(
+                lps_shared::LpsBufferElem::F32,
+                Box::new([
+                    f32::to_bits(2.0),
+                    f32::to_bits(4.0),
+                    f32::to_bits(106.0),
+                    f32::to_bits(8.0),
+                ]),
+            )
+            .expect("expected buffer"),
+        );
         assert!(heat.approx_eq_default(&expected), "heat: {heat:?}");
     }
 

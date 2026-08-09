@@ -68,6 +68,10 @@ pub struct ShaderSlotDef {
     /// without authoring it — see [`shader_panel_step`].
     pub step: OptionSlot<ValueSlot<f32>>,
     pub mapping: OptionSlot<ShaderSlotMappingDef>,
+    /// Element count for a [`ShaderSlotKind::Buffer`] slot: present iff the
+    /// kind is `buffer`, absent for every other kind. The element type is
+    /// the slot's `value` (builtin scalar/vector only).
+    pub len: OptionSlot<ValueSlot<u32>>,
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
     /// Display unit suffix rendered near the panel control's value
@@ -109,6 +113,7 @@ impl ShaderSlotDef {
             max: OptionSlot::none(),
             step: OptionSlot::none(),
             mapping: OptionSlot::none(),
+            len: OptionSlot::none(),
             label: ValueSlot::new(String::from(label)),
             description: ValueSlot::new(String::from(description)),
             unit: OptionSlot::none(),
@@ -201,19 +206,28 @@ impl ShaderSlotDef {
             max: OptionSlot::none(),
             step: OptionSlot::none(),
             mapping: OptionSlot::some(mapping),
+            len: OptionSlot::none(),
             label: ValueSlot::default(),
             description: ValueSlot::default(),
             unit: OptionSlot::none(),
         }
     }
 
-    /// A dense-mapped map slot over a builtin scalar/vector element
-    /// (`float heat[N];`): the map key is the element index.
-    pub fn map_dense_builtin(value: &str, len: u32) -> Self {
+    /// A `buffer` slot over a builtin scalar/vector element
+    /// (`float heat[N];`): per-cell state as one packed value.
+    pub fn buffer_builtin(value: &str, len: u32) -> Self {
         Self {
+            kind: ValueSlot::new(ShaderSlotKind::Buffer),
             value: ValueSlot::new(ShaderValueShapeRef::builtin(value)),
-            ..Self::map_u32_native(value, ShaderSlotMappingDef::dense(len))
+            default: OptionSlot::none(),
+            len: OptionSlot::some(ValueSlot::new(len)),
+            ..Self::value_f32("", "", 0.0, None)
         }
+    }
+
+    /// The declared element count of a [`ShaderSlotKind::Buffer`] slot.
+    pub fn buffer_len(&self) -> Option<u32> {
+        self.len.data.as_ref().map(|len| *len.value())
     }
 
     pub fn default_value(&self) -> LpValue {
@@ -256,6 +270,12 @@ pub enum ShaderSlotKind {
     #[default]
     Value,
     Map,
+    /// A bounded array of builtin scalars/vectors carried as ONE packed
+    /// value ([`crate::LpValue::Buffer`]): whole-buffer revision, `Latest`
+    /// merge, no per-element identity. The map/buffer split is exactly the
+    /// keyed-entries vs per-cell-state split — see
+    /// `docs/adr/2026-08-08-typed-shader-buffers.md`.
+    Buffer,
     Phasor,
     Seconds,
     Palette,
@@ -266,6 +286,7 @@ impl ShaderSlotKind {
         match self {
             Self::Value => "value",
             Self::Map => "map",
+            Self::Buffer => "buffer",
             Self::Phasor => "phasor",
             Self::Seconds => "seconds",
             Self::Palette => "palette",
@@ -276,6 +297,7 @@ impl ShaderSlotKind {
         match value {
             "value" => Some(Self::Value),
             "map" => Some(Self::Map),
+            "buffer" => Some(Self::Buffer),
             "phasor" => Some(Self::Phasor),
             "seconds" => Some(Self::Seconds),
             "palette" => Some(Self::Palette),

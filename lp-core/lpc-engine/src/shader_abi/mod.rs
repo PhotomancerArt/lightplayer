@@ -17,4 +17,7 @@ pub(crate) mod uniforms;
 
 pub use compute_desc::{ComputeDescError, compute_desc_from_model_def};
 pub use convert_type::model_type_to_lps_type;
-pub use convert_value::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
+pub use convert_value::{
+    LpsValueToModelConversionError, lps_buffer_elem_to_model, lps_value_f32_to_model_value,
+    model_buffer_elem_to_lps,
+};
