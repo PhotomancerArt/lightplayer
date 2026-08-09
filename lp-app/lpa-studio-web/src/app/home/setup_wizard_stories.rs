@@ -247,6 +247,45 @@ fn board_first() -> Element {
 fn port_picking() -> Element {
     frame(hardware(SetupState::PortPicking {
         preseeded_board: None,
+        grants: Vec::new(),
+    }))
+}
+
+#[story(
+    description = "PORT_PICKING with several already-authorized ports (D7): never guess between grants — the in-app picker lists them as deliberate, synthetically-clickable rows, with the browser's own chooser demoted to the last one. Unlike Chrome's dialog, this list can later carry registry recognition."
+)]
+fn port_picking_granted_list() -> Element {
+    frame(hardware(SetupState::PortPicking {
+        preseeded_board: None,
+        grants: vec![
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-2".to_string(),
+                label: "ESP32 Serial (303a:1001)".to_string(),
+            },
+        ],
+    }))
+}
+
+#[story(
+    description = "PORT_PICKING with two IDENTICAL grants: getInfo() gives only VID:PID, so two of the same bridge chip cannot be told apart until opened — the honesty note says so instead of pretending (D7). Picking either is safe; \"Not this one?\" on the next screen is the way back."
+)]
+fn port_picking_granted_twins() -> Element {
+    frame(hardware(SetupState::PortPicking {
+        preseeded_board: None,
+        grants: vec![
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-2".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+        ],
     }))
 }
 
@@ -256,6 +295,19 @@ fn port_picking() -> Element {
 fn connecting() -> Element {
     let mut wizard = hardware(SetupState::Connecting {
         preseeded_board: None,
+        via_grant: None,
+    });
+    wizard.console_tail = connect_console();
+    frame(wizard)
+}
+
+#[story(
+    description = "CONNECTING through an adopted grant (D7): a single unambiguous authorized port was taken without a chooser — visibly, naming the port, and reversibly, with \"Not this one?\" one click away. This is what makes an agent-driven reconnect zero-click while keeping the human in charge."
+)]
+fn connecting_via_grant() -> Element {
+    let mut wizard = hardware(SetupState::Connecting {
+        preseeded_board: None,
+        via_grant: Some("Serial device (1a86:7523)".to_string()),
     });
     wizard.console_tail = connect_console();
     frame(wizard)

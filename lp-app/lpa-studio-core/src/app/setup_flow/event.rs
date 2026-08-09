@@ -5,6 +5,7 @@
 //! flash succeeded/failed, project generated, push complete). The reducer
 //! cannot tell them apart and does not need to.
 
+use super::state::SetupGrantedPort;
 use super::verdict::BoardProbe;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,13 +30,31 @@ pub enum SetupEvent {
     /// still running. Reported mid-op (the executor's one honest
     /// mid-point), which is why it asks for nothing: the work it would
     /// name is already in flight.
-    PortChosen,
+    ///
+    /// `via_grant` is the label of the previously-authorized port the
+    /// executor adopted instead of showing a chooser (D7's single-grant
+    /// auto-proceed); `None` = the browser's own chooser answered.
+    PortChosen {
+        via_grant: Option<String>,
+    },
     /// The browser's port chooser returned a grant.
     PortGranted,
     /// The user dismissed the port chooser.
     PortPickerCancelled,
     /// The chooser had nothing to offer.
     PortPickerEmpty,
+    /// The grant sweep found several already-authorized ports (D7):
+    /// never guess between them — the wizard renders the in-app picker.
+    GrantedPortsListed {
+        ports: Vec<SetupGrantedPort>,
+    },
+    /// A row of the in-app granted-ports picker was clicked.
+    GrantChosen {
+        endpoint_id: String,
+    },
+    /// "Another port…" / "Not this one?" — the user wants the browser's
+    /// own chooser instead of anything grant-derived.
+    PickDifferentPort,
     /// One probe pass finished.
     ProbeCompleted {
         probe: BoardProbe,
@@ -97,10 +116,13 @@ impl SetupEvent {
             Self::Back => SetupEventKind::Back,
             Self::BoardChosen { .. } => SetupEventKind::BoardChosen,
             Self::Confirm => SetupEventKind::Confirm,
-            Self::PortChosen => SetupEventKind::PortChosen,
+            Self::PortChosen { .. } => SetupEventKind::PortChosen,
             Self::PortGranted => SetupEventKind::PortGranted,
             Self::PortPickerCancelled => SetupEventKind::PortPickerCancelled,
             Self::PortPickerEmpty => SetupEventKind::PortPickerEmpty,
+            Self::GrantedPortsListed { .. } => SetupEventKind::GrantedPortsListed,
+            Self::GrantChosen { .. } => SetupEventKind::GrantChosen,
+            Self::PickDifferentPort => SetupEventKind::PickDifferentPort,
             Self::ProbeCompleted { .. } => SetupEventKind::ProbeCompleted,
             Self::PortLost => SetupEventKind::PortLost,
             Self::WipeAndSetUp => SetupEventKind::WipeAndSetUp,
@@ -135,6 +157,9 @@ pub enum SetupEventKind {
     PortGranted,
     PortPickerCancelled,
     PortPickerEmpty,
+    GrantedPortsListed,
+    GrantChosen,
+    PickDifferentPort,
     ProbeCompleted,
     PortLost,
     WipeAndSetUp,
@@ -157,7 +182,7 @@ pub enum SetupEventKind {
 impl SetupEventKind {
     /// Every event, for the exhaustive transition table. Kept honest the
     /// same way [`SetupStateKind::ALL`](super::SetupStateKind::ALL) is.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 30] = [
         Self::ItsConnected,
         Self::PickBoardFirst,
         Self::ItsPluggedIn,
@@ -168,6 +193,9 @@ impl SetupEventKind {
         Self::PortGranted,
         Self::PortPickerCancelled,
         Self::PortPickerEmpty,
+        Self::GrantedPortsListed,
+        Self::GrantChosen,
+        Self::PickDifferentPort,
         Self::ProbeCompleted,
         Self::PortLost,
         Self::WipeAndSetUp,
@@ -199,23 +227,26 @@ impl SetupEventKind {
             Self::PortGranted => 7,
             Self::PortPickerCancelled => 8,
             Self::PortPickerEmpty => 9,
-            Self::ProbeCompleted => 10,
-            Self::PortLost => 11,
-            Self::WipeAndSetUp => 12,
-            Self::UpdateFirmware => 13,
-            Self::AdoptDone => 14,
-            Self::AdoptAndOpen => 15,
-            Self::SetUpFresh => 16,
-            Self::Retry => 17,
-            Self::FlashSucceeded => 18,
-            Self::FlashFailed => 19,
-            Self::NameEdited => 20,
-            Self::ProjectGenerated => 21,
-            Self::PushCompleted => 22,
-            Self::CloseRequested => 23,
-            Self::KeepFlashing => 24,
-            Self::Abandon => 25,
-            Self::SetUpElsewhere => 26,
+            Self::GrantedPortsListed => 10,
+            Self::GrantChosen => 11,
+            Self::PickDifferentPort => 12,
+            Self::ProbeCompleted => 13,
+            Self::PortLost => 14,
+            Self::WipeAndSetUp => 15,
+            Self::UpdateFirmware => 16,
+            Self::AdoptDone => 17,
+            Self::AdoptAndOpen => 18,
+            Self::SetUpFresh => 19,
+            Self::Retry => 20,
+            Self::FlashSucceeded => 21,
+            Self::FlashFailed => 22,
+            Self::NameEdited => 23,
+            Self::ProjectGenerated => 24,
+            Self::PushCompleted => 25,
+            Self::CloseRequested => 26,
+            Self::KeepFlashing => 27,
+            Self::Abandon => 28,
+            Self::SetUpElsewhere => 29,
         }
     }
 
@@ -232,6 +263,9 @@ impl SetupEventKind {
             Self::PortGranted => "port-granted",
             Self::PortPickerCancelled => "port-picker-cancelled",
             Self::PortPickerEmpty => "port-picker-empty",
+            Self::GrantedPortsListed => "granted-ports-listed",
+            Self::GrantChosen => "grant-chosen",
+            Self::PickDifferentPort => "pick-different-port",
             Self::ProbeCompleted => "probe-completed",
             Self::PortLost => "port-lost",
             Self::WipeAndSetUp => "wipe-and-set-up",

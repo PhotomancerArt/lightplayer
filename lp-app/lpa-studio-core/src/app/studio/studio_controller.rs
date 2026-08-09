@@ -4542,7 +4542,34 @@ impl StudioController {
         let context = self.setup_executor_context();
         match crate::dispatch_for(command, &context) {
             SetupDispatch::Device(DeviceOp::OpenProvider { provider_id }) => {
-                self.run_setup_port_request(provider_id, updates).await
+                // The D7 strategy and board hint live on the COMMAND (the
+                // op only names the machinery); the board hint resolves to
+                // its declared usb_bridge VID:PID here, where the catalog
+                // is in reach.
+                let (strategy, board_hint) = match command {
+                    SetupCommand::RequestPort {
+                        strategy,
+                        board_hint,
+                    } => (*strategy, board_hint.clone()),
+                    _ => (crate::PortRequestStrategy::AutoAdopt, None),
+                };
+                let board_usb = board_hint
+                    .as_deref()
+                    .and_then(lpa_boards::board_by_id)
+                    .and_then(|board| board.usb_bridge)
+                    .map(lpa_boards::UsbBridge::vid_pid);
+                self.run_setup_port_request(provider_id, strategy, board_usb, updates)
+                    .await
+            }
+            SetupDispatch::Device(DeviceOp::ConnectEndpoint {
+                provider_id,
+                endpoint_id,
+            }) => {
+                // A grant the user picked off the in-app list (D7): no
+                // chooser phase — the grant is the permission, and the
+                // wizard is already narrating CONNECTING.
+                self.run_setup_grant_connect(provider_id, endpoint_id, updates)
+                    .await
             }
             SetupDispatch::ReadProbe => {
                 // Before AND after: the connect's lines are what PROBING
@@ -4763,19 +4790,43 @@ impl StudioController {
         }
     }
 
-    /// `RequestPort`: the browser's own chooser, then a connect. The port
-    /// grant is what gives the flow a session — and therefore a card key.
+    /// `RequestPort`: the D7 grant ladder, then (at its bottom) the
+    /// browser's own chooser, then a connect. The port grant is what gives
+    /// the flow a session — and therefore a card key.
     ///
     /// The two phases are awaited SEPARATELY so the wizard can narrate
-    /// them apart (bench, 2026-08-08): the chooser resolving is reported
-    /// as `PortChosen` the moment it happens, and the several seconds of
-    /// open/reset/boot/hello that follow are PORT_PICKING's copy no
-    /// longer — they are CONNECTING's.
+    /// them apart (bench, 2026-08-08): the chooser resolving — or a grant
+    /// being adopted — is reported as `PortChosen` the moment it happens,
+    /// and the several seconds of open/reset/boot/hello that follow are
+    /// PORT_PICKING's copy no longer — they are CONNECTING's.
     async fn run_setup_port_request(
         &mut self,
         provider_id: LinkProviderKind,
+        strategy: crate::PortRequestStrategy,
+        board_usb: Option<(u16, u16)>,
         updates: UxUpdateSink,
     ) -> (UiNotices, Option<crate::SetupEvent>) {
+        // The grant sweep runs first and prompts for nothing. Several
+        // usable grants end the command here: the wizard renders the
+        // in-app list, and the user's row click is a fresh command.
+        let plan = if provider_id == LinkProviderKind::BrowserSerialEsp32 {
+            self.device.plan_granted_ports(strategy, board_usb).await
+        } else {
+            crate::GrantPortPlan::Chooser
+        };
+        if let crate::GrantPortPlan::Offer { ports } = plan {
+            let ports = ports
+                .into_iter()
+                .map(|port| crate::SetupGrantedPort {
+                    endpoint_id: port.endpoint_id.as_str().to_string(),
+                    label: port.label,
+                })
+                .collect();
+            return (
+                UiNotices::new(),
+                Some(crate::SetupEvent::GrantedPortsListed { ports }),
+            );
+        }
         let before: Vec<crate::RuntimeId> = self
             .pool
             .device_sessions()
@@ -4785,16 +4836,73 @@ impl StudioController {
         // the await below emits views while the session installs, and the
         // bind only lands after it returns.
         self.setup_port_snapshot = Some(before.clone());
-        let outcome = match self.device.choose_provider_endpoint(provider_id).await {
-            // A port is in hand: the flow leaves PORT_PICKING here, not
-            // after the connect below.
-            Ok(crate::PortChoice::Endpoint(endpoint_id)) => {
-                self.note_setup_progress(crate::SetupEvent::PortChosen, &updates);
+        let outcome = match plan {
+            // A single unambiguous grant: adopt it, saying WHICH port —
+            // the label rides `PortChosen` so CONNECTING can name it and
+            // offer the way back (D7: visible and reversible, never
+            // silent).
+            crate::GrantPortPlan::Adopt { endpoint_id, label } => {
+                self.note_setup_progress(
+                    crate::SetupEvent::PortChosen {
+                        via_grant: Some(label),
+                    },
+                    &updates,
+                );
                 self.device.connect_endpoint(provider_id, endpoint_id).await
             }
-            Ok(crate::PortChoice::Ended(outcome)) => Ok(outcome),
-            Err(error) => Err(error),
+            crate::GrantPortPlan::Chooser => {
+                match self.device.choose_provider_endpoint(provider_id).await {
+                    // A port is in hand: the flow leaves PORT_PICKING
+                    // here, not after the connect below.
+                    Ok(crate::PortChoice::Endpoint(endpoint_id)) => {
+                        self.note_setup_progress(
+                            crate::SetupEvent::PortChosen { via_grant: None },
+                            &updates,
+                        );
+                        self.device.connect_endpoint(provider_id, endpoint_id).await
+                    }
+                    Ok(crate::PortChoice::Ended(outcome)) => Ok(outcome),
+                    Err(error) => Err(error),
+                }
+            }
+            crate::GrantPortPlan::Offer { .. } => {
+                unreachable!("offers returned before the snapshot claim")
+            }
         };
+        self.finish_setup_port_request(provider_id, outcome, before, updates)
+            .await
+    }
+
+    /// A grant picked off the in-app list (D7): connect that endpoint —
+    /// no chooser phase — and land the outcome exactly the way a chooser
+    /// grant lands.
+    async fn run_setup_grant_connect(
+        &mut self,
+        provider_id: LinkProviderKind,
+        endpoint_id: lpa_link::LinkEndpointId,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let before: Vec<crate::RuntimeId> = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .collect();
+        self.setup_port_snapshot = Some(before.clone());
+        let outcome = self.device.connect_endpoint(provider_id, endpoint_id).await;
+        self.finish_setup_port_request(provider_id, outcome, before, updates)
+            .await
+    }
+
+    /// The shared tail of every setup port request: install the outcome,
+    /// bind the born session to the flow, and report `PortGranted` or
+    /// `PortPickerCancelled` back to the machine.
+    async fn finish_setup_port_request(
+        &mut self,
+        provider_id: LinkProviderKind,
+        outcome: Result<DeviceOpenOutcome, UiError>,
+        before: Vec<crate::RuntimeId>,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
         // The chooser's own vocabulary: a grant that produced no session
         // is a cancel. Web Serial cannot tell "cancelled" from "the list
         // was empty" — both are one `NotFoundError` — so the flow only

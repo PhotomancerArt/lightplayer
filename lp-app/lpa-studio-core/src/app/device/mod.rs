@@ -16,7 +16,10 @@ pub use connect_choices::{EndpointChoice, ProviderChoice};
 pub use connect_flow::ConnectFlowState;
 pub use connected_device_summary::ConnectedDeviceSummary;
 pub use deploy_op::{DEPLOY_NODE_ID, DeployOp, DeployTarget};
-pub use device_controller::{DeviceController, DeviceOpenOutcome, PortChoice};
+pub use device_controller::{
+    DeviceController, DeviceOpenOutcome, GrantPortPlan, GrantedPortSummary, PortChoice,
+    plan_for_granted_ports,
+};
 pub use device_op::DeviceOp;
 pub use device_target::DeviceTarget;
 pub use filesystem_backup::{

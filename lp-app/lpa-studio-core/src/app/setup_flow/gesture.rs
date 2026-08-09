@@ -27,6 +27,11 @@ pub enum SetupGesture {
     Back,
     /// A board tile was picked.
     BoardChosen { board_id: String },
+    /// A row of the in-app granted-ports picker (D7).
+    GrantChosen { endpoint_id: String },
+    /// "Another port…" on the granted-ports picker, and "Not this one?"
+    /// on a grant-adopted connect: the browser's own chooser, please.
+    PickDifferentPort,
     /// The step's forward verb (Flash / Continue / Create).
     Confirm,
     /// WLED_FOUND's "Wipe and set up".
@@ -60,6 +65,8 @@ impl From<SetupGesture> for SetupEvent {
             SetupGesture::ItsPluggedIn => Self::ItsPluggedIn,
             SetupGesture::Back => Self::Back,
             SetupGesture::BoardChosen { board_id } => Self::BoardChosen { board_id },
+            SetupGesture::GrantChosen { endpoint_id } => Self::GrantChosen { endpoint_id },
+            SetupGesture::PickDifferentPort => Self::PickDifferentPort,
             SetupGesture::Confirm => Self::Confirm,
             SetupGesture::WipeAndSetUp => Self::WipeAndSetUp,
             SetupGesture::UpdateFirmware => Self::UpdateFirmware,
@@ -81,11 +88,12 @@ mod tests {
     use crate::app::setup_flow::event::SetupEventKind;
 
     /// The events NO gesture may produce: things the world reports.
-    const OUTCOMES: [SetupEventKind; 11] = [
+    const OUTCOMES: [SetupEventKind; 12] = [
         SetupEventKind::PortChosen,
         SetupEventKind::PortGranted,
         SetupEventKind::PortPickerCancelled,
         SetupEventKind::PortPickerEmpty,
+        SetupEventKind::GrantedPortsListed,
         SetupEventKind::ProbeCompleted,
         SetupEventKind::PortLost,
         SetupEventKind::FlashSucceeded,
@@ -104,6 +112,10 @@ mod tests {
             SetupGesture::BoardChosen {
                 board_id: "seeed/xiao-esp32-c6".to_string(),
             },
+            SetupGesture::GrantChosen {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+            },
+            SetupGesture::PickDifferentPort,
             SetupGesture::Confirm,
             SetupGesture::WipeAndSetUp,
             SetupGesture::UpdateFirmware,

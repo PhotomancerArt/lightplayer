@@ -40,7 +40,8 @@ pub use app::bus::{
 pub use app::device::{
     BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
     DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, DeviceTarget, EndpointChoice,
-    PortChoice, ProviderChoice, RecoveryInstructions, RecoveryStep, UiDeviceBackup,
+    GrantPortPlan, GrantedPortSummary, PortChoice, ProviderChoice, RecoveryInstructions,
+    RecoveryStep, UiDeviceBackup, plan_for_granted_ports,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
@@ -136,10 +137,11 @@ pub use app::settings::{
 };
 pub use app::setup_flow::{
     BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
-    ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities, SetupCommand, SetupContext,
-    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupGesture,
-    SetupState, SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
-    derive_device_name, dispatch_for, known_device_for, month_day_label, unique_device_name,
+    PortRequestStrategy, ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities,
+    SetupCommand, SetupContext, SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext,
+    SetupFlow, SetupGesture, SetupGrantedPort, SetupState, SetupStateKind, SetupStep, SetupTarget,
+    SimulatorSetupTarget, classify_board, derive_device_name, dispatch_for, known_device_for,
+    month_day_label, unique_device_name,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,

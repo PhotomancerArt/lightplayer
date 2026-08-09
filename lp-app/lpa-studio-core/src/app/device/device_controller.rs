@@ -126,6 +126,80 @@ pub enum PortChoice {
     Ended(DeviceOpenOutcome),
 }
 
+/// One already-granted Web Serial port, as the D7 grant sweep sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantedPortSummary {
+    pub endpoint_id: LinkEndpointId,
+    pub label: String,
+    /// `getInfo()`'s VID:PID, when the browser exposed one — all a grant
+    /// can say about itself before it is opened.
+    pub usb_vid_pid: Option<(u16, u16)>,
+}
+
+/// The D7 grant ladder's verdict for one port request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrantPortPlan {
+    /// Exactly one unambiguous grant: adopt it — visibly and reversibly,
+    /// which is the CALLER's job to narrate.
+    Adopt {
+        endpoint_id: LinkEndpointId,
+        label: String,
+    },
+    /// Grants exist but none is unambiguous: offer them as a list and let
+    /// the user (or a driving agent) pick deliberately.
+    Offer { ports: Vec<GrantedPortSummary> },
+    /// Nothing grant-derived applies: the browser's own chooser.
+    Chooser,
+}
+
+/// The D7 ladder, pure so it is testable on the host: which of adopt /
+/// offer / chooser a strategy and a grant list add up to.
+///
+/// `board_usb` is the BOARD_FIRST refinement: when the user already named
+/// the board, its `usb_bridge` VID:PID narrows the list — one match adopts
+/// even when unrelated grants exist; zero matches means the board's own
+/// port has never been granted, and only the chooser can grant it.
+/// `getInfo()` cannot tell two identical bridge chips apart, so several
+/// matches stay an offer, never a guess.
+pub fn plan_for_granted_ports(
+    strategy: crate::PortRequestStrategy,
+    board_usb: Option<(u16, u16)>,
+    ports: Vec<GrantedPortSummary>,
+) -> GrantPortPlan {
+    use crate::PortRequestStrategy as Strategy;
+    if strategy == Strategy::ChooserOnly || ports.is_empty() {
+        return GrantPortPlan::Chooser;
+    }
+    let candidates: Vec<GrantedPortSummary> = match board_usb {
+        Some(usb) => {
+            let matches: Vec<GrantedPortSummary> = ports
+                .iter()
+                .filter(|port| port.usb_vid_pid == Some(usb))
+                .cloned()
+                .collect();
+            if matches.is_empty() {
+                // The named board's bridge is not among the grants: no
+                // grant can become its port, so the chooser is the only
+                // honest answer.
+                return GrantPortPlan::Chooser;
+            }
+            matches
+        }
+        None => ports,
+    };
+    match (strategy, candidates.len()) {
+        (Strategy::AutoAdopt, 1) => {
+            let port = candidates.into_iter().next().expect("len checked");
+            GrantPortPlan::Adopt {
+                endpoint_id: port.endpoint_id,
+                label: port.label,
+            }
+        }
+        // ListOnly, or several candidates: never guess between grants.
+        _ => GrantPortPlan::Offer { ports: candidates },
+    }
+}
+
 impl DeviceController {
     pub const NODE_ID: &'static str = "studio|device";
 
@@ -433,6 +507,67 @@ impl DeviceController {
             "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
         ))
+    }
+
+    /// The D7 grant sweep: enumerate the ports this origin already holds
+    /// (`getPorts()`, no prompt) and run [`plan_for_granted_ports`] over
+    /// them. Failures degrade to `Chooser` — a sweep that cannot even
+    /// enumerate must not block the browser's own dialog. On `Adopt` /
+    /// `Offer` the flow state carries the endpoints, so a follow-up
+    /// [`Self::connect_endpoint`] resolves their labels.
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    pub async fn plan_granted_ports(
+        &mut self,
+        strategy: crate::PortRequestStrategy,
+        board_usb: Option<(u16, u16)>,
+    ) -> GrantPortPlan {
+        if strategy == crate::PortRequestStrategy::ChooserOnly {
+            return GrantPortPlan::Chooser;
+        }
+        let Ok(connector) = self
+            .registry
+            .create_connector(LinkProviderKind::BrowserSerialEsp32)
+        else {
+            return GrantPortPlan::Chooser;
+        };
+        let LinkConnector::BrowserSerialEsp32(provider) = &*connector else {
+            return GrantPortPlan::Chooser;
+        };
+        let Ok(granted) = provider.discover_granted_endpoints_with_usb().await else {
+            return GrantPortPlan::Chooser;
+        };
+        let choices: Vec<EndpointChoice> = granted
+            .iter()
+            .map(|entry| EndpointChoice::from_endpoint(entry.endpoint.clone()))
+            .collect();
+        let ports = granted
+            .into_iter()
+            .map(|entry| GrantedPortSummary {
+                endpoint_id: entry.endpoint.id.clone(),
+                label: entry.endpoint.label.clone(),
+                usb_vid_pid: entry.usb_vid_pid,
+            })
+            .collect();
+        let plan = plan_for_granted_ports(strategy, board_usb, ports);
+        if !matches!(plan, GrantPortPlan::Chooser) {
+            self.set_flow(ConnectFlowState::SelectingEndpoint {
+                provider_id: LinkProviderKind::BrowserSerialEsp32,
+                endpoints: choices,
+            });
+        }
+        plan
+    }
+
+    /// Host builds have no Web Serial: the sweep finds nothing and the
+    /// request falls through to the (equally unsupported) chooser, which
+    /// is today's behaviour exactly.
+    #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+    pub async fn plan_granted_ports(
+        &mut self,
+        _strategy: crate::PortRequestStrategy,
+        _board_usb: Option<(u16, u16)>,
+    ) -> GrantPortPlan {
+        GrantPortPlan::Chooser
     }
 
     /// D32 auto-connect (M6): the attach sweep. Like
@@ -840,6 +975,95 @@ mod tests {
     use lpa_link::{LinkEndpoint, LinkEndpointId, LinkProviderKind};
 
     use super::*;
+
+    fn granted(endpoint: &str, label: &str, usb: Option<(u16, u16)>) -> GrantedPortSummary {
+        GrantedPortSummary {
+            endpoint_id: LinkEndpointId::new(endpoint),
+            label: label.to_string(),
+            usb_vid_pid: usb,
+        }
+    }
+
+    const CH340: (u16, u16) = (0x1A86, 0x7523);
+    const FTDI: (u16, u16) = (0x0403, 0x6001);
+
+    #[test]
+    fn the_grant_ladder_matches_d7() {
+        use crate::PortRequestStrategy as S;
+        let one = || vec![granted("p1", "Serial device (1a86:7523)", Some(CH340))];
+        let two = || {
+            vec![
+                granted("p1", "Serial device (1a86:7523)", Some(CH340)),
+                granted("p2", "Serial device (0403:6001)", Some(FTDI)),
+            ]
+        };
+
+        // 0 grants → the chooser, exactly as today.
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, None, Vec::new()),
+            GrantPortPlan::Chooser
+        );
+        // 1 grant → adopt, visibly (the caller narrates the label).
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, None, one()),
+            GrantPortPlan::Adopt {
+                endpoint_id: LinkEndpointId::new("p1"),
+                label: "Serial device (1a86:7523)".to_string(),
+            }
+        );
+        // several → never guess.
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, None, two()),
+            GrantPortPlan::Offer { ports: two() }
+        );
+        // The chooser can always be demanded by name.
+        assert_eq!(
+            plan_for_granted_ports(S::ChooserOnly, None, two()),
+            GrantPortPlan::Chooser
+        );
+        // A return trip lists even a single grant: re-adopting the port
+        // that just disappointed is the one silent move D7 forbids, and
+        // a list stays clickable for a driving agent.
+        assert_eq!(
+            plan_for_granted_ports(S::ListOnly, None, one()),
+            GrantPortPlan::Offer { ports: one() }
+        );
+    }
+
+    #[test]
+    fn the_board_first_filter_narrows_before_the_ladder_judges() {
+        use crate::PortRequestStrategy as S;
+        let mixed = vec![
+            granted("p1", "Serial device (1a86:7523)", Some(CH340)),
+            granted("p2", "Serial device (0403:6001)", Some(FTDI)),
+        ];
+        // One match among unrelated grants → adopt it (D7's refinement).
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, Some(CH340), mixed.clone()),
+            GrantPortPlan::Adopt {
+                endpoint_id: LinkEndpointId::new("p1"),
+                label: "Serial device (1a86:7523)".to_string(),
+            }
+        );
+        // Zero matches → only the chooser can grant the board's own port.
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, Some((0x10C4, 0xEA60)), mixed.clone()),
+            GrantPortPlan::Chooser
+        );
+        // Two identical bridges → indistinguishable until opened: offer
+        // the matches, never a guess.
+        let twins = vec![
+            granted("p1", "Serial device (1a86:7523)", Some(CH340)),
+            granted("p2", "Serial device (1a86:7523)", Some(CH340)),
+            granted("p3", "Serial device (0403:6001)", Some(FTDI)),
+        ];
+        assert_eq!(
+            plan_for_granted_ports(S::AutoAdopt, Some(CH340), twins.clone()),
+            GrantPortPlan::Offer {
+                ports: twins[..2].to_vec()
+            }
+        );
+    }
 
     #[test]
     fn new_controller_projects_provider_catalog_into_the_flow() {

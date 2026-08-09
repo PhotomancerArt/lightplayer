@@ -41,27 +41,44 @@ entry — flow-spec called that state `SIM_BOARD_PICK`; see §7).
 
 ```text
 CONNECT_INTRO                    "connect your device now" — two stacked full-width CTAs
-  —ItsConnected→                 PORT_PICKING          [RequestPort]
+  —ItsConnected→                 PORT_PICKING          [RequestPort{AutoAdopt|ListOnly}]
+                                 (AutoAdopt on first arrival; ANY hint = a return trip,
+                                  which never silently adopts again — §2a)
   —PickBoardFirst→               BOARD_FIRST
                                  (cancel hints escalate toward the secondary CTA)
 BOARD_FIRST                      full-catalog board pick, then board-specific connect
                                  guidance — driver steps for CH340-class boards,
                                  cable/port tips otherwise
   —BoardChosen→                  BOARD_FIRST           (records the choice; pre-seeds BOARD_PICK)
-  —ItsPluggedIn→                 PORT_PICKING          [RequestPort]
+  —ItsPluggedIn→                 PORT_PICKING          [RequestPort{AutoAdopt, board_hint}]
+                                 (the pick narrows the grant sweep to the board's
+                                  usb_bridge VID:PID — §2a)
   —Back→                         CONNECT_INTRO
-PORT_PICKING                     the browser owns the chooser dialog
-  —PortChosen→                   CONNECTING            (the chooser answered; the connect
-                                 it started is already running, so this asks for nothing)
+PORT_PICKING                     asking for a port: the browser's chooser when `grants`
+                                 is empty, the in-app granted-ports picker otherwise (§2a)
+  —PortChosen{via_grant?}→       CONNECTING            (the chooser answered — or a grant was
+                                 adopted, carrying its label; the connect it started is
+                                 already running, so this asks for nothing)
+  —GrantedPortsListed→           PORT_PICKING          (several authorized ports: the state
+                                 now carries the in-app picker's rows; never a guess)
+  —GrantChosen→                  CONNECTING            [ConnectGrantedPort]
+                                 (a listed row; an unlisted endpoint_id is a stale click)
+  —PickDifferentPort→            PORT_PICKING          [RequestPort{ChooserOnly}]
+                                 ("Another port…" — the grant list stands down)
   —PortGranted→                  PROBING               [ProbeBoard]
                                  (a grant with no CONNECTING in between: the port was
                                   already open, or a caller that does not split the phases)
   —PortPickerCancelled→          CONNECT_INTRO         (hint: picker closed)
   —PortPickerEmpty→              CONNECT_INTRO         (hint escalates to BOARD_FIRST)
 CONNECTING                       opening the port, resetting, waiting for the hello —
-                                 the SECONDS that used to wear PORT_PICKING's copy
+                                 the SECONDS that used to wear PORT_PICKING's copy.
+                                 Carries `via_grant` when a grant was adopted: the card
+                                 names the port and offers "Not this one?" (§2a)
   —PortGranted→                  PROBING               [ProbeBoard]
-  —PortPickerCancelled→          CONNECT_INTRO         (the connect ended with no session)
+  —PortPickerCancelled→          CONNECT_INTRO         (the connect ended with no session;
+                                 hint: GrantConnectFailed when via_grant — names the adopted
+                                 port as the suspect AND demotes the next attempt to ListOnly)
+  —PickDifferentPort→            PORT_PICKING          [ReleasePort, RequestPort{ChooserOnly}]
 PROBING                          chip probe + board-state detection, one spinner
   —ProbeCompleted(Blank)→        BOARD_PICK            (chip known → catalog filtered + Generic)
   —ProbeCompleted(Wled)→         WLED_FOUND
@@ -132,6 +149,15 @@ CLOSED                           terminal
 
 ### Cross-cutting
 
+- `PickDifferentPort` in any port-holding state before the flash
+  (CONNECTING, PROBING, and the five verdict states) → PORT_PICKING
+  `[ReleasePort, RequestPort{ChooserOnly}]`. The link that means it lives
+  on CONNECTING, but gestures queue behind the in-flight connect — by the
+  time the click runs, the flow has usually probed through the wrong port
+  and landed on a verdict. Wherever it lands, the meaning is the same:
+  drop this port, ask the browser's chooser. The flash states exclude it
+  (a write in progress outranks a second thought), and PROVISION is
+  post-flash — the wrong-port doubt has no business there.
 - `CloseRequested` anywhere outside FLASHING / FLASH_FAILED /
   ABANDON_GUARD / PROVISION → `CLOSED(Cancelled)`, no guard, state
   discarded (nothing was written before FLASHING; adopt writes nothing).
@@ -169,6 +195,48 @@ CLOSED                           terminal
 - **`SetUpElsewhere` is an OUTCOME, not a gesture**, like `ProbeCompleted`
   and `FlashSucceeded`: no component can name it, only the controller
   reporting what the world did. `gesture.rs`'s partition test enforces it.
+
+## 2a · Grant-aware port picking (D7, ratified 2026-08-08)
+
+**The problem.** `requestPort()` always shows Chrome's native chooser by
+spec; grants only affect `getPorts()`. So every wizard walk cost a human
+click in a dialog no agent can drive, even when the origin already held
+the exact port. The constraint Yona set: **silent adoption is only safe
+when unambiguous.**
+
+**The ladder** (`plan_for_granted_ports`, pure and host-tested; the
+executor walks it inside `RequestPort` before any chooser):
+
+- **0 granted ports** → the native chooser, exactly as before.
+- **Exactly 1** (under `AutoAdopt`) → adopt it, *visibly and reversibly*:
+  `PortChosen{via_grant: label}` puts the port's name on the CONNECTING
+  card ("Using your previously-authorized port — …") with "Not this one?
+  Pick a different port" one click away.
+- **Several** → never guess. `GrantedPortsListed` renders the in-app
+  picker: one row per grant, "Another port… (browser chooser)" as the
+  last row. Better for humans (it can later carry registry recognition,
+  which Chrome's dialog cannot) and synthetically clickable for agents.
+- **Board-first refinement**: with a board already picked, the sweep is
+  narrowed to that board's `usb_bridge` VID:PID first. Exactly one match
+  adopts even when unrelated grants exist; zero matches means the board's
+  own port was never granted, and only the chooser can grant it.
+- **Honesty**: `getInfo()` exposes only VID:PID, so two identical bridge
+  chips are indistinguishable until opened. The picker says so;
+  disambiguation-by-probe is a v2.
+
+**Adopt only once.** Any return to CONNECT_INTRO (a hint is set) demotes
+the next request to `ListOnly`: a failed or refused adoption is exactly
+what makes the grant ambiguous, so it is listed, never re-adopted. The
+list keeps single-grant retries one deliberate click for agents without
+ever re-adopting in silence. `ChooserOnly` is the user demanding the
+native dialog by name; note `requestPort()` needs transient user
+activation, so the chooser is only ever commanded off a click.
+
+**Plumbing.** VID:PID travels as data, not label prose:
+`getGrantedPorts()`/`requestPort()` (JS) → `BrowserSerialPortHandle` →
+`BrowserSerialEsp32Provider::discover_granted_endpoints_with_usb` →
+`GrantedPortSummary`. The wizard-facing rows are `SetupGrantedPort`
+(endpoint id + label only — components stay provider-blind).
 
 ## 3 · Provision step (shared)
 
@@ -461,8 +529,8 @@ state beside it.
 |---|---|
 | CONNECT_INTRO | headline + two stacked full-width CTAs; the `ConnectHint` line escalates toward the secondary |
 | BOARD_FIRST | the shipped board picker (full catalog, no Generic) + board-specific connect guidance (CH340 driver steps or cable/port tips) + "it's plugged in" |
-| PORT_PICKING | indeterminate wait — the browser owns the dialog |
-| CONNECTING | indeterminate wait ("Connecting to the board…"), with the op overlay's own TERMINAL under it — from the grant on, the link has lines to show |
+| PORT_PICKING | indeterminate wait when `grants` is empty (the browser owns the dialog); the in-app granted-ports picker otherwise — rows + "Another port…" + the identical-twins honesty note (§2a) |
+| CONNECTING | indeterminate wait ("Connecting to the board…"), with the op overlay's own TERMINAL under it — from the grant on, the link has lines to show. With `via_grant`: the adopted port's name and "Not this one? Pick a different port" above the wait (§2a) |
 | PROBING | indeterminate wait, one line about what is being read, the same terminal under it |
 | BOARD_PICK | recognition line, chip-filtered picker + Generic, picked-board bio, the forward verb (armed only when something is picked), Back |
 | WLED_FOUND | verdict + the wipe warning (migration is future work) + wipe / keep-WLED |

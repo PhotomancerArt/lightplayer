@@ -6,11 +6,38 @@
 //! [`dispatch_for`](super::dispatch_for) turns them into the op values the
 //! studio already runs.
 
+/// How a port request approaches the ports this origin was already
+/// granted (D7). The reducer picks the strategy — it is flow policy — and
+/// the executor walks the ladder it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortRequestStrategy {
+    /// First approach: a single unambiguous grant is adopted outright
+    /// (visibly and reversibly), several are offered as the in-app list,
+    /// none falls through to the browser's chooser.
+    AutoAdopt,
+    /// A return trip (the flow already came back once): never adopt
+    /// silently again — any grants are LISTED, none means the chooser.
+    /// This is also what keeps a driven retry synthetically clickable.
+    ListOnly,
+    /// The user asked for the browser's own chooser by name
+    /// ("Another port…" / "Not this one?").
+    ChooserOnly,
+}
+
 /// One request from the reducer to the executor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetupCommand {
-    /// Ask for a serial port grant (the browser's own chooser).
-    RequestPort,
+    /// Ask for a serial port: the D7 grant ladder under `strategy`, the
+    /// browser's chooser at its bottom. `board_hint` is the BOARD_FIRST
+    /// pick, when there is one — the executor narrows the grant list to
+    /// that board's `usb_bridge` VID:PID before judging ambiguity.
+    RequestPort {
+        strategy: PortRequestStrategy,
+        board_hint: Option<String>,
+    },
+    /// Connect one already-granted port the user picked off the in-app
+    /// list (D7). No chooser is involved; the grant is the permission.
+    ConnectGrantedPort { endpoint_id: String },
     /// Run one probe pass and report a `ProbeCompleted`.
     ProbeBoard,
     /// Drop the granted port and its session.
@@ -63,7 +90,8 @@ impl SetupCommand {
     /// (extend, do not rename — the M8 traces key off these).
     pub fn label(&self) -> &'static str {
         match self {
-            Self::RequestPort => "request-port",
+            Self::RequestPort { .. } => "request-port",
+            Self::ConnectGrantedPort { .. } => "connect-granted-port",
             Self::ProbeBoard => "probe-board",
             Self::ReleasePort => "release-port",
             Self::Flash { .. } => "flash",
