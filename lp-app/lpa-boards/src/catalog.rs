@@ -42,6 +42,10 @@ pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
         include_str!("../../../lp-core/lpc-hardware/boards/quinled/dig-uno.display.json"),
     ),
     (
+        "quinled/dig2go",
+        include_str!("../../../lp-core/lpc-hardware/boards/quinled/dig2go.display.json"),
+    ),
+    (
         "domraem/dom-z-102",
         include_str!("../../../lp-core/lpc-hardware/boards/domraem/dom-z-102.display.json"),
     ),

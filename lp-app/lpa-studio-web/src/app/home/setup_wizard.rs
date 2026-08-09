@@ -38,7 +38,7 @@ use lpa_studio_core::{
 use crate::app::home::card_sheet::{
     CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
 };
-use crate::app::home::device_card::{BoardPicker, card_op_activity};
+use crate::app::home::device_card::{BoardPicker, card_op_activity, card_op_terminal};
 use crate::app::home::package_card::home_action;
 
 /// Dispatch one wizard gesture through the normal action path.
@@ -224,17 +224,28 @@ fn wizard_body(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Ele
     match &wizard.state {
         SetupState::ConnectIntro { hint } => connect_intro(*hint, on_action),
         SetupState::BoardFirst { chosen } => board_first(chosen.clone(), on_action),
-        SetupState::PortPicking { .. } => spinner(
+        SetupState::PortPicking { grants, .. } if grants.is_empty() => spinner(
             "The browser is asking which port…",
             "Pick your board's port in the chooser.",
         ),
-        SetupState::Probing { .. } => spinner(
+        // The D7 in-app picker: several already-authorized ports, so
+        // never guess — the user (or a driving agent) picks a row, and
+        // the browser's chooser is demoted to the last one.
+        SetupState::PortPicking { grants, .. } => granted_port_list(grants.clone(), on_action),
+        // From the port grant on, the link has things to SAY — so these
+        // two wait with the terminal open, like every other operation.
+        SetupState::Connecting { via_grant, .. } => {
+            connecting(via_grant.clone(), &wizard.console_tail, on_action)
+        }
+        SetupState::Probing { .. } => working(
             "Talking to the board…",
             "Reading the chip, and what is already on it.",
+            &wizard.console_tail,
         ),
         SetupState::BoardPick(pick) => board_pick(wizard, pick.clone(), on_action),
         SetupState::WledFound { .. } => wled_found(wizard, on_action),
         SetupState::AlreadyLp { .. } => already_lp(wizard, on_action),
+        SetupState::StaleLp { .. } => stale_lp(wizard, on_action),
         SetupState::ProbeFailed { .. } => probe_failed(on_action),
         SetupState::Flashing { attempt, .. } | SetupState::AbandonGuard { attempt, .. } => {
             flashing(wizard.flash.as_ref(), &wizard.console_tail, *attempt)
@@ -273,6 +284,12 @@ fn connect_intro(hint: ConnectHint, on_action: EventHandler<UiAction>) -> Elemen
         ConnectHint::Disconnected => Some((
             true,
             "The board disconnected. Plug it back in, then try again.".to_string(),
+        )),
+        ConnectHint::GrantConnectFailed => Some((
+            true,
+            "Couldn't connect through the port you'd authorized before. Try again to pick \
+             the port yourself — or replug the board first."
+                .to_string(),
         )),
     };
     rsx! {
@@ -502,6 +519,37 @@ fn already_lp(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Elem
     }
 }
 
+/// STALE_LP: LightPlayer is on the board, but not a version this Studio
+/// can talk to. The board is recognised and never adopted — the update is
+/// the only verb, and it is a flash, so the confirmation still warns.
+fn stale_lp(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Element {
+    let name = wizard.recognised_name().unwrap_or("This board").to_string();
+    let chip = wizard.detected_chip().unwrap_or("").to_string();
+    rsx! {
+        p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+            "Running an older LightPlayer"
+        }
+        div { class: "tw:grid tw:gap-0.5 tw:rounded-lg tw:border tw:border-border tw:border-l-[3px] tw:border-l-[var(--studio-status-warning-text)] tw:bg-surface tw:p-2.5",
+            span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground", "{name}" }
+            if !chip.is_empty() {
+                span { class: "tw:font-mono tw:text-[0.65rem] tw:text-subtle-foreground", "{chip}" }
+            }
+        }
+        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-subtle-foreground",
+            "This board's LightPlayer firmware is too old for this Studio to talk to. \
+             Update it to continue — the flash confirmation will warn before anything \
+             is overwritten."
+        }
+        button {
+            class: primary_cta_class(),
+            r#type: "button",
+            onclick: move |_| on_action.call(gesture(SetupGesture::UpdateFirmware)),
+            "Update the firmware →"
+        }
+        {back_link(on_action)}
+    }
+}
+
 /// PROBE_FAILED: retry, replug hint, driver help. Never a dead end.
 fn probe_failed(on_action: EventHandler<UiAction>) -> Element {
     rsx! {
@@ -683,6 +731,108 @@ fn recognition_line(wizard: &UiSetupWizard) -> Element {
     };
     rsx! {
         p { class: "tw:m-0 tw:text-xs tw:text-heading", "You know this board — it was \"{name}\"." }
+    }
+}
+
+/// PORT_PICKING with grants (D7): the in-app picker of already-authorized
+/// ports. Every row is a deliberate, synthetically-clickable choice; the
+/// browser's own chooser is the honest last row. `getInfo()` gives only
+/// VID:PID, so identical bridge chips get identical labels — the note
+/// says so instead of pretending to tell them apart.
+fn granted_port_list(
+    grants: Vec<lpa_studio_core::SetupGrantedPort>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let twins = {
+        let mut labels: Vec<&str> = grants.iter().map(|port| port.label.as_str()).collect();
+        labels.sort_unstable();
+        labels.windows(2).any(|pair| pair[0] == pair[1])
+    };
+    rsx! {
+        p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+            "Pick your board's port"
+        }
+        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-subtle-foreground",
+            "These ports are already authorized for Studio — picking one connects right away."
+        }
+        div { class: "tw:grid tw:gap-1.5",
+            for port in grants.iter().cloned() {
+                button {
+                    class: "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border-strong tw:bg-terminal tw:px-3 tw:py-2 tw:text-left tw:text-sm tw:font-semibold tw:text-strong-foreground tw:hover:border-accent",
+                    r#type: "button",
+                    onclick: move |_| {
+                        on_action
+                            .call(
+                                gesture(SetupGesture::GrantChosen {
+                                    endpoint_id: port.endpoint_id.clone(),
+                                }),
+                            );
+                    },
+                    span { class: "tw:font-mono tw:text-[0.7rem] tw:text-[var(--studio-status-good-text)]",
+                        "▸"
+                    }
+                    "{port.label}"
+                }
+            }
+        }
+        if twins {
+            p { class: "tw:m-0 tw:text-[0.7rem] tw:text-dim-foreground",
+                "Some of these are the same chip on different cables — they are identical \
+                 until connected. Pick one; \"Not this one?\" is a click away."
+            }
+        }
+        button {
+            class: secondary_cta_class(),
+            r#type: "button",
+            onclick: move |_| on_action.call(gesture(SetupGesture::PickDifferentPort)),
+            "Another port… (browser chooser)"
+        }
+    }
+}
+
+/// CONNECTING: the wait the link narrates — and, on a grant-adopted
+/// connect (D7), the visible-and-reversible line naming WHICH port was
+/// adopted, with the way back to the browser's chooser.
+fn connecting(
+    via_grant: Option<String>,
+    tail: &[UiLogEntry],
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        if let Some(label) = via_grant {
+            div { class: "tw:grid tw:gap-1 tw:rounded-lg tw:border tw:border-border tw:bg-surface-muted tw:p-2.5",
+                span { class: "tw:text-xs tw:text-subtle-foreground",
+                    "Using your previously-authorized port — "
+                    span { class: "tw:font-mono tw:font-semibold tw:text-strong-foreground",
+                        "{label}"
+                    }
+                }
+                button {
+                    class: "tw:cursor-pointer tw:justify-self-start tw:border-0 tw:bg-transparent tw:p-0 tw:text-[0.7rem] tw:font-bold tw:text-heading tw:hover:text-strong-foreground",
+                    r#type: "button",
+                    onclick: move |_| on_action.call(gesture(SetupGesture::PickDifferentPort)),
+                    "Not this one? Pick a different port"
+                }
+            }
+        }
+        {working(
+            "Connecting to the board…",
+            "Opening the port, resetting, waiting for it to boot.",
+            tail,
+        )}
+    }
+}
+
+/// A wait the LINK narrates: the spinner headline, and under it the same
+/// terminal the flash step draws. The connect's reset/boot/hello lines
+/// used to reach only the browser console, which is where "it looks
+/// frozen" came from (bench, 2026-08-08).
+fn working(title: &str, detail: &str, tail: &[UiLogEntry]) -> Element {
+    rsx! {
+        {spinner(title, detail)}
+        div { class: "ux-card-op", role: "status", aria_busy: "true",
+            {card_op_terminal(tail)}
+        }
     }
 }
 

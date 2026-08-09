@@ -8,7 +8,7 @@ use lpa_link::{
     DeviceState, LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind,
 };
 
-use crate::app::device::device_event_adapter::management_event_sink;
+use crate::app::device::device_event_adapter::{management_event_sink, probe_event_sink};
 use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
 use crate::app::home::home_view_builder::HomeInputs;
@@ -3905,7 +3905,6 @@ impl StudioController {
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
-                self.record_logs(logs);
                 // Chrome's chooser cannot say which port is already
                 // connected (identical VID:PID, no OS path), so mis-picks
                 // are routine with several boards. The pool's per-endpoint
@@ -3922,6 +3921,12 @@ impl StudioController {
                         })
                     });
                 let id = self.install_session(payload).await?;
+                // The connect's own link lines belong to the session it
+                // just opened (D42), so they are recorded AFTER the install
+                // that gives them a session to land on — the wizard's
+                // terminal reads that tail, and the ring it used to reach
+                // is not on any card.
+                self.record_session_logs(id, logs);
                 let outcome = self.attach_runtime(id, updates).await?;
                 if repicked_live {
                     Ok(outcome.with_notice(UiNotice::info(
@@ -4360,10 +4365,42 @@ impl StudioController {
         let context = self.setup_executor_context();
         match crate::dispatch_for(command, &context) {
             SetupDispatch::Device(DeviceOp::OpenProvider { provider_id }) => {
-                self.run_setup_port_request(provider_id, updates).await
+                // The D7 strategy and board hint live on the COMMAND (the
+                // op only names the machinery); the board hint resolves to
+                // its declared usb_bridge VID:PID here, where the catalog
+                // is in reach.
+                let (strategy, board_hint) = match command {
+                    SetupCommand::RequestPort {
+                        strategy,
+                        board_hint,
+                    } => (*strategy, board_hint.clone()),
+                    _ => (crate::PortRequestStrategy::AutoAdopt, None),
+                };
+                let board_usb = board_hint
+                    .as_deref()
+                    .and_then(lpa_boards::board_by_id)
+                    .and_then(|board| board.usb_bridge)
+                    .map(lpa_boards::UsbBridge::vid_pid);
+                self.run_setup_port_request(provider_id, strategy, board_usb, updates)
+                    .await
+            }
+            SetupDispatch::Device(DeviceOp::ConnectEndpoint {
+                provider_id,
+                endpoint_id,
+            }) => {
+                // A grant the user picked off the in-app list (D7): no
+                // chooser phase — the grant is the permission, and the
+                // wizard is already narrating CONNECTING.
+                self.run_setup_grant_connect(provider_id, endpoint_id, updates)
+                    .await
             }
             SetupDispatch::ReadProbe => {
+                // Before AND after: the connect's lines are what PROBING
+                // has to show while it reads, and the escalation (a ROM
+                // reset) adds its own.
+                self.pump_setup_console(&updates);
                 let probe = self.read_setup_probe().await;
+                self.pump_setup_console(&updates);
                 (UiNotices::new(), Some(SetupEvent::ProbeCompleted { probe }))
             }
             SetupDispatch::Device(op @ DeviceOp::ProvisionFirmware { .. }) => {
@@ -4576,13 +4613,43 @@ impl StudioController {
         }
     }
 
-    /// `RequestPort`: the browser's own chooser, then a connect. The port
-    /// grant is what gives the flow a session — and therefore a card key.
+    /// `RequestPort`: the D7 grant ladder, then (at its bottom) the
+    /// browser's own chooser, then a connect. The port grant is what gives
+    /// the flow a session — and therefore a card key.
+    ///
+    /// The two phases are awaited SEPARATELY so the wizard can narrate
+    /// them apart (bench, 2026-08-08): the chooser resolving — or a grant
+    /// being adopted — is reported as `PortChosen` the moment it happens,
+    /// and the several seconds of open/reset/boot/hello that follow are
+    /// PORT_PICKING's copy no longer — they are CONNECTING's.
     async fn run_setup_port_request(
         &mut self,
         provider_id: LinkProviderKind,
+        strategy: crate::PortRequestStrategy,
+        board_usb: Option<(u16, u16)>,
         updates: UxUpdateSink,
     ) -> (UiNotices, Option<crate::SetupEvent>) {
+        // The grant sweep runs first and prompts for nothing. Several
+        // usable grants end the command here: the wizard renders the
+        // in-app list, and the user's row click is a fresh command.
+        let plan = if provider_id == LinkProviderKind::BrowserSerialEsp32 {
+            self.device.plan_granted_ports(strategy, board_usb).await
+        } else {
+            crate::GrantPortPlan::Chooser
+        };
+        if let crate::GrantPortPlan::Offer { ports } = plan {
+            let ports = ports
+                .into_iter()
+                .map(|port| crate::SetupGrantedPort {
+                    endpoint_id: port.endpoint_id.as_str().to_string(),
+                    label: port.label,
+                })
+                .collect();
+            return (
+                UiNotices::new(),
+                Some(crate::SetupEvent::GrantedPortsListed { ports }),
+            );
+        }
         let before: Vec<crate::RuntimeId> = self
             .pool
             .device_sessions()
@@ -4592,7 +4659,73 @@ impl StudioController {
         // the await below emits views while the session installs, and the
         // bind only lands after it returns.
         self.setup_port_snapshot = Some(before.clone());
-        let outcome = self.device.open_provider(provider_id).await;
+        let outcome = match plan {
+            // A single unambiguous grant: adopt it, saying WHICH port —
+            // the label rides `PortChosen` so CONNECTING can name it and
+            // offer the way back (D7: visible and reversible, never
+            // silent).
+            crate::GrantPortPlan::Adopt { endpoint_id, label } => {
+                self.note_setup_progress(
+                    crate::SetupEvent::PortChosen {
+                        via_grant: Some(label),
+                    },
+                    &updates,
+                );
+                self.device.connect_endpoint(provider_id, endpoint_id).await
+            }
+            crate::GrantPortPlan::Chooser => {
+                match self.device.choose_provider_endpoint(provider_id).await {
+                    // A port is in hand: the flow leaves PORT_PICKING
+                    // here, not after the connect below.
+                    Ok(crate::PortChoice::Endpoint(endpoint_id)) => {
+                        self.note_setup_progress(
+                            crate::SetupEvent::PortChosen { via_grant: None },
+                            &updates,
+                        );
+                        self.device.connect_endpoint(provider_id, endpoint_id).await
+                    }
+                    Ok(crate::PortChoice::Ended(outcome)) => Ok(outcome),
+                    Err(error) => Err(error),
+                }
+            }
+            crate::GrantPortPlan::Offer { .. } => {
+                unreachable!("offers returned before the snapshot claim")
+            }
+        };
+        self.finish_setup_port_request(provider_id, outcome, before, updates)
+            .await
+    }
+
+    /// A grant picked off the in-app list (D7): connect that endpoint —
+    /// no chooser phase — and land the outcome exactly the way a chooser
+    /// grant lands.
+    async fn run_setup_grant_connect(
+        &mut self,
+        provider_id: LinkProviderKind,
+        endpoint_id: lpa_link::LinkEndpointId,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let before: Vec<crate::RuntimeId> = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .collect();
+        self.setup_port_snapshot = Some(before.clone());
+        let outcome = self.device.connect_endpoint(provider_id, endpoint_id).await;
+        self.finish_setup_port_request(provider_id, outcome, before, updates)
+            .await
+    }
+
+    /// The shared tail of every setup port request: install the outcome,
+    /// bind the born session to the flow, and report `PortGranted` or
+    /// `PortPickerCancelled` back to the machine.
+    async fn finish_setup_port_request(
+        &mut self,
+        provider_id: LinkProviderKind,
+        outcome: Result<DeviceOpenOutcome, UiError>,
+        before: Vec<crate::RuntimeId>,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
         // The chooser's own vocabulary: a grant that produced no session
         // is a cancel. Web Serial cannot tell "cancelled" from "the list
         // was empty" — both are one `NotFoundError` — so the flow only
@@ -4604,7 +4737,7 @@ impl StudioController {
         );
         let failed = outcome.is_err();
         let settled = self
-            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates.clone())
             .await;
         let notices = match settled {
             Ok(notices) => notices,
@@ -4636,10 +4769,63 @@ impl StudioController {
         match granted {
             Some(device_id) => {
                 self.bind_setup_device(device_id);
+                // Everything the connect narrated belongs on the wizard's
+                // terminal now that there is a session to hang it on.
+                self.pump_setup_console(&updates);
                 (notices, Some(crate::SetupEvent::PortGranted))
             }
             None => (notices, Some(crate::SetupEvent::PortPickerCancelled)),
         }
+    }
+
+    /// Report an interim outcome to the machine WHILE the command that
+    /// produced it is still running.
+    ///
+    /// [`Self::run_setup_command`] reports one event, at the end. An op
+    /// with an honest mid-point — the chooser resolving, seconds before
+    /// the connect it starts finishes — has to say so as it happens, or
+    /// the wizard narrates the step the user already finished.
+    ///
+    /// Interim events are STATE-ONLY by construction: there is no queue to
+    /// run commands on from inside a command, so a transition that asks
+    /// for work does not belong here. The reducer's transition table
+    /// asserts exactly that for every interim event it defines.
+    fn note_setup_progress(&mut self, event: crate::SetupEvent, updates: &UxUpdateSink) {
+        let Some(session) = self.setup.as_mut() else {
+            return;
+        };
+        let commands = session.flow.handle(event);
+        debug_assert!(
+            commands.is_empty(),
+            "an interim setup event cannot ask for work: {commands:?}"
+        );
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+    }
+
+    /// Drain what the link has said into the bound session's console tail,
+    /// so the wizard's terminal shows the connect's own lines instead of
+    /// only the browser console.
+    ///
+    /// The heartbeat does this on a tick; a setup op holds the controller
+    /// across its awaits, so no tick can interleave and the tail only
+    /// advances where the flow asks. Called at the boundaries the flow can
+    /// actually observe — after the connect, and around the probe.
+    fn pump_setup_console(&mut self, updates: &UxUpdateSink) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        let mut drafts = self.device.take_pending_device_logs();
+        if let Some(session) = self.pool.session_mut(device_id) {
+            drafts.extend(session.take_pending_logs());
+            drafts.extend(session.take_device_console_logs());
+        }
+        if drafts.is_empty() {
+            return;
+        }
+        self.record_session_logs(device_id, drafts);
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
     }
 
     /// Remember which session the flow drives, and give the executor the
@@ -4670,13 +4856,40 @@ impl StudioController {
         // never automatic — but a board that said nothing intelligible has
         // nothing to lose, and this is what turns "it's dead" into "it's
         // blank, here are your boards".
-        let Some(session) = self.hardware_session_for(device_id) else {
-            return probe;
+        // The probe narrates itself (esptool's own terminal), and the
+        // wizard's PROBING terminal is where those seconds belong. The
+        // session borrow ends with the block so the lines can be recorded.
+        let probe_logs = Rc::new(RefCell::new(Vec::new()));
+        let probed = {
+            let Some(session) = self.hardware_session_for(device_id) else {
+                return probe;
+            };
+            session
+                .probe_link_mode(probe_event_sink(Rc::clone(&probe_logs)))
+                .await
         };
-        let _ = session
-            .probe_link_mode(lpa_link::DeviceEventSink::noop())
-            .await;
-        let escalated = self.setup_probe_evidence(device_id);
+        let drafts = core::mem::take(&mut *probe_logs.borrow_mut());
+        self.record_session_logs(device_id, drafts);
+        let mut escalated = self.setup_probe_evidence(device_id);
+        // The escalation's answer lives ONLY in this return value. The
+        // probe ends by rebuilding the link, and `DeviceSnapshot::link_mode`
+        // is recomputed passively from a boot-line classifier that the
+        // rebuild clears — so a re-read alone lands back on `Unresponsive`
+        // however well the conversation went (bench, 2026-08-08: a board
+        // parked in the esptool stub was told to hold BOOT).
+        if let Ok(lpa_link::DeviceLinkMode::Bootloader {
+            chip_name,
+            evidence: lpa_link::BootloaderEvidence::SyncHandshake,
+        }) = &probed
+        {
+            escalated.bootloader_conversation = true;
+            // The probe's chip identity is authoritative and it is what
+            // filters the board pick; the passive read has none once the
+            // rebuild wiped the classifier.
+            if escalated.detected_chip.is_none() {
+                escalated.detected_chip.clone_from(chip_name);
+            }
+        }
         crate::classify_board(&escalated, &registry)
     }
 
@@ -4704,10 +4917,21 @@ impl StudioController {
         );
         crate::ProbeEvidence {
             hello_seen: hello.is_some(),
+            // `Incompatible` is the link's own diagnosis of LightPlayer
+            // framing with no proto-matching hello — firmware too old for
+            // this Studio. Its one affordance is a reflash, which is what
+            // the verdict routes to; without this the flow read the board
+            // as unresponsive and offered BOOT-hold advice instead.
+            stale_lightplayer: matches!(device_state, Some(DeviceState::Incompatible { .. })),
             no_firmware_signature: state_says_blank
                 || snapshot
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
+            // This is the PASSIVE read, and no passive evidence can carry a
+            // conversation: `snapshot.link_mode` is derived from boot lines
+            // alone. Only `read_setup_probe`, holding the escalation's
+            // return value, can set this.
+            bootloader_conversation: false,
             lines: snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.recent_lines.clone())
@@ -5872,14 +6096,22 @@ impl StudioController {
                 let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
+                        // This session's own streams, onto this session's
+                        // console tail (D42) — the ring would swallow them.
+                        // A failed attach is exactly when they are worth
+                        // reading, and the setup wizard's terminal renders
+                        // that same tail: on the bench (2026-08-08) the
+                        // connect's whole narration was recorded here, into
+                        // the global ring, moments before the wizard looked
+                        // at the session and found nothing.
                         let pending_logs = self
                             .pool
                             .session_mut(id)
                             .map(|session| session.take_pending_logs())
                             .unwrap_or_default();
-                        self.record_logs(pending_logs);
+                        self.record_session_logs(id, pending_logs);
                         let device_logs = self.device.take_pending_device_logs();
-                        self.record_logs(device_logs);
+                        self.record_session_logs(id, device_logs);
                         // Quiesce the editor only when it is a lens on the
                         // failing session (P2: a project open on the sim
                         // survives a failed device attach).
@@ -7487,6 +7719,18 @@ impl StudioController {
     pub(crate) async fn refresh_device_sync_for_test(&mut self) {
         let id = self.the_device_for_test();
         self.refresh_device_sync_for(id).await;
+    }
+
+    /// Test-only: the setup flow's `ProbeBoard` read against the one
+    /// attached device, bound as the flow's device first.
+    ///
+    /// The escalation inside it needs a REAL link session (a stub has no
+    /// hardware session to probe), so its rows live in
+    /// `studio_link_e2e_tests` — a sibling module that cannot reach
+    /// `setup_device` or `read_setup_probe`.
+    pub(crate) async fn setup_probe_for_test(&mut self) -> crate::BoardProbe {
+        self.setup_device = Some(self.the_device_for_test());
+        self.read_setup_probe().await
     }
 
     /// Test-only: [`Self::device_sync_for`] against the one attached

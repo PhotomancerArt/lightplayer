@@ -18,6 +18,8 @@ use lpc_hardware::{
 };
 use lpc_shared::DisplayPipeline;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+
+use super::power_gate::{PowerGateController, is_all_black};
 const FRAME_INTERVAL_US: u64 = 16_667;
 const MID_FRAME_US: u64 = 8_333;
 
@@ -60,6 +62,12 @@ struct ChannelState {
     /// `byte_count`, so this is the same memory the per-write allocation held,
     /// just held for longer.
     frame: Vec<u8>,
+    /// Which of the board's power gates hold this channel's supply up (bit
+    /// `n` = gate `n`); zero on every board that declares none.
+    ///
+    /// Resolved once, at `open`, from the endpoint's address — the write path
+    /// must not walk gate descriptors or compare addresses per frame.
+    gate_mask: u32,
 }
 
 /// ESP32 OutputProvider implementation.
@@ -67,6 +75,12 @@ pub struct Esp32OutputProvider {
     hardware_system: Rc<HardwareSystem>,
     channels: RefCell<VecMap<i32, ChannelState>>,
     next_handle: RefCell<i32>,
+    /// The board's switched power rails, or `None` on a board with none.
+    ///
+    /// `Option` outside the `RefCell`, not inside: the ungated board's write
+    /// path then costs a discriminant test rather than a borrow, which is the
+    /// "zero overhead beyond a `None` check" the design asked for.
+    power_gates: Option<RefCell<PowerGateController>>,
 }
 
 impl Esp32OutputProvider {
@@ -75,7 +89,16 @@ impl Esp32OutputProvider {
             hardware_system,
             channels: RefCell::new(VecMap::with_capacity(RESERVED_CHANNELS)),
             next_handle: RefCell::new(1),
+            power_gates: None,
         }
+    }
+
+    /// Give the provider the board's power gates, built by the chip crate
+    /// (which owns the GPIO and the clock). A builder rather than a `new`
+    /// parameter so the chips with no gated rail construct exactly as before.
+    pub fn with_power_gates(mut self, gates: PowerGateController) -> Self {
+        self.power_gates = Some(RefCell::new(gates));
+        self
     }
 }
 
@@ -133,6 +156,23 @@ impl OutputProvider for Esp32OutputProvider {
         let mut frame = Vec::new();
         frame.resize(((byte_count / 3) * 3) as usize, 0);
 
+        // The endpoint's address is what a gate's `feeds` names, and it is
+        // only reachable through the driver that offered it — the opaque
+        // `Box<dyn Ws281xOutput>` carries no address. Resolved here, once,
+        // because `ws281x_endpoints` allocates and opens are rare.
+        let gate_mask = match &self.power_gates {
+            None => 0,
+            Some(gates) => {
+                let address = self
+                    .hardware_system
+                    .ws281x_endpoints()
+                    .into_iter()
+                    .find(|candidate| candidate.spec() == endpoint)
+                    .map(|candidate| candidate.address().clone());
+                gates.borrow().mask_for(address.as_ref())
+            }
+        };
+
         self.channels.borrow_mut().insert(
             handle_id,
             ChannelState {
@@ -140,6 +180,7 @@ impl OutputProvider for Esp32OutputProvider {
                 byte_count,
                 pipeline,
                 frame,
+                gate_mask,
             },
         );
 
@@ -188,6 +229,20 @@ impl OutputProvider for Esp32OutputProvider {
             log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
             OutputError::InvalidHandle { handle: handle_id }
         })?;
+
+        // Energise before staging, never after: this returns only once the
+        // rail's settle window has fully elapsed, so the `start` below cannot
+        // clock data into an unpowered strip. `data` is already post-gamma,
+        // post-brightness and post-power-limit, so all-black here is exactly
+        // the "nothing is lit" the gate wants — and the scan is reached only
+        // on a gated channel of a gated board.
+        if let Some(gates) = &self.power_gates {
+            if channel.gate_mask != 0 {
+                gates
+                    .borrow_mut()
+                    .on_frame(channel.gate_mask, is_all_black(data));
+            }
+        }
 
         // The previous frame may still be on the wire — `start` below returns
         // without waiting, and the transmitter keeps reading `channel.frame`
@@ -294,7 +349,8 @@ impl OutputProvider for Esp32OutputProvider {
     /// logged with its handle; the first is returned.
     fn flush(&self) -> Result<(), OutputError> {
         let mut first_error: Option<OutputError> = None;
-        for (handle_id, channel) in self.channels.borrow_mut().iter_mut() {
+        let mut channels = self.channels.borrow_mut();
+        for (handle_id, channel) in channels.iter_mut() {
             if channel.output.background_tx_safe() {
                 continue;
             }
@@ -303,6 +359,36 @@ impl OutputProvider for Esp32OutputProvider {
                 first_error.get_or_insert(error);
             }
         }
+
+        // The deassert decision belongs at the frame barrier, after the last
+        // write: it is the one point where every wire of the frame is known.
+        //
+        // Its wires are drained unconditionally, background-safe or not — the
+        // barrier above deliberately leaves those transmitting, and cutting
+        // the supply out from under a transmission is the failure this whole
+        // sequence exists to avoid. The drain costs nothing in the steady
+        // state because `expired` is false until the debounce runs out, and
+        // false again immediately after: one deassert per off-transition.
+        if let Some(gates) = &self.power_gates {
+            let mut gates = gates.borrow_mut();
+            let expired = gates.expired();
+            if expired != 0 {
+                for (handle_id, channel) in channels.iter_mut() {
+                    if channel.gate_mask & expired == 0 {
+                        continue;
+                    }
+                    if let Err(error) = channel.output.wait_complete() {
+                        log::warn!(
+                            "Esp32OutputProvider::flush: handle={handle_id} did not drain before \
+                             power-gate deassert: {error}"
+                        );
+                        first_error.get_or_insert(error);
+                    }
+                }
+                gates.deassert(expired);
+            }
+        }
+
         match first_error {
             None => Ok(()),
             Some(error) => Err(error),
@@ -782,5 +868,511 @@ mod concurrent_flush_tests {
         provider.write(handle, &frame).expect("write");
         assert_eq!(log.borrow().in_flight, 1);
         provider.close(handle).expect("close");
+    }
+}
+
+#[cfg(test)]
+mod power_gate_tests {
+    //! The switched-rail state machine, proven against a probe pin and a probe
+    //! output sharing one event log and one hand-advanced clock, so both the
+    //! *ordering* (energise → settle → transmit) and the *drain* (nothing on
+    //! the wire when the rail drops) are observable facts rather than timing.
+    //!
+    //! Its own probes rather than `concurrent_flush_tests`': those exist to
+    //! pin the transmission contract and must stay readable as exactly that.
+
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::cell::{Cell, RefCell};
+
+    use lpc_hardware::{
+        HardwareEndpointError, HardwareSystem, HwAddress, HwDriver, HwEndpoint, HwEndpointId,
+        HwEndpointKind, HwEndpointSpec, HwGateLevel, HwManifest, HwPowerGate, HwRegistry,
+        OutputError, Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    };
+    use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+
+    use super::Esp32OutputProvider;
+    use crate::output::power_gate::{PowerGateController, PowerGatePin};
+
+    const SETTLE_MS: u32 = 50;
+    const DEBOUNCE_MS: u32 = 1_000;
+    /// What one read of the probe clock costs. Non-zero so the settle spin —
+    /// which is a `while now() < deadline` loop — always terminates without a
+    /// real sleep; small enough that its drift never reaches the debounce.
+    const TICK_US: u64 = 100;
+
+    /// Hand-advanced monotonic µs. `read` is what the state machine sees (and
+    /// it ticks); `peek` is what the probes stamp events with, so stamping
+    /// never moves the clock.
+    #[derive(Default)]
+    struct Clock {
+        now_us: Cell<u64>,
+    }
+
+    impl Clock {
+        fn read(&self) -> u64 {
+            let now = self.now_us.get();
+            self.now_us.set(now + TICK_US);
+            now
+        }
+
+        fn peek(&self) -> u64 {
+            self.now_us.get()
+        }
+
+        fn advance_ms(&self, ms: u64) {
+            self.now_us.set(self.now_us.get() + ms * 1_000);
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Event {
+        /// The gate pin driven to a physical level, stamped with the clock and
+        /// with how many wires were transmitting at that instant — which is
+        /// what makes "never cut power with a frame in flight" checkable.
+        Level {
+            high: bool,
+            at_us: u64,
+            in_flight: usize,
+        },
+        Start {
+            at_us: u64,
+        },
+    }
+
+    #[derive(Default)]
+    struct Log {
+        events: Vec<Event>,
+        in_flight: usize,
+    }
+
+    impl Log {
+        fn levels(&self) -> Vec<(bool, u64, usize)> {
+            self.events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Level {
+                        high,
+                        at_us,
+                        in_flight,
+                    } => Some((*high, *at_us, *in_flight)),
+                    Event::Start { .. } => None,
+                })
+                .collect()
+        }
+    }
+
+    struct ProbePin {
+        log: Rc<RefCell<Log>>,
+        clock: Rc<Clock>,
+    }
+
+    impl PowerGatePin for ProbePin {
+        fn set_level(&mut self, high: bool) {
+            let at_us = self.clock.peek();
+            let mut log = self.log.borrow_mut();
+            let in_flight = log.in_flight;
+            log.events.push(Event::Level {
+                high,
+                at_us,
+                in_flight,
+            });
+        }
+    }
+
+    struct ProbeOutput {
+        log: Rc<RefCell<Log>>,
+        clock: Rc<Clock>,
+        in_flight: bool,
+        background_safe: bool,
+    }
+
+    impl Ws281xOutput for ProbeOutput {
+        fn background_tx_safe(&self) -> bool {
+            self.background_safe
+        }
+
+        fn write(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            Ok(())
+        }
+
+        fn resize(&mut self, _config: Ws281xConfig) -> Result<(), OutputError> {
+            Ok(())
+        }
+
+        unsafe fn start(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            let at_us = self.clock.peek();
+            let mut log = self.log.borrow_mut();
+            log.events.push(Event::Start { at_us });
+            log.in_flight += 1;
+            self.in_flight = true;
+            Ok(())
+        }
+
+        fn wait_complete(&mut self) -> Result<(), OutputError> {
+            if self.in_flight {
+                self.log.borrow_mut().in_flight -= 1;
+                self.in_flight = false;
+            }
+            Ok(())
+        }
+    }
+
+    /// Two endpoints, `ws281x:local:P0` at `/gpio/10` and `P1` at `/gpio/11` —
+    /// the addresses a gate's `feeds` names.
+    struct ProbeDriver {
+        log: Rc<RefCell<Log>>,
+        clock: Rc<Clock>,
+        background_safe: bool,
+    }
+
+    const PROBE_ENDPOINTS: usize = 2;
+
+    fn probe_spec(n: usize) -> HwEndpointSpec {
+        HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}")).expect("probe spec parses")
+    }
+
+    impl HwDriver for ProbeDriver {
+        fn driver_id(&self) -> &str {
+            "probe-ws281x"
+        }
+
+        fn display_label(&self) -> &str {
+            "Probe WS281x"
+        }
+    }
+
+    impl Ws281xDriver for ProbeDriver {
+        fn endpoints(&self) -> Vec<HwEndpoint> {
+            (0..PROBE_ENDPOINTS)
+                .map(|n| {
+                    let spec = probe_spec(n);
+                    HwEndpoint::new(
+                        HwEndpointId::for_driver_spec(self.driver_id(), &spec),
+                        spec,
+                        HwEndpointKind::Ws281x,
+                        self.driver_id(),
+                        HwAddress::gpio(10 + n as u32),
+                        "probe",
+                        lpc_hardware::HwEndpointStatus::Available,
+                    )
+                })
+                .collect()
+        }
+
+        fn open(
+            &self,
+            _endpoint_id: &HwEndpointId,
+            _config: Ws281xConfig,
+        ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+            Ok(Box::new(ProbeOutput {
+                log: Rc::clone(&self.log),
+                clock: Rc::clone(&self.clock),
+                in_flight: false,
+                background_safe: self.background_safe,
+            }))
+        }
+    }
+
+    struct Harness {
+        provider: Esp32OutputProvider,
+        log: Rc<RefCell<Log>>,
+        clock: Rc<Clock>,
+    }
+
+    fn harness(gate: HwPowerGate) -> Harness {
+        harness_with_background(gate, false)
+    }
+
+    fn harness_with_background(gate: HwPowerGate, background_safe: bool) -> Harness {
+        let log = Rc::new(RefCell::new(Log::default()));
+        let clock = Rc::new(Clock::default());
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
+        let mut system = HardwareSystem::new(registry);
+        system.add_ws281x_driver(Box::new(ProbeDriver {
+            log: Rc::clone(&log),
+            clock: Rc::clone(&clock),
+            background_safe,
+        }));
+
+        let pin = Box::new(ProbePin {
+            log: Rc::clone(&log),
+            clock: Rc::clone(&clock),
+        }) as Box<dyn PowerGatePin>;
+        let ticker = Rc::clone(&clock);
+        let gates = PowerGateController::new(Box::new(move || ticker.read()), [(gate, pin)]);
+
+        Harness {
+            provider: Esp32OutputProvider::new(Rc::new(system)).with_power_gates(gates),
+            log,
+            clock,
+        }
+    }
+
+    fn active_high_gate() -> HwPowerGate {
+        HwPowerGate::new(HwAddress::gpio(12), HwGateLevel::High, SETTLE_MS)
+            .with_off_debounce_ms(DEBOUNCE_MS)
+    }
+
+    fn open_probe(provider: &Esp32OutputProvider, n: usize) -> OutputChannelHandle {
+        provider
+            .open(&probe_spec(n), 3, OutputFormat::Ws2811, None)
+            .expect("probe endpoint opens")
+    }
+
+    fn lit() -> Vec<u16> {
+        vec![0, 0, 1]
+    }
+
+    fn black() -> Vec<u16> {
+        vec![0u16; 3]
+    }
+
+    /// Construction alone must leave the rail down, before any frame and
+    /// before anything else can idle the pad: on the dig2go the gate pin is
+    /// MTDI, the flash-voltage strap, and high is the state that stops the
+    /// board booting.
+    #[test]
+    fn construction_drives_the_rail_off_before_any_frame() {
+        let harness = harness(active_high_gate());
+        assert_eq!(harness.log.borrow().levels(), vec![(false, 0, 0)]);
+        // The construction stamp is the clock's origin: nothing may read the
+        // clock before the pin is parked.
+    }
+
+    /// The assert edge: pin high, then the full settle window, and only then
+    /// the wire starts. Clocking data into an unpowered strip phantom-powers
+    /// the first controller through its protection diode, so the gap is the
+    /// point of the test — not the ordering alone, which a single-threaded
+    /// loop would give for free.
+    #[test]
+    fn a_lit_frame_energises_and_settles_before_the_wire_starts() {
+        let harness = harness(active_high_gate());
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+
+        let log = harness.log.borrow();
+        let asserted_at = match log.levels().as_slice() {
+            [(false, _, _), (true, at_us, _)] => *at_us,
+            other => panic!("expected off-then-on, got {other:?}"),
+        };
+        let started_at = log
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Start { at_us } => Some(*at_us),
+                Event::Level { .. } => None,
+            })
+            .expect("the frame must reach the wire");
+        assert!(
+            started_at - asserted_at >= u64::from(SETTLE_MS) * 1_000,
+            "the wire started {}µs after the assert, short of the {SETTLE_MS}ms settle",
+            started_at - asserted_at
+        );
+    }
+
+    /// A rail already up does not re-settle: the steady state must not spend a
+    /// settle window per frame.
+    #[test]
+    fn a_second_lit_frame_neither_re_asserts_nor_re_settles() {
+        let harness = harness(active_high_gate());
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("first");
+        harness.provider.flush().expect("flush");
+        let before = harness.clock.peek();
+        harness.provider.write(handle, &lit()).expect("second");
+        let elapsed = harness.clock.peek() - before;
+
+        let levels: Vec<bool> = harness
+            .log
+            .borrow()
+            .levels()
+            .into_iter()
+            .map(|(high, _, _)| high)
+            .collect();
+        assert_eq!(
+            levels,
+            vec![false, true],
+            "the pin must be driven exactly twice: off at construction, on at the first lit frame"
+        );
+        assert!(
+            elapsed < u64::from(SETTLE_MS) * 1_000,
+            "a lit frame on an already-energised rail waited {elapsed}µs"
+        );
+    }
+
+    /// Black short of the debounce keeps the rail up — a shader's transient
+    /// black is not an off.
+    #[test]
+    fn black_frames_short_of_the_debounce_keep_the_rail_up() {
+        let harness = harness(active_high_gate());
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+        harness.provider.flush().expect("flush");
+        harness.clock.advance_ms(u64::from(DEBOUNCE_MS) - 1);
+        harness.provider.write(handle, &black()).expect("black");
+        harness.provider.flush().expect("flush");
+
+        assert_eq!(
+            harness.log.borrow().levels().len(),
+            2,
+            "the rail must still be up one millisecond short of the debounce"
+        );
+    }
+
+    /// Past the debounce the rail drops exactly once, and coming back up is
+    /// one assert — no chatter across a black/lit alternation.
+    #[test]
+    fn the_rail_drops_once_past_the_debounce_and_does_not_chatter() {
+        let harness = harness(active_high_gate());
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+        harness.provider.flush().expect("flush");
+        harness.clock.advance_ms(u64::from(DEBOUNCE_MS));
+
+        // Several black frames past the debounce: the first drops the rail,
+        // the rest find it already down.
+        for _ in 0..3 {
+            harness.provider.write(handle, &black()).expect("black");
+            harness.provider.flush().expect("flush");
+        }
+        // ...and back to lit, which re-energises exactly once.
+        for _ in 0..3 {
+            harness.provider.write(handle, &lit()).expect("lit");
+            harness.provider.flush().expect("flush");
+        }
+
+        let levels: Vec<bool> = harness
+            .log
+            .borrow()
+            .levels()
+            .into_iter()
+            .map(|(high, _, _)| high)
+            .collect();
+        assert_eq!(levels, vec![false, true, false, true]);
+    }
+
+    /// Any lit frame restarts the debounce, so a strobe never drops the rail.
+    #[test]
+    fn a_lit_frame_resets_the_debounce() {
+        let harness = harness(active_high_gate());
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+        harness.provider.flush().expect("flush");
+
+        for _ in 0..4 {
+            harness.clock.advance_ms(u64::from(DEBOUNCE_MS) * 3 / 4);
+            harness.provider.write(handle, &black()).expect("black");
+            harness.provider.flush().expect("flush");
+            harness.provider.write(handle, &lit()).expect("lit");
+            harness.provider.flush().expect("flush");
+        }
+
+        assert_eq!(
+            harness.log.borrow().levels().len(),
+            2,
+            "each lit frame must push the debounce out; the rail never dropped"
+        );
+    }
+
+    /// The rail may only drop with the wires drained. A background-safe output
+    /// is deliberately left transmitting by the flush barrier, so this is the
+    /// case where the deassert path has to do the draining itself.
+    #[test]
+    fn the_rail_never_drops_with_a_frame_in_flight() {
+        let harness = harness_with_background(active_high_gate(), true);
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+        harness.provider.flush().expect("flush");
+        assert_eq!(
+            harness.log.borrow().in_flight,
+            1,
+            "a background-safe wire keeps transmitting across the barrier"
+        );
+
+        harness.clock.advance_ms(u64::from(DEBOUNCE_MS));
+        harness.provider.write(handle, &black()).expect("black");
+        harness.provider.flush().expect("flush");
+
+        let levels = harness.log.borrow().levels();
+        let (high, _, in_flight) = *levels.last().expect("a deassert");
+        assert!(!high, "the rail must be down");
+        assert_eq!(
+            in_flight, 0,
+            "the rail dropped while a wire was transmitting"
+        );
+    }
+
+    /// Polarity is metadata: an active-low gate asserts by driving the pin
+    /// low and idles high.
+    #[test]
+    fn an_active_low_gate_inverts_both_edges() {
+        let gate = HwPowerGate::new(HwAddress::gpio(12), HwGateLevel::Low, SETTLE_MS)
+            .with_off_debounce_ms(DEBOUNCE_MS);
+        let harness = harness(gate);
+        let handle = open_probe(&harness.provider, 0);
+
+        harness.provider.write(handle, &lit()).expect("lit frame");
+        harness.provider.flush().expect("flush");
+        harness.clock.advance_ms(u64::from(DEBOUNCE_MS));
+        harness.provider.write(handle, &black()).expect("black");
+        harness.provider.flush().expect("flush");
+
+        let levels: Vec<bool> = harness
+            .log
+            .borrow()
+            .levels()
+            .into_iter()
+            .map(|(high, _, _)| high)
+            .collect();
+        assert_eq!(levels, vec![true, false, true]);
+    }
+
+    /// `feeds` scopes a gate to the wires it names: a channel it does not feed
+    /// neither energises the rail nor holds it up.
+    #[test]
+    fn a_channel_the_gate_does_not_feed_never_touches_the_rail() {
+        let gate = HwPowerGate::new(HwAddress::gpio(12), HwGateLevel::High, SETTLE_MS)
+            .with_off_debounce_ms(DEBOUNCE_MS)
+            .with_feeds([HwAddress::gpio(10)]);
+        let harness = harness(gate);
+        let fed = open_probe(&harness.provider, 0);
+        let unfed = open_probe(&harness.provider, 1);
+
+        harness.provider.write(unfed, &lit()).expect("unfed lit");
+        harness.provider.flush().expect("flush");
+        assert_eq!(
+            harness.log.borrow().levels().len(),
+            1,
+            "an unfed channel must not energise the rail"
+        );
+
+        harness.provider.write(fed, &lit()).expect("fed lit");
+        harness.provider.flush().expect("flush");
+        harness.clock.advance_ms(u64::from(DEBOUNCE_MS));
+
+        // The unfed channel stays lit throughout; only the fed one going black
+        // decides the rail.
+        harness.provider.write(unfed, &lit()).expect("unfed lit");
+        harness.provider.write(fed, &black()).expect("fed black");
+        harness.provider.flush().expect("flush");
+
+        let levels: Vec<bool> = harness
+            .log
+            .borrow()
+            .levels()
+            .into_iter()
+            .map(|(high, _, _)| high)
+            .collect();
+        assert_eq!(levels, vec![false, true, false]);
     }
 }

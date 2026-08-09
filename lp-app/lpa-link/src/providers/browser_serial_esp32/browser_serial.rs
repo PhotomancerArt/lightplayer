@@ -8,6 +8,19 @@ use crate::LinkError;
 pub struct BrowserSerialPortHandle {
     pub id: u32,
     pub label: String,
+    /// USB vendor:product ids from `SerialPort.getInfo()`, absent on
+    /// non-USB ports (and on browsers that expose nothing). Carried as
+    /// fields — not only inside `label`'s prose — so a grant can be
+    /// matched against a board's declared `usb_bridge` (D7).
+    pub usb_vendor_id: Option<u16>,
+    pub usb_product_id: Option<u16>,
+}
+
+impl BrowserSerialPortHandle {
+    /// The `(vid, pid)` pair when the browser exposed both.
+    pub fn usb_vid_pid(&self) -> Option<(u16, u16)> {
+        Some((self.usb_vendor_id?, self.usb_product_id?))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,10 +112,7 @@ pub async fn granted_ports() -> Result<Vec<BrowserSerialPortHandle>, LinkError> 
     let array = Array::from(&value);
     let mut ports = Vec::with_capacity(array.length() as usize);
     for entry in array.iter() {
-        ports.push(BrowserSerialPortHandle {
-            id: reflect_u32(&entry, "id")?,
-            label: reflect_string(&entry, "label")?,
-        });
+        ports.push(port_handle(&entry)?);
     }
     Ok(ports)
 }
@@ -111,9 +121,16 @@ pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {
     let value = JsFuture::from(js_request_port())
         .await
         .map_err(js_request_port_error)?;
-    let id = reflect_u32(&value, "id")?;
-    let label = reflect_string(&value, "label")?;
-    Ok(BrowserSerialPortHandle { id, label })
+    port_handle(&value)
+}
+
+fn port_handle(value: &JsValue) -> Result<BrowserSerialPortHandle, LinkError> {
+    Ok(BrowserSerialPortHandle {
+        id: reflect_u32(value, "id")?,
+        label: reflect_string(value, "label")?,
+        usb_vendor_id: reflect_optional_u32(value, "usbVendorId")?.map(|id| id as u16),
+        usb_product_id: reflect_optional_u32(value, "usbProductId")?.map(|id| id as u16),
+    })
 }
 
 pub async fn open(id: u32, baud_rate: u32) -> Result<BrowserSerialProtocolOpenResult, LinkError> {

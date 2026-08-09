@@ -12,6 +12,12 @@
 //! wire hello is the ONLY evidence that yields `LightPlayer`, and WLED
 //! detection stays conservative (a banner match; ambiguous Improv traffic
 //! alone is not enough).
+//!
+//! [`BoardVerdict::StaleLightPlayer`] is the one verdict that reads as
+//! LightPlayer-ish and still must never BE `LightPlayer`: the link saw our
+//! wire framing but no proto-matching hello, so the app protocol is not
+//! available on this board. Adopting it would put an unreachable board on
+//! the roster; its one affordance is a reflash.
 
 use crate::app::places::{HardwareId, RegisteredDevice};
 
@@ -20,7 +26,8 @@ use crate::app::places::{HardwareId, RegisteredDevice};
 ///
 /// `hello_seen` is `lpa_link`'s readiness gate (a `ServerHello` whose
 /// `proto` matched); `no_firmware_signature` is
-/// `BootLineClassifier::no_firmware_detected`; `lines` is the snapshot's
+/// `BootLineClassifier::no_firmware_detected`; `bootloader_conversation` is
+/// the escalation probe's own `DeviceLinkMode`; `lines` is the snapshot's
 /// `recent_lines` tail. Nothing here is re-derived — this struct is a
 /// carrier so the classification can be tested with no wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -30,6 +37,24 @@ pub struct ProbeEvidence {
     /// A known no-firmware boot signature was observed (blank header, ROM
     /// download mode, or a known replaceable banner).
     pub no_firmware_signature: bool,
+    /// The link classified this peer as `DeviceState::Incompatible`:
+    /// LightPlayer-framing wire, no proto-matching hello. Old firmware, in
+    /// practice — the board talks, this Studio just cannot talk to it.
+    pub stale_lightplayer: bool,
+    /// A ROM/stub bootloader ANSWERED the escalation probe's esptool SYNC
+    /// handshake (`BootloaderEvidence::SyncHandshake`) — the strongest
+    /// no-firmware-running evidence there is, since only a bootloader
+    /// answers it.
+    ///
+    /// Separate from `no_firmware_signature` because it comes from a
+    /// different place and nothing else can supply it: the snapshot's
+    /// `link_mode` is recomputed PASSIVELY from a boot-line classifier that
+    /// the probe's own link rebuild wipes clean, so a conversation that
+    /// just succeeded is invisible one line later. Only the probe's return
+    /// value carries it (bench, 2026-08-08: a board parked in the esptool
+    /// stub answered the escalation and the wizard still said "nothing
+    /// intelligible answered").
+    pub bootloader_conversation: bool,
     /// The non-protocol serial tail (`DeviceSnapshot::recent_lines`).
     pub lines: Vec<String>,
     /// Chip identity as reported (`DeviceSnapshot::detected_chip`).
@@ -46,9 +71,13 @@ pub struct ProbeEvidence {
 /// it is what lets BOARD_PICK and WLED_FOUND say "was Porch sign".
 /// `Unresponsive` carries the field for uniformity; a board that said
 /// nothing intelligible has no MAC either, so in practice it is `None`.
+///
+/// `StaleLightPlayer` is LightPlayer firmware too old for this Studio to
+/// talk to: recognised, never adopted (module doc).
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoardVerdict {
     LightPlayer { known: Option<RegisteredDevice> },
+    StaleLightPlayer { known: Option<RegisteredDevice> },
     Wled { known: Option<RegisteredDevice> },
     Blank { known: Option<RegisteredDevice> },
     Unresponsive { known: Option<RegisteredDevice> },
@@ -59,6 +88,7 @@ impl BoardVerdict {
     pub fn known(&self) -> Option<&RegisteredDevice> {
         match self {
             Self::LightPlayer { known }
+            | Self::StaleLightPlayer { known }
             | Self::Wled { known }
             | Self::Blank { known }
             | Self::Unresponsive { known } => known.as_ref(),
@@ -69,6 +99,7 @@ impl BoardVerdict {
     pub fn label(&self) -> &'static str {
         match self {
             Self::LightPlayer { .. } => "lightplayer",
+            Self::StaleLightPlayer { .. } => "stale-lightplayer",
             Self::Wled { .. } => "wled",
             Self::Blank { .. } => "blank",
             Self::Unresponsive { .. } => "unresponsive",
@@ -110,9 +141,21 @@ pub fn classify_board(evidence: &ProbeEvidence, registry: &[RegisteredDevice]) -
     // else, makes a board LightPlayer.
     let verdict = if evidence.hello_seen {
         BoardVerdict::LightPlayer { known }
+    } else if evidence.stale_lightplayer {
+        // The link's `Incompatible` classification: our framing on the
+        // wire, no proto-matching hello. Strong evidence about WHAT the
+        // board runs, and deliberately not `LightPlayer` — nothing the
+        // Studio can talk to is there to adopt. It outranks the banner and
+        // no-firmware rules below because it names the firmware exactly.
+        BoardVerdict::StaleLightPlayer { known }
     } else if evidence.lines.iter().any(|line| is_wled_line(line)) {
         BoardVerdict::Wled { known }
-    } else if evidence.no_firmware_signature {
+    } else if evidence.no_firmware_signature || evidence.bootloader_conversation {
+        // A bootloader that answered is Blank-class evidence: nothing this
+        // Studio can talk to is running, and the board's affordance is the
+        // pick-and-flash BOARD_PICK offers. This arm is what turns "it's
+        // dead" into "it's blank, here are your boards" for a board the
+        // passive read heard nothing from.
         BoardVerdict::Blank { known }
     } else {
         BoardVerdict::Unresponsive { known }
@@ -210,6 +253,13 @@ mod tests {
                 lines: vec!["lightplayer".to_string()],
                 ..ProbeEvidence::default()
             },
+            // The nearest miss there is: our own wire framing, and still
+            // no hello. Old firmware is not a board to adopt.
+            ProbeEvidence {
+                stale_lightplayer: true,
+                lines: vec!["LightPlayer ready".to_string()],
+                ..ProbeEvidence::default()
+            },
             ProbeEvidence::default(),
         ];
         for evidence in shapes {
@@ -217,6 +267,45 @@ mod tests {
             assert!(
                 !matches!(summary.verdict, BoardVerdict::LightPlayer { .. }),
                 "{evidence:?} must not be called LightPlayer"
+            );
+        }
+    }
+
+    #[test]
+    fn an_incompatible_link_is_stale_lightplayer() {
+        let summary = classify_board(
+            &ProbeEvidence {
+                stale_lightplayer: true,
+                ..ProbeEvidence::default()
+            },
+            &[],
+        );
+        assert!(matches!(
+            summary.verdict,
+            BoardVerdict::StaleLightPlayer { .. }
+        ));
+    }
+
+    #[test]
+    fn a_named_firmware_outranks_a_banner_and_a_blank_signature() {
+        // The link identified the firmware; the weaker rules below it must
+        // not relabel the board as something to wipe blind or a dead port.
+        for evidence in [
+            ProbeEvidence {
+                stale_lightplayer: true,
+                lines: vec!["WLED 0.14.0 ready".to_string()],
+                ..ProbeEvidence::default()
+            },
+            ProbeEvidence {
+                stale_lightplayer: true,
+                no_firmware_signature: true,
+                ..ProbeEvidence::default()
+            },
+        ] {
+            let summary = classify_board(&evidence, &[]);
+            assert!(
+                matches!(summary.verdict, BoardVerdict::StaleLightPlayer { .. }),
+                "{evidence:?} names the firmware"
             );
         }
     }
@@ -252,6 +341,54 @@ mod tests {
     }
 
     #[test]
+    fn a_bootloader_that_answered_is_blank_never_unresponsive() {
+        // The whole point of the escalation (§8): it runs ONLY on
+        // `Unresponsive`, so evidence carrying its success must never come
+        // back Unresponsive — that would offer BOOT-hold advice to a board
+        // whose bootloader just held a conversation.
+        let summary = classify_board(
+            &ProbeEvidence {
+                bootloader_conversation: true,
+                detected_chip: Some("ESP32-D0WD-V3".to_string()),
+                ..ProbeEvidence::default()
+            },
+            &[],
+        );
+        assert!(
+            matches!(summary.verdict, BoardVerdict::Blank { .. }),
+            "an answered SYNC handshake is blank-class evidence, got {:?}",
+            summary.verdict
+        );
+        assert_eq!(summary.detected_chip.as_deref(), Some("ESP32-D0WD-V3"));
+    }
+
+    #[test]
+    fn a_bootloader_that_answered_never_outranks_a_named_firmware() {
+        // Ordering guard: the escalation cannot run once a firmware named
+        // itself, but if both were ever present the named one still wins.
+        for (evidence, label) in [
+            (
+                ProbeEvidence {
+                    bootloader_conversation: true,
+                    stale_lightplayer: true,
+                    ..ProbeEvidence::default()
+                },
+                "stale-lightplayer",
+            ),
+            (
+                ProbeEvidence {
+                    bootloader_conversation: true,
+                    lines: vec!["WLED 0.14.0 ready".to_string()],
+                    ..ProbeEvidence::default()
+                },
+                "wled",
+            ),
+        ] {
+            assert_eq!(classify_board(&evidence, &[]).verdict.label(), label);
+        }
+    }
+
+    #[test]
     fn a_no_firmware_signature_is_blank() {
         let summary = classify_board(
             &ProbeEvidence {
@@ -284,6 +421,14 @@ mod tests {
                     ..ProbeEvidence::default()
                 },
                 "lightplayer",
+            ),
+            (
+                ProbeEvidence {
+                    stale_lightplayer: true,
+                    base_mac: Some(MAC.to_string()),
+                    ..ProbeEvidence::default()
+                },
+                "stale-lightplayer",
             ),
             (
                 ProbeEvidence {
