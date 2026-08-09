@@ -35,9 +35,11 @@ pub use node_face_body::NodeFaceBody;
 pub use output_face::OutputFace;
 pub use playlist_face::PlaylistFace;
 pub use shader_face::ShaderFace;
-pub(crate) use space_section::{
-    ProjectionTileGrid, SpaceSection, face_space_badge, space_badge_title,
-};
+pub(crate) use space_section::{face_space_badge, space_badge_title};
+// Story-only surfaces (the G1b decision-matrix stories compose them
+// directly); unused without the feature.
+#[cfg(feature = "stories")]
+pub(crate) use space_section::{ProjectionTileGrid, SpaceSection};
 pub use tape_transport::TapeTransport;
 pub(crate) use tape_transport::{
     RATE_DETENTS, adjacent_detent, apply_detents, frac_rate, rate_frac,

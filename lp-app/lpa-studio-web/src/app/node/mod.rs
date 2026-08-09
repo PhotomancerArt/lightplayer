@@ -99,6 +99,9 @@ pub use face::{
     ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
     PlaylistFace, ShaderFace, TapeTransport,
 };
+// Story-only surfaces (the G1b decision-matrix stories compose them
+// directly); unused without the feature.
+#[cfg(feature = "stories")]
 pub(crate) use face::{ProjectionTileGrid, SpaceSection};
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
