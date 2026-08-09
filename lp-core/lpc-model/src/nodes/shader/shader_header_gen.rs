@@ -64,15 +64,25 @@ pub fn generate_compute_shader_header(
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
                     }
-                    ShaderSlotMappingKind::Dense => {
-                        validate_dense_element(slot.value.value())?;
-                    }
                 }
                 writeln!(&mut out, "// consumed: {name}").expect("write string");
                 writeln!(
                     &mut out,
                     "layout(binding = {binding}) uniform {ty} {name}[{}];",
                     mapping.len.value()
+                )
+                .expect("write string");
+            }
+            ShaderSlotKind::Buffer => {
+                let elem = validate_buffer_element(slot.value.value())?;
+                let len = slot
+                    .buffer_len()
+                    .ok_or(ShaderHeaderGenError::MissingBufferLen)?;
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(
+                    &mut out,
+                    "layout(binding = {binding}) uniform {} {name}[{len}];",
+                    elem.glsl_name()
                 )
                 .expect("write string");
             }
@@ -108,12 +118,17 @@ pub fn generate_compute_shader_header(
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
                     }
-                    ShaderSlotMappingKind::Dense => {
-                        validate_dense_element(slot.value.value())?;
-                    }
                 }
                 writeln!(&mut out, "// produced: {name}").expect("write string");
                 writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value()).expect("write string");
+            }
+            ShaderSlotKind::Buffer => {
+                let elem = validate_buffer_element(slot.value.value())?;
+                let len = slot
+                    .buffer_len()
+                    .ok_or(ShaderHeaderGenError::MissingBufferLen)?;
+                writeln!(&mut out, "// produced: {name}").expect("write string");
+                writeln!(&mut out, "{} {name}[{len}];", elem.glsl_name()).expect("write string");
             }
         }
     }
@@ -125,6 +140,7 @@ pub fn generate_compute_shader_header(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShaderHeaderGenError {
     MissingMapping,
+    MissingBufferLen,
     UnknownNativeShape(String),
     Unsupported(&'static str),
     UnsupportedType(String),
@@ -135,6 +151,7 @@ impl core::fmt::Display for ShaderHeaderGenError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::MissingMapping => f.write_str("shader map slot is missing mapping"),
+            Self::MissingBufferLen => f.write_str("shader buffer slot is missing len"),
             Self::UnknownNativeShape(name) => write!(f, "unknown native shader shape {name:?}"),
             Self::Unsupported(message) => f.write_str(message),
             Self::UnsupportedType(ty) => write!(f, "unsupported shader value type {ty}"),
@@ -179,18 +196,21 @@ fn emit_native_struct_if_needed(
     Ok(())
 }
 
-/// A dense mapping's element must be a builtin scalar/vector: the element
-/// index IS the map key, so there is no struct field to carry one — and a
-/// struct element would silently lose runtime indexability (struct arrays
-/// are constant-index-only on `Frontend::Lp`; scalar/vector uniform arrays
-/// index dynamically, `lps-filetests filetests/uniform/array.glsl`).
-fn validate_dense_element(value_ref: &ShaderValueShapeRef) -> Result<(), ShaderHeaderGenError> {
-    if value_ref.as_lp_type().is_some() {
-        return Ok(());
-    }
-    Err(ShaderHeaderGenError::Unsupported(
-        "dense mappings require builtin scalar/vector values",
-    ))
+/// A buffer's element must be a builtin scalar/vector: per-cell state has
+/// no key field to carry, and a struct element would silently lose runtime
+/// indexability (struct arrays are constant-index-only on `Frontend::Lp`;
+/// scalar/vector arrays index dynamically — `lps-filetests
+/// filetests/uniform/array.glsl`, `filetests/global/type-array.glsl`).
+fn validate_buffer_element(
+    value_ref: &ShaderValueShapeRef,
+) -> Result<crate::BufferElem, ShaderHeaderGenError> {
+    value_ref
+        .as_lp_type()
+        .as_ref()
+        .and_then(crate::BufferElem::from_lp_type)
+        .ok_or(ShaderHeaderGenError::Unsupported(
+            "buffer slots require builtin scalar/vector values",
+        ))
 }
 
 fn validate_key_field(
@@ -295,6 +315,7 @@ mod tests {
                 max: crate::OptionSlot::none(),
                 step: crate::OptionSlot::none(),
                 mapping: crate::OptionSlot::none(),
+                len: crate::OptionSlot::none(),
                 label: crate::ValueSlot::default(),
                 description: crate::ValueSlot::default(),
                 unit: crate::OptionSlot::none(),
@@ -364,19 +385,19 @@ mod tests {
         assert!(!header.contains("PhasorConfig"), "{header}");
     }
 
-    /// A dense mapping declares a plain builtin array on both sides — no
+    /// A buffer slot declares a plain builtin array on both sides — no
     /// struct emission, no key field anywhere.
     #[test]
-    fn dense_mapping_declares_builtin_arrays() {
+    fn buffer_slots_declare_builtin_arrays() {
         let mut consumed = VecMap::new();
         consumed.insert(
             String::from("heat_in"),
-            ShaderSlotDef::map_dense_builtin("f32", 8),
+            ShaderSlotDef::buffer_builtin("f32", 8),
         );
         let mut produced = VecMap::new();
         produced.insert(
             String::from("heat"),
-            ShaderSlotDef::map_dense_builtin("f32", 8),
+            ShaderSlotDef::buffer_builtin("f32", 8),
         );
         let def = ComputeShaderDef {
             source: AssetSlot::path("heat.glsl"),
@@ -397,15 +418,20 @@ mod tests {
         assert!(!header.contains("struct"), "{header}");
     }
 
-    /// The element index is the key, so a struct element has nowhere to
-    /// carry one — and struct arrays are constant-index-only on
-    /// `Frontend::Lp`, which would defeat the point of a dense slot.
+    /// Per-cell state has no key field to carry, and struct arrays are
+    /// constant-index-only on `Frontend::Lp`, which would defeat the point
+    /// of a buffer slot.
     #[test]
-    fn dense_mapping_rejects_struct_values() {
+    fn buffer_slots_reject_struct_values() {
         let mut produced = VecMap::new();
         produced.insert(
             String::from("heat"),
-            ShaderSlotDef::map_u32_native("lp::fluid::Emitter", ShaderSlotMappingDef::dense(8)),
+            ShaderSlotDef {
+                kind: crate::ValueSlot::new(ShaderSlotKind::Buffer),
+                value: crate::ValueSlot::new(ShaderValueShapeRef::native("lp::fluid::Emitter")),
+                len: crate::OptionSlot::some(crate::ValueSlot::new(8)),
+                ..ShaderSlotDef::default()
+            },
         );
         let def = ComputeShaderDef {
             source: AssetSlot::path("heat.glsl"),
@@ -418,7 +444,7 @@ mod tests {
         assert!(matches!(
             generate_compute_shader_header(&def, &SlotShapeRegistry::default()),
             Err(ShaderHeaderGenError::Unsupported(
-                "dense mappings require builtin scalar/vector values"
+                "buffer slots require builtin scalar/vector values"
             ))
         ));
     }

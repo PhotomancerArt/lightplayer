@@ -71,7 +71,54 @@ pub fn lps_value_f32_to_model_value(
                 fields: out_fields,
             })
         }
+        LpsValueF32::Buffer(buffer) => Ok(LpValue::Buffer(
+            lpc_model::LpBuffer::from_words(
+                lps_buffer_elem_to_model(buffer.elem),
+                buffer.words().to_vec(),
+            )
+            .expect("ABI buffer invariant matches model invariant"),
+        )),
         LpsValueF32::Texture2D(_) => Err(LpsValueToModelConversionError::Texture2dNotPortable),
+    }
+}
+
+/// The two element vocabularies are the same closed set on the two sides of
+/// the ABI boundary; these two maps are the only place they meet.
+pub fn model_buffer_elem_to_lps(elem: lpc_model::BufferElem) -> lps_shared::LpsBufferElem {
+    use lpc_model::BufferElem as M;
+    use lps_shared::LpsBufferElem as A;
+    match elem {
+        M::F32 => A::F32,
+        M::Vec2 => A::Vec2,
+        M::Vec3 => A::Vec3,
+        M::Vec4 => A::Vec4,
+        M::U32 => A::U32,
+        M::UVec2 => A::UVec2,
+        M::UVec3 => A::UVec3,
+        M::UVec4 => A::UVec4,
+        M::I32 => A::I32,
+        M::IVec2 => A::IVec2,
+        M::IVec3 => A::IVec3,
+        M::IVec4 => A::IVec4,
+    }
+}
+
+pub fn lps_buffer_elem_to_model(elem: lps_shared::LpsBufferElem) -> lpc_model::BufferElem {
+    use lpc_model::BufferElem as M;
+    use lps_shared::LpsBufferElem as A;
+    match elem {
+        A::F32 => M::F32,
+        A::Vec2 => M::Vec2,
+        A::Vec3 => M::Vec3,
+        A::Vec4 => M::Vec4,
+        A::U32 => M::U32,
+        A::UVec2 => M::UVec2,
+        A::UVec3 => M::UVec3,
+        A::UVec4 => M::UVec4,
+        A::I32 => M::I32,
+        A::IVec2 => M::IVec2,
+        A::IVec3 => M::IVec3,
+        A::IVec4 => M::IVec4,
     }
 }
 

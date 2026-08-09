@@ -39,6 +39,9 @@ pub enum LpValue {
     /// Sequence payload used for both fixed [`LpType::Array`](crate::LpType::Array)
     /// and variable-length [`LpType::List`](crate::LpType::List) storage.
     Array(Vec<LpValue>),
+    /// Packed typed buffer interpreted through
+    /// [`LpType::Buffer`](crate::LpType::Buffer).
+    Buffer(crate::LpBuffer),
     Struct {
         name: Option<String>,
         fields: Vec<(String, LpValue)>,

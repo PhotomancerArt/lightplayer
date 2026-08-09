@@ -99,7 +99,10 @@ pub use project::inventory::{
     ReferencedAsset,
 };
 pub use value::WithRevision;
-pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
+pub use value::{
+    BufferElem, BufferScalar, LpBuffer, LpBufferError, LpType, LpValue, ModelEnumVariant,
+    ModelStructMember,
+};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};

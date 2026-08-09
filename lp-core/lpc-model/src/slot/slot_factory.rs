@@ -256,6 +256,7 @@ fn default_lp_value(ty: &LpType) -> LpValue {
         LpType::Array(item, len) => {
             LpValue::Array((0..*len).map(|_| default_lp_value(item)).collect())
         }
+        LpType::Buffer { elem, len } => LpValue::Buffer(crate::LpBuffer::zeroed(*elem, *len)),
         LpType::List(_) => LpValue::Array(Vec::new()),
         LpType::Struct { name, fields } => LpValue::Struct {
             name: name.clone(),

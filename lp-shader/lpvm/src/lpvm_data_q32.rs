@@ -8,7 +8,10 @@ use crate::LpsValueF32;
 use crate::data_error::DataError;
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::path_resolve::LpsTypePathExt;
-use lps_shared::{LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, StructMember};
+use lps_shared::{
+    LayoutRules, LpsBuffer, LpsBufferElem, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType,
+    StructMember,
+};
 
 /// Shader data as represented in LPVM memory
 pub struct LpvmDataQ32 {
@@ -209,6 +212,16 @@ fn value_matches_type(ty: &LpsType, v: &LpsValueF32) -> Result<(), DataError> {
             }
             Ok(())
         }
+        (LpsType::Array { element, len }, LpsValueF32::Buffer(buffer)) => {
+            if LpsBufferElem::from_lps_type(element) == Some(buffer.elem) && buffer.len() == *len {
+                Ok(())
+            } else {
+                Err(DataError::type_mismatch(
+                    format!("array[{len}] of {element:?}"),
+                    format!("buffer {:?}[{}]", buffer.elem, buffer.len()),
+                ))
+            }
+        }
         (LpsType::Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(DataError::type_mismatch(
@@ -234,6 +247,30 @@ fn value_matches_type(ty: &LpsType, v: &LpsValueF32) -> Result<(), DataError> {
             format!("value {v:?}"),
         )),
     }
+}
+
+/// Read a packed buffer out of layout bytes: `len` elements at the layout's
+/// element stride, `word_at` converting each 4-byte lane to its host word
+/// (identity for F32-mode bytes, a Q32→f32-bits transcode for Q32 floats).
+pub(crate) fn read_buffer_words(
+    elem: LpsBufferElem,
+    len: u32,
+    element: &LpsType,
+    rules: LayoutRules,
+    data: &[u8],
+    word_at: impl Fn(&[u8]) -> u32,
+) -> Result<LpsBuffer, DataError> {
+    let stride = array_stride(element, rules);
+    let packed = elem.word_stride() as usize;
+    let mut words = Vec::with_capacity(len as usize * packed);
+    for i in 0..len as usize {
+        for j in 0..packed {
+            let at = i * stride + j * 4;
+            words.push(word_at(&data[at..at + 4]));
+        }
+    }
+    LpsBuffer::from_words(elem, words.into_boxed_slice())
+        .map_err(|e| DataError::type_mismatch("buffer", e))
 }
 
 fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF32, DataError> {
@@ -349,6 +386,15 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF
             },
         )),
         LpsType::Array { element, len } => {
+            // Arrays of buffer-legal primitives decode as ONE packed buffer,
+            // not len boxed enums — the memory-honest form per-cell state
+            // rides in. Struct/matrix elements keep the boxed shape.
+            if let Some(elem) = LpsBufferElem::from_lps_type(element) {
+                return read_buffer_words(elem, *len, element, rules, data, |bytes| {
+                    u32_from_bytes(bytes)
+                })
+                .map(LpsValueF32::Buffer);
+            }
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
             let mut elems = Vec::with_capacity(*len as usize);
@@ -501,6 +547,25 @@ fn write_value(
                 write_value(element, rules, &mut data[base..base + esz], it)?;
             }
         }
+        (LpsType::Array { element, len }, LpsValueF32::Buffer(buffer)) => {
+            if LpsBufferElem::from_lps_type(element) != Some(buffer.elem) || buffer.len() != *len {
+                return Err(DataError::type_mismatch(
+                    format!("array[{len}] of {element:?}"),
+                    format!("buffer {:?}[{}]", buffer.elem, buffer.len()),
+                ));
+            }
+            // Word copy at the layout's element stride: contiguous for
+            // packed strides (scalars, vec2, vec4), per-element for vec3
+            // (std430 stride 16 over 12 packed bytes).
+            let packed = buffer.elem.word_stride() as usize;
+            let stride = array_stride(element, rules);
+            for (i, chunk) in buffer.words().chunks_exact(packed).enumerate() {
+                for (j, word) in chunk.iter().enumerate() {
+                    let at = i * stride + j * 4;
+                    write_u32(&mut data[at..at + 4], *word);
+                }
+            }
+        }
         (LpsType::Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             debug_assert_eq!(members.len(), fields.len());
             let mut cursor = 0usize;
@@ -593,6 +658,67 @@ mod tests {
         let mut d = LpvmDataQ32::new(ty);
         d.set_f32("[1]", 9.0).unwrap();
         assert!((d.get_f32("[1]").unwrap() - 9.0).abs() < 1e-6);
+    }
+
+    /// Buffers round-trip through F32-mode layout bytes; scalar arrays are
+    /// contiguous words.
+    #[test]
+    fn buffer_round_trips_scalar_array_bytes() {
+        let ty = LpsType::Array {
+            element: Box::new(LpsType::Float),
+            len: 3,
+        };
+        let buffer = LpsBuffer::from_words(
+            LpsBufferElem::F32,
+            vec![f32::to_bits(1.5), f32::to_bits(-2.0), f32::to_bits(0.25)].into_boxed_slice(),
+        )
+        .unwrap();
+
+        let d = LpvmDataQ32::from_value(ty, &LpsValueF32::Buffer(buffer.clone())).unwrap();
+
+        assert_eq!(d.len(), 12);
+        assert_eq!(&d.as_slice()[0..4], &1.5f32.to_le_bytes());
+        assert_eq!(&d.as_slice()[4..8], &(-2.0f32).to_le_bytes());
+        let LpsValueF32::Buffer(back) = d.to_value().unwrap() else {
+            panic!("expected buffer");
+        };
+        assert!(back.bits_eq(&buffer));
+    }
+
+    /// The LP ABI's layout packs vec3 arrays tight (alignment 4, stride 12
+    /// — its documented std430 deviation, `docs/design/glsl-layout.md`), so
+    /// a vec3 buffer's packed words match the layout stride exactly. The
+    /// write/read paths compute the stride rather than assuming it, so a
+    /// future padded layout would keep round-tripping.
+    #[test]
+    fn buffer_vec3_elements_follow_layout_stride() {
+        let ty = LpsType::Array {
+            element: Box::new(LpsType::Vec3),
+            len: 2,
+        };
+        let words: Vec<u32> = (1..=6).map(|i| f32::to_bits(i as f32)).collect();
+        let buffer = LpsBuffer::from_words(LpsBufferElem::Vec3, words.into_boxed_slice()).unwrap();
+
+        let d = LpvmDataQ32::from_value(ty, &LpsValueF32::Buffer(buffer.clone())).unwrap();
+
+        assert_eq!(d.len(), 24);
+        // Element 0 lanes at 0/4/8, element 1 lanes at 12/16/20.
+        assert_eq!(&d.as_slice()[8..12], &3.0f32.to_le_bytes());
+        assert_eq!(&d.as_slice()[12..16], &4.0f32.to_le_bytes());
+        let LpsValueF32::Buffer(back) = d.to_value().unwrap() else {
+            panic!("expected buffer");
+        };
+        assert!(back.bits_eq(&buffer));
+    }
+
+    #[test]
+    fn buffer_rejects_element_kind_mismatch() {
+        let ty = LpsType::Array {
+            element: Box::new(LpsType::Float),
+            len: 2,
+        };
+        let buffer = LpsBuffer::zeroed(LpsBufferElem::U32, 2);
+        assert!(LpvmDataQ32::from_value(ty, &LpsValueF32::Buffer(buffer)).is_err());
     }
 
     fn uniforms_with_tex() -> LpsType {

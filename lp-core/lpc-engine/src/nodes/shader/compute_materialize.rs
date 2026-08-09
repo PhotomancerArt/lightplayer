@@ -31,6 +31,7 @@ pub fn materialize_produced_slot(
             Ok(SlotData::Value(WithRevision::new(revision, value)))
         }
         ShaderSlotKind::Map => materialize_map_slot(slot_name, slot, value, revision),
+        ShaderSlotKind::Buffer => materialize_buffer_slot(slot_name, slot, value, revision),
         // A compute shader writes values, not palettes; a produced sampler is
         // refused rather than converted to something it is not.
         ShaderSlotKind::Palette => Err(ComputeMaterializeError::Unsupported(format!(
@@ -45,6 +46,7 @@ pub enum ComputeMaterializeError {
     MissingMapping(String),
     Unsupported(String),
     ExpectedArray(String),
+    ExpectedBuffer(String),
     ExpectedStruct(String),
     MissingKeyField { slot: String, key: String },
     InvalidKey { slot: String, key: String },
@@ -56,6 +58,9 @@ impl core::fmt::Display for ComputeMaterializeError {
             Self::MissingMapping(slot) => write!(f, "produced map slot {slot:?} missing mapping"),
             Self::Unsupported(message) => f.write_str(message),
             Self::ExpectedArray(slot) => write!(f, "produced map slot {slot:?} was not an array"),
+            Self::ExpectedBuffer(slot) => {
+                write!(f, "produced buffer slot {slot:?} was not a buffer")
+            }
             Self::ExpectedStruct(slot) => {
                 write!(f, "produced map slot {slot:?} item was not a struct")
             }
@@ -90,9 +95,6 @@ fn materialize_map_slot(
         .ok_or_else(|| ComputeMaterializeError::MissingMapping(String::from(slot_name)))?;
     match mapping.kind.value() {
         ShaderSlotMappingKind::Sentinel => {}
-        ShaderSlotMappingKind::Dense => {
-            return materialize_dense_slot(slot_name, value, revision);
-        }
     }
     let key_def = slot.key.data.as_ref().ok_or_else(|| {
         ComputeMaterializeError::Unsupported(format!("produced map slot {slot_name:?} missing key"))
@@ -122,39 +124,37 @@ fn materialize_map_slot(
     Ok(SlotData::Map(SlotMapDyn::with_revision(revision, entries)))
 }
 
-/// A dense array IS the map: the element index is the key and every index
-/// is present, so there is no key field to read and no empty sentinel to
-/// skip — element `i` lands at `SlotMapKey::U32(i)` unconditionally.
-fn materialize_dense_slot(
+/// A produced buffer is ONE value: the packed words move across the ABI in
+/// a single conversion, and the whole buffer carries one revision — there
+/// is no per-element identity to key or skip.
+fn materialize_buffer_slot(
     slot_name: &str,
+    slot: &ShaderSlotDef,
     value: &LpsValueF32,
     revision: Revision,
 ) -> Result<SlotData, ComputeMaterializeError> {
-    let LpsValueF32::Array(items) = value else {
-        return Err(ComputeMaterializeError::ExpectedArray(String::from(
+    let LpsValueF32::Buffer(buffer) = value else {
+        return Err(ComputeMaterializeError::ExpectedBuffer(String::from(
             slot_name,
         )));
     };
-
-    let mut entries = VecMap::new();
-    for (index, item) in items.iter().enumerate() {
-        let key = u32::try_from(index).map_err(|_| {
-            ComputeMaterializeError::Unsupported(format!(
-                "produced map slot {slot_name:?} index overflows u32"
-            ))
-        })?;
-        let model = lps_value_f32_to_model_value(item).map_err(|e| {
-            ComputeMaterializeError::Unsupported(format!(
-                "produced map slot {slot_name:?} item cannot convert value: {e}"
-            ))
-        })?;
-        entries.insert(
-            SlotMapKey::U32(key),
-            SlotData::Value(WithRevision::new(revision, model)),
-        );
+    let declared_len = slot.buffer_len().ok_or_else(|| {
+        ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} missing len"
+        ))
+    })?;
+    if buffer.len() != declared_len {
+        return Err(ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} has {} elements, declared {declared_len}",
+            buffer.len()
+        )));
     }
-
-    Ok(SlotData::Map(SlotMapDyn::with_revision(revision, entries)))
+    let model = lps_value_f32_to_model_value(value).map_err(|e| {
+        ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} cannot convert value: {e}"
+        ))
+    })?;
+    Ok(SlotData::Value(WithRevision::new(revision, model)))
 }
 
 fn extract_key(
@@ -218,29 +218,45 @@ mod tests {
         ));
     }
 
-    /// A dense array lands every element at its index — no key field, no
-    /// skipped sentinel, zeros included.
+    /// A produced buffer materializes as ONE packed value with one
+    /// revision — no per-element entries anywhere.
     #[test]
-    fn dense_array_materializes_to_index_keyed_map() {
-        let slot = ShaderSlotDef::map_dense_builtin("f32", 3);
-        let value = LpsValueF32::Array(Box::new([
-            LpsValueF32::F32(0.5),
-            LpsValueF32::F32(0.0),
-            LpsValueF32::F32(0.25),
-        ]));
+    fn buffer_materializes_to_single_packed_value() {
+        let slot = ShaderSlotDef::buffer_builtin("f32", 3);
+        let value = LpsValueF32::Buffer(
+            lps_shared::LpsBuffer::from_words(
+                lps_shared::LpsBufferElem::F32,
+                Box::new([f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.25)]),
+            )
+            .expect("buffer"),
+        );
 
-        let data = materialize_produced_slot("heat", &slot, &value, Revision::new(4)).expect("map");
+        let data =
+            materialize_produced_slot("heat", &slot, &value, Revision::new(4)).expect("value");
 
-        let SlotData::Map(map) = data else {
-            panic!("map");
+        let SlotData::Value(value) = data else {
+            panic!("value");
         };
-        assert_eq!(map.entries.len(), 3);
-        for (index, expected) in [(0, 0.5), (1, 0.0), (2, 0.25)] {
-            let SlotDataAccess::Value(value) = map.entries[&SlotMapKey::U32(index)].access() else {
-                panic!("value at {index}");
-            };
-            assert_eq!(value.value(), LpValue::F32(expected));
-        }
+        assert_eq!(value.changed_at(), Revision::new(4));
+        let LpValue::Buffer(buffer) = value.value() else {
+            panic!("buffer");
+        };
+        assert_eq!(buffer.elem, lpc_model::BufferElem::F32);
+        assert_eq!(
+            buffer.words(),
+            &[f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.25)]
+        );
+    }
+
+    #[test]
+    fn buffer_rejects_length_disagreement() {
+        let slot = ShaderSlotDef::buffer_builtin("f32", 4);
+        let value = LpsValueF32::Buffer(lps_shared::LpsBuffer::zeroed(
+            lps_shared::LpsBufferElem::F32,
+            3,
+        ));
+
+        assert!(materialize_produced_slot("heat", &slot, &value, Revision::new(4)).is_err());
     }
 
     fn emitter(id: u32, x: f32) -> LpsValueF32 {

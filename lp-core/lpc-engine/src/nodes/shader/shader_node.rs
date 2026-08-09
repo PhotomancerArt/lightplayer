@@ -965,6 +965,16 @@ pub(super) fn sync_shader_slot_def_from_authored(
             &mut slot.key,
         )?;
     }
+    // `len` is buffer STORAGE, gated for the same route-entry reason as
+    // `key` above. A live len edit changes the generated declaration, so it
+    // folds into `changed` and recompiles.
+    if matches!(slot.kind.value(), ShaderSlotKind::Buffer) {
+        changed |= sync_optional_value_from_authored::<u32>(
+            ctx,
+            &alloc::format!("{base_path}.len.some"),
+            &mut slot.len,
+        )?;
+    }
     // The phasor config is a value LEAF (a `PhasorConfig` struct), not a
     // record of sub-slots, so the whole config syncs in one read — which is
     // what makes a live period drag hot-apply without a reload. Creation-
@@ -1486,12 +1496,12 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
                 LpsValueF32::F32(phasor_frame_zero(&slot.phasor_config())),
             )),
             ShaderSlotKind::Seconds => Some((name.clone(), LpsValueF32::F32(0.0))),
-            // A map declares an array the backend fills from slot data, and a
-            // palette declares a sampler whose strip cannot be allocated
-            // without a graphics backend. The palette's frame-zero answer is
-            // baked on the first render instead
+            // A map or buffer declares an array the backend fills from slot
+            // data, and a palette declares a sampler whose strip cannot be
+            // allocated without a graphics backend. The palette's frame-zero
+            // answer is baked on the first render instead
             // ([`ShaderNode::ensure_palette_uniforms`]).
-            ShaderSlotKind::Map | ShaderSlotKind::Palette => None,
+            ShaderSlotKind::Map | ShaderSlotKind::Buffer | ShaderSlotKind::Palette => None,
         })
         .collect()
 }
@@ -1897,7 +1907,10 @@ pub(super) fn resolve_or_default_input(
         // the bake path before this function is called, and the compute node
         // has no palette support yet. The materialize helper below refuses it
         // by name rather than by silence.
-        ShaderSlotKind::Value | ShaderSlotKind::Map | ShaderSlotKind::Palette => {}
+        ShaderSlotKind::Value
+        | ShaderSlotKind::Map
+        | ShaderSlotKind::Buffer
+        | ShaderSlotKind::Palette => {}
     }
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;

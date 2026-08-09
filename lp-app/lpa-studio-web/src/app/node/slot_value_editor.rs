@@ -237,8 +237,11 @@ fn auto_value(
             MatrixSlotField { kind, state, address, on_action }
         },
         // Composite bodies get gesture editors in M3 P4, not value editors.
+        // A buffer is deliberately summary-only ("f32 × 300"): per-cell sim
+        // state is written by the shader, never element-edited in a panel.
         UiSlotValueKind::Unset
         | UiSlotValueKind::Array(_)
+        | UiSlotValueKind::Buffer(_)
         | UiSlotValueKind::Struct { .. }
         | UiSlotValueKind::Enum { .. } => fallback_value(value, state),
         // Explicitly read-only reference displays (not a fallback): Studio
@@ -282,6 +285,7 @@ fn slot_value_key(value: &UiSlotValue) -> String {
         | UiSlotValueKind::Mat3x3(_)
         | UiSlotValueKind::Mat4x4(_)
         | UiSlotValueKind::Array(_)
+        | UiSlotValueKind::Buffer(_)
         | UiSlotValueKind::Struct { .. }
         | UiSlotValueKind::Enum { .. }
         | UiSlotValueKind::Resource(_)

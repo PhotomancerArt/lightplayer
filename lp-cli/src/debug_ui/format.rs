@@ -33,6 +33,7 @@ pub(crate) fn format_lp_value(value: &LpValue) -> String {
         LpValue::Mat3x3(value) => format!("{value:?}"),
         LpValue::Mat4x4(value) => format!("{value:?}"),
         LpValue::Array(values) => format!("array[{}]", values.len()),
+        LpValue::Buffer(buffer) => format!("{} × {}", buffer.elem.glsl_name(), buffer.len()),
         LpValue::Struct { name, fields } => format_struct_value(name.as_deref(), fields),
         LpValue::Enum { variant, payload } => match payload {
             Some(payload) => format!("enum::{variant}({})", format_lp_value(payload)),
@@ -114,6 +115,7 @@ pub(crate) fn format_lp_type(ty: &LpType) -> String {
         LpType::Mat3x3 => String::from("mat3x3"),
         LpType::Mat4x4 => String::from("mat4x4"),
         LpType::Array(item, len) => format!("[{}; {len}]", format_lp_type(item)),
+        LpType::Buffer { elem, len } => format!("buffer<{}; {len}>", elem.glsl_name()),
         LpType::List(item) => format!("list<{}>", format_lp_type(item)),
         LpType::Struct { name, fields } => format!(
             "{} struct[{}]",
