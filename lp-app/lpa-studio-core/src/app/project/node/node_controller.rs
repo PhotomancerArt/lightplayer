@@ -854,7 +854,7 @@ fn face_claimed_debug_rows(face: &crate::UiNodeFace) -> &'static [&'static str] 
 /// sections, and either section itself when nothing is left — the face IS
 /// those rows' surface now (the clock's tape transport for the Debug
 /// three; the `space` section for the shader's `space` and the fixture's
-/// `consume` + `strip_order_meaningful`), and a striped drawer with zero
+/// `consume`), and a striped drawer with zero
 /// rows would read as broken. Two controls writing one slot is the defect
 /// this prevents.
 ///

@@ -4,9 +4,12 @@
 //!
 //! One derivation, two sides. The shader's `space` enum
 //! (`TwoD { in_1d } | OneD { in_2d }`) and the fixture's `consume` enum
-//! (`Auto | Policy { from_1d, force }`) plus `strip_order_meaningful` land
-//! in the SAME DTO, so D13's "the two sections are visual mirrors" is a
-//! data fact the web cannot accidentally break.
+//! (`Auto | Policy { from_1d, force }`) land in the SAME DTO, so D13's
+//! "the two sections are visual mirrors" is a data fact the web cannot
+//! accidentally break. (The fixture's `strip_order_meaningful` bit was
+//! ruled OFF this surface 2026-08-09 — the patching vision's declared
+//! fixture space will absorb it; until then the raw bool lives in the
+//! advanced drawer, unclaimed.)
 //!
 //! Everything is read off the already-projected config rows — the same
 //! rows the advanced drawer would render, which is exactly why the face
@@ -24,16 +27,14 @@
 
 use crate::{
     UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiProjectionDirection, UiSlotComposite,
-    UiSlotValueKind, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceFlag,
-    UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceMismatch, UiSpaceSection,
+    UiSpaceSide, UiVisualSpace,
 };
 
 /// The shader def's producer-side declaration row.
 pub(in crate::app::project) const SHADER_SPACE_ROW: &str = "space";
 /// The fixture def's consumer-side policy row.
 pub(in crate::app::project) const FIXTURE_CONSUME_ROW: &str = "consume";
-/// The fixture def's "does strip order mean something?" row (vision D3).
-pub(in crate::app::project) const FIXTURE_STRIP_ORDER_ROW: &str = "strip_order_meaningful";
 
 /// The producer side's section: the shader's `space` declaration, its
 /// answer cell for the opposite dimension, and the D1 mismatch state.
@@ -75,13 +76,14 @@ pub(in crate::app::project) fn shader_space_section(
         primary,
         declared_space,
         cells,
-        flags: Vec::new(),
         mismatch: declared_space.and_then(|declared| space_mismatch(declared, status_detail)),
     })
 }
 
 /// The consumer side's section: ONE dropdown cell over the fixture's
-/// `consume` policy, plus the strip-order bit.
+/// `consume` policy. (The strip-order bit was ruled off this surface
+/// 2026-08-09; its raw bool renders in the advanced drawer until the
+/// patching vision's declared fixture space absorbs it.)
 ///
 /// **G1 rework (plan-B P4b).** G1 ruled the `Auto`/`Policy` split
 /// backwards as a surface: "use the dropdown with the 'default' option…
@@ -106,21 +108,6 @@ pub(in crate::app::project) fn fixture_space_section(
         .copied()
         .find(|row| row.key == FIXTURE_CONSUME_ROW)?;
     let primary = consumer_projection_cell(row)?;
-    let mut flags = Vec::new();
-    if let Some(strip) = rows
-        .iter()
-        .copied()
-        .find(|row| row.key == FIXTURE_STRIP_ORDER_ROW)
-        .and_then(|row| {
-            bool_flag(
-                row,
-                UiSpaceFlagRole::StripOrderMeaningful,
-                "Strip order means something",
-            )
-        })
-    {
-        flags.push(strip);
-    }
     Some(UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary,
@@ -128,7 +115,6 @@ pub(in crate::app::project) fn fixture_space_section(
         // comes from its mapping, not from this section.
         declared_space: None,
         cells: Vec::new(),
-        flags,
         mismatch: None,
     })
 }
@@ -207,9 +193,7 @@ pub(in crate::app::project) fn claimed_config_rows(
 ) -> &'static [&'static str] {
     match face {
         crate::UiNodeFace::Shader(face) if face.space.is_some() => &[SHADER_SPACE_ROW],
-        crate::UiNodeFace::Fixture(face) if face.space.is_some() => {
-            &[FIXTURE_CONSUME_ROW, FIXTURE_STRIP_ORDER_ROW]
-        }
+        crate::UiNodeFace::Fixture(face) if face.space.is_some() => &[FIXTURE_CONSUME_ROW],
         _ => &[],
     }
 }
@@ -264,24 +248,6 @@ fn enum_cell(
         address: row.address.clone(),
         state: row.state.clone(),
         direction: None,
-    })
-}
-
-/// Project a bool config row into a space flag. `None` when the row is not
-/// a boolean value row.
-fn bool_flag(row: &UiConfigSlot, role: UiSpaceFlagRole, label: &str) -> Option<UiSpaceFlag> {
-    let UiConfigSlotBody::Value(value) = &row.body else {
-        return None;
-    };
-    let UiSlotValueKind::Bool(value) = value.kind else {
-        return None;
-    };
-    Some(UiSpaceFlag {
-        role,
-        label: label.to_string(),
-        value,
-        address: row.address.clone(),
-        state: row.state.clone(),
     })
 }
 
@@ -460,7 +426,6 @@ mod tests {
             section.cell(UiSpaceCellRole::ProducerIn1d).is_none(),
             "the inactive variant's payload is not in the tree"
         );
-        assert!(section.flags.is_empty(), "flags are the consumer side's");
     }
 
     /// A 2D shader's `in_1d` cell has exactly one declared variant today —
@@ -501,6 +466,8 @@ mod tests {
     #[test]
     fn an_auto_fixture_is_one_dropdown_selecting_follow_the_source() {
         let rows = [
+            // The strip-order bool rides along UNCLAIMED (ruled off this
+            // surface 2026-08-09): the derivation must ignore it.
             bool_row("strip_order_meaningful", true),
             enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
         ];
@@ -530,18 +497,6 @@ mod tests {
             "dispatch targets the consume enum row"
         );
         assert!(section.cells.is_empty(), "the primary IS the only cell");
-        assert_eq!(section.flags.len(), 1);
-        let strip = section
-            .flag(UiSpaceFlagRole::StripOrderMeaningful)
-            .expect("the strip-order flag");
-        assert!(strip.value);
-        assert_eq!(
-            strip
-                .address
-                .as_ref()
-                .map(|address| address.path.to_string()),
-            Some("strip_order_meaningful".to_string()),
-        );
     }
 
     /// An authored policy selects its `from_1d` in the same dropdown, and
@@ -549,36 +504,26 @@ mod tests {
     /// flag (an explicit pick IS the override).
     #[test]
     fn a_policy_fixture_selects_its_projection_in_the_one_dropdown() {
-        let rows = [
-            bool_row("strip_order_meaningful", false),
-            enum_row(
-                "consume",
-                "Policy",
-                &["Auto", "Policy"],
-                vec![
-                    enum_row(
-                        "consume.Policy.from_1d",
-                        "Mirror",
-                        &["Extrude", "Radial", "Angular", "Mirror"],
-                        Vec::new(),
-                    ),
-                    bool_row("consume.Policy.force", true),
-                ],
-            ),
-        ];
+        let rows = [enum_row(
+            "consume",
+            "Policy",
+            &["Auto", "Policy"],
+            vec![
+                enum_row(
+                    "consume.Policy.from_1d",
+                    "Mirror",
+                    &["Extrude", "Radial", "Angular", "Mirror"],
+                    Vec::new(),
+                ),
+                bool_row("consume.Policy.force", true),
+            ],
+        )];
         let rows: Vec<&UiConfigSlot> = rows.iter().collect();
         let section = fixture_space_section(&rows).expect("section");
 
         assert_eq!(section.primary.active, "Mirror");
         assert_eq!(section.primary.active_label, "mirror");
         assert!(section.primary.is_choosable());
-        assert!(
-            section
-                .flag(UiSpaceFlagRole::StripOrderMeaningful)
-                .is_some(),
-            "the strip-order flag survives"
-        );
-        assert_eq!(section.flags.len(), 1, "no force flag — the pick forces");
     }
 
     /// G1b ruling 4's second section: an ACTIVE directional shape's
@@ -756,7 +701,6 @@ mod tests {
             },
             declared_space: Some(UiVisualSpace::TwoD),
             cells: Vec::new(),
-            flags: Vec::new(),
             mismatch: None,
         });
         assert_eq!(

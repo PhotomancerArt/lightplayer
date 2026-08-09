@@ -622,17 +622,15 @@ pub(crate) fn shader_space_section() -> lpa_studio_core::UiSpaceSection {
             "Default",
             &[("Default", "default", None)],
         )],
-        flags: Vec::new(),
         mismatch: None,
     }
 }
 
 /// The consumer mirror in its default state: the ONE dropdown (P4b)
-/// selecting "follow the source", plus the strip-order declaration (D3).
+/// selecting "follow the source". (The strip-order bit was ruled off this
+/// surface 2026-08-09 — its raw bool lives in the advanced drawer now.)
 pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
-    use lpa_studio_core::{
-        UiSpaceCellRole, UiSpaceFlag, UiSpaceFlagRole, UiSpaceSection, UiSpaceSide,
-    };
+    use lpa_studio_core::{UiSpaceCellRole, UiSpaceSection, UiSpaceSide};
     UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary: space_cell(
@@ -644,13 +642,6 @@ pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
         ),
         declared_space: None,
         cells: Vec::new(),
-        flags: vec![UiSpaceFlag {
-            role: UiSpaceFlagRole::StripOrderMeaningful,
-            label: "1D patterns follow the wire".to_string(),
-            value: true,
-            address: Some(story_slot_address("strip_order_meaningful")),
-            state: UiSlotFieldState::editable(),
-        }],
         mismatch: None,
     }
 }
@@ -737,7 +728,6 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
             answer,
             PRODUCER_IN_2D_CHOICES,
         )],
-        flags: Vec::new(),
         mismatch: None,
     }
 }

@@ -2845,7 +2845,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
 /// preview has to come back tagged with the space it rendered in.
 #[test]
 fn space_sections_derive_and_claim_their_rows_end_to_end() {
-    use crate::{UiSpaceCellRole, UiSpaceFlagRole, UiSpaceSide, UiVisualSpace};
+    use crate::{UiSpaceCellRole, UiSpaceSide, UiVisualSpace};
 
     let server = Rc::new(RefCell::new(face_e2e_server()));
     let io = InProcessServerIo {
@@ -2959,25 +2959,18 @@ fn space_sections_derive_and_claim_their_rows_end_to_end() {
         space.cells.is_empty(),
         "Auto is the unexpanded state — a unit variant has no payload rows"
     );
-    let strip = space
-        .flag(UiSpaceFlagRole::StripOrderMeaningful)
-        .expect("the strip-order flag");
-    assert!(strip.value, "a bare strip is {{1D}} by default (D3)");
-    assert_eq!(
-        strip
-            .address
-            .as_ref()
-            .expect("the flag is addressed")
-            .path
-            .to_string(),
-        "strip_order_meaningful",
-    );
     let keys = config_row_keys(&fixture);
     assert!(
-        !keys
-            .iter()
-            .any(|key| key == "consume" || key == "strip_order_meaningful"),
-        "both consumer rows left the drawer: {keys:?}"
+        !keys.iter().any(|key| key == "consume"),
+        "the consume row left the drawer: {keys:?}"
+    );
+    // The strip-order bit was ruled OFF this surface (2026-08-09): the
+    // section no longer claims it, so the raw bool is BACK in the
+    // advanced drawer — its only surface until the patching vision's
+    // declared fixture space absorbs it.
+    assert!(
+        keys.iter().any(|key| key == "strip_order_meaningful"),
+        "the unclaimed strip-order bool reverts to the drawer: {keys:?}"
     );
     assert!(
         keys.iter().any(|key| key == "mapping"),

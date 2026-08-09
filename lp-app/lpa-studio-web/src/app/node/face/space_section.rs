@@ -13,9 +13,9 @@
 //! **No parallel write path.** Every gesture here is the op the generic
 //! drawer row would have sent: a variant tile dispatches `EnsurePresent` at
 //! `cell.address.child_field(&variant)` (exactly `EnumVariantField`'s
-//! gesture), a flag checkbox dispatches `SetValue` at `flag.address`
-//! (exactly `BoolSlotField`'s). The section is a different PRESENTATION of
-//! the rows it claimed out of the advanced drawer, never a second writer.
+//! gesture); the consumer dropdown's force bit rides the same `SetValue`
+//! the bool row sends. The section is a different PRESENTATION of the
+//! rows it claimed out of the advanced drawer, never a second writer.
 //!
 //! **Tiles are schematic, not live** (plan A2, decided here — see the
 //! `ProjectionGlyph` doc): the picker draws each projection's shape rather
@@ -32,8 +32,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dioxus::prelude::*;
 use lpa_studio_core::{
     LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiNodeFace, UiProjectionDirection,
-    UiProjectionOrigin, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceFlag,
-    UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    UiProjectionOrigin, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection,
+    UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_value_action};
@@ -57,12 +57,6 @@ const PRODUCER_IN_2D_LABEL: &str = "show in 2D by";
 const PRODUCER_IN_1D_LABEL: &str = "show in 1D by";
 /// The consumer's ONE dropdown (P4b — "then we just have one control").
 const CONSUMER_PRIMARY_LABEL: &str = "show 1D sources by";
-
-/// Vision D3's authored bit. G1: "strip order means something" didn't
-/// land; this candidate says what the bit actually changes.
-const STRIP_ORDER_LABEL: &str = "1D patterns follow the wire";
-const STRIP_ORDER_TITLE: &str = "Yes: 1D effects run along the wire order (a strip worn in a shape). No: the map is the real \
-     layout and wire order is plumbing.";
 
 /// Variant vocabulary, keyed by role where one variant name reads
 /// differently per cell.
@@ -167,7 +161,6 @@ pub fn SpaceSection(
 ) -> Element {
     let side = section.side;
     let mismatched = section.mismatch.is_some();
-    let flags = section.flags.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
@@ -202,9 +195,6 @@ pub fn SpaceSection(
                     picker_initially_open: picker_open_cell == Some(cell.role),
                     on_action,
                 }
-            }
-            for flag in flags {
-                SpaceFlagRow { key: "{flag.role:?}", flag, on_action }
             }
             if let Some(ladder) = ladder_line(&section) {
                 p { class: LADDER_CLASS, "{ladder}" }
@@ -766,67 +756,6 @@ fn angular_sectors() -> Vec<(String, f32)> {
         .collect()
 }
 
-/// A boolean the section owns, as its own row (`strip order means
-/// something` — vision D3's authored bit).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceFlagRow(
-    flag: UiSpaceFlag,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    let title = flag_title(flag.role);
-    rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-            SpaceFlagCheckbox { flag, title, on_action }
-        }
-    }
-}
-
-/// The flag itself: a squared checkbox plus its label, dispatching the
-/// ordinary `SetValue` a bool row dispatches.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceFlagCheckbox(
-    flag: UiSpaceFlag,
-    title: &'static str,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    let label = flag_label(flag.role);
-    let value = flag.value;
-    let Some((address, handler)) = field_wiring(&flag.state, &flag.address, on_action) else {
-        return rsx! {
-            span { class: "tw:inline-flex tw:items-center tw:gap-1.5 tw:text-[11px] tw:text-dim-foreground",
-                title,
-                span { class: checkbox_box_class(value), aria_hidden: "true",
-                    if value {
-                        StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                    }
-                }
-                "{label}"
-            }
-        };
-    };
-
-    rsx! {
-        button {
-            class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-[11px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
-            r#type: "button",
-            title,
-            aria_pressed: "{value}",
-            onclick: move |event| {
-                event.stop_propagation();
-                handler.call(slot_set_value_action(address.clone(), LpValue::Bool(!value)));
-            },
-            span { class: checkbox_box_class(value), aria_hidden: "true",
-                if value {
-                    StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                }
-            }
-            "{label}"
-        }
-    }
-}
-
 /// D1 made visible on the card instead of buried in a compile log: the two
 /// sides named, and where to fix it.
 #[component]
@@ -961,18 +890,6 @@ fn cell_label(side: UiSpaceSide, role: UiSpaceCellRole) -> &'static str {
         (_, UiSpaceCellRole::ProducerIn1d) => PRODUCER_IN_1D_LABEL,
         // The consumer's primary IS the one dropdown (P4b).
         (_, UiSpaceCellRole::Primary) => CONSUMER_PRIMARY_LABEL,
-    }
-}
-
-fn flag_label(role: UiSpaceFlagRole) -> &'static str {
-    match role {
-        UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_LABEL,
-    }
-}
-
-fn flag_title(role: UiSpaceFlagRole) -> &'static str {
-    match role {
-        UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_TITLE,
     }
 }
 
@@ -1178,16 +1095,6 @@ fn tile_class(selected: bool) -> &'static str {
     }
 }
 
-/// The squared checkbox box (no preflight: a `<button>`'s box is drawn
-/// here or not at all).
-fn checkbox_box_class(value: bool) -> &'static str {
-    if value {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:text-strong-foreground"
-    } else {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{UiSlotFieldState, UiVisualProductSpace};
@@ -1229,7 +1136,6 @@ mod tests {
                 UiVisualSpace::TwoD
             }),
             cells,
-            flags: Vec::new(),
             mismatch: None,
         }
     }
@@ -1245,7 +1151,6 @@ mod tests {
             ),
             declared_space: None,
             cells: Vec::new(),
-            flags: Vec::new(),
             mismatch: None,
         }
     }
