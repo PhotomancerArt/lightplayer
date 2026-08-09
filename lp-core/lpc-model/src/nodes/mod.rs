@@ -7,6 +7,7 @@ pub mod node_def;
 pub mod output;
 pub mod pattern_project;
 pub mod playlist;
+pub mod projection_direction;
 pub mod provenance_def;
 pub mod radio;
 pub mod shader;
@@ -42,6 +43,7 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
+pub use projection_direction::ProjectionDirection;
 pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{

@@ -285,7 +285,51 @@
                               {
                                 "name": "Extrude",
                                 "shape": {
-                                  "unit": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Right",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Left",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Down",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Up",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
                                     "meta": {}
                                   }
                                 }
@@ -309,7 +353,51 @@
                               {
                                 "name": "Mirror",
                                 "shape": {
-                                  "unit": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Right",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Left",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Down",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Up",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
                                     "meta": {}
                                   }
                                 }

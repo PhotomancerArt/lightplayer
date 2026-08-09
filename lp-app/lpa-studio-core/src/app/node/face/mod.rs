@@ -52,6 +52,6 @@ pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;
 pub use ui_shader_face::UiShaderFace;
 pub use ui_space_section::{
-    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch,
-    UiSpaceSection, UiSpaceSide,
+    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole,
+    UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
 };

@@ -35,8 +35,8 @@ pub use probe::{
     RenderProductProbeResult, RenderProductProbeResultHeader, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
     WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
-    WireScopeRef, WireVisualSpace,
+    WireEffectiveBinding, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
+    WireProjectionDirection, WireProjectionOrigin, WireScopeRef, WireVisualSpace,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

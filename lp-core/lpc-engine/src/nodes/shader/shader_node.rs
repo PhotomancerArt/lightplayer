@@ -1142,10 +1142,27 @@ fn space_answer_2_for(space: &lpc_model::ShaderSpace) -> Option<CellProjection> 
 fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjection> {
     match answer {
         lpc_model::SpaceAnswer2::Default => None,
-        lpc_model::SpaceAnswer2::Extrude => Some(CellProjection::Extrude),
+        lpc_model::SpaceAnswer2::Extrude { direction } => Some(CellProjection::Extrude(
+            runtime_projection_direction(*direction.value()),
+        )),
         lpc_model::SpaceAnswer2::Radial => Some(CellProjection::Radial),
         lpc_model::SpaceAnswer2::Angular => Some(CellProjection::Angular),
-        lpc_model::SpaceAnswer2::Mirror => Some(CellProjection::Mirror),
+        lpc_model::SpaceAnswer2::Mirror { direction } => Some(CellProjection::Mirror(
+            runtime_projection_direction(*direction.value()),
+        )),
+    }
+}
+
+/// The runtime twin of an authored [`lpc_model::ProjectionDirection`].
+fn runtime_projection_direction(
+    direction: lpc_model::ProjectionDirection,
+) -> crate::products::visual::ProjectionDirection {
+    use crate::products::visual::ProjectionDirection as Runtime;
+    match direction {
+        lpc_model::ProjectionDirection::Right => Runtime::Right,
+        lpc_model::ProjectionDirection::Left => Runtime::Left,
+        lpc_model::ProjectionDirection::Down => Runtime::Down,
+        lpc_model::ProjectionDirection::Up => Runtime::Up,
     }
 }
 
@@ -1155,23 +1172,60 @@ fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjectio
 /// subtree is absent) and leaves the loaded answer standing; the inner
 /// `None` is the authored `Default`.
 fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<CellProjection>> {
-    let production = ctx
-        .resolve(&QueryKey::ConsumedSlot {
-            node: ctx.node_id(),
-            slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
-        })
-        .ok()?;
-    let lpc_model::SlotData::Enum(answer) = production.data() else {
-        return None;
+    // The variant name is copied out before the direction read: the
+    // resolved production borrows the context the direction read needs.
+    let variant = {
+        let production = ctx
+            .resolve(&QueryKey::ConsumedSlot {
+                node: ctx.node_id(),
+                slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
+            })
+            .ok()?;
+        let lpc_model::SlotData::Enum(answer) = production.data() else {
+            return None;
+        };
+        alloc::string::String::from(answer.variant.as_str())
     };
-    Some(match answer.variant.as_str() {
+    Some(match variant.as_str() {
         "Default" => None,
-        "Extrude" => Some(CellProjection::Extrude),
+        "Extrude" => Some(CellProjection::Extrude(try_read_authored_direction(
+            ctx,
+            "space.OneD.in_2d.Extrude.direction",
+        ))),
         "Radial" => Some(CellProjection::Radial),
         "Angular" => Some(CellProjection::Angular),
-        "Mirror" => Some(CellProjection::Mirror),
+        "Mirror" => Some(CellProjection::Mirror(try_read_authored_direction(
+            ctx,
+            "space.OneD.in_2d.Mirror.direction",
+        ))),
         _ => return None,
     })
+}
+
+/// The authored direction payload of a directional answer cell. A path
+/// that does not resolve (or is not an enum) reads as the default `Right`
+/// — the additive contract: a bare pre-directional `Extrude` means what
+/// it always meant.
+fn try_read_authored_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::ProjectionDirection {
+    use crate::products::visual::ProjectionDirection as Runtime;
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return Runtime::Right;
+    };
+    let lpc_model::SlotData::Enum(direction) = production.data() else {
+        return Runtime::Right;
+    };
+    match direction.variant.as_str() {
+        "Left" => Runtime::Left,
+        "Down" => Runtime::Down,
+        "Up" => Runtime::Up,
+        _ => Runtime::Right,
+    }
 }
 
 /// The authored `space` declaration's variant, read through the same

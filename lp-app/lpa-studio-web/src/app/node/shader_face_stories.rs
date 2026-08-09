@@ -296,35 +296,23 @@ fn space_in_definition_variant() -> Element {
     }
 }
 
-/// G1b decision-matrix: the candidate 1D→2D option set.
+/// G1b ruling 4's two-section design, in the flesh: shape, then
+/// direction. (The old `space_projection_candidates` story — the Y-twin
+/// drawings with no model behind them — retired with the ruling: the
+/// directional vocabulary is real now.)
 #[story(
-    description = "G1b CANDIDATE TILES — G1 asked whether the option set wants extrude / mirror split per axis ('maybe that's too many?'). This grid renders the candidate vocabulary as drawings only — extrude and mirror in both axes plus radial and the conic angular — with NO model variants behind the Y twins yet. If the set is ratified, `SpaceAnswer2`/`ConsumerCell2` grow variants; if trimmed, this story shrinks back."
+    description = "The direction row — RULING 4's two-section design (2026-08-09): the top section is the general SHAPE (the picker keeps its four tiles plus the default), and when the active shape is directional a `direction` row appears under the projection field — a 4-way segmented control (→ ← ↓ ↑) in the same squared-blocks discrete language as the 2D|1D tabs. Here: mirror ↓ — the strip folds along the rows; the field face, the glyph, and the collapsed summary all wear the arrow. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>`, the generic enum-row gesture at the flattened payload row's real address. Radial/angular show no row."
 )]
-fn space_projection_candidates() -> Element {
-    use lpa_studio_core::{UiSpaceChoice, UiSpaceSide};
-    let choices = [
-        ("Default", "extrude · default"),
-        ("ExtrudeY", "extrude ↓"),
-        ("Mirror", "mirror"),
-        ("MirrorY", "mirror ↓"),
-        ("Radial", "radial"),
-        ("Angular", "angular"),
-    ]
-    .into_iter()
-    .map(|(variant, label)| UiSpaceChoice {
-        variant: variant.to_string(),
-        label: label.to_string(),
-        projection: None,
-        selected: variant == "Default",
-    })
-    .collect::<Vec<_>>();
+fn space_direction_row() -> Element {
+    let mut face = shader_face_one_d("Mirror");
+    face.space = Some(
+        crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
+            "Mirror", "Down",
+        ),
+    );
     rsx! {
-        div { class: "tw:w-full tw:max-w-xs tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong tw:bg-card",
-            crate::app::node::ProjectionTileGrid {
-                choices,
-                side: UiSpaceSide::Producer,
-                role: UiSpaceCellRole::ProducerIn2d,
-            }
+        ShaderCardCanvas {
+            ShaderBodyCard { face, space_open: true }
         }
     }
 }
@@ -375,7 +363,10 @@ fn preview_space_origins() -> Element {
             {
                 div { key: "{key}", class: "tw:w-full tw:max-w-md",
                     ShaderFace {
-                        face: shader_face_stacked_preview(UiCellProjection::Extrude, origin),
+                        face: shader_face_stacked_preview(
+                            UiCellProjection::Extrude(lpa_studio_core::UiProjectionDirection::Right),
+                            origin,
+                        ),
                         node: "/fyeah_sign.show/comet.shader".to_string(),
                         on_action: move |_| {},
                     }

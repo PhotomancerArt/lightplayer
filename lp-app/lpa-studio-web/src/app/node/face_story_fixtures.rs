@@ -597,6 +597,7 @@ fn space_cell(
             .collect(),
         address: Some(story_slot_address(path)),
         state: UiSlotFieldState::editable(),
+        direction: None,
     }
 }
 
@@ -661,7 +662,9 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
     (
         "Extrude",
         "extrude",
-        Some(lpa_studio_core::UiCellProjection::Extrude),
+        Some(lpa_studio_core::UiCellProjection::Extrude(
+            lpa_studio_core::UiProjectionDirection::Right,
+        )),
     ),
     (
         "Radial",
@@ -676,7 +679,9 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
     (
         "Mirror",
         "mirror",
-        Some(lpa_studio_core::UiCellProjection::Mirror),
+        Some(lpa_studio_core::UiCellProjection::Mirror(
+            lpa_studio_core::UiProjectionDirection::Right,
+        )),
     ),
 ];
 
@@ -687,7 +692,9 @@ const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellPr
     (
         "Extrude",
         "extrude",
-        Some(lpa_studio_core::UiCellProjection::Extrude),
+        Some(lpa_studio_core::UiCellProjection::Extrude(
+            lpa_studio_core::UiProjectionDirection::Right,
+        )),
     ),
     (
         "Radial",
@@ -702,7 +709,9 @@ const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellPr
     (
         "Mirror",
         "mirror",
-        Some(lpa_studio_core::UiCellProjection::Mirror),
+        Some(lpa_studio_core::UiCellProjection::Mirror(
+            lpa_studio_core::UiProjectionDirection::Right,
+        )),
     ),
 ];
 
@@ -731,6 +740,28 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
         flags: Vec::new(),
         mismatch: None,
     }
+}
+
+/// A 1D producer with a DIRECTIONAL answer (G1b ruling 4): the same
+/// section as [`shader_space_section_one_d`], with the active shape's
+/// `direction` row attached — the flattened payload row a real tree would
+/// carry (`space.OneD.in_2d.<Shape>.direction`), addressed so the story's
+/// segmented control is live.
+pub(crate) fn shader_space_section_one_d_directed(
+    answer: &str,
+    direction: &str,
+) -> lpa_studio_core::UiSpaceSection {
+    let mut section = shader_space_section_one_d(answer);
+    if let Some(cell) = section.cells.first_mut() {
+        cell.direction = Some(lpa_studio_core::UiSpaceDirection {
+            active: direction.to_string(),
+            address: Some(story_slot_address(&format!(
+                "space.OneD.in_2d.{answer}.direction"
+            ))),
+            state: UiSlotFieldState::editable(),
+        });
+    }
+    section
 }
 
 /// D1: the slot says 1D and the GLSL defines the 2D entry. The compiler

@@ -91,9 +91,9 @@ pub fn NodeCardDrawers(
     // open by a D1 mismatch (an error folded away is an error hidden) or an
     // open tile picker (a popover anchored inside a closed lid is nothing).
     let space_summary = space.as_ref().map(space_section_summary);
-    let space_forced = space.as_ref().is_some_and(|section| {
-        section.mismatch.is_some() || space_picker_open_cell.is_some()
-    });
+    let space_forced = space
+        .as_ref()
+        .is_some_and(|section| section.mismatch.is_some() || space_picker_open_cell.is_some());
     let space_effective_open = space_open || space_forced;
 
     rsx! {

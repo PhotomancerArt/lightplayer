@@ -43,8 +43,8 @@ pub use face::{
     UiOutputPin, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit,
     UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading,
     UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiTimebaseState,
-    UiWireStatus, phasor_rate_display,
+    UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
+    UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
@@ -59,8 +59,8 @@ pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
     UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat,
     UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductSpaceView, UiProductTrackingState, UiProjectionOrigin, UiVisualProductSpace,
-    UiVisualSpace,
+    UiProductSpaceView, UiProductTrackingState, UiProjectionDirection, UiProjectionOrigin,
+    UiVisualProductSpace, UiVisualSpace,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_shader_uniform::UiShaderUniform;

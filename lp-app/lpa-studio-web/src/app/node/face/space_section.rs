@@ -31,9 +31,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiNodeFace, UiProjectionOrigin,
-    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch,
-    UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiNodeFace, UiProjectionDirection,
+    UiProjectionOrigin, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceFlag,
+    UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_value_action};
@@ -82,6 +82,20 @@ const PROJECTION_MIRROR: &str = "mirror";
 const PROJECTION_CENTRE_SCANLINE: &str = "centre scanline";
 /// The consumer dropdown's default entry.
 const CONSUMER_FOLLOW: &str = "follow the source";
+
+/// The direction row under a directional shape (G1b ruling 4: "top
+/// section is general shape, below that is direction").
+const DIRECTION_ROW_LABEL: &str = "direction";
+
+/// What one direction segment's tooltip says.
+fn direction_title(direction: UiProjectionDirection) -> &'static str {
+    match direction {
+        UiProjectionDirection::Right => "left → right",
+        UiProjectionDirection::Left => "right → left",
+        UiProjectionDirection::Down => "top → bottom",
+        UiProjectionDirection::Up => "bottom → top",
+    }
+}
 
 /// One line per choice in the picker's tiles.
 const HINT_DEFAULT_EXTRUDE: &str = "the standard projection, unless a fixture overrides";
@@ -251,6 +265,10 @@ fn SpaceSegments(
 /// One answer cell: its label and the projection field (picker or
 /// statement). The consumer's old inline `force` bit is gone (P4b): an
 /// explicit pick IS the override, dispatched as part of the choice.
+///
+/// When the ACTIVE shape is directional the `direction` row renders
+/// beneath the field (G1b ruling 4's second section) — shape first,
+/// direction under it, never a flattened 8-tile grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceCellRow(
@@ -259,6 +277,7 @@ fn SpaceCellRow(
     #[props(default = false)] picker_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let direction = cell.direction.clone();
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
             span { class: ROW_LABEL_CLASS, "{cell_label(side, cell.role)}" }
@@ -267,6 +286,61 @@ fn SpaceCellRow(
                 side,
                 initially_open: picker_initially_open,
                 on_action,
+            }
+        }
+        if let Some(direction) = direction {
+            SpaceDirectionRow { direction, on_action }
+        }
+    }
+}
+
+/// The direction row (G1b ruling 4): a 4-way segmented control drawing
+/// the arrows, in the same squared-blocks discrete language as the 2D|1D
+/// tabs. A pick dispatches the generic enum-row gesture — `EnsurePresent`
+/// at `<direction row>.<D>` — so the row stays a presentation of the same
+/// write path.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SpaceDirectionRow(
+    direction: UiSpaceDirection,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let active = UiProjectionDirection::from_variant(&direction.active);
+    let wiring = field_wiring(&direction.state, &direction.address, on_action);
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
+            span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
+            span { class: DIRECTION_GROUP_CLASS,
+                for candidate in UiProjectionDirection::ALL {
+                    if let Some((address, handler)) = wiring.clone() {
+                        button {
+                            key: "{candidate.variant()}",
+                            class: direction_segment_class(candidate == active),
+                            r#type: "button",
+                            title: direction_title(candidate),
+                            onclick: {
+                                let selected = candidate == active;
+                                move |event: MouseEvent| {
+                                    event.stop_propagation();
+                                    if selected {
+                                        return;
+                                    }
+                                    if let Some(target) = address.child_field(candidate.variant()) {
+                                        handler.call(slot_ensure_present_action(target));
+                                    }
+                                }
+                            },
+                            "{candidate.arrow()}"
+                        }
+                    } else {
+                        span {
+                            key: "{candidate.variant()}",
+                            class: direction_segment_class(candidate == active),
+                            title: direction_title(candidate),
+                            "{candidate.arrow()}"
+                        }
+                    }
+                }
             }
         }
     }
@@ -322,7 +396,14 @@ fn ProjectionField(
     #[props(default = false)] initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let active_label = active_variant_label(side, &cell);
+    // The face wears the direction arrow beside the shape name (the
+    // direction row beneath spells it out; the closed field should not
+    // hide it).
+    let active_label = format!(
+        "{}{}",
+        active_variant_label(side, &cell),
+        directional_suffix(&cell)
+    );
     let reachable = cell.is_choosable() && on_action.is_some();
     if !reachable {
         let kind = active_glyph(&cell);
@@ -391,9 +472,9 @@ fn projection_field_face(cell: &UiSpaceCell, active_label: &str) -> Element {
     }
 }
 
-/// The glyph for a cell's active choice.
+/// The glyph for a cell's active choice, rotated to its active direction.
 fn active_glyph(cell: &UiSpaceCell) -> SpaceGlyph {
-    glyph_for(cell.role, &cell.active)
+    glyph_for_direction(cell.role, &cell.active, active_direction(cell))
 }
 
 /// The picker's content: one tile per declared variant, each drawing what
@@ -456,43 +537,60 @@ pub fn ProjectionTileGrid(
 /// What a tile or field glyph draws. Web-side vocabulary, deliberately
 /// wider than [`UiCellProjection`]: the DTO says what a choice FORCES in a
 /// probe; this says what the drawing shows — which lets the producer's
-/// `Default` wear the extrude it resolves to, the 2D→1D statement draw its
-/// centre scanline, and the G1b candidate tiles (`ExtrudeY`/`MirrorY`)
-/// exist as drawings before any model variant does.
+/// `Default` wear the extrude it resolves to and the 2D→1D statement draw
+/// its centre scanline. The directional shapes carry their direction
+/// (G1b ruling 4 retired the story-only `ExtrudeY`/`MirrorY` stand-ins in
+/// favor of this real vocabulary): the ramp drawing rotates with it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SpaceGlyph {
-    Extrude,
+    Extrude(UiProjectionDirection),
     Radial,
     Angular,
-    Mirror,
-    /// G1b candidates — drawings only, no model variant behind them yet.
-    ExtrudeY,
-    MirrorY,
+    Mirror(UiProjectionDirection),
     /// The 2D→1D answer: the texture's centre row, read as a strip.
     CentreScanline,
     /// The consumer dropdown's `Auto`: the answer lives on the source.
     FollowSource,
 }
 
-/// The drawing for one choice, by role and RAW variant name.
+/// The drawing for one choice, by role and RAW variant name — the picker's
+/// SHAPE tiles, which always wear the default `Right` (the picker stays a
+/// 4-shape grid; the direction row under the field refines direction).
 fn glyph_for(role: UiSpaceCellRole, variant: &str) -> SpaceGlyph {
+    glyph_for_direction(role, variant, UiProjectionDirection::Right)
+}
+
+/// The drawing for one choice with an explicit direction — the FIELD's
+/// active glyph rotates with the authored direction.
+fn glyph_for_direction(
+    role: UiSpaceCellRole,
+    variant: &str,
+    direction: UiProjectionDirection,
+) -> SpaceGlyph {
     match variant {
-        "Extrude" => SpaceGlyph::Extrude,
+        "Extrude" => SpaceGlyph::Extrude(direction),
         "Radial" => SpaceGlyph::Radial,
         "Angular" => SpaceGlyph::Angular,
-        "Mirror" => SpaceGlyph::Mirror,
-        "ExtrudeY" => SpaceGlyph::ExtrudeY,
-        "MirrorY" => SpaceGlyph::MirrorY,
+        "Mirror" => SpaceGlyph::Mirror(direction),
         "Auto" => SpaceGlyph::FollowSource,
         "Default" => match role {
             // A 2D shader's 1D answer IS the centre scanline.
             UiSpaceCellRole::ProducerIn1d => SpaceGlyph::CentreScanline,
             // A 1D shader's silent 2D answer resolves to extrude in every
             // UI-reachable state (see PROJECTION_DEFAULT_EXTRUDE).
-            _ => SpaceGlyph::Extrude,
+            _ => SpaceGlyph::Extrude(UiProjectionDirection::Right),
         },
         _ => SpaceGlyph::FollowSource,
     }
+}
+
+/// A cell's ACTIVE direction: the direction row's active variant, or the
+/// default `Right` when the cell carries none.
+fn active_direction(cell: &UiSpaceCell) -> UiProjectionDirection {
+    cell.direction
+        .as_ref()
+        .map(|direction| UiProjectionDirection::from_variant(&direction.active))
+        .unwrap_or_default()
 }
 
 /// A schematic drawing of what one choice does to a 1D source.
@@ -513,55 +611,40 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
             preserve_aspect_ratio: "none",
             role: "img",
             match kind {
-                SpaceGlyph::Extrude => rsx! {
-                    for (index , opacity) in RAMP.iter().copied().enumerate() {
+                // The directional pair: the ramp's bands run along the
+                // direction — `Right` is the original left→right drawing,
+                // the other three are the same ramp re-laid (G1b ruling 4
+                // retired the story-only Y-twin drawings for this).
+                SpaceGlyph::Extrude(direction) => rsx! {
+                    for (index , (x , y , width , height , opacity)) in ramp_bands(&RAMP, direction)
+                        .into_iter()
+                        .enumerate()
+                    {
                         rect {
                             key: "{index}",
-                            x: "{index * 8}",
-                            y: "0",
-                            width: "8",
-                            height: "40",
+                            x: "{x}",
+                            y: "{y}",
+                            width: "{width}",
+                            height: "{height}",
                             fill: "currentColor",
                             fill_opacity: "{opacity}",
                         }
                     }
                 },
-                SpaceGlyph::Mirror => rsx! {
-                    for (index , opacity) in MIRROR_RAMP.iter().copied().enumerate() {
+                SpaceGlyph::Mirror(direction) => rsx! {
+                    for (index , (x , y , width , height , opacity)) in ramp_bands(
+                            &MIRROR_RAMP,
+                            direction,
+                        )
+                        .into_iter()
+                        .enumerate()
+                    {
                         rect {
                             key: "{index}",
-                            x: "{index * 8}",
-                            y: "0",
-                            width: "8",
-                            height: "40",
-                            fill: "currentColor",
-                            fill_opacity: "{opacity}",
-                        }
-                    }
-                },
-                // The Y twins: the same ramp run down the rows instead of
-                // across the columns.
-                SpaceGlyph::ExtrudeY => rsx! {
-                    for (index , opacity) in RAMP.iter().copied().enumerate() {
-                        rect {
-                            key: "{index}",
-                            x: "0",
-                            y: "{index * 5}",
-                            width: "64",
-                            height: "5",
-                            fill: "currentColor",
-                            fill_opacity: "{opacity}",
-                        }
-                    }
-                },
-                SpaceGlyph::MirrorY => rsx! {
-                    for (index , opacity) in MIRROR_RAMP.iter().copied().enumerate() {
-                        rect {
-                            key: "{index}",
-                            x: "0",
-                            y: "{index * 5}",
-                            width: "64",
-                            height: "5",
+                            x: "{x}",
+                            y: "{y}",
+                            width: "{width}",
+                            height: "{height}",
                             fill: "currentColor",
                             fill_opacity: "{opacity}",
                         }
@@ -640,6 +723,23 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
 const RAMP: [f32; 8] = [0.14, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84, 0.96];
 /// The same ramp folded at the centre — what `mirror` does.
 const MIRROR_RAMP: [f32; 8] = [0.14, 0.36, 0.6, 0.96, 0.96, 0.6, 0.36, 0.14];
+
+/// The eight ramp bands laid along a direction, as `(x, y, width, height,
+/// opacity)` rects in the glyph's 64×40 box: `Right` is the original
+/// left→right columns, `Left` reverses them, `Down`/`Up` run the rows.
+fn ramp_bands(ramp: &[f32; 8], direction: UiProjectionDirection) -> Vec<(u32, u32, u32, u32, f32)> {
+    (0..8u32)
+        .map(|index| {
+            let opacity = ramp[index as usize];
+            match direction {
+                UiProjectionDirection::Right => (index * 8, 0, 8, 40, opacity),
+                UiProjectionDirection::Left => ((7 - index) * 8, 0, 8, 40, opacity),
+                UiProjectionDirection::Down => (0, index * 5, 64, 5, opacity),
+                UiProjectionDirection::Up => (0, (7 - index) * 5, 64, 5, opacity),
+            }
+        })
+        .collect()
+}
 /// Concentric rings, outermost first so the inner ones paint over.
 const RADIAL_RINGS: [(u32, f32); 4] = [(26, 0.18), (19, 0.38), (12, 0.62), (5, 0.95)];
 
@@ -781,12 +881,37 @@ pub(crate) fn visual_space_label(space: UiVisualSpace) -> &'static str {
     }
 }
 
-fn projection_label(projection: UiCellProjection) -> &'static str {
+/// A projection's caption: the shape name, plus the direction arrow when
+/// a directional shape runs anywhere but the default `Right` (`mirror ↓`
+/// — G1b ruling 4's caption form; `Right` stays bare because it IS the
+/// pre-directional behavior and the captions around it predate arrows).
+fn projection_label(projection: UiCellProjection) -> String {
     match projection {
-        UiCellProjection::Extrude => PROJECTION_EXTRUDE,
-        UiCellProjection::Radial => PROJECTION_RADIAL,
-        UiCellProjection::Angular => PROJECTION_ANGULAR,
-        UiCellProjection::Mirror => PROJECTION_MIRROR,
+        UiCellProjection::Extrude(direction) => directional_label(PROJECTION_EXTRUDE, direction),
+        UiCellProjection::Radial => PROJECTION_RADIAL.to_string(),
+        UiCellProjection::Angular => PROJECTION_ANGULAR.to_string(),
+        UiCellProjection::Mirror(direction) => directional_label(PROJECTION_MIRROR, direction),
+    }
+}
+
+/// `shape` or `shape ←` per the caption rule above.
+fn directional_label(shape: &str, direction: UiProjectionDirection) -> String {
+    if direction == UiProjectionDirection::Right {
+        shape.to_string()
+    } else {
+        format!("{shape} {}", direction.arrow())
+    }
+}
+
+/// The ` ↓` a cell's field face and drawer summary append when its active
+/// shape runs anywhere but `Right` — empty otherwise, so the default keeps
+/// reading exactly as it did before directions existed.
+fn directional_suffix(cell: &UiSpaceCell) -> String {
+    let direction = active_direction(cell);
+    if cell.direction.is_some() && direction != UiProjectionDirection::Right {
+        format!(" {}", direction.arrow())
+    } else {
+        String::new()
     }
 }
 
@@ -819,7 +944,7 @@ pub(crate) fn preview_space_caption(
         Some(projection) => projection_label(projection),
         // A 2D producer filling a 1D request has no 1D→2D cell to name;
         // the centre scanline is the only answer there is.
-        None => PROJECTION_CENTRE_SCANLINE,
+        None => PROJECTION_CENTRE_SCANLINE.to_string(),
     };
     match meta.origin {
         Some(origin) => format!(
@@ -950,8 +1075,9 @@ pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
                 .unwrap_or_default();
             if let Some(cell) = section.cell(UiSpaceCellRole::ProducerIn2d) {
                 format!(
-                    "{space} · in 2D: {}",
-                    active_variant_label(section.side, cell)
+                    "{space} · in 2D: {}{}",
+                    active_variant_label(section.side, cell),
+                    directional_suffix(cell)
                 )
             } else if section.cell(UiSpaceCellRole::ProducerIn1d).is_some() {
                 format!("{space} · in 1D: {PROJECTION_CENTRE_SCANLINE}")
@@ -964,8 +1090,9 @@ pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
                 CONSUMER_FOLLOW.to_string()
             } else {
                 format!(
-                    "1D sources: {} (override)",
-                    active_variant_label(section.side, &section.primary)
+                    "1D sources: {}{} (override)",
+                    active_variant_label(section.side, &section.primary),
+                    directional_suffix(&section.primary)
                 )
             }
         }
@@ -1026,6 +1153,22 @@ fn segment_class(selected: bool) -> &'static str {
     }
 }
 
+/// The direction segmented control's frame — the squared-blocks discrete
+/// language, compact (four fixed squares, not a full-width tab row).
+const DIRECTION_GROUP_CLASS: &str =
+    "tw:inline-flex tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle";
+
+/// One segment of the direction control: pressed reads as filled, the
+/// rest as quiet arrows (the same language as [`segment_class`], sized to
+/// its glyph).
+fn direction_segment_class(selected: bool) -> &'static str {
+    if selected {
+        "tw:inline-flex tw:h-7 tw:w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-card-muted tw:text-xs tw:font-bold tw:text-strong-foreground"
+    } else {
+        "tw:inline-flex tw:h-7 tw:w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-transparent tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
+    }
+}
+
 /// One tile of the picker grid.
 fn tile_class(selected: bool) -> &'static str {
     if selected {
@@ -1072,6 +1215,7 @@ mod tests {
                 .collect(),
             address: None,
             state: UiSlotFieldState::editable(),
+            direction: None,
         }
     }
 
@@ -1137,7 +1281,7 @@ mod tests {
     fn glyphs_follow_the_same_honesty_rules_as_labels() {
         assert_eq!(
             glyph_for(UiSpaceCellRole::ProducerIn2d, "Default"),
-            SpaceGlyph::Extrude
+            SpaceGlyph::Extrude(UiProjectionDirection::Right)
         );
         assert_eq!(
             glyph_for(UiSpaceCellRole::ProducerIn1d, "Default"),
@@ -1149,7 +1293,66 @@ mod tests {
         );
         assert_eq!(
             glyph_for(UiSpaceCellRole::Primary, "Mirror"),
-            SpaceGlyph::Mirror
+            SpaceGlyph::Mirror(UiProjectionDirection::Right)
+        );
+    }
+
+    /// G1b ruling 4's caption rule: a directional shape at the default
+    /// `Right` reads bare (it IS the pre-directional behavior); anywhere
+    /// else it wears the arrow — `mirror ↓`, `extrude ←`.
+    #[test]
+    fn directional_captions_wear_the_arrow_except_at_right() {
+        assert_eq!(
+            projection_label(UiCellProjection::Extrude(UiProjectionDirection::Right)),
+            "extrude"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection::Extrude(UiProjectionDirection::Left)),
+            "extrude ←"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection::Mirror(UiProjectionDirection::Down)),
+            "mirror ↓"
+        );
+        assert_eq!(projection_label(UiCellProjection::Radial), "radial");
+    }
+
+    /// The drawer summary and the active glyph follow the direction row:
+    /// `1D · in 2D: mirror ↓`, glyph rotated to match; a `Right` row adds
+    /// nothing.
+    #[test]
+    fn summaries_and_glyphs_follow_the_active_direction() {
+        let directed = |active: &str| lpa_studio_core::UiSpaceDirection {
+            active: active.to_string(),
+            address: None,
+            state: UiSlotFieldState::editable(),
+        };
+        let mut answer = cell(
+            UiSpaceCellRole::ProducerIn2d,
+            "Mirror",
+            &["Default", "Extrude", "Radial", "Angular", "Mirror"],
+        );
+        answer.direction = Some(directed("Down"));
+        assert_eq!(
+            active_glyph(&answer),
+            SpaceGlyph::Mirror(UiProjectionDirection::Down)
+        );
+        let shader = producer("OneD", vec![answer.clone()]);
+        assert_eq!(space_section_summary(&shader), "1D · in 2D: mirror ↓");
+
+        answer.direction = Some(directed("Right"));
+        let shader = producer("OneD", vec![answer]);
+        assert_eq!(
+            space_section_summary(&shader),
+            "1D · in 2D: mirror",
+            "the default direction keeps the pre-directional reading"
+        );
+
+        let mut fixture = consumer("Extrude");
+        fixture.primary.direction = Some(directed("Left"));
+        assert_eq!(
+            space_section_summary(&fixture),
+            "1D sources: extrude ← (override)"
         );
     }
 
@@ -1297,7 +1500,7 @@ mod tests {
 
         let filled = UiVisualProductSpace {
             origin: Some(UiProjectionOrigin::ConsumerDefault),
-            projection: Some(UiCellProjection::Extrude),
+            projection: Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
             ..declared
         };
         assert_eq!(

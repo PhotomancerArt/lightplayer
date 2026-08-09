@@ -104,6 +104,33 @@ pub struct UiSpaceCell {
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,
+    /// The ACTIVE shape's direction row, when the active shape is
+    /// directional (extrude/mirror — G1b ruling 4's second section:
+    /// "top section is general shape, below that is direction"). Derived
+    /// from the flattened payload row (`…in_2d.Extrude.direction` /
+    /// `…from_1d.Mirror.direction`), so it carries a REAL address; absent
+    /// for radial/angular, for the deferring choices, and while a
+    /// consumer is still in `Auto` (no payload rows in the tree yet —
+    /// the row appears once a directional shape is picked).
+    pub direction: Option<UiSpaceDirection>,
+}
+
+/// The direction row under a directional projection cell (G1b ruling 4):
+/// a 4-way choice over the shared `ProjectionDirection` vocabulary.
+///
+/// The four variants are static (`Right`/`Left`/`Down`/`Up` — one enum,
+/// no per-shape extras), so this carries only the ACTIVE ident plus the
+/// flattened direction row's address: a pick dispatches `EnsurePresent`
+/// at `address.child_field(<D>)`, the generic enum-row gesture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiSpaceDirection {
+    /// Active `ProjectionDirection` variant ident (`Right`…`Up`).
+    pub active: String,
+    /// The flattened direction enum row's address
+    /// (`<cell>.<Shape>.direction`). `None` renders inert.
+    pub address: Option<ProjectSlotAddress>,
+    /// The backing row's interaction/validation state.
+    pub state: UiSlotFieldState,
 }
 
 impl UiSpaceCell {
@@ -212,6 +239,7 @@ mod tests {
                 .collect(),
             address: None,
             state: UiSlotFieldState::editable(),
+            direction: None,
         }
     }
 
@@ -225,7 +253,9 @@ mod tests {
         single.choices.push(UiSpaceChoice {
             variant: "Extrude".to_string(),
             label: "extrude".to_string(),
-            projection: Some(UiCellProjection::Extrude),
+            projection: Some(UiCellProjection::Extrude(
+                crate::UiProjectionDirection::Right,
+            )),
             selected: false,
         });
         assert!(

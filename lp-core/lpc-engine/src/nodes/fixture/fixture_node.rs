@@ -684,8 +684,14 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
             {
                 "Radial" => CellProjection::Radial,
                 "Angular" => CellProjection::Angular,
-                "Mirror" => CellProjection::Mirror,
-                _ => CellProjection::Extrude,
+                "Mirror" => CellProjection::Mirror(try_read_def_direction(
+                    ctx,
+                    "consume.Policy.from_1d.Mirror.direction",
+                )),
+                _ => CellProjection::Extrude(try_read_def_direction(
+                    ctx,
+                    "consume.Policy.from_1d.Extrude.direction",
+                )),
             };
             let force = try_read_def_value::<bool>(ctx, "consume.Policy.force")
                 .ok()
@@ -697,6 +703,23 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
             })
         }
         _ => None,
+    }
+}
+
+/// The authored direction payload of a directional `from_1d` cell. A path
+/// that does not resolve reads as the default `Right` — the additive
+/// contract: a bare pre-directional `Extrude`/`Mirror` means what it
+/// always meant.
+fn try_read_def_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::ProjectionDirection {
+    use crate::products::visual::ProjectionDirection;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("Left") => ProjectionDirection::Left,
+        Some("Down") => ProjectionDirection::Down,
+        Some("Up") => ProjectionDirection::Up,
+        _ => ProjectionDirection::Right,
     }
 }
 
@@ -4230,7 +4253,7 @@ mod space_negotiation {
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
     use crate::products::visual::{
-        ProductSpaceInfo, VisualSampleBufferRequest, VisualSampleTarget,
+        ProductSpaceInfo, ProjectionDirection, VisualSampleBufferRequest, VisualSampleTarget,
     };
     use alloc::boxed::Box;
     use alloc::string::String;
@@ -4544,7 +4567,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror,
+            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
             force: false,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
@@ -4553,6 +4576,57 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
             let expected = crate::products::visual::mirror(point[0], point[1]);
             assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror"));
+        }
+    }
+
+    /// A directional authored opinion (G1b ruling 4): `Extrude { Left }`
+    /// runs the strip right→left — every lamp reads `1 − x` where the
+    /// plain extrude would read `x`. Direction enters the math as the
+    /// strip-coordinate pick and nothing else.
+    #[test]
+    fn an_extrude_left_opinion_reverses_the_strip() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(SpaceAnswer2::Extrude {
+                    direction: EnumSlot::new(lpc_model::ProjectionDirection::Left),
+                }),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, false, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::extrude(1.0 - point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude ←"));
+        }
+    }
+
+    /// A directional consumer policy (G1b ruling 4): `Mirror ↓` folds the
+    /// strip along the ROWS — the strip coordinate is `y`, then the
+    /// existing mirror math folds it at the centre.
+    #[test]
+    fn a_mirror_down_policy_folds_along_the_rows() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(SpaceAnswer2::Default),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Down),
+            force: false,
+        };
+        let mut fixture = ring_fixture(COUNT, false, policy, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::mirror(point[1], point[0]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror ↓"));
         }
     }
 
@@ -4569,7 +4643,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude,
+            default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
             force: true,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);

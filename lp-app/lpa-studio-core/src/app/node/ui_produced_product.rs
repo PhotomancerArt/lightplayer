@@ -217,14 +217,68 @@ pub enum UiVisualSpace {
     TwoD,
 }
 
+/// UI mirror of `lpc_wire::WireProjectionDirection` — which way a
+/// directional projection runs the strip (G1b ruling 4). `Right` is
+/// today's behavior and the default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UiProjectionDirection {
+    #[default]
+    Right,
+    Left,
+    Down,
+    Up,
+}
+
+impl UiProjectionDirection {
+    /// The unicode arrow captions and the direction segmented control
+    /// spell this direction with (`extrude ←`, `mirror ↓`).
+    #[must_use]
+    pub const fn arrow(self) -> &'static str {
+        match self {
+            Self::Right => "→",
+            Self::Left => "←",
+            Self::Down => "↓",
+            Self::Up => "↑",
+        }
+    }
+
+    /// The RAW model variant ident (`Right`…`Up`) — what a direction
+    /// gesture's `EnsurePresent` appends to the direction cell's address.
+    #[must_use]
+    pub const fn variant(self) -> &'static str {
+        match self {
+            Self::Right => "Right",
+            Self::Left => "Left",
+            Self::Down => "Down",
+            Self::Up => "Up",
+        }
+    }
+
+    /// Every direction, in the segmented control's render order.
+    pub const ALL: [Self; 4] = [Self::Right, Self::Left, Self::Down, Self::Up];
+
+    /// Parse a RAW model variant ident; unknown idents read as the
+    /// default `Right` (the additive contract).
+    #[must_use]
+    pub fn from_variant(variant: &str) -> Self {
+        match variant {
+            "Left" => Self::Left,
+            "Down" => Self::Down,
+            "Up" => Self::Up,
+            _ => Self::Right,
+        }
+    }
+}
+
 /// UI mirror of `lpc_wire::WireCellProjection` — one cell of the 1D→2D
-/// projection matrix.
+/// projection matrix. Extrude/mirror carry their direction (G1b ruling
+/// 4); radial/angular are direction-free by construction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiCellProjection {
-    Extrude,
+    Extrude(UiProjectionDirection),
     Radial,
     Angular,
-    Mirror,
+    Mirror(UiProjectionDirection),
 }
 
 /// UI mirror of `lpc_wire::WireProjectionOrigin` — which precedence arm
@@ -251,10 +305,10 @@ pub struct UiConsumerPolicy {
 }
 
 impl UiConsumerPolicy {
-    /// The defaults-only policy (extrude, never force) — what a caller
-    /// that has never heard of spaces effectively sends.
+    /// The defaults-only policy (extrude right, never force) — what a
+    /// caller that has never heard of spaces effectively sends.
     pub const AUTO: Self = Self {
-        default_1d_to_2d: UiCellProjection::Extrude,
+        default_1d_to_2d: UiCellProjection::Extrude(UiProjectionDirection::Right),
         force: false,
     };
 

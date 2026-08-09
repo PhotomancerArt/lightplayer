@@ -1,4 +1,4 @@
-use crate::{EnumSlot, Slotted, ValueSlot};
+use crate::{EnumSlot, ProjectionDirection, Slotted, ValueSlot};
 
 /// A fixture's consumer-side space policy — the answer side of the
 /// two-sided space declaration (vision D14), mirroring the shader
@@ -30,13 +30,24 @@ pub enum VisualConsumerSpace {
 /// Fixture-side default projection for a 1D source landing on a 2D-capable
 /// fixture (vision D14) — the consumer mirror of
 /// [`crate::nodes::shader::SpaceAnswer2`].
+///
+/// `Extrude`/`Mirror` carry the shared [`ProjectionDirection`] (G1b ruling
+/// 4), additive exactly as on the producer side: a bare persisted
+/// `"Extrude"` keeps parsing as `Right` — today's behavior, no format
+/// bump.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum ConsumerCell2 {
     #[default]
-    Extrude,
+    Extrude {
+        /// Which way the strip runs across the surface.
+        direction: EnumSlot<ProjectionDirection>,
+    },
     Radial,
     Angular,
-    Mirror,
+    Mirror {
+        /// Which way the folded strip runs across the surface.
+        direction: EnumSlot<ProjectionDirection>,
+    },
 }
 
 #[cfg(test)]
@@ -46,6 +57,17 @@ mod tests {
     #[test]
     fn default_is_auto() {
         assert_eq!(VisualConsumerSpace::default(), VisualConsumerSpace::Auto);
+    }
+
+    /// The consumer cell's default is extrude RIGHT — the same additive
+    /// contract as the producer side: a bare persisted `"Extrude"` keeps
+    /// meaning what it always meant.
+    #[test]
+    fn default_cell_is_extrude_right() {
+        let ConsumerCell2::Extrude { direction } = ConsumerCell2::default() else {
+            panic!("expected Extrude");
+        };
+        assert_eq!(*direction.value(), ProjectionDirection::Right);
     }
 
     #[test]
