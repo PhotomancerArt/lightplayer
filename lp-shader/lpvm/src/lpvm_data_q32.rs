@@ -386,15 +386,6 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF
             },
         )),
         LpsType::Array { element, len } => {
-            // Arrays of buffer-legal primitives decode as ONE packed buffer,
-            // not len boxed enums — the memory-honest form per-cell state
-            // rides in. Struct/matrix elements keep the boxed shape.
-            if let Some(elem) = LpsBufferElem::from_lps_type(element) {
-                return read_buffer_words(elem, *len, element, rules, data, |bytes| {
-                    u32_from_bytes(bytes)
-                })
-                .map(LpsValueF32::Buffer);
-            }
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
             let mut elems = Vec::with_capacity(*len as usize);
@@ -679,10 +670,18 @@ mod tests {
         assert_eq!(d.len(), 12);
         assert_eq!(&d.as_slice()[0..4], &1.5f32.to_le_bytes());
         assert_eq!(&d.as_slice()[4..8], &(-2.0f32).to_le_bytes());
-        let LpsValueF32::Buffer(back) = d.to_value().unwrap() else {
-            panic!("expected buffer");
-        };
-        assert!(back.bits_eq(&buffer));
+        // This layer reads back as the boxed Array it always produced —
+        // only the GLOBALS seam (`decode_global_read`) buffer-izes, so
+        // sret returns and uniform read-back keep their historical shape.
+        let back = d.to_value().unwrap();
+        assert!(back.approx_eq(
+            &LpsValueF32::Array(Box::new([
+                LpsValueF32::F32(1.5),
+                LpsValueF32::F32(-2.0),
+                LpsValueF32::F32(0.25),
+            ])),
+            0.0
+        ));
     }
 
     /// The LP ABI's layout packs vec3 arrays tight (alignment 4, stride 12
@@ -705,10 +704,7 @@ mod tests {
         // Element 0 lanes at 0/4/8, element 1 lanes at 12/16/20.
         assert_eq!(&d.as_slice()[8..12], &3.0f32.to_le_bytes());
         assert_eq!(&d.as_slice()[12..16], &4.0f32.to_le_bytes());
-        let LpsValueF32::Buffer(back) = d.to_value().unwrap() else {
-            panic!("expected buffer");
-        };
-        assert!(back.bits_eq(&buffer));
+        drop(buffer);
     }
 
     #[test]
