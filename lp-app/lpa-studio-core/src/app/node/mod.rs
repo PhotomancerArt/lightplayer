@@ -42,9 +42,9 @@ pub use face::{
     UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace,
     UiOutputPin, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit,
     UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading,
-    UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiStripOrderRow, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiShapePresets, UiSpaceCell, UiSpaceCellRole,
+    UiSpaceChoice, UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection,
+    UiSpaceSide, UiStripOrderRow, UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};

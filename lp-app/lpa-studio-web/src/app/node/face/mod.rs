@@ -15,6 +15,7 @@ use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
 mod clock_face;
 mod fixture_face;
+mod fixture_shape_moment;
 mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;
@@ -29,6 +30,7 @@ mod tape_transport;
 
 pub use clock_face::ClockFace;
 pub use fixture_face::FixtureFace;
+pub(crate) use fixture_shape_moment::FixtureShapeMoment;
 pub use node_card_drawers::NodeCardDrawers;
 pub use node_card_section::NodeCardSection;
 pub use node_face_body::NodeFaceBody;

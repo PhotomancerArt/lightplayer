@@ -49,7 +49,7 @@ use lpa_studio_core::{
     UiProductPreview,
 };
 
-use crate::app::node::face::node_ui_action;
+use crate::app::node::face::{FixtureShapeMoment, node_ui_action};
 use crate::app::node::lamp_view::control_live_lamp_colors;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
@@ -85,6 +85,10 @@ pub fn FixtureFace(
     /// drawer defaults collapsed, P4b).
     #[props(default = false)]
     space_initially_open: bool,
+    /// Render the dimensionality drawer as the guided Shape moment
+    /// (`NodeCardUiState::shape_guided` — a freshly created fixture).
+    #[props(default = false)]
+    shape_guided: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // The dimensionality drawer's open state (P4b: default collapsed,
@@ -219,15 +223,35 @@ pub fn FixtureFace(
                     on_action,
                 }
                 if let Some(power) = face.power {
-                    PowerReadout { power, node, on_action }
+                    PowerReadout { power, node: node.clone(), on_action }
                 }
             }
         }
         // The consumer half of the mirror, in the same slot the shader
         // card gives the producer half — below settings, as a
         // default-collapsed drawer whose summary states the policy (G1
-        // rework, P4b). Same DTO, same component, opposite side.
-        if let Some(space) = face.space.clone() {
+        // rework, P4b). Same DTO, same component, opposite side. A
+        // guided card (P5's Shape moment) renders the preset tiles in
+        // its place, forced open: the moment IS this section in guided
+        // clothing, and a moment folded away is no moment.
+        if shape_guided && face.shape_presets.is_some() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                open: Some(true),
+                on_toggle: move |()| {},
+                FixtureShapeMoment {
+                    presets: face.shape_presets.clone().expect("checked above"),
+                    node: node.clone(),
+                    on_open_mapping: editable
+                        .then_some(
+                            EventHandler::new(move |()| {
+                                editing.set(true);
+                            }),
+                        ),
+                    on_action,
+                }
+            }
+        } else if let Some(space) = face.space.clone() {
             NodeCardSection {
                 label: SPACE_SECTION_LABEL,
                 summary: Some(space_section_summary(&space)),

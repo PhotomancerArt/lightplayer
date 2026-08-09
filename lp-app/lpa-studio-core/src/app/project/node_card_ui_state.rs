@@ -76,6 +76,14 @@ pub struct NodeCardUiState {
     /// The composer draft as last mirrored by the web (write-on-collapse;
     /// see the module doc — this is the remount seed, not the live text).
     pub composer_draft: String,
+    /// Whether the fixture card's Shape declaration moment is showing
+    /// (D13, plan-B P5): a freshly created fixture renders its
+    /// dimensionality section in guided clothing — preset tiles — until a
+    /// preset is picked or the moment is dismissed. Default `false`, so
+    /// existing fixtures (and every card in an existing project) never
+    /// see the guided state; the controller sets it on the create/paste
+    /// paths that birth an undeclared fixture.
+    pub shape_guided: bool,
 }
 
 impl Default for NodeCardUiState {
@@ -90,6 +98,7 @@ impl Default for NodeCardUiState {
             hero_product: ModuleHeroProduct::default(),
             preview_spaces: None,
             composer_draft: String::new(),
+            shape_guided: false,
         }
     }
 }
@@ -124,6 +133,9 @@ impl NodeCardUiState {
                 if spaces.any_checked() {
                     self.preview_spaces = Some(*spaces);
                 }
+            }
+            NodeUiOp::SetShapeGuided { guided, .. } => {
+                self.shape_guided = *guided;
             }
         }
     }
@@ -273,6 +285,10 @@ pub enum NodeUiOp {
         node: String,
         spaces: UiPreviewSpaces,
     },
+    /// Show or clear the fixture card's guided Shape moment (P5): a
+    /// preset pick and the dismiss affordance both clear it; the
+    /// controller's create/paste paths set it.
+    SetShapeGuided { node: String, guided: bool },
 }
 
 impl NodeUiOp {
@@ -283,7 +299,8 @@ impl NodeUiOp {
             | Self::SetAgentCollapsed { node, .. }
             | Self::SetDraft { node, .. }
             | Self::SetHeroProduct { node, .. }
-            | Self::SetPreviewSpaces { node, .. } => node,
+            | Self::SetPreviewSpaces { node, .. }
+            | Self::SetShapeGuided { node, .. } => node,
         }
     }
 
@@ -427,6 +444,7 @@ mod tests {
                     two_d: true,
                 }),
                 composer_draft: "make it pulse".to_string(),
+                shape_guided: false,
             }
         );
 
@@ -469,6 +487,10 @@ mod tests {
             NodeUiOp::SetPreviewSpaces {
                 node: "/a.module/b.shader".into(),
                 spaces: UiPreviewSpaces::only(crate::UiVisualSpace::TwoD),
+            },
+            NodeUiOp::SetShapeGuided {
+                node: "/a.module/b.shader".into(),
+                guided: true,
             },
         ];
         for op in &ops {
@@ -568,6 +590,24 @@ mod tests {
             Some(only_2d),
             "the reducer refuses a preview showing nothing"
         );
+    }
+
+    /// P5's guided-moment bit: absent by default (existing fixtures never
+    /// see the guided state), set/cleared by the op.
+    #[test]
+    fn the_shape_guided_bit_round_trips_and_defaults_off() {
+        let mut state = NodeCardUiState::default();
+        assert!(!state.shape_guided);
+        state.apply(&NodeUiOp::SetShapeGuided {
+            node: "/a.module/halo.fixture".into(),
+            guided: true,
+        });
+        assert!(state.shape_guided);
+        state.apply(&NodeUiOp::SetShapeGuided {
+            node: "/a.module/halo.fixture".into(),
+            guided: false,
+        });
+        assert!(!state.shape_guided);
     }
 
     #[test]
