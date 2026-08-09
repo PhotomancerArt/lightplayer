@@ -794,7 +794,11 @@ mod tests {
   "source": { "path": "main.glsl" },
   "space": {
     "kind": "OneD",
-    "in_2d": { "kind": "Project", "shape": { "kind": "Radial" }, "flip": true }
+    "in_2d": {
+      "kind": "Project",
+      "shape": { "kind": "Radial" },
+      "flip": { "kind": "Flipped" }
+    }
   }
 }"#,
         )
@@ -809,8 +813,8 @@ mod tests {
             *in_2d.value(),
             SpaceAnswer2::Project {
                 shape: EnumSlot::new(crate::ProjectionShape::Radial),
-                mirror: crate::ValueSlot::new(false),
-                flip: crate::ValueSlot::new(true),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::new(crate::FlipMode::Flipped),
             }
         );
 
@@ -828,8 +832,8 @@ mod tests {
             *in_2d.value(),
             SpaceAnswer2::Project {
                 shape: EnumSlot::new(crate::ProjectionShape::Radial),
-                mirror: crate::ValueSlot::new(false),
-                flip: crate::ValueSlot::new(true),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::new(crate::FlipMode::Flipped),
             }
         );
     }
@@ -878,8 +882,8 @@ mod tests {
             *from_1d.value(),
             ConsumerCell2::Project {
                 shape: EnumSlot::new(crate::ProjectionShape::Radial),
-                mirror: crate::ValueSlot::new(false),
-                flip: crate::ValueSlot::new(false),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::default(),
             }
         );
         assert!(*force.value());
@@ -899,8 +903,8 @@ mod tests {
             *from_1d.value(),
             ConsumerCell2::Project {
                 shape: EnumSlot::new(crate::ProjectionShape::Radial),
-                mirror: crate::ValueSlot::new(false),
-                flip: crate::ValueSlot::new(false),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::default(),
             }
         );
         assert!(*force.value());

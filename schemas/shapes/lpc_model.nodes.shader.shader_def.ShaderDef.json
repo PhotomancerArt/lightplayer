@@ -208,26 +208,52 @@
                                       {
                                         "name": "mirror",
                                         "shape": {
-                                          "value": {
-                                            "shape": {
-                                              "editor": "plain",
-                                              "id": 1196386242,
-                                              "meta": {},
-                                              "ty": "bool"
-                                            }
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Mirrored",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
                                           }
                                         }
                                       },
                                       {
                                         "name": "flip",
                                         "shape": {
-                                          "value": {
-                                            "shape": {
-                                              "editor": "plain",
-                                              "id": 1196386242,
-                                              "meta": {},
-                                              "ty": "bool"
-                                            }
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Flipped",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
                                           }
                                         }
                                       }

@@ -77,8 +77,12 @@
       "shape": {
         "kind": "ExtrudeX"
       },
-      "mirror": false,
-      "flip": false
+      "mirror": {
+        "kind": "Normal"
+      },
+      "flip": {
+        "kind": "Normal"
+      }
     }
   }
 }

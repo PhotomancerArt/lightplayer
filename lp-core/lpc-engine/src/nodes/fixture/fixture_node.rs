@@ -697,14 +697,14 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
             // their behavior-preserving defaults.
             let from_1d = CellProjection {
                 shape: try_read_def_shape(ctx, "consume.Policy.from_1d.Project.shape"),
-                mirror: try_read_def_value::<bool>(ctx, "consume.Policy.from_1d.Project.mirror")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(false),
-                flip: try_read_def_value::<bool>(ctx, "consume.Policy.from_1d.Project.flip")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(false),
+                // The modifiers are two-variant mode enums; anything but
+                // the on-variant (including unresolvable) reads as off.
+                mirror: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.mirror")
+                    .as_deref()
+                    == Some("Mirrored"),
+                flip: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.flip")
+                    .as_deref()
+                    == Some("Flipped"),
             };
             let force = try_read_def_value::<bool>(ctx, "consume.Policy.force")
                 .ok()
@@ -4304,8 +4304,16 @@ mod space_negotiation {
     ) -> SpaceAnswer2 {
         SpaceAnswer2::Project {
             shape: EnumSlot::new(shape),
-            mirror: lpc_model::ValueSlot::new(mirror),
-            flip: lpc_model::ValueSlot::new(flip),
+            mirror: EnumSlot::new(if mirror {
+                lpc_model::MirrorMode::Mirrored
+            } else {
+                lpc_model::MirrorMode::Normal
+            }),
+            flip: EnumSlot::new(if flip {
+                lpc_model::FlipMode::Flipped
+            } else {
+                lpc_model::FlipMode::Normal
+            }),
         }
     }
 

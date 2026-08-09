@@ -1,4 +1,4 @@
-use crate::{EnumSlot, ProjectionShape, Slotted, ValueSlot};
+use crate::{EnumSlot, FlipMode, MirrorMode, ProjectionShape, Slotted};
 
 /// Space a shader (or any future visual source) declares it lives in, plus
 /// the per-target answer for the opposite dimension.
@@ -49,9 +49,11 @@ pub enum SpaceAnswer2 {
         /// The base coordinate map.
         shape: EnumSlot<ProjectionShape>,
         /// Fold the strip around the map's midpoint (`u′ = 1 − |2u − 1|`).
-        mirror: ValueSlot<bool>,
+        /// A two-variant enum, not a bool, so future fold refinements are
+        /// additive (see [`MirrorMode`]).
+        mirror: EnumSlot<MirrorMode>,
         /// Reverse the strip (`u′ = 1 − u`), applied after the fold.
-        flip: ValueSlot<bool>,
+        flip: EnumSlot<FlipMode>,
     },
 }
 
@@ -83,8 +85,8 @@ mod tests {
     fn one_d_variant_carries_a_two_d_answer_cell() {
         let radial = SpaceAnswer2::Project {
             shape: EnumSlot::new(ProjectionShape::Radial),
-            mirror: ValueSlot::new(false),
-            flip: ValueSlot::new(false),
+            mirror: EnumSlot::default(),
+            flip: EnumSlot::default(),
         };
         let space = ShaderSpace::OneD {
             in_2d: EnumSlot::new(radial.clone()),
@@ -106,7 +108,7 @@ mod tests {
             flip,
         } = SpaceAnswer2::default();
         assert_eq!(*shape.value(), ProjectionShape::ExtrudeX);
-        assert!(!*mirror.value());
-        assert!(!*flip.value());
+        assert!(!mirror.value().is_on());
+        assert!(!flip.value().is_on());
     }
 }
