@@ -48,11 +48,14 @@ frame per link, on embedded targets where RAM is the scarce resource.
    be recognized without the shape.
 4. **`LpsType` does not change.** `LpType::Buffer` lowers to the
    `LpsType::Array` the shader already declares; only the VALUE enums
-   (`LpsValueF32`, `LpsValueQ32`) grew packed variants. The shared decode
-   seams (`LpvmDataQ32::read_value`, `decode_q32_memory_value`) produce
-   buffers for every buffer-legal element array, which covers all five
-   backends' `get_output` through one function each. No frontend, layout,
-   or codegen changes.
+   (`LpsValueF32`, `LpsValueQ32`) grew packed variants. Buffers are
+   minted at exactly ONE decode seam — `decode_global_read`, which all
+   five backends' `get_output` funnels through — for every buffer-legal
+   element array, in both float modes. Deliberately globals-only: sret
+   function returns, uniform read-back, and the filetest harnesses keep
+   their historical boxed-Array shape (the broad version broke wasm.f32
+   filetests, whose directive expectations are arrays). Write paths
+   accept buffers everywhere. No frontend, layout, or codegen changes.
 5. **The authoring surface is a slot KIND, not a mapping:**
    `{"kind": "buffer", "value": "f32", "len": 300}`. Slot data is
    `SlotData::Value(WithRevision(LpValue::Buffer))` — whole-buffer
