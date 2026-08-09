@@ -99,7 +99,10 @@ pub use project::inventory::{
     ReferencedAsset,
 };
 pub use value::WithRevision;
-pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
+pub use value::{
+    BufferElem, BufferScalar, LpBuffer, LpBufferError, LpType, LpValue, ModelEnumVariant,
+    ModelStructMember,
+};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
@@ -129,15 +132,15 @@ pub use nodes::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
     PATTERN_EXPORT_FOLDER, PathSpec, PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry,
     PlaylistEntryView, PlaylistState, PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL,
-    STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace, ShaderState,
-    ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2, TextureDef, TextureDefView,
-    TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
+    STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderBudget, ShaderBudgetError,
+    ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
+    ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
+    ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2,
+    TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
     generate_compute_shader_header, glsl_type_for_lp_type, node_def_asset_ref,
     pattern_project_files_1d, pattern_project_files_2d, resolve_artifact_specifier,
-    set_node_def_asset_ref, shader_panel_step, starter_def_for_kind, starter_for_kind,
-    starter_project_files,
+    set_node_def_asset_ref, shader_panel_step, slot_bytes_estimate, starter_def_for_kind,
+    starter_for_kind, starter_project_files, validate_shader_slot_budget,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,

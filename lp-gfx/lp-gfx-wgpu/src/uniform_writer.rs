@@ -153,6 +153,44 @@ fn write_value(
             }
             Ok(())
         }
+        (
+            TypeInner::Array {
+                base,
+                size: naga::ArraySize::Constant(len),
+                stride,
+            },
+            LpsValueF32::Buffer(buffer),
+        ) => {
+            // Packed words land at naga's array stride. Lane kind agreement
+            // is delegated to the element writer path on the CPU tiers; here
+            // the buffer's own lane count is checked against the element's
+            // vector size implicitly by the word math, and naga has already
+            // validated the array for the uniform address space (scalar/vec2
+            // element buffers cannot reach this writer today — the GLSL is
+            // refused upstream with a std140 stride error).
+            if buffer.len() != len.get() {
+                return Err(GfxError::Render(format!(
+                    "uniform `{path}`: buffer length mismatch (shader wants {}, value has {})",
+                    len.get(),
+                    buffer.len()
+                )));
+            }
+            let base_size = module.types[*base].inner.size(module.to_ctx()) as usize;
+            let packed = buffer.elem.word_stride() as usize;
+            if packed * 4 != base_size {
+                return Err(type_mismatch(path, "buffer element", value));
+            }
+            for (i, chunk) in buffer.words().chunks_exact(packed).enumerate() {
+                for (j, word) in chunk.iter().enumerate() {
+                    write_bytes(
+                        out,
+                        offset + i * *stride as usize + j * 4,
+                        &word.to_le_bytes(),
+                    );
+                }
+            }
+            Ok(())
+        }
         (TypeInner::Array { .. }, _) => Err(type_mismatch(path, "array", value)),
         // Texture uniforms never reach this writer: naga puts sampler2D
         // globals in the handle address space, so they are reflected as

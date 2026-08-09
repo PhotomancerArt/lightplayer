@@ -837,6 +837,7 @@ void tick() {{
                 max: lpc_model::OptionSlot::none(),
                 step: lpc_model::OptionSlot::none(),
                 mapping: lpc_model::OptionSlot::none(),
+                len: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
                 unit: lpc_model::OptionSlot::none(),

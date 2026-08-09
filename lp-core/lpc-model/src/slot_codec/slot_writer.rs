@@ -358,7 +358,7 @@ where
         array.finish()
     }
 
-    fn base64_string(self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
+    pub(crate) fn base64_string(self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_raw(b"\"")?;
         let engine = base64::engine::general_purpose::STANDARD;
         let mut encoded = [0u8; 4];

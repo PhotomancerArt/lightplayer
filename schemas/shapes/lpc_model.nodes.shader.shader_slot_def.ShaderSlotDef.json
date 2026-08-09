@@ -263,6 +263,24 @@
         }
       },
       {
+        "name": "len",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3065358156,
+                  "meta": {},
+                  "ty": "u32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "label",
         "shape": {
           "value": {
