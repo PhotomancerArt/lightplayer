@@ -99,12 +99,6 @@ pub use face::{
     ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
     PlaylistFace, ShaderFace, TapeTransport,
 };
-// Story-only surface (the G1b definition-variant story composes it
-// directly); unused without the feature. (The choice tiles render inline
-// in the section body since the inline-tiles ruling, so `ChoiceTiles`
-// itself needs no separate story export.)
-#[cfg(feature = "stories")]
-pub(crate) use face::SpaceSection;
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};

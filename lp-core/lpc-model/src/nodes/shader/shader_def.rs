@@ -26,7 +26,11 @@ pub struct ShaderDef {
     /// answer cell for the opposite dimension (dimensionality-first-class
     /// plan, vision D6/D7). Defaults to `TwoD` — every shader authored
     /// before this plan is 2D, so existing projects stay meaning-identical.
-    /// Model layer only: not yet read by the engine or shader compiler.
+    ///
+    /// Read end to end: the shader compiler takes it as the entry contract
+    /// (`OneD` ⇒ `vec4 render_1d(float)`), the sampling boundary takes the
+    /// answer cell as the coordinate map a 2D consumer receives, and the
+    /// studio's `dimensionality` drawer is where it is authored.
     pub space: EnumSlot<ShaderSpace>,
 }
 

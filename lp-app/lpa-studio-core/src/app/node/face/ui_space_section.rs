@@ -60,9 +60,10 @@ pub enum UiSpaceCellRole {
 ///
 /// `projection` is the tile's subject: the [`UiCellProjection`] a live tile
 /// probe should force to show what THIS choice would look like (P4's
-/// forced-policy probes). `None` means the choice defers rather than
-/// projecting — the producer-side `Default` ("consumer decides") and the
-/// primary cell's own variants.
+/// forced-policy probes). `None` means the choice runs no projection at
+/// all — the consumer's `along the wire` and `follow the source`, and the
+/// primary cell's own `1D`/`2D` variants. Every producer choice projects:
+/// there is no deferring `Default` since format v9.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSpaceChoice {
     /// RAW declared variant ident (`Radial`, not `radial`) — slot paths

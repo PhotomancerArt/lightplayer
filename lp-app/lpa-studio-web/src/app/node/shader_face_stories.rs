@@ -237,17 +237,17 @@ fn space_two_d() -> Element {
     }
 }
 
-/// One story per answer: the projections are the design decision, and a
+/// One story per shape: the projections are the design decision, and a
 /// single screenshot of "radial" cannot be read against the others.
 #[story(
-    description = "A 1D shader's drawer OPEN in its new home between `code` and `advanced` (G1b ruling 1), one card per answer. The declaration leads as a full-width tab pair (G1: 'almost like tabs'), and the answer row reads `show in 2D by`. `consumer decides` is gone (G1): the silent state is `extrude · default` — the projection silence actually resolves to — and the other picks state an opinion a fixture can still override, which is what the line beneath says."
+    description = "A 1D shader's drawer OPEN in its new home between `code` and `advanced` (G1b ruling 1), one card per SHAPE — the four the factorization leaves (extrude-x, extrude-y, radial, angular), each with its modifier rows beneath. The declaration leads as a full-width `1D | 2D` tab pair (G1: 'almost like tabs'), and the shape row reads `show in 2D by`. `consumer decides` is gone (G1) and so is the deferring `Default` (format v9): the producer always declares, and a fixture can still override whatever it declares."
 )]
 fn space_one_d_answers() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
-            for answer in ["Default", "Extrude", "Radial", "Mirror"] {
-                div { key: "{answer}", class: "tw:w-full tw:max-w-md",
-                    ShaderBodyCard { face: shader_face_one_d(answer), space_open: true }
+            for shape in ["ExtrudeX", "ExtrudeY", "Radial", "Angular"] {
+                div { key: "{shape}", class: "tw:w-full tw:max-w-md",
+                    ShaderBodyCard { face: shader_face_one_d(shape), space_open: true }
                 }
             }
         }
@@ -261,31 +261,6 @@ fn space_choices_inline() -> Element {
     rsx! {
         ShaderCardCanvas {
             ShaderBodyCard { face: shader_face_one_d("Radial"), space_open: true }
-        }
-    }
-}
-
-/// G1b decision-matrix candidate A: the space controls next to the code,
-/// inside one renamed authoring section.
-#[story(
-    description = "G1b CANDIDATE A — 'they feel like authoring that should go next to the code': the space controls folded into one `definition` section together with the GLSL, instead of a drawer of their own (candidate B, every other space story). Yona is explicitly not 100% sold either way; this story exists so the two homes can be judged side by side. The code block here is a mock — judging the placement needs the shape of code, not a live editor."
-)]
-fn space_in_definition_variant() -> Element {
-    let section = crate::app::node::face_story_fixtures::shader_space_section_one_d("Radial");
-    rsx! {
-        ShaderCardCanvas {
-            div { class: "tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong tw:bg-card",
-                crate::app::node::NodeCardSection { label: "definition", first: true,
-                    div { class: "tw:grid tw:min-w-0 tw:gap-0",
-                        pre { class: "tw:m-0 tw:overflow-x-auto tw:px-4 tw:py-3 tw:font-mono tw:text-[11px] tw:leading-snug tw:text-soft-foreground",
-                            "vec4 render_1d(float pos) {{\n    float w = phase(pos * reach);\n    return palette(w);\n}}"
-                        }
-                        div { class: "tw:border-t tw:border-border-strong",
-                            crate::app::node::SpaceSection { section, on_action: move |_| {} }
-                        }
-                    }
-                }
-            }
         }
     }
 }

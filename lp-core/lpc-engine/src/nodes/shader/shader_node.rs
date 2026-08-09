@@ -87,10 +87,12 @@ pub struct ShaderNode {
     /// source must define changes with it.
     space: ShaderEntrySpace,
     /// This shader's authored answer for a 2D consumer, when it is 1D
-    /// (`ShaderSpace::OneD { in_2d }`). `None` = `Default` — no opinion,
-    /// defer to the consumer's policy. Read from the declaration, never
-    /// compiled in: it selects a coordinate map at the sampling boundary,
-    /// so a change costs no recompile.
+    /// (`ShaderSpace::OneD { in_2d }`). `None` only for a `TwoD`
+    /// declaration, which carries no such cell — post-v9 every 1D
+    /// declaration carries a `Project` record, so "no opinion" is not a
+    /// state a shader can be in. Read from the declaration, never compiled
+    /// in: it selects a coordinate map at the sampling boundary, so a
+    /// change costs no recompile.
     space_answer_2: Option<CellProjection>,
     /// Scratch point buffer for projected sampling: the consumer's own
     /// buffer is a *cache* keyed on (mapping, size) that must survive the

@@ -273,8 +273,9 @@ pub static FIRE2012_FILES: &[ExampleFile] = &[
 ];
 
 /// `examples/comet` — a WLED port ("Lighthouse", `mode_comet`) authored as
-/// a true 1D shader: `vec4 render_1d(float)` and a `OneD { in_2d: Default }`
-/// declaration, so a 2D consumer gets the extrude the CONSUMER picks.
+/// a true 1D shader: `vec4 render_1d(float)` and a
+/// `OneD { in_2d: Project { extrude-x } }` declaration — the factored
+/// default, so a 2D consumer sees the comet swept across the panel.
 /// Publishes `speed`, `tail` and `palette`.
 pub static COMET_FILES: &[ExampleFile] = &[
     (
@@ -312,7 +313,7 @@ pub static COMET_FILES: &[ExampleFile] = &[
 ];
 
 /// `examples/palette-waves` — a WLED port (`mode_colorwaves`) and the
-/// declared-projection example: `OneD { in_2d: Radial }` on a disc fixture,
+/// declared-projection example: `OneD { in_2d: Project { radial } }` on a disc fixture,
 /// so the strip the shader is written along arrives as rings. Publishes
 /// `speed`, `scale`, `depth` and `palette`.
 pub static PALETTE_WAVES_FILES: &[ExampleFile] = &[
