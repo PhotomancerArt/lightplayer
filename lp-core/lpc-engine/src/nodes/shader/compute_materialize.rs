@@ -19,6 +19,19 @@ pub fn materialize_produced_slot(
     value: &LpsValueF32,
     revision: Revision,
 ) -> Result<SlotData, ComputeMaterializeError> {
+    // Defense in depth at the allocation site — see the twin check in
+    // `materialize_shader_input`. Estimation needs no registry here: only
+    // builtin-element kinds allocate proportionally to a produced len.
+    let budget = lpc_model::ShaderBudget::default();
+    if let Some(len) = slot.buffer_len() {
+        let bytes = u64::from(len) * 16;
+        if bytes > u64::from(budget.max_slot_bytes) {
+            return Err(ComputeMaterializeError::Unsupported(format!(
+                "produced slot {slot_name:?} declares {bytes} bytes, over the {} byte budget",
+                budget.max_slot_bytes
+            )));
+        }
+    }
     match slot.kind.value() {
         // Timebase kinds declare a plain f32 uniform, so a produced one
         // (meaningless, but authorable) materializes as one.

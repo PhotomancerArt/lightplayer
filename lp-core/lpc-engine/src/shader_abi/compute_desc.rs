@@ -41,6 +41,20 @@ pub fn compute_desc_from_model_def<'a>(
         },
     );
 
+    // Same valve as header generation, at the compile seam: a descriptor
+    // whose declared slots exceed the budget must not reach VMContext
+    // sizing (`lps-shared/src/sig.rs`).
+    lpc_model::validate_shader_slot_budget(
+        def.consumed_slots
+            .entries
+            .iter()
+            .chain(def.produced_slots.entries.iter())
+            .map(|(name, slot)| (name.as_str(), slot)),
+        registry,
+        &lpc_model::ShaderBudget::default(),
+    )
+    .map_err(|e| ComputeDescError::Unsupported(alloc::format!("{e}")))?;
+
     for (name, slot) in &def.consumed_slots.entries {
         // A palette declares a sampler, which is not an `LpsType` the value
         // lookup can answer — so that lookup must not run for it.
