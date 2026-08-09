@@ -1,4 +1,4 @@
-use crate::{EnumSlot, Slotted};
+use crate::{EnumSlot, ProjectionDirection, Slotted};
 
 /// Space a shader (or any future visual source) declares it lives in, plus
 /// the per-target answer for the opposite dimension.
@@ -36,15 +36,26 @@ pub enum ShaderSpace {
 /// v1 projections use fixed defaults (centre 0.5x0.5); projection
 /// parameters (radial centre, etc.) arrive with the explicit projection
 /// node later (vision Q3 lean: declared defaults stay static).
+///
+/// `Extrude`/`Mirror` carry a [`ProjectionDirection`] (G1b ruling 4) —
+/// additive: a bare persisted `"Extrude"` parses with the payload at its
+/// default (`Right`), which is exactly the pre-directional behavior, so
+/// no format bump. Radial/angular are direction-free by construction.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum SpaceAnswer2 {
     /// Consumer decides (the extrude system default) — no opinion authored.
     #[default]
     Default,
-    Extrude,
+    Extrude {
+        /// Which way the strip runs across the surface.
+        direction: EnumSlot<ProjectionDirection>,
+    },
     Radial,
     Angular,
-    Mirror,
+    Mirror {
+        /// Which way the folded strip runs across the surface.
+        direction: EnumSlot<ProjectionDirection>,
+    },
     // Native (own `render_2d` entry) is deliberately NOT a variant yet —
     // multi-entry is the first fast-follow (vision D9/D19); adding the
     // variant later is additive.
@@ -83,5 +94,25 @@ mod tests {
             panic!("expected OneD");
         };
         assert_eq!(*in_2d.value(), SpaceAnswer2::Radial);
+    }
+
+    /// The additive-compat contract (G1b ruling 4): selecting the bare
+    /// variant name — which is exactly what parsing a pre-directional
+    /// persisted `"Extrude"`/`"Mirror"` does — lands on `Right`, today's
+    /// behavior. No format bump.
+    #[test]
+    fn bare_extrude_and_mirror_default_their_direction_to_right() {
+        use crate::SlottedEnumMut;
+        for variant in ["Extrude", "Mirror"] {
+            let mut answer = SpaceAnswer2::default();
+            answer.set_variant_default(variant).expect("variant");
+            let direction = match &answer {
+                SpaceAnswer2::Extrude { direction } | SpaceAnswer2::Mirror { direction } => {
+                    direction
+                }
+                other => panic!("expected a directional variant, got {other:?}"),
+            };
+            assert_eq!(*direction.value(), ProjectionDirection::Right);
+        }
     }
 }

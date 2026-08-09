@@ -87,16 +87,37 @@ pub fn centre_scanline(t: f32) -> (f32, f32) {
     (t.clamp(0.0, 1.0), 0.5)
 }
 
+/// The strip coordinate a
+/// [`ProjectionDirection`](crate::products::visual::ProjectionDirection)
+/// picks out of a normalized `(u, v)` — the ONE place direction enters the
+/// math (G1b ruling 4): the directional shapes run their existing 1-axis
+/// map over this coordinate. `Right` is `u` verbatim, so the default
+/// direction is bit-for-bit the pre-directional behavior.
+#[must_use]
+pub fn directed_coord(
+    direction: crate::products::visual::ProjectionDirection,
+    u: f32,
+    v: f32,
+) -> f32 {
+    use crate::products::visual::ProjectionDirection;
+    match direction {
+        ProjectionDirection::Right => u,
+        ProjectionDirection::Left => 1.0 - u,
+        ProjectionDirection::Down => v,
+        ProjectionDirection::Up => 1.0 - v,
+    }
+}
+
 /// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
 /// normalized target→source map.
 #[must_use]
 pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v: f32) -> f32 {
     use crate::products::visual::CellProjection;
     match cell {
-        CellProjection::Extrude => extrude(u, v),
+        CellProjection::Extrude(direction) => extrude(directed_coord(direction, u, v), v),
         CellProjection::Radial => radial(u, v),
         CellProjection::Angular => angular(u, v),
-        CellProjection::Mirror => mirror(u, v),
+        CellProjection::Mirror(direction) => mirror(directed_coord(direction, u, v), v),
     }
 }
 
@@ -223,10 +244,10 @@ mod tests {
 
     #[test]
     fn the_cell_dispatcher_matches_the_named_maps() {
-        use crate::products::visual::CellProjection;
+        use crate::products::visual::{CellProjection, ProjectionDirection};
         for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
             assert_close(
-                project_2d_to_1d(CellProjection::Extrude, u, v),
+                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Right), u, v),
                 extrude(u, v),
                 "extrude",
             );
@@ -241,9 +262,51 @@ mod tests {
                 "angular",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Mirror, u, v),
+                project_2d_to_1d(CellProjection::Mirror(ProjectionDirection::Right), u, v),
                 mirror(u, v),
                 "mirror",
+            );
+        }
+    }
+
+    /// Direction picks the strip coordinate and nothing else (G1b ruling
+    /// 4): `Right` is `u` verbatim (today's behavior), `Left` reverses it,
+    /// `Down`/`Up` run the rows instead of the columns.
+    #[test]
+    fn directed_coord_picks_the_strip_axis() {
+        use crate::products::visual::ProjectionDirection;
+        let (u, v) = (0.25, 0.7);
+        assert_close(directed_coord(ProjectionDirection::Right, u, v), 0.25, "→");
+        assert_close(directed_coord(ProjectionDirection::Left, u, v), 0.75, "←");
+        assert_close(directed_coord(ProjectionDirection::Down, u, v), 0.7, "↓");
+        assert_close(
+            directed_coord(ProjectionDirection::Up, u, v),
+            0.3,
+            "↑ is 1 − y",
+        );
+    }
+
+    /// The directional dispatcher arms compose direction with the existing
+    /// shape math — extrude-left is the reversed ramp, mirror-down folds
+    /// along the rows.
+    #[test]
+    fn directional_arms_compose_direction_with_the_shape_math() {
+        use crate::products::visual::{CellProjection, ProjectionDirection};
+        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
+            assert_close(
+                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Left), u, v),
+                extrude(1.0 - u, v),
+                "extrude ←",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Mirror(ProjectionDirection::Down), u, v),
+                mirror(v, u),
+                "mirror ↓",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Up), u, v),
+                extrude(1.0 - v, u),
+                "extrude ↑",
             );
         }
     }

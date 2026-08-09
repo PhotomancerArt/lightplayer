@@ -99,10 +99,12 @@ pub use face::{
     ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
     PlaylistFace, ShaderFace, TapeTransport,
 };
-// Story-only surfaces (the G1b decision-matrix stories compose them
-// directly); unused without the feature.
+// Story-only surface (the G1b definition-variant story composes it
+// directly); unused without the feature. (`ProjectionTileGrid`'s
+// candidates story retired with G1b ruling 4 — the directional vocabulary
+// is real now, so the grid is only reached through the picker.)
 #[cfg(feature = "stories")]
-pub(crate) use face::{ProjectionTileGrid, SpaceSection};
+pub(crate) use face::SpaceSection;
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};

@@ -56,36 +56,90 @@ impl VisualSpace {
     }
 }
 
+/// Which way a directional projection runs the strip across the surface —
+/// the runtime mirror of `lpc_model::ProjectionDirection` (G1b ruling 4).
+///
+/// The direction picks the STRIP COORDINATE before the shape's own math
+/// runs ([`super::coordinates::directed_coord`]): `Right` is `u = x` —
+/// exactly what the pre-directional maps computed, so it is the default
+/// and the meaning-identical arm.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ProjectionDirection {
+    /// `u = x` — left→right (today's behavior).
+    #[default]
+    Right,
+    /// `u = 1 − x` — right→left.
+    Left,
+    /// `u = y` — top→bottom.
+    Down,
+    /// `u = 1 − y` — bottom→top.
+    Up,
+}
+
+impl ProjectionDirection {
+    /// The unicode arrow captions spell this direction with
+    /// (`extrude ←`, `mirror ↓`).
+    #[must_use]
+    pub const fn arrow(self) -> &'static str {
+        match self {
+            Self::Right => "→",
+            Self::Left => "←",
+            Self::Down => "↓",
+            Self::Up => "↑",
+        }
+    }
+}
+
 /// One cell of the projection matrix: the coordinate map that fills a 2D
 /// sampling space from a 1D source.
 ///
 /// The runtime mirror of `lpc_model::SpaceAnswer2` (producer opinion) and
 /// `lpc_model::ConsumerCell2` (consumer default) — they are the same four
 /// maps seen from the two sides of the negotiation. The math lives in
-/// [`super::coordinates`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// [`super::coordinates`]. Extrude/mirror carry a [`ProjectionDirection`]
+/// (G1b ruling 4); radial/angular are direction-free by construction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CellProjection {
-    /// `t = u` — the system default: the strip runs along x, every row alike.
-    #[default]
-    Extrude,
+    /// `t = u` along the direction — the system default (`Right`): the
+    /// strip runs along x, every row alike.
+    Extrude(ProjectionDirection),
     /// `t = |uv − centre| / corner-reach`.
     Radial,
     /// `t = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`.
     Angular,
-    /// `t = |2u − 1|` — the strip runs out from the centre column both ways.
-    Mirror,
+    /// `t = |2u − 1|` along the direction — the strip runs out from the
+    /// centre line both ways.
+    Mirror(ProjectionDirection),
+}
+
+impl Default for CellProjection {
+    /// Extrude right — the pre-directional system default, bit-for-bit.
+    fn default() -> Self {
+        Self::Extrude(ProjectionDirection::Right)
+    }
 }
 
 impl CellProjection {
     /// Short human label used in diagnostics and preview captions (mirrors
-    /// [`VisualSpace::label`]).
+    /// [`VisualSpace::label`]) — the SHAPE's name; a directional caption
+    /// appends [`ProjectionDirection::arrow`] via [`Self::direction`].
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Extrude => "extrude",
+            Self::Extrude(_) => "extrude",
             Self::Radial => "radial",
             Self::Angular => "angular",
-            Self::Mirror => "mirror",
+            Self::Mirror(_) => "mirror",
+        }
+    }
+
+    /// The direction a directional shape runs in; `None` for the
+    /// direction-free shapes.
+    #[must_use]
+    pub const fn direction(self) -> Option<ProjectionDirection> {
+        match self {
+            Self::Extrude(direction) | Self::Mirror(direction) => Some(direction),
+            Self::Radial | Self::Angular => None,
         }
     }
 }
@@ -107,7 +161,7 @@ pub struct ConsumerPolicy {
 impl ConsumerPolicy {
     /// The defaults-only policy (`Extrude`, never force).
     pub const AUTO: Self = Self {
-        default_1d_to_2d: CellProjection::Extrude,
+        default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
         force: false,
     };
 }
@@ -213,7 +267,7 @@ mod tests {
     fn an_authored_opinion_beats_the_consumer_default() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror,
+            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
             force: false,
         };
         assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Radial);
@@ -233,17 +287,20 @@ mod tests {
     fn force_beats_an_authored_opinion() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude,
+            default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
             force: true,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Extrude);
+        assert_eq!(
+            resolve_1d_to_2d(source, policy),
+            CellProjection::Extrude(ProjectionDirection::Right)
+        );
     }
 
     #[test]
     fn origin_reports_declared_for_an_authored_opinion() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror,
+            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
             force: false,
         };
         assert_eq!(
@@ -269,20 +326,29 @@ mod tests {
     fn origin_reports_forced_even_over_an_authored_opinion() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude,
+            default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
             force: true,
         };
         assert_eq!(
             resolve_1d_to_2d_with_origin(source, policy),
-            (CellProjection::Extrude, ProjectionOrigin::Forced)
+            (
+                CellProjection::Extrude(ProjectionDirection::Right),
+                ProjectionOrigin::Forced
+            )
         );
     }
 
     #[test]
     fn cell_projection_labels_are_lowercase_diagnostics() {
-        assert_eq!(CellProjection::Extrude.label(), "extrude");
+        assert_eq!(
+            CellProjection::Extrude(ProjectionDirection::Right).label(),
+            "extrude"
+        );
         assert_eq!(CellProjection::Radial.label(), "radial");
         assert_eq!(CellProjection::Angular.label(), "angular");
-        assert_eq!(CellProjection::Mirror.label(), "mirror");
+        assert_eq!(
+            CellProjection::Mirror(ProjectionDirection::Down).label(),
+            "mirror"
+        );
     }
 }

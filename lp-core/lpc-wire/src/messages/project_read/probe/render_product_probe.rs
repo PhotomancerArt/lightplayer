@@ -15,16 +15,30 @@ pub enum WireVisualSpace {
     TwoD,
 }
 
+/// Wire mirror of `lpc_engine::products::visual::ProjectionDirection` —
+/// which way a directional projection runs the strip (G1b ruling 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireProjectionDirection {
+    /// `u = x` (today's behavior — the default on the runtime side).
+    Right,
+    Left,
+    Down,
+    Up,
+}
+
 /// Wire mirror of `lpc_engine::products::visual::CellProjection` — one cell
-/// of the 1D→2D projection matrix.
+/// of the 1D→2D projection matrix. Extrude/mirror carry their direction;
+/// radial/angular are direction-free by construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireCellProjection {
-    Extrude,
+    Extrude(WireProjectionDirection),
     Radial,
     Angular,
-    Mirror,
+    Mirror(WireProjectionDirection),
 }
 
 /// Wire mirror of `lpc_engine::products::visual::ProjectionOrigin` — which
@@ -50,10 +64,10 @@ pub struct WireConsumerPolicy {
 }
 
 impl WireConsumerPolicy {
-    /// The defaults-only policy (`Extrude`, never force) — what a caller
-    /// that has never heard of spaces effectively sends.
+    /// The defaults-only policy (`Extrude` right, never force) — what a
+    /// caller that has never heard of spaces effectively sends.
     pub const AUTO: Self = Self {
-        default_1d_to_2d: WireCellProjection::Extrude,
+        default_1d_to_2d: WireCellProjection::Extrude(WireProjectionDirection::Right),
         force: false,
     };
 }
@@ -295,7 +309,7 @@ mod tests {
             format: WireTextureFormat::Rgba16,
             space: Some(WireVisualSpace::OneD),
             policy: Some(WireConsumerPolicy {
-                default_1d_to_2d: WireCellProjection::Mirror,
+                default_1d_to_2d: WireCellProjection::Mirror(WireProjectionDirection::Down),
                 force: true,
             }),
         };

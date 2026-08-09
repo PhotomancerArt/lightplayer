@@ -33,6 +33,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 13: directional projections (G1b ruling 4) — `WireCellProjection`'s
+///   `Extrude`/`Mirror` variants grow a `WireProjectionDirection` payload
+///   (right/left/down/up), changing their encoding from bare strings to
+///   tagged objects on the render-product probe's policy and result
+///   metadata. An old peer cannot decode the new cell encoding, which is
+///   what earns the bump.
 /// - 12: the published output-frame probe —
 ///   `ProjectProbeRequest::OutputFrame` / `ProjectProbeResult::OutputFrame`
 ///   (`OutputFrameProbeRequest`, `OutputFrameProbeResult`,
@@ -101,7 +107,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 12;
+pub const WIRE_PROTO_VERSION: u32 = 13;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

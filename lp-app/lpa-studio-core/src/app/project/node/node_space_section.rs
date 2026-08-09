@@ -23,9 +23,9 @@
 //! there is no intermediate variant row to descend through.
 
 use crate::{
-    UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiSlotComposite, UiSlotValueKind,
-    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch,
-    UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiProjectionDirection, UiSlotComposite,
+    UiSlotValueKind, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceFlag,
+    UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
 };
 
 /// The shader def's producer-side declaration row.
@@ -60,7 +60,14 @@ pub(in crate::app::project) fn shader_space_section(
     ]
     .into_iter()
     .filter_map(|(role, field, label)| {
-        enum_cell(payload_field(row, field)?, role, label, projection_label)
+        let answer_row = payload_field(row, field)?;
+        let mut cell = enum_cell(answer_row, role, label, projection_label)?;
+        // The two-section shape+direction design (G1b ruling 4): when the
+        // ACTIVE shape is directional, its flattened `direction` payload
+        // row (`…in_2d.Extrude.direction`) becomes the cell's direction
+        // row — a real address for the segmented control to dispatch at.
+        cell.direction = direction_cell(answer_row);
+        Some(cell)
     })
     .collect();
     Some(UiSpaceSection {
@@ -138,10 +145,11 @@ fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
     let Some(UiSlotComposite::Enum(composite)) = &row.composite else {
         return None;
     };
+    let from_1d = payload_field(row, "from_1d");
     let active = if composite.active == "Auto" {
         "Auto".to_string()
     } else {
-        payload_field(row, "from_1d")
+        from_1d
             .and_then(|field| match &field.composite {
                 Some(UiSlotComposite::Enum(from)) => Some(from.active.clone()),
                 _ => None,
@@ -165,6 +173,27 @@ fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
         choices,
         address: row.address.clone(),
         state: row.state.clone(),
+        // The direction row lives under `consume.Policy.from_1d.<Shape>`
+        // (G1b ruling 4). While the fixture is still in `Auto` the payload
+        // rows are not in the tree, so there is no row to derive — it
+        // appears once a directional shape is picked, which is fine.
+        direction: from_1d.and_then(direction_cell),
+    })
+}
+
+/// The ACTIVE shape's flattened `direction` payload row under a
+/// projection enum row, as the cell's direction row (G1b ruling 4).
+/// `None` when the active shape carries no direction payload
+/// (default/radial/angular, or a pre-directional tree).
+fn direction_cell(row: &UiConfigSlot) -> Option<UiSpaceDirection> {
+    let direction_row = payload_field(row, "direction")?;
+    let Some(UiSlotComposite::Enum(composite)) = &direction_row.composite else {
+        return None;
+    };
+    Some(UiSpaceDirection {
+        active: composite.active.clone(),
+        address: direction_row.address.clone(),
+        state: direction_row.state.clone(),
     })
 }
 
@@ -234,6 +263,7 @@ fn enum_cell(
         choices,
         address: row.address.clone(),
         state: row.state.clone(),
+        direction: None,
     })
 }
 
@@ -304,13 +334,15 @@ fn projection_label(variant: &str) -> String {
 
 /// The projection a variant would force in a live tile probe. `None` for
 /// `Default` (which defers rather than projecting) and for the primary
-/// cell's own variants.
+/// cell's own variants. The picker's tiles are SHAPE tiles (G1b ruling 4:
+/// two sections, never a flattened 8-tile grid), so a directional shape
+/// probes at the default `Right` here; the direction row refines it.
 fn variant_projection(variant: &str) -> Option<UiCellProjection> {
     match variant {
-        "Extrude" => Some(UiCellProjection::Extrude),
+        "Extrude" => Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
         "Radial" => Some(UiCellProjection::Radial),
         "Angular" => Some(UiCellProjection::Angular),
-        "Mirror" => Some(UiCellProjection::Mirror),
+        "Mirror" => Some(UiCellProjection::Mirror(UiProjectionDirection::Right)),
         _ => None,
     }
 }
@@ -417,10 +449,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 None,
-                Some(UiCellProjection::Extrude),
+                Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
                 Some(UiCellProjection::Radial),
                 Some(UiCellProjection::Angular),
-                Some(UiCellProjection::Mirror),
+                Some(UiCellProjection::Mirror(UiProjectionDirection::Right)),
             ],
             "every projecting choice names the cell a live tile forces"
         );
@@ -549,6 +581,115 @@ mod tests {
         assert_eq!(section.flags.len(), 1, "no force flag — the pick forces");
     }
 
+    /// G1b ruling 4's second section: an ACTIVE directional shape's
+    /// flattened `direction` payload row becomes the cell's direction row
+    /// — real address, real active variant. Radial (direction-free) and a
+    /// pre-directional tree (no payload row) derive none.
+    #[test]
+    fn a_directional_answer_carries_its_direction_row() {
+        let row = enum_row(
+            "space",
+            "OneD",
+            &["TwoD", "OneD"],
+            vec![enum_row(
+                "space.OneD.in_2d",
+                "Mirror",
+                &["Default", "Extrude", "Radial", "Angular", "Mirror"],
+                vec![enum_row(
+                    "space.OneD.in_2d.Mirror.direction",
+                    "Down",
+                    &["Right", "Left", "Down", "Up"],
+                    Vec::new(),
+                )],
+            )],
+        );
+        let section = shader_space_section(&[&row], None).expect("section");
+        let answer = section
+            .cell(UiSpaceCellRole::ProducerIn2d)
+            .expect("the 2D answer cell");
+        let direction = answer.direction.as_ref().expect("the direction row");
+        assert_eq!(direction.active, "Down");
+        assert_eq!(
+            direction
+                .address
+                .as_ref()
+                .map(|address| address.path.to_string()),
+            Some("space.OneD.in_2d.Mirror.direction".to_string()),
+            "the row dispatches at the flattened direction enum row"
+        );
+
+        let radial = enum_row(
+            "space",
+            "OneD",
+            &["TwoD", "OneD"],
+            vec![enum_row(
+                "space.OneD.in_2d",
+                "Radial",
+                &["Default", "Extrude", "Radial", "Angular", "Mirror"],
+                Vec::new(),
+            )],
+        );
+        let section = shader_space_section(&[&radial], None).expect("section");
+        assert!(
+            section
+                .cell(UiSpaceCellRole::ProducerIn2d)
+                .expect("cell")
+                .direction
+                .is_none(),
+            "a direction-free shape has no direction row"
+        );
+    }
+
+    /// The consumer mirror: an authored directional policy carries the
+    /// direction row under `consume.Policy.from_1d.<Shape>`; an `Auto`
+    /// fixture has no payload rows and therefore no row yet (fine — it
+    /// appears once a directional shape is picked).
+    #[test]
+    fn a_directional_consumer_policy_carries_its_direction_row() {
+        let rows = [enum_row(
+            "consume",
+            "Policy",
+            &["Auto", "Policy"],
+            vec![enum_row(
+                "consume.Policy.from_1d",
+                "Extrude",
+                &["Extrude", "Radial", "Angular", "Mirror"],
+                vec![enum_row(
+                    "consume.Policy.from_1d.Extrude.direction",
+                    "Left",
+                    &["Right", "Left", "Down", "Up"],
+                    Vec::new(),
+                )],
+            )],
+        )];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        let direction = section
+            .primary
+            .direction
+            .as_ref()
+            .expect("the direction row");
+        assert_eq!(direction.active, "Left");
+        assert_eq!(
+            direction
+                .address
+                .as_ref()
+                .map(|address| address.path.to_string()),
+            Some("consume.Policy.from_1d.Extrude.direction".to_string()),
+        );
+
+        let auto = [enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new())];
+        let auto: Vec<&UiConfigSlot> = auto.iter().collect();
+        assert!(
+            fixture_space_section(&auto)
+                .expect("section")
+                .primary
+                .direction
+                .is_none(),
+            "Auto carries no payload rows, so no direction row yet"
+        );
+    }
+
     /// D1: the compiler's mismatch message becomes a structured pair. The
     /// declared side comes from the SLOT (what the project says), the
     /// entry side from the message (what the GLSL says).
@@ -611,6 +752,7 @@ mod tests {
                 choices: Vec::new(),
                 address: None,
                 state: UiSlotFieldState::editable(),
+                direction: None,
             },
             declared_space: Some(UiVisualSpace::TwoD),
             cells: Vec::new(),

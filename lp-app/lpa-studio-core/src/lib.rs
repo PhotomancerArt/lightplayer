@@ -62,14 +62,14 @@ pub use app::node::{
     UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole,
     UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings,
     UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
-    UiProductRef, UiProductSpaceView, UiProductTrackingState, UiProjectionOrigin, UiShaderFace,
-    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
-    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch,
-    UiSpaceSection, UiSpaceSide, UiTimebaseState, UiVisualProductSpace, UiVisualSpace,
-    UiWireStatus, phasor_rate_display,
+    UiProductRef, UiProductSpaceView, UiProductTrackingState, UiProjectionDirection,
+    UiProjectionOrigin, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection,
+    UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiTimebaseState,
+    UiVisualProductSpace, UiVisualSpace, UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
