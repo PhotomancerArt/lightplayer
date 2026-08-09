@@ -6,7 +6,7 @@ use std::rc::Rc;
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::project::agent_support::{
-    AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
+    AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
 use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::project::slot::{
@@ -1351,6 +1351,7 @@ impl ProjectController {
                     node_address: node.address().to_string(),
                     node_label: node.label().to_string(),
                     bindings: agent_shader_bindings(node),
+                    space: agent_shader_space(node),
                 });
             }
             if let Some(found) = self.find_agent_shader(node.children(), artifact) {
@@ -1471,6 +1472,38 @@ impl ProjectController {
         artifact: &ArtifactLocation,
         upsert: &lpa_agent::ParamUpsert,
     ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        self.apply_agent_def_edits(server, artifact, param_upsert_edits(upsert))
+            .await
+    }
+
+    /// Dispatch one agent `declare_space` as ONE `MutationCmdBatch` on the
+    /// same def artifact and through the same ack path as
+    /// [`Self::upsert_shader_param`]. The edit list is
+    /// [`space_declaration_edits`] — the SAME ops the dimensionality
+    /// section's tiles dispatch, so the agent and the human share one
+    /// writer.
+    pub(crate) async fn declare_shader_space(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        declaration: &lpa_agent::SpaceDeclaration,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        self.apply_agent_def_edits(server, artifact, space_declaration_edits(declaration))
+            .await
+    }
+
+    /// The shared body behind every agent def write: resolve the shader
+    /// node's def artifact, send `edits` as ONE `MutationCmdBatch` of
+    /// `PutSlotEdit`s, and report the joined rejection text when any
+    /// command was refused. A clean ack arms the verdict chase — a def
+    /// change flips the node's needs-compile, so the agent's
+    /// engine-verdict wait observes the fresh outcome.
+    async fn apply_agent_def_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        edits: Vec<lpc_model::SlotEdit>,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
         let handle_id = self.ready_handle_id()?;
         let def_artifact = {
             let node = self.agent_shader_node(artifact).ok_or_else(|| {
@@ -1490,7 +1523,7 @@ impl ProjectController {
                 })?
         };
         let batch = MutationCmdBatch::new(
-            param_upsert_edits(upsert)
+            edits
                 .into_iter()
                 .map(|edit| MutationCmd {
                     id: self.allocate_mutation_cmd_id(),
@@ -7614,6 +7647,33 @@ fn fixture_render_size(node: &NodeController) -> Option<lpc_model::Dim2u> {
         slot.children().iter().find_map(find)
     }
     node.slots().iter().find_map(find)
+}
+
+/// The space a shader node DECLARES, read off its top-level `space` enum
+/// slot — the same row the dimensionality section reads and the agent's
+/// `declare_space` writes. A node without the slot reads as `TwoD`, the
+/// model's own default.
+fn agent_shader_space(node: &NodeController) -> lpa_agent::DeclaredSpace {
+    fn find_space(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Enum
+            && matches!(
+                slot.address().path.segments().last(),
+                Some(SlotPathSegment::Field(field))
+                    if field.as_str()
+                        == crate::app::project::node::node_space_section::SHADER_SPACE_ROW
+            )
+        {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_space)
+    }
+
+    crate::app::project::agent_support::declared_space(
+        node.slots()
+            .iter()
+            .find_map(find_space)
+            .and_then(SlotController::enum_variant),
+    )
 }
 
 /// The agent's binding table for a shader node: uniform name, GLSL type

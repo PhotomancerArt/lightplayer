@@ -424,6 +424,17 @@ impl SlotController {
         self.kind
     }
 
+    /// The active variant ident of an enum slot, verbatim as declared
+    /// (`"OneD"`, not `"1d"`) — variant idents are slot path segments.
+    /// `None` for every other slot kind. The read-side twin of the
+    /// `EnsurePresent <enum>.<Variant>` gesture.
+    pub fn enum_variant(&self) -> Option<&str> {
+        match &self.body {
+            SlotControllerBody::Enum { variant, .. } => Some(variant.as_str()),
+            _ => None,
+        }
+    }
+
     /// Latest known revision for this slot, if the mirror supplied one.
     pub fn revision(&self) -> Option<Revision> {
         self.revision

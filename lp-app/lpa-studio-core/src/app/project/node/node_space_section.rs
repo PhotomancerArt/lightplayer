@@ -827,6 +827,109 @@ mod tests {
         assert!(section.mismatch.is_none());
     }
 
+    /// **THE ONE-WRITER GATE.** `declare_space` (the agent's tool) and the
+    /// section's tiles must write the SAME slot paths; a second spelling
+    /// of "how a space declaration is written" is a defect, not a
+    /// convenience.
+    ///
+    /// The agent cannot reuse the derivation directly — it declares a
+    /// space and its projection in ONE call, so the payload rows it
+    /// targets do not exist in the tree yet to be addressed. What CAN be
+    /// checked is the result: derive the section for the state the agent
+    /// asked for, then assert every path
+    /// [`space_declaration_edits`](crate::app::project::agent_support::space_declaration_edits)
+    /// emits is exactly the address a tile carries plus the variant that
+    /// tile dispatches. Drift on either side fails here.
+    #[test]
+    fn agent_edits_match_the_dimensionality_tiles() {
+        use crate::app::project::agent_support::space_declaration_edits;
+        use lpa_agent::{DeclaredSpace, ProjectionShapeTag, SpaceDeclaration};
+
+        // The state the declaration asks for, as the tree would hold it
+        // AFTER the write (mirror on, flip off, shape radial).
+        let row = enum_row(
+            "space",
+            "OneD",
+            &["TwoD", "OneD"],
+            vec![project_row("space.OneD.in_2d", "Radial", true, false)],
+        );
+        let section = shader_space_section(&[&row], None).expect("section");
+
+        // What a user clicking through that state dispatches: the primary
+        // tab, then the shape tile, then each modifier row's on/off card —
+        // every one an `EnsurePresent <row address>.<variant>`.
+        let path = |cell: &UiSpaceCell, variant: &str| {
+            format!(
+                "{}.{variant}",
+                cell.address.as_ref().expect("addressed cell").path
+            )
+        };
+        let answer = section
+            .cell(UiSpaceCellRole::ProducerIn2d)
+            .expect("the 2D answer cell");
+        let modifiers = answer.modifiers.as_ref().expect("the modifier rows");
+        let modifier_path = |row: &UiSpaceBoolRow, variant: &str| {
+            format!(
+                "{}.{variant}",
+                row.address.as_ref().expect("addressed row").path
+            )
+        };
+        let tile_paths = vec![
+            path(&section.primary, "OneD"),
+            path(answer, "Radial"),
+            modifier_path(&modifiers.mirror, "Mirrored"),
+            modifier_path(&modifiers.flip, "Normal"),
+        ];
+
+        let agent_paths: Vec<String> = space_declaration_edits(&SpaceDeclaration {
+            space: DeclaredSpace::OneD,
+            shape: Some(ProjectionShapeTag::Radial),
+            mirror: Some(true),
+            flip: Some(false),
+        })
+        .iter()
+        .map(|edit| edit.path().to_string())
+        .collect();
+
+        assert_eq!(
+            agent_paths, tile_paths,
+            "`declare_space` must write the paths the tiles dispatch — one \
+             writer, two presentations"
+        );
+    }
+
+    /// The 2D half of the same gate: the agent's bare `space.TwoD` ensure
+    /// is what the primary tab pair's other card dispatches.
+    #[test]
+    fn a_two_d_agent_declaration_matches_the_primary_tab() {
+        use crate::app::project::agent_support::space_declaration_edits;
+        use lpa_agent::{DeclaredSpace, SpaceDeclaration};
+
+        let row = enum_row(
+            "space",
+            "TwoD",
+            &["TwoD", "OneD"],
+            vec![enum_row(
+                "space.TwoD.in_1d",
+                "Default",
+                &["Default"],
+                Vec::new(),
+            )],
+        );
+        let section = shader_space_section(&[&row], None).expect("section");
+        let expected = format!(
+            "{}.TwoD",
+            section.primary.address.as_ref().expect("addressed").path
+        );
+
+        let edits = space_declaration_edits(&SpaceDeclaration {
+            space: DeclaredSpace::TwoD,
+            ..SpaceDeclaration::default()
+        });
+        assert_eq!(edits.len(), 1, "nothing to author on the 1D-answer side");
+        assert_eq!(edits[0].path().to_string(), expected);
+    }
+
     /// Claiming is declaration-driven: a face with no section claims
     /// nothing, so a kind that happens to declare a `space` slot keeps its
     /// drawer rows.

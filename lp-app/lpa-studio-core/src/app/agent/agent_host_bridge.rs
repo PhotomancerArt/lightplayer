@@ -23,6 +23,7 @@ use std::rc::Rc;
 
 use lpa_agent::{
     AgentHost, EngineVerdict, HostError, HostFuture, ParamDefRecord, ParamUpsert, ShaderContext,
+    SpaceDeclaration,
 };
 use lpc_model::{ArtifactLocation, Revision};
 use lps_probe::LedPoint;
@@ -39,9 +40,10 @@ use crate::{
 /// tightened pull interval, so each poll can observe one fresh pull).
 const ENGINE_POLL_STEP_MS: u32 = 250;
 
-/// Budget for the upsert-ack wait: one overlay-mutation round trip plus
-/// generous margin (polled on the same actor timer as the verdict wait).
-const UPSERT_ACK_BUDGET_MS: u32 = 5000;
+/// Budget for an agent def-write ack wait (`upsert_param`,
+/// `declare_space`): one overlay-mutation round trip plus generous margin
+/// (polled on the same actor timer as the verdict wait).
+const WRITE_ACK_BUDGET_MS: u32 = 5000;
 
 /// The snapshot the bridge serves between run-start refreshes. Written by
 /// the controller at every Send; `source` is additionally updated by
@@ -71,10 +73,13 @@ pub struct AgentBridgeState {
     /// The target node's def-side param records, refreshed alongside
     /// `engine` (`None` until the node resolves).
     pub params: Option<Vec<ParamDefRecord>>,
-    /// The latest `UpsertParam` outcome: `(seq, rejection text)`. Written
-    /// by the controller when the dispatched batch acks; the bridge's
-    /// `upsert_param` polls it up by its allocated `seq`.
-    pub upsert_ack: Option<(u64, Option<String>)>,
+    /// The latest agent DEF-WRITE outcome: `(seq, rejection text)`.
+    /// Written by the controller when the dispatched batch acks; the
+    /// dispatching bridge call polls it up by its allocated `seq`. One
+    /// cell for every write op (`UpsertParam`, `DeclareSpace`) because the
+    /// run future awaits each dispatch before issuing the next — only one
+    /// is ever in flight, and the `seq` guard rejects a stale ack anyway.
+    pub write_ack: Option<(u64, Option<String>)>,
 }
 
 /// The host handed to `lpa_agent::AgentSession` for one shader node.
@@ -87,9 +92,9 @@ pub struct AgentHostBridge {
     /// The engine-status Revision observed when the last stage was
     /// enqueued; the verdict wait resolves once the cell advances past it.
     pre_stage_revision: Option<Revision>,
-    /// Correlation counter for `UpsertParam` dispatches (acks carry it
-    /// back through [`AgentBridgeState::upsert_ack`]).
-    upsert_seq: u64,
+    /// Correlation counter for agent def-write dispatches (acks carry it
+    /// back through [`AgentBridgeState::write_ack`]).
+    write_seq: u64,
 }
 
 impl AgentHostBridge {
@@ -103,7 +108,70 @@ impl AgentHostBridge {
             tx,
             timer,
             pre_stage_revision: None,
-            upsert_seq: 0,
+            write_seq: 0,
+        }
+    }
+
+    /// Dispatch one agent DEF write (`upsert_param`, `declare_space`) and
+    /// wait for its ack — the shared body behind every write-side host
+    /// method, so the correlation protocol has exactly one implementation.
+    ///
+    /// `make_op` builds the op from the resolved artifact and the
+    /// bridge-allocated `seq`; `summary` is the action's user-facing
+    /// summary; `what` names the write in the timeout error.
+    async fn dispatch_def_write(
+        &mut self,
+        make_op: impl FnOnce(ArtifactLocation, u64) -> AgentOp,
+        summary: &'static str,
+        what: &'static str,
+    ) -> Result<(), HostError> {
+        let artifact = self
+            .state
+            .borrow()
+            .artifact
+            .clone()
+            .ok_or_else(|| HostError::new("no shader source artifact resolved"))?;
+        // A def change flips the node's needs-compile: mark the pre-stage
+        // engine Revision BEFORE enqueuing, exactly like a staged source
+        // edit, so the following verdict wait resolves on this edit's
+        // outcome.
+        self.pre_stage_revision = self
+            .state
+            .borrow()
+            .engine
+            .as_ref()
+            .map(|status| status.revision);
+        self.write_seq += 1;
+        let seq = self.write_seq;
+        self.state.borrow_mut().write_ack = None;
+        self.tx.send(StudioCommand::Action(
+            UiAction::from_op(
+                ControllerId::new(AgentController::NODE_ID),
+                make_op(artifact, seq),
+            )
+            .with_summary(summary),
+        ));
+        // The ApplyBody-style correlation, surfaced through the shared
+        // cell: poll on the actor timer until this seq's ack lands.
+        let mut waited_ms = 0u32;
+        loop {
+            let ack = self.state.borrow().write_ack.clone();
+            if let Some((ack_seq, rejection)) = ack
+                && ack_seq == seq
+            {
+                return match rejection {
+                    None => Ok(()),
+                    Some(reason) => Err(HostError::new(reason)),
+                };
+            }
+            if waited_ms >= WRITE_ACK_BUDGET_MS {
+                return Err(HostError::new(format!(
+                    "{what} was not acknowledged in time"
+                )));
+            }
+            let step = ENGINE_POLL_STEP_MS.min(WRITE_ACK_BUDGET_MS - waited_ms);
+            (self.timer.borrow_mut())(Duration::from_millis(u64::from(step))).await;
+            waited_ms += step;
         }
     }
 
@@ -188,56 +256,34 @@ impl AgentHost for AgentHostBridge {
         upsert: &'a ParamUpsert,
     ) -> HostFuture<'a, Result<(), HostError>> {
         Box::pin(async move {
-            let artifact = self
-                .state
-                .borrow()
-                .artifact
-                .clone()
-                .ok_or_else(|| HostError::new("no shader source artifact resolved"))?;
-            // The def change flips the node's needs-compile: mark the
-            // pre-stage engine Revision BEFORE enqueuing, exactly like a
-            // staged source edit, so the following verdict wait resolves
-            // on this edit's outcome.
-            self.pre_stage_revision = self
-                .state
-                .borrow()
-                .engine
-                .as_ref()
-                .map(|status| status.revision);
-            self.upsert_seq += 1;
-            let seq = self.upsert_seq;
-            self.state.borrow_mut().upsert_ack = None;
-            self.tx.send(StudioCommand::Action(
-                UiAction::from_op(
-                    ControllerId::new(AgentController::NODE_ID),
-                    AgentOp::UpsertParam {
-                        artifact,
-                        seq,
-                        upsert: upsert.clone(),
-                    },
-                )
-                .with_summary("Stage the agent's param record edit."),
-            ));
-            // The ApplyBody-style correlation, surfaced through the shared
-            // cell: poll on the actor timer until this seq's ack lands.
-            let mut waited_ms = 0u32;
-            loop {
-                let ack = self.state.borrow().upsert_ack.clone();
-                if let Some((ack_seq, rejection)) = ack
-                    && ack_seq == seq
-                {
-                    return match rejection {
-                        None => Ok(()),
-                        Some(reason) => Err(HostError::new(reason)),
-                    };
-                }
-                if waited_ms >= UPSERT_ACK_BUDGET_MS {
-                    return Err(HostError::new("param upsert was not acknowledged in time"));
-                }
-                let step = ENGINE_POLL_STEP_MS.min(UPSERT_ACK_BUDGET_MS - waited_ms);
-                (self.timer.borrow_mut())(Duration::from_millis(u64::from(step))).await;
-                waited_ms += step;
-            }
+            self.dispatch_def_write(
+                |artifact, seq| AgentOp::UpsertParam {
+                    artifact,
+                    seq,
+                    upsert: upsert.clone(),
+                },
+                "Stage the agent's param record edit.",
+                "param upsert",
+            )
+            .await
+        })
+    }
+
+    fn declare_space<'a>(
+        &'a mut self,
+        declaration: &'a SpaceDeclaration,
+    ) -> HostFuture<'a, Result<(), HostError>> {
+        Box::pin(async move {
+            self.dispatch_def_write(
+                |artifact, seq| AgentOp::DeclareSpace {
+                    artifact,
+                    seq,
+                    declaration: declaration.clone(),
+                },
+                "Stage the agent's dimensionality declaration.",
+                "space declaration",
+            )
+            .await
         })
     }
 
@@ -454,7 +500,7 @@ mod tests {
         let timer_acks = Rc::clone(&acks);
         let timer: AgentTimerFactory = Rc::new(RefCell::new(move |_delay| {
             if let Some(ack) = timer_acks.borrow_mut().pop() {
-                timer_state.borrow_mut().upsert_ack = Some(ack);
+                timer_state.borrow_mut().write_ack = Some(ack);
             }
             Box::pin(core::future::ready(()))
                 as core::pin::Pin<Box<dyn core::future::Future<Output = ()>>>
@@ -498,7 +544,7 @@ mod tests {
         }));
         let timer_state = Rc::clone(&state);
         let timer: AgentTimerFactory = Rc::new(RefCell::new(move |_delay| {
-            timer_state.borrow_mut().upsert_ack = Some((1, Some("unknown slot path".to_string())));
+            timer_state.borrow_mut().write_ack = Some((1, Some("unknown slot path".to_string())));
             Box::pin(core::future::ready(()))
                 as core::pin::Pin<Box<dyn core::future::Future<Output = ()>>>
         }));

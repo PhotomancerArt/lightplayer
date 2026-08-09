@@ -5367,6 +5367,11 @@ impl StudioController {
                 seq,
                 upsert,
             } => self.agent_upsert_param(artifact, seq, upsert).await,
+            crate::AgentOp::DeclareSpace {
+                artifact,
+                seq,
+                declaration,
+            } => self.agent_declare_space(artifact, seq, declaration).await,
         }
     }
 
@@ -5431,12 +5436,47 @@ impl StudioController {
         match outcome {
             Ok((run, rejection)) => {
                 self.record_logs(run.logs);
-                self.agent.record_upsert_ack(&artifact, seq, rejection);
+                self.agent.record_write_ack(&artifact, seq, rejection);
                 Ok(run.notices)
             }
             Err(error) => {
                 self.agent
-                    .record_upsert_ack(&artifact, seq, Some(error.to_string()));
+                    .record_write_ack(&artifact, seq, Some(error.to_string()));
+                Err(error)
+            }
+        }
+    }
+
+    /// Execute one agent `declare_space` dispatch — the same batch, ack
+    /// and failure-reporting path as [`Self::agent_upsert_param`], over
+    /// the space-declaration edit list.
+    async fn agent_declare_space(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        seq: u64,
+        declaration: lpa_agent::SpaceDeclaration,
+    ) -> UiResult {
+        let outcome = match self
+            .pool
+            .lens_session_mut()
+            .and_then(|session| session.client_mut())
+        {
+            Ok(server) => {
+                self.project
+                    .declare_shader_space(server, &artifact, &declaration)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok((run, rejection)) => {
+                self.record_logs(run.logs);
+                self.agent.record_write_ack(&artifact, seq, rejection);
+                Ok(run.notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_write_ack(&artifact, seq, Some(error.to_string()));
                 Err(error)
             }
         }
@@ -5487,6 +5527,7 @@ impl StudioController {
             node_name: target.node_label,
             fixture,
             bindings,
+            space: target.space,
         };
         let key = crate::AgentSessionKey::new(runtime, target.node_address);
         self.agent
