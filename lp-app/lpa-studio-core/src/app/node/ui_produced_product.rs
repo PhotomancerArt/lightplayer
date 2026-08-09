@@ -217,182 +217,86 @@ pub enum UiVisualSpace {
     TwoD,
 }
 
-/// UI mirror of `lpc_wire::WireProjectionDirection` — which way a
-/// directional projection runs the strip (G1b ruling 4). `Right` is
-/// today's behavior and the default.
+/// UI mirror of `lpc_wire::WireProjectionShape` — the base coordinate
+/// map of a factored projection cell (THE FACTORIZATION, format v9).
+/// `ExtrudeX` is today's extrude and the default.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum UiProjectionDirection {
+pub enum UiProjectionShape {
     #[default]
-    Right,
-    Left,
-    Down,
-    Up,
+    ExtrudeX,
+    ExtrudeY,
+    Radial,
+    Angular,
 }
 
-impl UiProjectionDirection {
-    /// The unicode arrow captions and the direction segmented control
-    /// spell this direction with (`extrude ←`, `mirror ↓`).
+impl UiProjectionShape {
+    /// The caption/tile label.
     #[must_use]
-    pub const fn arrow(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
-            Self::Right => "→",
-            Self::Left => "←",
-            Self::Down => "↓",
-            Self::Up => "↑",
+            Self::ExtrudeX => "extrude-x",
+            Self::ExtrudeY => "extrude-y",
+            Self::Radial => "radial",
+            Self::Angular => "angular",
         }
     }
 
-    /// The RAW model variant ident (`Right`…`Up`) — what a direction
-    /// gesture's `EnsurePresent` appends to the direction cell's address.
+    /// The RAW model variant ident — what a shape tile's `EnsurePresent`
+    /// appends to the shape enum row's address.
     #[must_use]
     pub const fn variant(self) -> &'static str {
         match self {
-            Self::Right => "Right",
-            Self::Left => "Left",
-            Self::Down => "Down",
-            Self::Up => "Up",
+            Self::ExtrudeX => "ExtrudeX",
+            Self::ExtrudeY => "ExtrudeY",
+            Self::Radial => "Radial",
+            Self::Angular => "Angular",
         }
     }
 
-    /// Every direction, in the segmented control's render order.
-    pub const ALL: [Self; 4] = [Self::Right, Self::Left, Self::Down, Self::Up];
-
     /// Parse a RAW model variant ident; unknown idents read as the
-    /// default `Right` (the additive contract).
+    /// default `ExtrudeX` (the behavior-preserving anchor).
     #[must_use]
     pub fn from_variant(variant: &str) -> Self {
         match variant {
-            "Left" => Self::Left,
-            "Down" => Self::Down,
-            "Up" => Self::Up,
-            _ => Self::Right,
+            "ExtrudeY" => Self::ExtrudeY,
+            "Radial" => Self::Radial,
+            "Angular" => Self::Angular,
+            _ => Self::ExtrudeX,
         }
     }
 }
 
-/// UI mirror of `lpc_wire::WireMirrorDirection` — a mirror fold's sense
-/// × axis (mirror-direction ruling: a fold is symmetric in run
-/// direction, so mirror carries its own vocabulary, not
-/// [`UiProjectionDirection`]). `OutwardX` is today's behavior and the
-/// default.
+/// UI mirror of `lpc_wire::WireCellProjection` — one FACTORED cell of the
+/// 1D→2D projection matrix: a base shape plus the two boolean modifiers
+/// (mirror folds the strip around the midpoint, flip reverses it — the
+/// same uniform chain the engine runs).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum UiMirrorDirection {
-    InwardX,
-    #[default]
-    OutwardX,
-    InwardY,
-    OutwardY,
+pub struct UiCellProjection {
+    pub shape: UiProjectionShape,
+    pub mirror: bool,
+    pub flip: bool,
 }
 
-impl UiMirrorDirection {
-    /// The paired-arrow glyph captions and the direction row spell this
-    /// fold with (`mirror →←`).
+impl UiCellProjection {
+    /// A plain shape — no mirror, no flip.
     #[must_use]
-    pub const fn arrows(self) -> &'static str {
-        match self {
-            Self::InwardX => "→←",
-            Self::OutwardX => "←→",
-            Self::InwardY => "↓↑",
-            Self::OutwardY => "↑↓",
+    pub const fn plain(shape: UiProjectionShape) -> Self {
+        Self {
+            shape,
+            mirror: false,
+            flip: false,
         }
     }
-
-    /// Parse a RAW model variant ident; unknown idents read as the
-    /// default `OutwardX` (the additive contract).
-    #[must_use]
-    pub fn from_variant(variant: &str) -> Self {
-        match variant {
-            "InwardX" => Self::InwardX,
-            "InwardY" => Self::InwardY,
-            "OutwardY" => Self::OutwardY,
-            _ => Self::OutwardX,
-        }
-    }
-}
-
-/// UI mirror of `lpc_wire::WireRadialDirection` — a radial projection's
-/// flip (radial/angular flip ruling). `Outward` is today's behavior and
-/// the default.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum UiRadialDirection {
-    #[default]
-    Outward,
-    Inward,
-}
-
-impl UiRadialDirection {
-    /// The word captions spell this flip with (`radial · inward`) —
-    /// radial has no honest arrow, so the caption speaks.
-    #[must_use]
-    pub const fn word(self) -> &'static str {
-        match self {
-            Self::Outward => "outward",
-            Self::Inward => "inward",
-        }
-    }
-
-    /// Parse a RAW model variant ident; unknown idents read as the
-    /// default `Outward` (the additive contract).
-    #[must_use]
-    pub fn from_variant(variant: &str) -> Self {
-        match variant {
-            "Inward" => Self::Inward,
-            _ => Self::Outward,
-        }
-    }
-}
-
-/// UI mirror of `lpc_wire::WireAngularDirection` — an angular
-/// projection's sweep (radial/angular flip ruling). `Clockwise` is
-/// today's behavior and the default (texture y points down, so the
-/// engine's sweep reads clockwise on screen).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum UiAngularDirection {
-    #[default]
-    Clockwise,
-    CounterClockwise,
-}
-
-impl UiAngularDirection {
-    /// The rotation-arrow glyph captions and the direction row spell
-    /// this sweep with (`angular ↺`).
-    #[must_use]
-    pub const fn arrow(self) -> &'static str {
-        match self {
-            Self::Clockwise => "↻",
-            Self::CounterClockwise => "↺",
-        }
-    }
-
-    /// Parse a RAW model variant ident; unknown idents read as the
-    /// default `Clockwise` (the additive contract).
-    #[must_use]
-    pub fn from_variant(variant: &str) -> Self {
-        match variant {
-            "CounterClockwise" => Self::CounterClockwise,
-            _ => Self::Clockwise,
-        }
-    }
-}
-
-/// UI mirror of `lpc_wire::WireCellProjection` — one cell of the 1D→2D
-/// projection matrix. Every shape carries its own direction vocabulary
-/// (G1b ruling 4 + the mirror and radial/angular flip rulings).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UiCellProjection {
-    Extrude(UiProjectionDirection),
-    Radial(UiRadialDirection),
-    Angular(UiAngularDirection),
-    Mirror(UiMirrorDirection),
 }
 
 /// UI mirror of `lpc_wire::WireProjectionOrigin` — which precedence arm
 /// decided a resolved [`UiCellProjection`] (plan D15 preview captions, e.g.
 /// `in 2D · radial (declared)`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// `ConsumerDefault` died with the v9 factorization: the producer always
+/// declares, so a projection is a declaration or a consumer force.
 pub enum UiProjectionOrigin {
     Declared,
-    ConsumerDefault,
     Forced,
 }
 
@@ -410,10 +314,10 @@ pub struct UiConsumerPolicy {
 }
 
 impl UiConsumerPolicy {
-    /// The defaults-only policy (extrude right, never force) — what a
+    /// The defaults-only policy (plain extrude-x, never force) — what a
     /// caller that has never heard of spaces effectively sends.
     pub const AUTO: Self = Self {
-        default_1d_to_2d: UiCellProjection::Extrude(UiProjectionDirection::Right),
+        default_1d_to_2d: UiCellProjection::plain(UiProjectionShape::ExtrudeX),
         force: false,
     };
 

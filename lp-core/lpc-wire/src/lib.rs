@@ -37,11 +37,10 @@ pub use messages::{
     RenderProductProbeResult, RenderProductProbeResultHeader, ResourcePayloadRead,
     ResourceReadQuery, ResourceReadResult, RuntimeReadQuery, RuntimeReadResult,
     ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
-    TimebaseProbeResult, WireAngularDirection, WireBindingDirection, WireBindingEndpoint,
-    WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection,
-    WireConsumerPolicy, WireEffectiveBinding, WireMirrorDirection, WirePhasorOrigin,
-    WirePhasorReading, WirePhasorRow, WireProjectionDirection, WireProjectionOrigin,
-    WireRadialDirection, WireScopeRef, WireVisualSpace,
+    TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
+    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
+    WireEffectiveBinding, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{

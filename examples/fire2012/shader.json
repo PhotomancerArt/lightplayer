@@ -73,7 +73,12 @@
   "space": {
     "kind": "OneD",
     "in_2d": {
-      "kind": "Default"
+      "kind": "Project",
+      "shape": {
+        "kind": "ExtrudeX"
+      },
+      "mirror": false,
+      "flip": false
     }
   }
 }

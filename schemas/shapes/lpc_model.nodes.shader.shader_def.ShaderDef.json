@@ -159,26 +159,18 @@
                             "meta": {},
                             "variants": [
                               {
-                                "name": "Default",
-                                "shape": {
-                                  "unit": {
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Extrude",
+                                "name": "Project",
                                 "shape": {
                                   "record": {
                                     "fields": [
                                       {
-                                        "name": "direction",
+                                        "name": "shape",
                                         "shape": {
                                           "enum": {
                                             "meta": {},
                                             "variants": [
                                               {
-                                                "name": "Right",
+                                                "name": "ExtrudeX",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -186,7 +178,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Left",
+                                                "name": "ExtrudeY",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -194,7 +186,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Down",
+                                                "name": "Radial",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -202,7 +194,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Up",
+                                                "name": "Angular",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -212,128 +204,30 @@
                                             ]
                                           }
                                         }
-                                      }
-                                    ],
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Radial",
-                                "shape": {
-                                  "record": {
-                                    "fields": [
+                                      },
                                       {
-                                        "name": "direction",
+                                        "name": "mirror",
                                         "shape": {
-                                          "enum": {
-                                            "meta": {},
-                                            "variants": [
-                                              {
-                                                "name": "Outward",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              },
-                                              {
-                                                "name": "Inward",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              }
-                                            ]
+                                          "value": {
+                                            "shape": {
+                                              "editor": "plain",
+                                              "id": 1196386242,
+                                              "meta": {},
+                                              "ty": "bool"
+                                            }
                                           }
                                         }
-                                      }
-                                    ],
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Angular",
-                                "shape": {
-                                  "record": {
-                                    "fields": [
+                                      },
                                       {
-                                        "name": "direction",
+                                        "name": "flip",
                                         "shape": {
-                                          "enum": {
-                                            "meta": {},
-                                            "variants": [
-                                              {
-                                                "name": "Clockwise",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              },
-                                              {
-                                                "name": "CounterClockwise",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              }
-                                            ]
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Mirror",
-                                "shape": {
-                                  "record": {
-                                    "fields": [
-                                      {
-                                        "name": "direction",
-                                        "shape": {
-                                          "enum": {
-                                            "meta": {},
-                                            "variants": [
-                                              {
-                                                "name": "InwardX",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              },
-                                              {
-                                                "name": "OutwardX",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              },
-                                              {
-                                                "name": "InwardY",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              },
-                                              {
-                                                "name": "OutwardY",
-                                                "shape": {
-                                                  "unit": {
-                                                    "meta": {}
-                                                  }
-                                                }
-                                              }
-                                            ]
+                                          "value": {
+                                            "shape": {
+                                              "editor": "plain",
+                                              "id": 1196386242,
+                                              "meta": {},
+                                              "ty": "bool"
+                                            }
                                           }
                                         }
                                       }

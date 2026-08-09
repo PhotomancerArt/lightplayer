@@ -87,94 +87,53 @@ pub fn centre_scanline(t: f32) -> (f32, f32) {
     (t.clamp(0.0, 1.0), 0.5)
 }
 
-/// The strip coordinate a
-/// [`ProjectionDirection`](crate::products::visual::ProjectionDirection)
-/// picks out of a normalized `(u, v)` — the ONE place direction enters the
-/// math (G1b ruling 4): the directional shapes run their existing 1-axis
-/// map over this coordinate. `Right` is `u` verbatim, so the default
-/// direction is bit-for-bit the pre-directional behavior.
+/// The strip coordinate a base [`ProjectionShape`]
+/// (`crate::products::visual::ProjectionShape`) reads off a normalized
+/// `(u, v)` — the first link of THE uniform chain (the factorization
+/// ruling): `ExtrudeX` is `u` verbatim, `ExtrudeY` is `v`, and
+/// radial/angular are the existing centre maps.
 #[must_use]
-pub fn directed_coord(
-    direction: crate::products::visual::ProjectionDirection,
-    u: f32,
-    v: f32,
-) -> f32 {
-    use crate::products::visual::ProjectionDirection;
-    match direction {
-        ProjectionDirection::Right => u,
-        ProjectionDirection::Left => 1.0 - u,
-        ProjectionDirection::Down => v,
-        ProjectionDirection::Up => 1.0 - v,
-    }
-}
-
-/// The strip coordinate a mirror FOLD produces from a normalized
-/// `(u, v)` (mirror-direction ruling): outward runs the strip from the
-/// centre line toward both edges (`|2s−1|` — the pre-direction mirror,
-/// verbatim, for `OutwardX`), inward from both edges toward the centre
-/// (`1 − |2s−1|`); the axis picks `x` or `y` as the folded coordinate.
-#[must_use]
-pub fn mirror_fold_coord(
-    direction: crate::products::visual::MirrorDirection,
-    u: f32,
-    v: f32,
-) -> f32 {
-    use crate::products::visual::MirrorDirection;
-    match direction {
-        MirrorDirection::OutwardX => mirror(u, v),
-        MirrorDirection::InwardX => 1.0 - mirror(u, v),
-        MirrorDirection::OutwardY => mirror(v, u),
-        MirrorDirection::InwardY => 1.0 - mirror(v, u),
-    }
-}
-
-/// The strip coordinate a radial FLIP produces (radial/angular flip
-/// ruling): `Outward` is the pre-flip radial verbatim (`u = r`), `Inward`
-/// runs the strip edge → centre (`u = 1 − r`).
-#[must_use]
-pub fn radial_flip_coord(
-    direction: crate::products::visual::RadialDirection,
-    u: f32,
-    v: f32,
-) -> f32 {
-    use crate::products::visual::RadialDirection;
-    match direction {
-        RadialDirection::Outward => radial(u, v),
-        RadialDirection::Inward => 1.0 - radial(u, v),
-    }
-}
-
-/// The strip coordinate an angular SWEEP produces (radial/angular flip
-/// ruling): `Clockwise` is the pre-flip sweep verbatim, `CounterClockwise`
-/// negates it (`u = 1 − a`, wrapped so the range stays half-open — the
-/// seam stays at the same angle, only the direction of travel flips).
-#[must_use]
-pub fn angular_sweep_coord(
-    direction: crate::products::visual::AngularDirection,
-    u: f32,
-    v: f32,
-) -> f32 {
-    use crate::products::visual::AngularDirection;
-    match direction {
-        AngularDirection::Clockwise => angular(u, v),
-        AngularDirection::CounterClockwise => {
-            let swept = 1.0 - angular(u, v);
-            if swept >= 1.0 { 0.0 } else { swept }
-        }
+pub fn shape_coord(shape: crate::products::visual::ProjectionShape, u: f32, v: f32) -> f32 {
+    use crate::products::visual::ProjectionShape;
+    match shape {
+        ProjectionShape::ExtrudeX => extrude(u, v),
+        ProjectionShape::ExtrudeY => extrude(v, u),
+        ProjectionShape::Radial => radial(u, v),
+        ProjectionShape::Angular => angular(u, v),
     }
 }
 
 /// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
-/// normalized target→source map.
+/// normalized target→source map — ONE uniform transform chain for every
+/// factored cell (the factorization ruling replaced the per-shape arms):
+///
+/// ```text
+/// t = shape_coord(shape, u, v);
+/// if mirror { t = 1 − |2t − 1| }   // fold around the midpoint
+/// if flip   { t = 1 − t }          // reverse the strip
+/// ```
+///
+/// A non-mirrored angular's output is CYCLIC with a discontinuous seam,
+/// so its range is kept half-open after the chain (a flipped seam value
+/// of exactly `1.0` wraps to `0.0`) — the seam stays at the same angle,
+/// only the direction of travel changes; bit-identical to the
+/// pre-factored counter-clockwise arm. A MIRRORED angular is continuous
+/// across the seam (the fold runs up and back), so `1.0` there is the
+/// fold's genuine far end and is never wrapped.
 #[must_use]
 pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v: f32) -> f32 {
-    use crate::products::visual::CellProjection;
-    match cell {
-        CellProjection::Extrude(direction) => extrude(directed_coord(direction, u, v), v),
-        CellProjection::Radial(direction) => radial_flip_coord(direction, u, v),
-        CellProjection::Angular(direction) => angular_sweep_coord(direction, u, v),
-        CellProjection::Mirror(direction) => mirror_fold_coord(direction, u, v),
+    use crate::products::visual::ProjectionShape;
+    let mut t = shape_coord(cell.shape, u, v);
+    if cell.mirror {
+        t = 1.0 - libm::fabsf(2.0 * t - 1.0);
     }
+    if cell.flip {
+        t = 1.0 - t;
+    }
+    if cell.shape == ProjectionShape::Angular && !cell.mirror && t >= 1.0 {
+        t = 0.0;
+    }
+    t
 }
 
 #[must_use]
@@ -298,86 +257,97 @@ mod tests {
         }
     }
 
+    /// THE bit-identity table (factorization ruling): every pre-factored
+    /// vocabulary entry re-expressed as shape × mirror × flip must equal
+    /// the same named map it always ran. Extrude-Right = ExtrudeX plain;
+    /// Left = ExtrudeX + flip; Down/Up = ExtrudeY (± flip); the four
+    /// mirror folds = ExtrudeX|Y × mirror (× flip — outward is the
+    /// mirrored fold REVERSED, `|2s−1|`); radial inward = Radial + flip;
+    /// angular counter-clockwise = Angular + flip.
     #[test]
-    fn the_cell_dispatcher_matches_the_named_maps() {
-        use crate::products::visual::{
-            AngularDirection, CellProjection, MirrorDirection, ProjectionDirection, RadialDirection,
+    fn the_factored_chain_is_bit_identical_to_the_named_maps() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
+        let cell = |shape, m, f| CellProjection {
+            shape,
+            mirror: m,
+            flip: f,
         };
-        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
+        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0), (0.9, 0.2)] {
+            // extrude directions
             assert_close(
-                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Right), u, v),
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, false, false), u, v),
                 extrude(u, v),
-                "extrude",
+                "extrude right = extrude-x",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Radial(RadialDirection::Outward), u, v),
-                radial(u, v),
-                "radial (outward IS the pre-flip behavior)",
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, false, true), u, v),
+                extrude(1.0 - u, v),
+                "extrude left = extrude-x + flip",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Angular(AngularDirection::Clockwise), u, v),
-                angular(u, v),
-                "angular (clockwise IS the pre-flip behavior)",
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, false, false), u, v),
+                extrude(v, u),
+                "extrude down = extrude-y",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::OutwardX), u, v),
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, false, true), u, v),
+                extrude(1.0 - v, u),
+                "extrude up = extrude-y + flip",
+            );
+            // mirror folds (outward = the pre-direction mirror |2s−1|)
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, true, true), u, v),
                 mirror(u, v),
-                "mirror (outward-x IS the pre-direction behavior)",
+                "mirror outward-x = extrude-x + mirror + flip",
             );
-        }
-    }
-
-    /// Direction picks the strip coordinate and nothing else (G1b ruling
-    /// 4): `Right` is `u` verbatim (today's behavior), `Left` reverses it,
-    /// `Down`/`Up` run the rows instead of the columns.
-    #[test]
-    fn directed_coord_picks_the_strip_axis() {
-        use crate::products::visual::ProjectionDirection;
-        let (u, v) = (0.25, 0.7);
-        assert_close(directed_coord(ProjectionDirection::Right, u, v), 0.25, "→");
-        assert_close(directed_coord(ProjectionDirection::Left, u, v), 0.75, "←");
-        assert_close(directed_coord(ProjectionDirection::Down, u, v), 0.7, "↓");
-        assert_close(
-            directed_coord(ProjectionDirection::Up, u, v),
-            0.3,
-            "↑ is 1 − y",
-        );
-    }
-
-    /// The radial flip runs the strip edge → centre: 1 at the centre,
-    /// 0 in the corners — `1 − r` everywhere.
-    #[test]
-    fn radial_inward_runs_the_strip_edge_to_centre() {
-        use crate::products::visual::{CellProjection, RadialDirection};
-        assert_close(
-            project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), 0.5, 0.5),
-            1.0,
-            "inward centre",
-        );
-        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
             assert_close(
-                project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), u, v),
-                0.0,
-                "inward corner",
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, true, false), u, v),
+                1.0 - mirror(u, v),
+                "mirror inward-x = extrude-x + mirror",
             );
-        }
-        for (u, v) in [(0.3, 0.7), (0.9, 0.2)] {
             assert_close(
-                project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), u, v),
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, true, true), u, v),
+                mirror(v, u),
+                "mirror outward-y = extrude-y + mirror + flip",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, true, false), u, v),
+                1.0 - mirror(v, u),
+                "mirror inward-y = extrude-y + mirror",
+            );
+            // radial flips
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Radial, false, false), u, v),
+                radial(u, v),
+                "radial outward = radial",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Radial, false, true), u, v),
                 1.0 - radial(u, v),
-                "inward is 1 − r",
+                "radial inward = radial + flip",
+            );
+            // angular sweep (the wrap case is asserted separately below)
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Angular, false, false), u, v),
+                angular(u, v),
+                "angular clockwise = angular",
             );
         }
     }
 
     /// The angular flip negates the sweep — `1 − a`, wrapped so the range
-    /// stays half-open (the seam stays put; only the travel flips).
+    /// stays half-open (the seam stays put; only the travel flips) —
+    /// bit-identical to the pre-factored counter-clockwise arm.
     #[test]
-    fn angular_counter_clockwise_negates_the_sweep() {
-        use crate::products::visual::{AngularDirection, CellProjection};
+    fn angular_flip_negates_the_sweep_and_stays_half_open() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
         let ccw = |u, v| {
             project_2d_to_1d(
-                CellProjection::Angular(AngularDirection::CounterClockwise),
+                CellProjection {
+                    shape: ProjectionShape::Angular,
+                    mirror: false,
+                    flip: true,
+                },
                 u,
                 v,
             )
@@ -392,37 +362,51 @@ mod tests {
         }
     }
 
-    /// The directional dispatcher arms compose direction with the existing
-    /// shape math — extrude-left is the reversed ramp; each mirror fold is
-    /// its sense × axis over the same `|2s−1|` core.
+    /// The NEW states the factorization makes reachable (Yona's ask):
+    /// angular + mirror is the up-and-back sweep — the strip runs half a
+    /// turn out and folds back over the other half — and radial + mirror
+    /// is a ring ramp that peaks mid-radius.
     #[test]
-    fn directional_arms_compose_direction_with_the_shape_math() {
-        use crate::products::visual::{CellProjection, MirrorDirection, ProjectionDirection};
-        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
+    fn the_new_mirror_composites_run_up_and_back() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
+        let am = |u, v| {
+            project_2d_to_1d(
+                CellProjection {
+                    shape: ProjectionShape::Angular,
+                    mirror: true,
+                    flip: false,
+                },
+                u,
+                v,
+            )
+        };
+        // The sweep runs 0→1 over the first half turn and back 1→0 over
+        // the second: quarter turns land on the same value.
+        assert_close(am(1.0, 0.5), 0.0, "+x start");
+        assert_close(am(0.0, 0.5), 1.0, "-x is the far end of the fold");
+        assert_close(am(0.5, 1.0), 0.5, "+y quarter");
+        assert_close(am(0.5, 0.0), 0.5, "-y quarter matches +y — up and back");
+
+        let rm = |u, v| {
+            project_2d_to_1d(
+                CellProjection {
+                    shape: ProjectionShape::Radial,
+                    mirror: true,
+                    flip: false,
+                },
+                u,
+                v,
+            )
+        };
+        assert_close(rm(0.5, 0.5), 0.0, "centre = fold start");
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            assert_close(rm(u, v), 0.0, "corners fold back to 0");
+        }
+        for (u, v) in [(0.3, 0.7), (0.9, 0.2)] {
             assert_close(
-                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Left), u, v),
-                extrude(1.0 - u, v),
-                "extrude ←",
-            );
-            assert_close(
-                project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Up), u, v),
-                extrude(1.0 - v, u),
-                "extrude ↑",
-            );
-            assert_close(
-                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::InwardX), u, v),
-                1.0 - mirror(u, v),
-                "mirror →← (inward-x)",
-            );
-            assert_close(
-                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::OutwardY), u, v),
-                mirror(v, u),
-                "mirror ↑↓ (outward-y)",
-            );
-            assert_close(
-                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::InwardY), u, v),
-                1.0 - mirror(v, u),
-                "mirror ↓↑ (inward-y)",
+                rm(u, v),
+                1.0 - libm::fabsf(2.0 * radial(u, v) - 1.0),
+                "mid fold",
             );
         }
     }

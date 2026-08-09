@@ -292,39 +292,38 @@ fn space_in_definition_variant() -> Element {
 
 /// G1b ruling 4's two-section design, in the flesh: shape, then
 /// direction — each shape with its OWN direction vocabulary
-/// (mirror-direction ruling). (The old `space_projection_candidates`
-/// story — the Y-twin drawings with no model behind them — retired with
-/// the ruling: the directional vocabulary is real now.)
+/// (The old per-shape direction rows and their vocabularies retired
+/// with THE FACTORIZATION: shape × mirror × flip.)
 #[story(
-    description = "The direction rows — RULING 4's two-section design, now for ALL FOUR shapes (radial/angular flip ruling): the top section is the general SHAPE (inline tiles), and the active shape's `direction` row renders beneath, each shape with its OWN vocabulary: single run-direction arrows for extrude (→ ← ↓ ↑), paired FOLD arrows for mirror (→← ←→ ↓↑ ↑↓), outward/inward words for radial's flip, ↻/↺ for angular's sweep. Shown: extrude ↓, mirror ↓↑ (inward-y), radial · inward, angular ↺ — field summaries and captions wear the same vocabulary, with each shape's default staying bare. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>` at the flattened payload row's real address."
+    description = "The MODIFIER TOGGLES — THE FACTORIZATION in the flesh: four shape tiles (extrude-x, extrude-y, radial, angular) with two checkbox toggles beneath ('mirror' folds the strip around the middle, 'flip' reverses it — the same uniform chain the engine runs, in that order). The per-shape direction rows and their four vocabularies are GONE: extrude's directions, mirror's folds, radial's in/out, angular's sweep were all this one grid × two bools. Shown: extrude-y + mirror (the old inward-y fold), radial + flip (the old inward), angular + mirror (the up-and-back sweep no old vocabulary could spell), and angular + flip (the old counter-clockwise). Glyphs are DERIVED — the same transform chain runs over the ramp drawing — so every composite draws itself; captions read `extrude-y · mirrored`."
 )]
-fn space_direction_row() -> Element {
-    let directed = |answer: &str, direction: &str| {
+fn space_modifiers() -> Element {
+    let modified = |answer: &str, mirror: bool, flip: bool| {
         let mut face = shader_face_one_d(answer);
         face.space = Some(
-            crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
-                answer, direction,
+            crate::app::node::face_story_fixtures::shader_space_section_one_d_modified(
+                answer, mirror, flip,
             ),
         );
         face
     };
-    let extrude = directed("Extrude", "Down");
-    let mirror = directed("Mirror", "InwardY");
-    let radial = directed("Radial", "Inward");
-    let angular = directed("Angular", "CounterClockwise");
+    let extrude_y_mirror = modified("ExtrudeY", true, false);
+    let radial_flip = modified("Radial", false, true);
+    let angular_mirror = modified("Angular", true, false);
+    let angular_flip = modified("Angular", false, true);
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: extrude, space_open: true }
+                ShaderBodyCard { face: extrude_y_mirror, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: mirror, space_open: true }
+                ShaderBodyCard { face: radial_flip, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: radial, space_open: true }
+                ShaderBodyCard { face: angular_mirror, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: angular, space_open: true }
+                ShaderBodyCard { face: angular_flip, space_open: true }
             }
         }
     }
@@ -353,7 +352,7 @@ fn preview_spaces_stacked() -> Element {
         ShaderCardCanvas {
             ShaderFace {
                 face: shader_face_stacked_preview(
-                    UiCellProjection::Radial(lpa_studio_core::UiRadialDirection::Outward),
+                    UiCellProjection::plain(lpa_studio_core::UiProjectionShape::Radial),
                     UiProjectionOrigin::Declared,
                 ),
                 node: "/fyeah_sign.show/comet.shader".to_string(),
@@ -364,26 +363,18 @@ fn preview_spaces_stacked() -> Element {
 }
 
 #[story(
-    description = "The same stacked hero under the other two origins (D11's honesty rule): `(consumer default)` is the fixture filling a silence the shader left, `(forced)` is the fixture overruling an opinion the shader did state. A projection nobody authored must never read like one somebody did — which is the whole reason the caption carries an origin at all."
+    description = "The same stacked hero under the OTHER origin (D11's honesty rule): `(forced)` is the fixture overruling the projection the shader declared. Post-v9 there are only two origins — the producer always declares, so the old `(consumer default)` fill-the-silence rung no longer exists; a caption is `declared` or `forced`, nothing else."
 )]
 fn preview_space_origins() -> Element {
     rsx! {
-        div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
-            for (key , origin) in [
-                ("consumer-default", UiProjectionOrigin::ConsumerDefault),
-                ("forced", UiProjectionOrigin::Forced),
-            ]
-            {
-                div { key: "{key}", class: "tw:w-full tw:max-w-md",
-                    ShaderFace {
-                        face: shader_face_stacked_preview(
-                            UiCellProjection::Extrude(lpa_studio_core::UiProjectionDirection::Right),
-                            origin,
-                        ),
-                        node: "/fyeah_sign.show/comet.shader".to_string(),
-                        on_action: move |_| {},
-                    }
-                }
+        div { class: "tw:w-full tw:max-w-md tw:p-2",
+            ShaderFace {
+                face: shader_face_stacked_preview(
+                    UiCellProjection::plain(lpa_studio_core::UiProjectionShape::ExtrudeX),
+                    UiProjectionOrigin::Forced,
+                ),
+                node: "/fyeah_sign.show/comet.shader".to_string(),
+                on_action: move |_| {},
             }
         }
     }
@@ -393,7 +384,7 @@ fn preview_space_origins() -> Element {
     description = "1D only — the D15 default for a strip-native shader, and the card an author of fire2012 or comet sees before touching anything. The hero is the strip as a readable band rather than the 32:1 hairline its probe geometry literally is; the caption says `native · 1D`, because nothing was projected to get here."
 )]
 fn preview_space_one_d_only() -> Element {
-    let mut face = shader_face_one_d("Extrude");
+    let mut face = shader_face_one_d("ExtrudeX");
     face.preview
         .spaces
         .retain(|view| view.space == UiVisualSpace::OneD);

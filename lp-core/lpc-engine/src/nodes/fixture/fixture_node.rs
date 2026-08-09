@@ -692,26 +692,19 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
         // words, so there is no third state to carry into the engine.
         "Auto" => Some(ConsumerPolicy::AUTO),
         "Policy" => {
-            let from_1d = match try_read_def_enum_variant(ctx, "consume.Policy.from_1d")
-                .as_deref()
-                .unwrap_or("Extrude")
-            {
-                "Radial" => CellProjection::Radial(try_read_def_radial_direction(
-                    ctx,
-                    "consume.Policy.from_1d.Radial.direction",
-                )),
-                "Angular" => CellProjection::Angular(try_read_def_angular_direction(
-                    ctx,
-                    "consume.Policy.from_1d.Angular.direction",
-                )),
-                "Mirror" => CellProjection::Mirror(try_read_def_mirror_direction(
-                    ctx,
-                    "consume.Policy.from_1d.Mirror.direction",
-                )),
-                _ => CellProjection::Extrude(try_read_def_direction(
-                    ctx,
-                    "consume.Policy.from_1d.Extrude.direction",
-                )),
+            // The factored cell (v9): one `Project` record of
+            // shape × mirror × flip. Unresolvable payload fields read as
+            // their behavior-preserving defaults.
+            let from_1d = CellProjection {
+                shape: try_read_def_shape(ctx, "consume.Policy.from_1d.Project.shape"),
+                mirror: try_read_def_value::<bool>(ctx, "consume.Policy.from_1d.Project.mirror")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+                flip: try_read_def_value::<bool>(ctx, "consume.Policy.from_1d.Project.flip")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
             };
             let force = try_read_def_value::<bool>(ctx, "consume.Policy.force")
                 .ok()
@@ -726,61 +719,18 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
     }
 }
 
-/// The authored direction payload of a directional `from_1d` cell. A path
-/// that does not resolve reads as the default `Right` — the additive
-/// contract: a bare pre-directional `Extrude`/`Mirror` means what it
-/// always meant.
-fn try_read_def_direction(
+/// The authored shape payload of a `Project` cell. Unresolvable reads as
+/// the default `ExtrudeX` (the behavior-preserving anchor).
+fn try_read_def_shape(
     ctx: &mut TickContext<'_>,
     path: &'static str,
-) -> crate::products::visual::ProjectionDirection {
-    use crate::products::visual::ProjectionDirection;
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape;
     match try_read_def_enum_variant(ctx, path).as_deref() {
-        Some("Left") => ProjectionDirection::Left,
-        Some("Down") => ProjectionDirection::Down,
-        Some("Up") => ProjectionDirection::Up,
-        _ => ProjectionDirection::Right,
-    }
-}
-
-/// The authored flip payload of a radial `from_1d` cell. Unresolvable
-/// reads as the default `Outward` (the additive contract).
-fn try_read_def_radial_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::RadialDirection {
-    use crate::products::visual::RadialDirection;
-    match try_read_def_enum_variant(ctx, path).as_deref() {
-        Some("Inward") => RadialDirection::Inward,
-        _ => RadialDirection::Outward,
-    }
-}
-
-/// The authored sweep payload of an angular `from_1d` cell. Unresolvable
-/// reads as the default `Clockwise` (the additive contract).
-fn try_read_def_angular_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::AngularDirection {
-    use crate::products::visual::AngularDirection;
-    match try_read_def_enum_variant(ctx, path).as_deref() {
-        Some("CounterClockwise") => AngularDirection::CounterClockwise,
-        _ => AngularDirection::Clockwise,
-    }
-}
-
-/// The authored fold payload of a mirror `from_1d` cell. Unresolvable
-/// reads as the default `OutwardX` (the additive contract).
-fn try_read_def_mirror_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::MirrorDirection {
-    use crate::products::visual::MirrorDirection;
-    match try_read_def_enum_variant(ctx, path).as_deref() {
-        Some("InwardX") => MirrorDirection::InwardX,
-        Some("InwardY") => MirrorDirection::InwardY,
-        Some("OutwardY") => MirrorDirection::OutwardY,
-        _ => MirrorDirection::OutwardX,
+        Some("ExtrudeY") => ProjectionShape::ExtrudeY,
+        Some("Radial") => ProjectionShape::Radial,
+        Some("Angular") => ProjectionShape::Angular,
+        _ => ProjectionShape::ExtrudeX,
     }
 }
 
@@ -4343,9 +4293,30 @@ mod space_negotiation {
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
     use crate::products::visual::{
-        AngularDirection, MirrorDirection, ProductSpaceInfo, ProjectionDirection, RadialDirection,
-        VisualSampleBufferRequest, VisualSampleTarget,
+        ProductSpaceInfo, ProjectionShape, VisualSampleBufferRequest, VisualSampleTarget,
     };
+
+    /// An authored factored answer cell: `Project { shape, mirror, flip }`.
+    fn authored_project(
+        shape: lpc_model::ProjectionShape,
+        mirror: bool,
+        flip: bool,
+    ) -> SpaceAnswer2 {
+        SpaceAnswer2::Project {
+            shape: EnumSlot::new(shape),
+            mirror: lpc_model::ValueSlot::new(mirror),
+            flip: lpc_model::ValueSlot::new(flip),
+        }
+    }
+
+    /// A runtime factored cell.
+    fn cellp(shape: ProjectionShape, mirror: bool, flip: bool) -> CellProjection {
+        CellProjection {
+            shape,
+            mirror,
+            flip,
+        }
+    }
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::sync::Arc;
@@ -4674,9 +4645,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
-                    direction: EnumSlot::default(),
-                }),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -4690,43 +4663,46 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
-    /// A source with no opinion (`SpaceAnswer2::Default`) takes the
-    /// consumer's policy default.
+    /// Post-v9 the producer ALWAYS declares — a fresh (default) record is
+    /// plain extrude-x, and a non-forcing consumer policy no longer fills
+    /// any silence: the declaration wins.
     #[test]
-    fn a_silent_source_takes_the_consumer_policy_default() {
+    fn a_default_declaration_beats_a_non_forcing_consumer_policy() {
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Default),
+                in_2d: EnumSlot::default(),
             },
             RAMP_1D,
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, true, true),
             force: false,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
         let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
 
         for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
-            let expected = crate::products::visual::mirror(point[0], point[1]);
-            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror"));
+            let expected = crate::products::visual::extrude(point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude"));
         }
     }
 
-    /// A directional authored opinion (G1b ruling 4): `Extrude { Left }`
-    /// runs the strip right→left — every lamp reads `1 − x` where the
-    /// plain extrude would read `x`. Direction enters the math as the
-    /// strip-coordinate pick and nothing else.
+    /// A flipped authored opinion (the factorization's spelling of the
+    /// old `Extrude { Left }`): `ExtrudeX + flip` runs the strip
+    /// right→left — every lamp reads `1 − x` where the plain extrude
+    /// would read `x`.
     #[test]
     fn an_extrude_left_opinion_reverses_the_strip() {
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Extrude {
-                    direction: EnumSlot::new(lpc_model::ProjectionDirection::Left),
-                }),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::ExtrudeX,
+                    false,
+                    true,
+                )),
             },
             RAMP_1D,
         );
@@ -4740,22 +4716,22 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
-    /// A directional consumer policy (mirror-direction ruling): the
-    /// `↑↓` outward-y fold runs the strip from the centre ROW toward top
-    /// and bottom — the fold coordinate is `y`, same `|2s−1|` core.
+    /// A FORCED factored consumer policy: the old outward-y fold spelled
+    /// `ExtrudeY + mirror + flip` runs the strip from the centre ROW
+    /// toward top and bottom — the same `|2s−1|` core over `y`.
     #[test]
     fn a_mirror_outward_y_policy_folds_along_the_rows() {
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Default),
+                in_2d: EnumSlot::default(),
             },
             RAMP_1D,
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardY),
-            force: false,
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeY, true, true),
+            force: true,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
         let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
@@ -4773,15 +4749,17 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
-                    direction: EnumSlot::default(),
-                }),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, false, false),
             force: true,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
@@ -4953,7 +4931,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             1,
             VisualSpace::OneD,
             ConsumerPolicy {
-                default_1d_to_2d: CellProjection::Radial(RadialDirection::Outward),
+                default_1d_to_2d: cellp(ProjectionShape::Radial, false, false),
                 force: true,
             },
             false,
@@ -5031,9 +5009,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn a_1d_source_fills_a_2d_texture_through_the_projection() {
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
-                    direction: EnumSlot::default(),
-                }),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -5140,9 +5120,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn the_render_node_route_answers_the_same_space() {
         let producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Angular {
-                    direction: EnumSlot::default(),
-                }),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Angular,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -5151,9 +5133,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             let node = ShaderNode::new(
                 NodeId::new(1),
                 shader_def(ShaderSpace::OneD {
-                    in_2d: EnumSlot::new(SpaceAnswer2::Angular {
-                        direction: EnumSlot::default(),
-                    }),
+                    in_2d: EnumSlot::new(authored_project(
+                        lpc_model::ProjectionShape::Angular,
+                        false,
+                        false,
+                    )),
                 }),
                 asset(RAMP_1D),
             );
@@ -5167,7 +5151,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             .expect("space");
         assert_eq!(
             via_trait,
-            ProductSpaceInfo::one_d(Some(CellProjection::Angular(AngularDirection::Clockwise)))
+            ProductSpaceInfo::one_d(Some(cellp(ProjectionShape::Angular, false, false)))
         );
         let _ = VisualConsumerSpace::default();
     }

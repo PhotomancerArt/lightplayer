@@ -1,6 +1,4 @@
-use crate::{
-    AngularDirection, EnumSlot, MirrorDirection, ProjectionDirection, RadialDirection, Slotted,
-};
+use crate::{EnumSlot, ProjectionShape, Slotted, ValueSlot};
 
 /// Space a shader (or any future visual source) declares it lives in, plus
 /// the per-target answer for the opposite dimension.
@@ -10,9 +8,6 @@ use crate::{
 /// struct-payload variants and one `#[default]` variant. The derive
 /// generates all `SlotValue`/`SlottedEnum` plumbing — no hand-written
 /// impls.
-///
-/// Model layer only: this declaration is not yet read by the engine or
-/// shader compiler (that's P2/P4 of the dimensionality-first-class plan).
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum ShaderSpace {
     /// The shader renders into 2D texture space — every shader authored
@@ -33,42 +28,31 @@ pub enum ShaderSpace {
     },
 }
 
-/// How a 1D source answers a 2D pair (vision D7/D14).
+/// How a 1D source answers a 2D pair (vision D7/D14) — the FACTORED form
+/// (post-G2 ruling, format v9): one `Project` record of
+/// `shape × mirror × flip` instead of per-shape variants with per-shape
+/// direction vocabularies. A FLAT record deliberately: switching shape
+/// keeps your mirror/flip, and the UI (four shape tiles + two toggles)
+/// maps 1:1. "Project" echoes Plan A's ratified
+/// `SpaceAnswer{Default|Project|Native}` vision naming; `Native` (own
+/// `render_2d` entry) arrives later as an additive variant.
 ///
-/// v1 projections use fixed defaults (centre 0.5x0.5); projection
-/// parameters (radial centre, etc.) arrive with the explicit projection
-/// node later (vision Q3 lean: declared defaults stay static).
-///
-/// Every shape carries its OWN direction vocabulary (G1b ruling 4, the
-/// mirror-direction ruling, and the radial/angular flip ruling) —
-/// additive: a bare persisted variant name parses with the payload at
-/// its default, which is exactly the pre-directional behavior, so no
-/// format bump.
+/// There is NO `Default` variant anymore (G1 ruling 11 fully realized,
+/// v8→v9): the producer always declares — a fresh `Project` record IS
+/// the extrude-x default, bit-identical to what v8's `Default` resolved
+/// to. The v8→v9 migration rewrites every persisted cell.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum SpaceAnswer2 {
-    /// Consumer decides (the extrude system default) — no opinion authored.
+    /// A declared projection: base shape and its two modifiers.
     #[default]
-    Default,
-    Extrude {
-        /// Which way the strip runs across the surface.
-        direction: EnumSlot<ProjectionDirection>,
+    Project {
+        /// The base coordinate map.
+        shape: EnumSlot<ProjectionShape>,
+        /// Fold the strip around the map's midpoint (`u′ = 1 − |2u − 1|`).
+        mirror: ValueSlot<bool>,
+        /// Reverse the strip (`u′ = 1 − u`), applied after the fold.
+        flip: ValueSlot<bool>,
     },
-    Radial {
-        /// Which way the strip runs the rings (centre→edge or back).
-        direction: EnumSlot<RadialDirection>,
-    },
-    Angular {
-        /// Which way the strip sweeps around the centre.
-        direction: EnumSlot<AngularDirection>,
-    },
-    Mirror {
-        /// Which way the fold runs — mirror's own vocabulary (fold sense
-        /// × axis), since a fold is symmetric in run direction.
-        direction: EnumSlot<MirrorDirection>,
-    },
-    // Native (own `render_2d` entry) is deliberately NOT a variant yet —
-    // multi-entry is the first fast-follow (vision D9/D19); adding the
-    // variant later is additive.
 }
 
 /// How a 2D source answers a 1D pair (vision D8).
@@ -97,8 +81,10 @@ mod tests {
 
     #[test]
     fn one_d_variant_carries_a_two_d_answer_cell() {
-        let radial = SpaceAnswer2::Radial {
-            direction: EnumSlot::default(),
+        let radial = SpaceAnswer2::Project {
+            shape: EnumSlot::new(ProjectionShape::Radial),
+            mirror: ValueSlot::new(false),
+            flip: ValueSlot::new(false),
         };
         let space = ShaderSpace::OneD {
             in_2d: EnumSlot::new(radial.clone()),
@@ -109,26 +95,18 @@ mod tests {
         assert_eq!(*in_2d.value(), radial);
     }
 
-    /// The additive-compat contract (G1b ruling 4 + the mirror-direction
-    /// ruling): selecting the bare variant name — which is exactly what
-    /// parsing a pre-directional persisted `"Extrude"`/`"Mirror"` does —
-    /// lands on each shape's behavior-preserving default (`Right` /
-    /// `OutwardX`). No format bump.
+    /// The factored default IS the pre-factorization behavior: a fresh
+    /// `Project` record is extrude-x, no mirror, no flip — exactly what
+    /// v8's `Default` and bare `Extrude` both resolved to.
     #[test]
-    fn bare_extrude_and_mirror_default_to_todays_behavior() {
-        use crate::SlottedEnumMut;
-        for variant in ["Extrude", "Mirror"] {
-            let mut answer = SpaceAnswer2::default();
-            answer.set_variant_default(variant).expect("variant");
-            match &answer {
-                SpaceAnswer2::Extrude { direction } => {
-                    assert_eq!(*direction.value(), ProjectionDirection::Right);
-                }
-                SpaceAnswer2::Mirror { direction } => {
-                    assert_eq!(*direction.value(), MirrorDirection::OutwardX);
-                }
-                other => panic!("expected a directional variant, got {other:?}"),
-            }
-        }
+    fn a_fresh_project_record_is_plain_extrude_x() {
+        let SpaceAnswer2::Project {
+            shape,
+            mirror,
+            flip,
+        } = SpaceAnswer2::default();
+        assert_eq!(*shape.value(), ProjectionShape::ExtrudeX);
+        assert!(!*mirror.value());
+        assert!(!*flip.value());
     }
 }

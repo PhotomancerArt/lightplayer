@@ -28,7 +28,7 @@
 // history, identical at 1 fps and 500 fps.
 //
 // Also unported: upstream's 2D mode blurs across virtual strips. Here the
-// shader is honestly 1D and declares `OneD { in_2d: Default }`, so a 2D
+// shader is honestly 1D and declares `OneD` with the default extrude-x projection, so a 2D
 // consumer decides how the flame column reaches a surface.
 
 layout(binding = 0) uniform vec2 outputSize;
