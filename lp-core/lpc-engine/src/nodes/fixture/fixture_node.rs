@@ -136,6 +136,10 @@ pub struct FixtureNode {
     /// authored coordinate set. Synced from the def each tick; an absent
     /// def leaves the loaded value standing.
     strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests (lamp `k`
+    /// reads strip position `N-1-k`). Synced from the def each tick; only
+    /// the 1D request paths ever read it.
+    wire_reversed: bool,
     /// The authored consumer policy for a 1D source landing on a 2D
     /// request, translated from `FixtureDef::consume`.
     consume_policy: ConsumerPolicy,
@@ -171,6 +175,7 @@ impl FixtureNode {
             power_estimate_ma: 0,
             power_last_time_seconds: None,
             strip_order_meaningful: true,
+            wire_reversed: false,
             consume_policy: ConsumerPolicy::AUTO,
         }
     }
@@ -225,6 +230,7 @@ impl FixtureNode {
             gamma_correction: true,
             power: FixturePower::default(),
             strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
             consume_policy: self.consume_policy,
         });
         self
@@ -364,6 +370,10 @@ struct FixtureSamplePoints {
     /// keeping it in the key means a policy edit can never be served from
     /// a buffer written under the old one.
     policy: ConsumerPolicy,
+    /// The wire direction the 1D coordinates were generated for. Unlike
+    /// `policy` this DOES change the numbers (the strip reads back to
+    /// front), so a flip must rewrite the buffer.
+    wire_reversed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,6 +429,9 @@ impl NodeRuntime for FixtureNode {
         // shader node's `space` read follows.
         if let Some(strip_order_meaningful) = try_read_def_value(ctx, "strip_order_meaningful")? {
             self.strip_order_meaningful = strip_order_meaningful;
+        }
+        if let Some(wire_reversed) = try_read_def_value(ctx, "wire_reversed")? {
+            self.wire_reversed = wire_reversed;
         }
         if let Some(policy) = try_read_consume_policy(ctx) {
             self.consume_policy = policy;
@@ -487,6 +500,7 @@ impl NodeRuntime for FixtureNode {
             gamma_correction,
             power,
             strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
             consume_policy: self.consume_policy,
         });
         self.state.output.set_with_version(
@@ -678,14 +692,19 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
         // words, so there is no third state to carry into the engine.
         "Auto" => Some(ConsumerPolicy::AUTO),
         "Policy" => {
-            let from_1d = match try_read_def_enum_variant(ctx, "consume.Policy.from_1d")
-                .as_deref()
-                .unwrap_or("Extrude")
-            {
-                "Radial" => CellProjection::Radial,
-                "Angular" => CellProjection::Angular,
-                "Mirror" => CellProjection::Mirror,
-                _ => CellProjection::Extrude,
+            // The factored cell (v9): one `Project` record of
+            // shape × mirror × flip. Unresolvable payload fields read as
+            // their behavior-preserving defaults.
+            let from_1d = CellProjection {
+                shape: try_read_def_shape(ctx, "consume.Policy.from_1d.Project.shape"),
+                // The modifiers are two-variant mode enums; anything but
+                // the on-variant (including unresolvable) reads as off.
+                mirror: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.mirror")
+                    .as_deref()
+                    == Some("Mirrored"),
+                flip: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.flip")
+                    .as_deref()
+                    == Some("Flipped"),
             };
             let force = try_read_def_value::<bool>(ctx, "consume.Policy.force")
                 .ok()
@@ -697,6 +716,21 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
             })
         }
         _ => None,
+    }
+}
+
+/// The authored shape payload of a `Project` cell. Unresolvable reads as
+/// the default `ExtrudeX` (the behavior-preserving anchor).
+fn try_read_def_shape(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("ExtrudeY") => ProjectionShape::ExtrudeY,
+        Some("Radial") => ProjectionShape::Radial,
+        Some("Angular") => ProjectionShape::Angular,
+        _ => ProjectionShape::ExtrudeX,
     }
 }
 
@@ -773,6 +807,8 @@ struct FixtureRenderSettings {
     power: FixturePower,
     /// Whether 1D is in this fixture's authored coordinate set.
     strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests.
+    wire_reversed: bool,
     /// This fixture's projection policy for a 1D source on a 2D request.
     consume_policy: ConsumerPolicy,
 }
@@ -959,7 +995,11 @@ impl FixtureNode {
                 .as_ref()
                 .map(|(_, channels)| channels.as_slice())
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
-            let accumulators = accumulate_fixture_channels_from_strip(&texture_data, channels)?;
+            let accumulators = accumulate_fixture_channels_from_strip(
+                &texture_data,
+                channels,
+                settings.wire_reversed,
+            )?;
             return render_fixture_control_target(
                 request,
                 target,
@@ -1128,6 +1168,7 @@ fn ensure_fixture_sample_points<'a>(
     output_height: u32,
     space: VisualSpace,
     policy: ConsumerPolicy,
+    wire_reversed: bool,
     ctx: &ControlRenderContext<'_>,
 ) -> Result<&'a mut SamplePointsHandle, NodeError> {
     let current_matches = current.as_ref().is_some_and(|sp| {
@@ -1137,6 +1178,7 @@ fn ensure_fixture_sample_points<'a>(
             && sp.height == output_height
             && sp.space == space
             && sp.policy == policy
+            && sp.wire_reversed == wire_reversed
     });
     if current_matches {
         return Ok(&mut current.as_mut().expect("checked above").handle);
@@ -1172,7 +1214,7 @@ fn ensure_fixture_sample_points<'a>(
                 .map_err(err_ctx("fixture sample point write"))?;
         }
         VisualSpace::OneD => {
-            let coords = fixture_strip_point_coords(count);
+            let coords = fixture_strip_point_coords(count, wire_reversed);
             graphics
                 .write_sample_points_1d(&mut handle, &coords)
                 .map_err(err_ctx("fixture strip point write"))?;
@@ -1186,6 +1228,7 @@ fn ensure_fixture_sample_points<'a>(
         height: output_height,
         space,
         policy,
+        wire_reversed,
     });
     Ok(&mut current.as_mut().expect("just stored").handle)
 }
@@ -1228,9 +1271,16 @@ fn fixture_sample_point_coords(
 /// scarf, not around the ring). Pixel centres (`k + 0.5`) rather than
 /// `k`, so sampling the strip and rendering an `(N, 1)` texture of it
 /// land on the same points.
-fn fixture_strip_point_coords(count: u32) -> Vec<i32> {
+fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
     (0..count)
-        .map(|index| ((index as i32) << 16) + (crate::products::visual::coordinates::Q16_ONE / 2))
+        .map(|index| {
+            let index = if wire_reversed {
+                count - 1 - index
+            } else {
+                index
+            } as i32;
+            (index << 16) + (crate::products::visual::coordinates::Q16_ONE / 2)
+        })
         .collect()
 }
 
@@ -1241,6 +1291,7 @@ fn fixture_strip_point_coords(count: u32) -> Vec<i32> {
 fn accumulate_fixture_channels_from_strip(
     texture: &TextureData,
     channels: &[u32],
+    wire_reversed: bool,
 ) -> Result<ChannelAccumulators, NodeError> {
     if texture.format() != lps_shared::TextureStorageFormat::Rgba16Unorm {
         return Err(NodeError::msg(format!(
@@ -1266,7 +1317,14 @@ fn accumulate_fixture_channels_from_strip(
     };
     let bytes = texture.bytes();
     for (index, channel) in channels.iter().enumerate() {
-        let base = index * 8;
+        // The reversed wire reads the strip back to front: lamp `k` takes
+        // texel `N-1-k` (the along-the-wire direction option).
+        let texel_index = if wire_reversed {
+            channels.len() - 1 - index
+        } else {
+            index
+        };
+        let base = texel_index * 8;
         let Some(texel) = bytes.get(base..base + 8) else {
             break;
         };
@@ -1375,6 +1433,7 @@ fn render_direct_fixture_control(
         output_height,
         space,
         settings.consume_policy,
+        settings.wire_reversed,
         ctx,
     )?;
     let sample_buf = ensure_fixture_sample_target(sample_target, channels.len() as u32, ctx)?;
@@ -2330,6 +2389,7 @@ mod tests {
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("first ensure");
@@ -2354,6 +2414,7 @@ mod tests {
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("same-key ensure");
@@ -2373,6 +2434,7 @@ mod tests {
             8,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("resized ensure");
@@ -2395,6 +2457,7 @@ mod tests {
             8,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("remapped ensure");
@@ -4230,8 +4293,38 @@ mod space_negotiation {
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
     use crate::products::visual::{
-        ProductSpaceInfo, VisualSampleBufferRequest, VisualSampleTarget,
+        ProductSpaceInfo, ProjectionShape, VisualSampleBufferRequest, VisualSampleTarget,
     };
+
+    /// An authored factored answer cell: `Project { shape, mirror, flip }`.
+    fn authored_project(
+        shape: lpc_model::ProjectionShape,
+        mirror: bool,
+        flip: bool,
+    ) -> SpaceAnswer2 {
+        SpaceAnswer2::Project {
+            shape: EnumSlot::new(shape),
+            mirror: EnumSlot::new(if mirror {
+                lpc_model::MirrorMode::Mirrored
+            } else {
+                lpc_model::MirrorMode::Normal
+            }),
+            flip: EnumSlot::new(if flip {
+                lpc_model::FlipMode::Flipped
+            } else {
+                lpc_model::FlipMode::Normal
+            }),
+        }
+    }
+
+    /// A runtime factored cell.
+    fn cellp(shape: ProjectionShape, mirror: bool, flip: bool) -> CellProjection {
+        CellProjection {
+            shape,
+            mirror,
+            flip,
+        }
+    }
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::sync::Arc;
@@ -4488,6 +4581,49 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
+    /// **The scarf, worn the other way.** `wire_reversed` (the
+    /// along-the-wire direction option) flips the wire-order 1D request:
+    /// lamp `k` samples strip position `1 − u` — the strip read back to
+    /// front. Nothing else changes; only the wire-order path reads the
+    /// bit.
+    #[test]
+    fn a_reversed_wire_request_samples_the_strip_back_to_front() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, true, ConsumerPolicy::AUTO, product);
+        fixture.wire_reversed = true;
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.wire_reversed = true;
+        }
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], reversed_position, "reversed strip ramp");
+        }
+    }
+
+    /// The reversed wire's strip coordinates are the forward ones read
+    /// back to front — texel centres either way, so forward and reversed
+    /// sample the same points in opposite orders.
+    #[test]
+    fn reversed_strip_point_coords_read_back_to_front() {
+        let forward = fixture_strip_point_coords(4, false);
+        let mut reversed = fixture_strip_point_coords(4, true);
+        reversed.reverse();
+        assert_eq!(forward, reversed);
+        assert_eq!(
+            fixture_strip_point_coords(4, true)[0] >> 16,
+            3,
+            "the reversed wire's first lamp sits on the last texel"
+        );
+    }
+
     /// The same scarf running a 2D effect samples the RING UVs — the map
     /// is exactly what a 2D effect is for.
     #[test]
@@ -4517,7 +4653,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -4531,28 +4671,82 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
-    /// A source with no opinion (`SpaceAnswer2::Default`) takes the
-    /// consumer's policy default.
+    /// Post-v9 the producer ALWAYS declares — a fresh (default) record is
+    /// plain extrude-x, and a non-forcing consumer policy no longer fills
+    /// any silence: the declaration wins.
     #[test]
-    fn a_silent_source_takes_the_consumer_policy_default() {
+    fn a_default_declaration_beats_a_non_forcing_consumer_policy() {
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Default),
+                in_2d: EnumSlot::default(),
             },
             RAMP_1D,
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror,
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, true, true),
             force: false,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
         let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
 
         for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
-            let expected = crate::products::visual::mirror(point[0], point[1]);
-            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror"));
+            let expected = crate::products::visual::extrude(point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude"));
+        }
+    }
+
+    /// A flipped authored opinion (the factorization's spelling of the
+    /// old `Extrude { Left }`): `ExtrudeX + flip` runs the strip
+    /// right→left — every lamp reads `1 − x` where the plain extrude
+    /// would read `x`.
+    #[test]
+    fn an_extrude_left_opinion_reverses_the_strip() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::ExtrudeX,
+                    false,
+                    true,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, false, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::extrude(1.0 - point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude ←"));
+        }
+    }
+
+    /// A FORCED factored consumer policy: the old outward-y fold spelled
+    /// `ExtrudeY + mirror + flip` runs the strip from the centre ROW
+    /// toward top and bottom — the same `|2s−1|` core over `y`.
+    #[test]
+    fn a_mirror_outward_y_policy_folds_along_the_rows() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeY, true, true),
+            force: true,
+        };
+        let mut fixture = ring_fixture(COUNT, false, policy, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::mirror(point[1], point[0]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror ↑↓"));
         }
     }
 
@@ -4563,13 +4757,17 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude,
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, false, false),
             force: true,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
@@ -4698,6 +4896,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::AUTO,
+            false,
             &ctx,
         )
         .expect("2D ensure");
@@ -4717,6 +4916,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             1,
             VisualSpace::OneD,
             ConsumerPolicy::AUTO,
+            false,
             &ctx,
         )
         .expect("1D ensure");
@@ -4739,9 +4939,10 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             1,
             VisualSpace::OneD,
             ConsumerPolicy {
-                default_1d_to_2d: CellProjection::Radial,
+                default_1d_to_2d: cellp(ProjectionShape::Radial, false, false),
                 force: true,
             },
+            false,
             &ctx,
         )
         .expect("policy ensure");
@@ -4773,7 +4974,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         let graphics = producer.graphics.clone();
 
         let mut points = graphics.create_sample_points(COUNT).expect("points");
-        let coords = fixture_strip_point_coords(COUNT);
+        let coords = fixture_strip_point_coords(COUNT, false);
         graphics
             .write_sample_points_1d(&mut points, &coords)
             .expect("write strip points");
@@ -4816,7 +5017,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn a_1d_source_fills_a_2d_texture_through_the_projection() {
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -4855,6 +5060,51 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
+    /// The texture path's 2D→1D fill: a 1D-only consumer that materializes
+    /// a frame gets the centre scanline (vision D8), the same map the
+    /// direct path's `a_2d_source_answers_a_1d_request_on_the_centre_scanline`
+    /// exercises — this is the texture-request counterpart, and the arm
+    /// this test targets errored before P2 (`shader_node.rs`
+    /// `render_projected_texture`).
+    #[test]
+    fn a_2d_source_fills_a_1d_texture_through_the_centre_scanline() {
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::TwoD {
+                in_1d: EnumSlot::default(),
+            },
+            RAMP_2D,
+        );
+        let product = producer.product();
+        let graphics = producer.graphics.clone();
+        const WIDTH: u32 = 8;
+        let request = RenderTextureRequest {
+            width: WIDTH,
+            height: 1,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+            space: VisualSpace::OneD,
+            policy: ConsumerPolicy::AUTO,
+        };
+        let mut texture = graphics.create_render_target(WIDTH, 1).expect("target");
+        {
+            let mut ctx = producer.ctx();
+            producer
+                .node
+                .render_texture_into(product, &request, &mut texture, &mut ctx)
+                .expect("scanline texture fill");
+        }
+        let data = graphics.read_back(&texture).expect("read back");
+        let bytes = data.bytes();
+        for x in 0..WIDTH {
+            let base = (x * 8) as usize;
+            let red = u16::from_le_bytes([bytes[base], bytes[base + 1]]);
+            let green = u16::from_le_bytes([bytes[base + 2], bytes[base + 3]]);
+            let t = (x as f32 + 0.5) / WIDTH as f32;
+            assert_near(red, t, &alloc::format!("texel {x} u"));
+            assert_near(green, 0.5, &alloc::format!("texel {x} v is the centre row"));
+        }
+    }
+
     /// The forwarding rule: a shader that never declared anything answers
     /// the query with 2D-and-no-opinion, which is what keeps every
     /// pre-plan project meaning-identical.
@@ -4878,7 +5128,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn the_render_node_route_answers_the_same_space() {
         let producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Angular),
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Angular,
+                    false,
+                    false,
+                )),
             },
             RAMP_1D,
         );
@@ -4887,7 +5141,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             let node = ShaderNode::new(
                 NodeId::new(1),
                 shader_def(ShaderSpace::OneD {
-                    in_2d: EnumSlot::new(SpaceAnswer2::Angular),
+                    in_2d: EnumSlot::new(authored_project(
+                        lpc_model::ProjectionShape::Angular,
+                        false,
+                        false,
+                    )),
                 }),
                 asset(RAMP_1D),
             );
@@ -4901,7 +5159,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             .expect("space");
         assert_eq!(
             via_trait,
-            ProductSpaceInfo::one_d(Some(CellProjection::Angular))
+            ProductSpaceInfo::one_d(Some(cellp(ProjectionShape::Angular, false, false)))
         );
         let _ = VisualConsumerSpace::default();
     }

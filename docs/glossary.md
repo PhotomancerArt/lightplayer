@@ -129,6 +129,28 @@ of implementation — code can lag these names during the transition.
   its verb is **Clear**. Declared `#[slot(role = "debug")]`, rendered in the
   node card's own hazard-striped Debug section
   ([ADR](adr/2026-08-01-debug-slots-taxonomy.md)).
+- **Dimensionality** — the label on the drawer where a node's *declared
+  space* is authored: on a shader card between `code` and `advanced`, on
+  a fixture card below `settings`. The two are mirror images — the shader
+  says what it renders and how a 2D fixture should receive it, the
+  fixture says what it does with a 1D source. Its rows are claimed out of
+  the advanced drawer, so it is the only writer for them.
+  ([ADR](adr/2026-08-09-dimensionality-authoring-surface.md))
+- **Declared space** — the authored `1D`/`2D` fact on a node, never
+  inferred: a shader's `space` slot, which must agree with the GLSL entry
+  it defines (`render_1d(float)` / `render_2d(vec2)`) or the card shows a
+  mismatch error.
+  ([ADR](adr/2026-08-07-two-sided-space-model.md))
+- **Projection** — how a 1D source fills a 2D consumer, authored as a
+  base **shape** (extrude-x, extrude-y, radial, angular) plus two
+  modifiers, **mirror** (fold around the midpoint) and **flip** (reverse
+  the strip). Executed by the *producer* at the sampling boundary — never
+  a node in the graph. The producer always declares one; a fixture may
+  override it.
+- **Along the wire** — the fixture-side choice that runs a 1D source in
+  wire order and ignores the mapping (`strip_order_meaningful`), with a
+  forward/reversed direction. The WLED-familiar behavior, and the default
+  for mapped fixtures.
 - **Bound (violet)** — the UI state family for "this value comes from a
   binding/bus"; always violet, never green (green = valid only).
 - **Dirty** — an authored value differing from its saved artifact

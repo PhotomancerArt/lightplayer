@@ -38,6 +38,15 @@ pub struct FixtureDef {
     /// carries the authored bit. Model layer only: not yet read by the
     /// engine.
     pub strip_order_meaningful: ValueSlot<bool>,
+    /// Reverse the wire order on the along-the-wire (1D) sampling path:
+    /// lamp `k` reads strip position `N-1-k` instead of `k`. Only read
+    /// when a wire-order 1D request actually happens (strip order
+    /// meaningful and a 1D-primary source); the mapped 2D path never
+    /// looks at it — map2d's per-object `reversed` is map geometry, a
+    /// different thing. INTERIM by design (strip-order unification
+    /// addendum, 2026-08-09): the mapping-patching work's per-range
+    /// `reversed` (slice 1) absorbs this whole-fixture bit later.
+    pub wire_reversed: ValueSlot<bool>,
     /// This fixture's consumer-side space policy (vision D14): the answer
     /// side of the two-sided space declaration, mirroring
     /// [`crate::ShaderSpace`] on the producer side. Defaults to `Auto`
@@ -75,6 +84,7 @@ impl Default for FixtureDef {
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::default()),
             mapping: EnumSlot::default(),
             strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),
             color_order: ValueSlot::default(),
             transform: Affine2dSlot::default(),
@@ -368,6 +378,7 @@ mod tests {
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
             strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),

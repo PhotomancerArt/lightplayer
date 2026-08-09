@@ -56,24 +56,83 @@ impl VisualSpace {
     }
 }
 
-/// One cell of the projection matrix: the coordinate map that fills a 2D
-/// sampling space from a 1D source.
-///
-/// The runtime mirror of `lpc_model::SpaceAnswer2` (producer opinion) and
-/// `lpc_model::ConsumerCell2` (consumer default) — they are the same four
-/// maps seen from the two sides of the negotiation. The math lives in
-/// [`super::coordinates`].
+/// The base coordinate map of a 1D→2D projection — the runtime mirror of
+/// `lpc_model::ProjectionShape` (THE FACTORIZATION ruling, post-G2): four
+/// shapes, composed with the two boolean modifiers on
+/// [`CellProjection`]. `ExtrudeX` is the default and IS the pre-factored
+/// behavior (`u = x`, every row alike).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum CellProjection {
-    /// `t = u` — the system default: the strip runs along x, every row alike.
+pub enum ProjectionShape {
+    /// `u = x` — the strip runs the columns (today's extrude).
     #[default]
-    Extrude,
-    /// `t = |uv − centre| / corner-reach`.
+    ExtrudeX,
+    /// `u = y` — the strip runs the rows.
+    ExtrudeY,
+    /// `u = |uv − centre| / corner-reach`.
     Radial,
-    /// `t = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`.
+    /// `u = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`.
     Angular,
-    /// `t = |2u − 1|` — the strip runs out from the centre column both ways.
-    Mirror,
+}
+
+impl ProjectionShape {
+    /// Short human label used in diagnostics and preview captions.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExtrudeX => "extrude-x",
+            Self::ExtrudeY => "extrude-y",
+            Self::Radial => "radial",
+            Self::Angular => "angular",
+        }
+    }
+}
+
+/// One cell of the projection matrix, FACTORED (post-G2 ruling): the
+/// coordinate map that fills a 2D sampling space from a 1D source is a
+/// base [`ProjectionShape`] composed with two modifiers, applied in ONE
+/// uniform chain by [`super::coordinates::project_2d_to_1d`]:
+///
+/// ```text
+/// u = shape_coord(shape, x, y);
+/// if mirror { u = 1 − |2u − 1| }   // fold around the midpoint
+/// if flip   { u = 1 − u }          // reverse the strip
+/// ```
+///
+/// The runtime mirror of `lpc_model::SpaceAnswer2::Project` /
+/// `ConsumerCell2::Project` — the same record seen from the two sides of
+/// the negotiation. Sixteen meaningful states; the pre-factored
+/// vocabulary maps 1:1 (extrude directions = ExtrudeX|Y × flip, mirror
+/// folds = ExtrudeX|Y × mirror × flip, radial inward = Radial + flip,
+/// angular counter-clockwise = Angular + flip).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CellProjection {
+    /// The base coordinate map.
+    pub shape: ProjectionShape,
+    /// Fold the strip around the map's midpoint (`u′ = 1 − |2u − 1|`).
+    pub mirror: bool,
+    /// Reverse the strip (`u′ = 1 − u`), applied after the fold.
+    pub flip: bool,
+}
+
+impl CellProjection {
+    /// A plain shape — no mirror, no flip.
+    #[must_use]
+    pub const fn plain(shape: ProjectionShape) -> Self {
+        Self {
+            shape,
+            mirror: false,
+            flip: false,
+        }
+    }
+
+    /// Short human label used in diagnostics and preview captions
+    /// (mirrors [`VisualSpace::label`]) — the SHAPE's name; captions
+    /// append the modifiers (`extrude-x · mirrored · flipped`) at the UI
+    /// layer.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        self.shape.label()
+    }
 }
 
 /// The consumer half of the negotiation, carried on every space-tagged
@@ -91,9 +150,9 @@ pub struct ConsumerPolicy {
 }
 
 impl ConsumerPolicy {
-    /// The defaults-only policy (`Extrude`, never force).
+    /// The defaults-only policy (plain extrude-x, never force).
     pub const AUTO: Self = Self {
-        default_1d_to_2d: CellProjection::Extrude,
+        default_1d_to_2d: CellProjection::plain(ProjectionShape::ExtrudeX),
         force: false,
     };
 }
@@ -108,8 +167,10 @@ pub struct ProductSpaceInfo {
     /// The space this product natively renders in.
     pub primary: VisualSpace,
     /// This producer's own answer for a 2D consumer, when [`Self::primary`]
-    /// is 1D. `None` means "Default" — no authored opinion, defer to the
-    /// consumer's policy.
+    /// is 1D. `None` only for 2D products (which are never asked) and for
+    /// a 1D runtime whose def has not been read yet — post-v9 the MODEL
+    /// cannot express "no opinion": every 1D declaration carries a
+    /// `Project` record.
     pub in_2d: Option<CellProjection>,
     // in_1d: only the centre scanline exists today (vision D8), so a 2D
     // producer has nothing to say that the map library does not already
@@ -136,18 +197,52 @@ impl ProductSpaceInfo {
     }
 }
 
+/// Which precedence arm decided a 1D→2D projection (vision D14, plan D18) —
+/// the "why" a preview caption needs alongside the "what"
+/// ([`CellProjection`]), e.g. `in 2D · radial (declared)` (plan D15).
+///
+/// `ConsumerDefault` DIED with the v9 factorization: the producer always
+/// declares (`SpaceAnswer2` has no `Default` variant anymore), so the
+/// fill-the-silence rung no longer exists — a projection is the
+/// producer's declaration or a consumer force, nothing else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectionOrigin {
+    /// The producer's own authored `in_2d` opinion won.
+    Declared,
+    /// The consumer forced its default over the producer's declaration.
+    Forced,
+}
+
+/// The 1D→2D precedence ladder (vision D14, plan D18), resolved by the
+/// **producer** because the producer is what executes the map — origin-
+/// aware form, for callers (preview captions, D15) that need to know which
+/// arm fired and not just the resulting cell.
+///
+/// `force` ⇒ the consumer's default wins ([`ProjectionOrigin::Forced`]);
+/// else the producer's declaration ([`ProjectionOrigin::Declared`]).
+/// Post-v9 there is no third rung: the model cannot express a silent
+/// producer, so an absent opinion (a 1D runtime whose def is unread)
+/// resolves to the plain extrude-x default — exactly what its
+/// declaration will read as — and reports `Declared`.
+#[must_use]
+pub fn resolve_1d_to_2d_with_origin(
+    source: ProductSpaceInfo,
+    policy: ConsumerPolicy,
+) -> (CellProjection, ProjectionOrigin) {
+    if policy.force {
+        return (policy.default_1d_to_2d, ProjectionOrigin::Forced);
+    }
+    (source.in_2d.unwrap_or_default(), ProjectionOrigin::Declared)
+}
+
 /// The 1D→2D precedence ladder (vision D14, plan D18), resolved by the
 /// **producer** because the producer is what executes the map.
 ///
-/// `force` ⇒ the consumer's default wins; else the producer's own non-Default
-/// opinion; else the consumer's default. "Opinion → default", with the
-/// consumer able to take the wheel.
+/// A thin wrapper over [`resolve_1d_to_2d_with_origin`] for callers that
+/// only need the resulting cell.
 #[must_use]
 pub fn resolve_1d_to_2d(source: ProductSpaceInfo, policy: ConsumerPolicy) -> CellProjection {
-    if policy.force {
-        return policy.default_1d_to_2d;
-    }
-    source.in_2d.unwrap_or(policy.default_1d_to_2d)
+    resolve_1d_to_2d_with_origin(source, policy).0
 }
 
 #[cfg(test)]
@@ -159,35 +254,106 @@ mod tests {
         assert_eq!(VisualSpace::default(), VisualSpace::TwoD);
         assert_eq!(ProductSpaceInfo::default(), ProductSpaceInfo::two_d());
         assert_eq!(ConsumerPolicy::default(), ConsumerPolicy::AUTO);
+        assert_eq!(
+            CellProjection::default(),
+            CellProjection::plain(ProjectionShape::ExtrudeX),
+            "the factored default is plain extrude-x — the pre-factored \
+             extrude, bit-for-bit"
+        );
     }
 
     #[test]
     fn an_authored_opinion_beats_the_consumer_default() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source = ProductSpaceInfo::one_d(Some(CellProjection::plain(ProjectionShape::Radial)));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror,
+            default_1d_to_2d: CellProjection {
+                shape: ProjectionShape::ExtrudeX,
+                mirror: true,
+                flip: false,
+            },
             force: false,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Radial);
+        assert_eq!(
+            resolve_1d_to_2d(source, policy),
+            CellProjection::plain(ProjectionShape::Radial)
+        );
     }
 
+    /// Post-v9 there is no silent producer: an absent opinion (a 1D
+    /// runtime whose def is unread) resolves to the plain extrude-x
+    /// default — what its declaration will read as — and reports
+    /// `Declared`. The `ConsumerDefault` rung is gone.
     #[test]
-    fn a_silent_source_takes_the_consumer_default() {
+    fn an_unread_source_resolves_to_the_declaration_default() {
         let source = ProductSpaceInfo::one_d(None);
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Angular,
+            default_1d_to_2d: CellProjection::plain(ProjectionShape::Angular),
             force: false,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Angular);
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (
+                CellProjection::plain(ProjectionShape::ExtrudeX),
+                ProjectionOrigin::Declared
+            )
+        );
     }
 
     #[test]
     fn force_beats_an_authored_opinion() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source = ProductSpaceInfo::one_d(Some(CellProjection::plain(ProjectionShape::Radial)));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Extrude,
+            default_1d_to_2d: CellProjection::plain(ProjectionShape::ExtrudeX),
             force: true,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Extrude);
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (
+                CellProjection::plain(ProjectionShape::ExtrudeX),
+                ProjectionOrigin::Forced
+            )
+        );
+    }
+
+    #[test]
+    fn origin_reports_declared_for_an_authored_opinion() {
+        let source = ProductSpaceInfo::one_d(Some(CellProjection::plain(ProjectionShape::Radial)));
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: CellProjection::plain(ProjectionShape::Angular),
+            force: false,
+        };
+        assert_eq!(
+            resolve_1d_to_2d_with_origin(source, policy),
+            (
+                CellProjection::plain(ProjectionShape::Radial),
+                ProjectionOrigin::Declared
+            )
+        );
+    }
+
+    #[test]
+    fn cell_projection_labels_are_lowercase_diagnostics() {
+        assert_eq!(
+            CellProjection::plain(ProjectionShape::ExtrudeX).label(),
+            "extrude-x"
+        );
+        assert_eq!(
+            CellProjection::plain(ProjectionShape::ExtrudeY).label(),
+            "extrude-y"
+        );
+        assert_eq!(
+            CellProjection::plain(ProjectionShape::Radial).label(),
+            "radial"
+        );
+        assert_eq!(
+            CellProjection {
+                shape: ProjectionShape::Angular,
+                mirror: true,
+                flip: true,
+            }
+            .label(),
+            "angular",
+            "the label is the SHAPE's; captions add the modifiers"
+        );
     }
 }

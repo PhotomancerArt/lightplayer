@@ -38,10 +38,11 @@
 //! idiom: two fixtures writing one `control.out` would be a contention the
 //! author never asked for.
 //!
-//! Honest today (T2 owns shader dimensionality): the 1D template's shader is
-//! a `render(vec2)` that reads the long axis and ignores the short one. The
-//! template is named 1D because its *rig* is; when the space work lands, the
-//! template gains the space declaration and nothing else here moves.
+//! The two templates differ in **declared space**, not just in rig: the 1D
+//! template's shader is a true `vec4 render_1d(float pos)` declaring
+//! `OneD`, so the strand renders along the strip and the panel beside it
+//! shows the same effect through the declared projection (extrude-x by
+//! default). The 2D template stays `render_2d(vec2)` / `TwoD`.
 //!
 //! Pure data + serialization, exactly like [`crate::nodes::starter_project`]:
 //! the compositions return `(relative path, bytes)` pairs and never touch a
@@ -62,7 +63,7 @@ use crate::project::manifest::ProjectKind;
 use crate::{
     ArtifactSpec, AssetSlot, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, Dim2u,
     EnumSlot, HwEndpointSpec, MapSlot, ModuleDef, NodeDef, NodeInvocation, NodeInvocationSlot,
-    OptionSlot, OutputDef, ProjectManifest, SlotShapeRegistry, ValueSlot,
+    OptionSlot, OutputDef, ProjectManifest, ShaderSpace, SlotShapeRegistry, ValueSlot,
 };
 
 /// The one export folder a pattern template authors. Named `effect` (not
@@ -145,6 +146,7 @@ pub fn pattern_project_files_1d(
         registry,
         &[STRIP_300, MATRIX_32X16],
         PATTERN_1D_BODY_GLSL,
+        one_d_space(),
     )
 }
 
@@ -160,15 +162,23 @@ pub fn pattern_project_files_2d(
         endpoint: STRIP_300.endpoint,
         ..MATRIX_32X16
     };
-    pattern_project_files(name, registry, &[matrix], PATTERN_2D_BODY_GLSL)
+    pattern_project_files(
+        name,
+        registry,
+        &[matrix],
+        PATTERN_2D_BODY_GLSL,
+        ShaderSpace::default(),
+    )
 }
 
-/// Both templates, differing only in rig list and shader body.
+/// Both templates, differing only in rig list, shader body and the space
+/// the shader declares.
 fn pattern_project_files(
     name: &str,
     registry: &SlotShapeRegistry,
     rigs: &[RigSpec],
     shader_body: &str,
+    space: ShaderSpace,
 ) -> Result<Vec<(String, Vec<u8>)>, NodeDefWriteError> {
     let mut files = Vec::new();
 
@@ -201,7 +211,7 @@ fn pattern_project_files(
     ));
     files.push((
         format!("{PATTERN_EXPORT_FOLDER}/shader.json"),
-        node_json(&effect_shader_def(), registry)?,
+        node_json(&effect_shader_def(space), registry)?,
     ));
     files.push((
         format!("{PATTERN_EXPORT_FOLDER}/shader.glsl"),
@@ -302,15 +312,32 @@ fn effect_module_def() -> NodeDef {
 /// The exported module's shader: the starter scaffold's phasor slot and
 /// `shader.glsl` source, publishing to the module scope's own `visual.out`
 /// (which R7 then mirrors outward to the rig).
-fn effect_shader_def() -> NodeDef {
+///
+/// `space` is the template's declared dimensionality — the other half of
+/// the entry contract the body writes (`OneD` ⇒ `render_1d(float)`,
+/// `TwoD` ⇒ `render_2d(vec2)`). Passed in rather than derived: the
+/// declaration is authored, never inferred from source text (ADR
+/// `2026-08-07-two-sided-space-model.md`).
+fn effect_shader_def(space: ShaderSpace) -> NodeDef {
     let mut def = starter_for_kind(NodeKind::Shader)
         .expect("shader starter exists")
         .for_stem("shader")
         .def;
     if let NodeDef::Shader(shader) = &mut def {
         shader.bindings = bus_output_binding_defs("visual.out");
+        shader.space = EnumSlot::new(space);
     }
     def
+}
+
+/// The 1D template's declaration: a strip shader whose answer to a 2D
+/// consumer is the factored default — extrude-x, unmirrored, unflipped.
+/// Authored explicitly (there is no deferring `Default` variant since
+/// format v9: the producer always declares).
+fn one_d_space() -> ShaderSpace {
+    ShaderSpace::OneD {
+        in_2d: EnumSlot::default(),
+    }
 }
 
 fn path_invocation(path: &str) -> NodeInvocationSlot {
@@ -440,18 +467,19 @@ vec3 hsv_to_rgb(float h, float s, float v) {
 }
 "#;
 
-/// The 1D template's body: a comet running the long axis over a slow hue
-/// wash. `render(vec2)` is honest — the entry point takes a pixel position
-/// today (T2 owns shader-side dimensionality); a 1D pattern simply reads
-/// the long axis and lets the short one be.
+/// The 1D template's body: a comet running the strand over a slow hue
+/// wash. A true 1D entry — `vec4 render_1d(float pos)` takes the position
+/// ALONG the strip and there is no second axis to ignore. The node
+/// declares `OneD`, so a 2D fixture receives it through the declared
+/// projection instead of the shader guessing at a long axis.
 const PATTERN_1D_BODY_GLSL: &str = r#"
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
 
-vec4 render_2d(vec2 pos) {
-    // Position along the strand, 0 at one end and 1 at the other. A 1D
-    // pattern reads this axis and ignores pos.y entirely.
-    float along = pos.x / max(outputSize.x, 1.0);
+vec4 render_1d(float pos) {
+    // Position along the strand, 0 at one end and 1 at the other. `pos`
+    // arrives in lamp units, so normalize by the strand's length.
+    float along = pos / max(outputSize.x, 1.0);
 
     // Hue washes the whole strand and drifts with the phasor. `phase`
     // already wraps in [0,1) each period, so nothing here folds seconds.
@@ -785,18 +813,17 @@ mod tests {
         assert_eq!(matrix.render_height(), 16);
     }
 
-    /// The shader body is a `render(vec2)` in both templates — honest
-    /// about what the entry point is today (T2 owns dimensionality) — and
-    /// it declares the `phase` phasor the clock drives.
+    /// Both templates author the shared scaffolding: a self-contained
+    /// `shader.glsl` beside the def, the HSV helper, and the `phase`
+    /// phasor the clock drives.
     #[test]
-    fn both_templates_ship_a_render_vec2_body_riding_the_phasor() {
+    fn both_templates_ship_a_self_contained_body_riding_the_phasor() {
         let registry = registry();
         for files in [
             pattern_project_files_1d("demo", &registry).expect("1d"),
             pattern_project_files_2d("demo", &registry).expect("2d"),
         ] {
             let glsl = text(&files, "effect/shader.glsl");
-            assert!(glsl.contains("vec4 render_2d(vec2 pos)"), "{glsl}");
             assert!(glsl.contains("uniform float phase"), "{glsl}");
             assert!(glsl.contains("vec3 hsv_to_rgb"), "{glsl}");
 
@@ -812,6 +839,45 @@ mod tests {
             );
             assert!(shader.consumed_slots.entries.get("phase").is_some());
         }
+    }
+
+    /// The entry contract, both halves, per template: the GLSL entry name
+    /// and the node's declared `space` must agree, because a mismatch is
+    /// the D1 error class the whole two-sided model exists to make
+    /// visible. The 1D template is a TRUE 1D shader — `render_1d(float)`
+    /// under a `OneD` declaration — not a 2D shader over an Nx1 area.
+    #[test]
+    fn each_template_declares_the_space_its_entry_point_writes() {
+        let registry = registry();
+
+        let files = pattern_project_files_1d("demo", &registry).expect("1d");
+        let glsl = text(&files, "effect/shader.glsl");
+        assert!(glsl.contains("vec4 render_1d(float pos)"), "{glsl}");
+        assert!(!glsl.contains("render_2d"), "{glsl}");
+        let ShaderSpace::OneD { in_2d } = template_space(&registry, &files) else {
+            panic!("the 1D template declares OneD");
+        };
+        // The factored default: extrude-x, unmirrored, unflipped — what a
+        // strip effect does when it lands on a panel.
+        assert_eq!(*in_2d.value(), crate::SpaceAnswer2::default());
+
+        let files = pattern_project_files_2d("demo", &registry).expect("2d");
+        let glsl = text(&files, "effect/shader.glsl");
+        assert!(glsl.contains("vec4 render_2d(vec2 pos)"), "{glsl}");
+        assert!(!glsl.contains("render_1d"), "{glsl}");
+        assert!(
+            matches!(template_space(&registry, &files), ShaderSpace::TwoD { .. }),
+            "the 2D template stays TwoD"
+        );
+    }
+
+    /// The declared space on a template's exported shader def.
+    fn template_space(registry: &SlotShapeRegistry, files: &[(String, Vec<u8>)]) -> ShaderSpace {
+        let def = NodeDef::read_json(registry, &text(files, "effect/shader.json")).expect("shader");
+        let NodeDef::Shader(shader) = def else {
+            panic!("expected shader");
+        };
+        shader.space.value().clone()
     }
 
     /// Deterministic bytes: two calls agree exactly, so an unchanged

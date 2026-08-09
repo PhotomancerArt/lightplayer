@@ -36,7 +36,7 @@ use crate::node::{
 };
 use crate::products::visual::{
     CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSpace, coordinates, resolve_1d_to_2d,
+    VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
 };
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
@@ -87,10 +87,12 @@ pub struct ShaderNode {
     /// source must define changes with it.
     space: ShaderEntrySpace,
     /// This shader's authored answer for a 2D consumer, when it is 1D
-    /// (`ShaderSpace::OneD { in_2d }`). `None` = `Default` — no opinion,
-    /// defer to the consumer's policy. Read from the declaration, never
-    /// compiled in: it selects a coordinate map at the sampling boundary,
-    /// so a change costs no recompile.
+    /// (`ShaderSpace::OneD { in_2d }`). `None` only for a `TwoD`
+    /// declaration, which carries no such cell — post-v9 every 1D
+    /// declaration carries a `Project` record, so "no opinion" is not a
+    /// state a shader can be in. Read from the declaration, never compiled
+    /// in: it selects a coordinate map at the sampling boundary, so a
+    /// change costs no recompile.
     space_answer_2: Option<CellProjection>,
     /// Scratch point buffer for projected sampling: the consumer's own
     /// buffer is a *cache* keyed on (mapping, size) that must survive the
@@ -541,7 +543,8 @@ impl ShaderNode {
 
         match (self.declared_space(), request.space) {
             (VisualSpace::OneD, VisualSpace::TwoD) => {
-                let cell = resolve_1d_to_2d(self.space_info(), request.policy);
+                let (cell, _origin) =
+                    resolve_1d_to_2d_with_origin(self.space_info(), request.policy);
                 let mut mapped = Vec::with_capacity(count);
                 for index in 0..count {
                     let x = source.get(index * 2).copied().unwrap_or(0);
@@ -612,8 +615,14 @@ impl ShaderNode {
     /// program (plan P4 §4): one sample point per target pixel, mapped
     /// through the same coordinate library the direct path uses, so there
     /// is exactly one definition of every projection. The cost is one
-    /// point + one RGBA16 sample per pixel — paid only when a 1D source
-    /// meets a 2D-only consumer through the texture path.
+    /// point + one RGBA16 sample per pixel — paid only when a producer's
+    /// declared space and the request's space disagree.
+    ///
+    /// Two arms mirror `sample_projected`'s: a 1D producer filling a 2D
+    /// request applies the negotiated [`CellProjection`]; a 2D producer
+    /// filling a 1D request samples its own space along the centre
+    /// scanline (vision D8) — there is no projection *choice* in that
+    /// direction, so no [`CellProjection`]/origin applies.
     fn render_projected_texture(
         &mut self,
         request: &RenderTextureRequest,
@@ -621,13 +630,6 @@ impl ShaderNode {
         uniforms: &LpsValueF32,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
-        if self.declared_space() != VisualSpace::OneD || request.space != VisualSpace::TwoD {
-            return Err(NodeError::msg(format!(
-                "no texture projection from {} shader to {} request",
-                self.declared_space().label(),
-                request.space.label()
-            )));
-        }
         if request.format != lps_shared::TextureStorageFormat::Rgba16Unorm {
             return Err(NodeError::msg(format!(
                 "projected texture fill needs an Rgba16Unorm target, got {:?}",
@@ -640,23 +642,57 @@ impl ShaderNode {
         let pixels = (request.width as usize).saturating_mul(request.height as usize);
         let pixel_count = u32::try_from(pixels)
             .map_err(|_| NodeError::msg("projected texture fill target is too large"))?;
-        let cell = resolve_1d_to_2d(self.space_info(), request.policy);
 
-        // Pixel centres, matching the CPU texture synth's own convention.
-        let mut mapped = Vec::with_capacity(pixels);
-        for y in 0..request.height {
-            for x in 0..request.width {
-                let u = (x as f32 + 0.5) / request.width as f32;
-                let v = (y as f32 + 0.5) / request.height as f32;
-                let t = coordinates::project_2d_to_1d(cell, u, v);
-                mapped.push(normalized_f32_to_pixel_q16(t, request.width));
+        match (self.declared_space(), request.space) {
+            (VisualSpace::OneD, VisualSpace::TwoD) => {
+                let (cell, _origin) =
+                    resolve_1d_to_2d_with_origin(self.space_info(), request.policy);
+                // Pixel centres, matching the CPU texture synth's own convention.
+                let mut mapped = Vec::with_capacity(pixels);
+                for y in 0..request.height {
+                    for x in 0..request.width {
+                        let u = (x as f32 + 0.5) / request.width as f32;
+                        let v = (y as f32 + 0.5) / request.height as f32;
+                        let t = coordinates::project_2d_to_1d(cell, u, v);
+                        mapped.push(normalized_f32_to_pixel_q16(t, request.width));
+                    }
+                }
+                let points =
+                    ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
+                graphics
+                    .write_sample_points_1d(points, &mapped)
+                    .map_err(err_ctx("write projected texture points"))?;
+            }
+            (VisualSpace::TwoD, VisualSpace::OneD) => {
+                // Centre scanline (vision D8): fill the 1D strip by sampling
+                // this shader's native 2D space along `centre_scanline(t)` —
+                // the same map `sample_projected`'s TwoD→OneD arm uses.
+                let mut mapped = Vec::with_capacity(pixels * 2);
+                // `v` from `centre_scanline` never depends on the target row
+                // (a 1D request is one strip, `(N, 1)`), so every row of the
+                // request (normally just one) gets the same scanline.
+                for _y in 0..request.height {
+                    for x in 0..request.width {
+                        let t = (x as f32 + 0.5) / request.width as f32;
+                        let (u, v) = coordinates::centre_scanline(t);
+                        mapped.push(normalized_f32_to_pixel_q16(u, request.width));
+                        mapped.push(normalized_f32_to_pixel_q16(v, request.height));
+                    }
+                }
+                let points =
+                    ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
+                graphics
+                    .write_sample_points(points, &mapped)
+                    .map_err(err_ctx("write scanline texture points"))?;
+            }
+            (native, requested) => {
+                return Err(NodeError::msg(format!(
+                    "no texture projection from {} shader to {} request",
+                    native.label(),
+                    requested.label()
+                )));
             }
         }
-
-        let points = ensure_projected_points(&mut self.projected_points, graphics, pixel_count)?;
-        graphics
-            .write_sample_points_1d(points, &mapped)
-            .map_err(err_ctx("write projected texture points"))?;
         ensure_projected_samples(&mut self.projected_samples, graphics, pixel_count)?;
 
         {
@@ -1095,23 +1131,41 @@ fn entry_space_for(space: &lpc_model::ShaderSpace) -> ShaderEntrySpace {
 }
 
 /// The authored 2D answer cell of a `OneD` declaration, as the runtime
-/// projection vocabulary. `None` means the authored `Default` — no
-/// opinion — and a `TwoD` declaration has no such cell at all.
+/// projection vocabulary. `None` only for a `TwoD` declaration, which has
+/// no such cell — post-v9 every 1D declaration carries a `Project`
+/// record, so there is no "no opinion" state anymore.
 fn space_answer_2_for(space: &lpc_model::ShaderSpace) -> Option<CellProjection> {
     match space {
         lpc_model::ShaderSpace::TwoD { .. } => None,
-        lpc_model::ShaderSpace::OneD { in_2d } => cell_projection_for(in_2d.value()),
+        lpc_model::ShaderSpace::OneD { in_2d } => Some(cell_projection_for(in_2d.value())),
     }
 }
 
-/// The runtime map behind an authored [`lpc_model::SpaceAnswer2`] cell.
-fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjection> {
-    match answer {
-        lpc_model::SpaceAnswer2::Default => None,
-        lpc_model::SpaceAnswer2::Extrude => Some(CellProjection::Extrude),
-        lpc_model::SpaceAnswer2::Radial => Some(CellProjection::Radial),
-        lpc_model::SpaceAnswer2::Angular => Some(CellProjection::Angular),
-        lpc_model::SpaceAnswer2::Mirror => Some(CellProjection::Mirror),
+/// The runtime map behind an authored [`lpc_model::SpaceAnswer2`] cell —
+/// the factored record, field for field.
+fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> CellProjection {
+    let lpc_model::SpaceAnswer2::Project {
+        shape,
+        mirror,
+        flip,
+    } = answer;
+    CellProjection {
+        shape: runtime_projection_shape(*shape.value()),
+        mirror: mirror.value().is_on(),
+        flip: flip.value().is_on(),
+    }
+}
+
+/// The runtime twin of an authored [`lpc_model::ProjectionShape`].
+fn runtime_projection_shape(
+    shape: lpc_model::ProjectionShape,
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape as Runtime;
+    match shape {
+        lpc_model::ProjectionShape::ExtrudeX => Runtime::ExtrudeX,
+        lpc_model::ProjectionShape::ExtrudeY => Runtime::ExtrudeY,
+        lpc_model::ProjectionShape::Radial => Runtime::Radial,
+        lpc_model::ProjectionShape::Angular => Runtime::Angular,
     }
 }
 
@@ -1119,25 +1173,77 @@ fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjectio
 /// view as the space variant itself. The outer `None` means "the query did
 /// not resolve" (unit fakes, or a `TwoD` declaration whose inactive variant
 /// subtree is absent) and leaves the loaded answer standing; the inner
-/// `None` is the authored `Default`.
+/// value is always a full factored cell — an unresolvable payload field
+/// reads as its behavior-preserving default (plain extrude-x).
 fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<CellProjection>> {
-    let production = ctx
-        .resolve(&QueryKey::ConsumedSlot {
-            node: ctx.node_id(),
-            slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
-        })
-        .ok()?;
-    let lpc_model::SlotData::Enum(answer) = production.data() else {
-        return None;
+    // The variant name is copied out before the payload reads: the
+    // resolved production borrows the context the other reads need.
+    let variant = {
+        let production = ctx
+            .resolve(&QueryKey::ConsumedSlot {
+                node: ctx.node_id(),
+                slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
+            })
+            .ok()?;
+        let lpc_model::SlotData::Enum(answer) = production.data() else {
+            return None;
+        };
+        alloc::string::String::from(answer.variant.as_str())
     };
-    Some(match answer.variant.as_str() {
-        "Default" => None,
-        "Extrude" => Some(CellProjection::Extrude),
-        "Radial" => Some(CellProjection::Radial),
-        "Angular" => Some(CellProjection::Angular),
-        "Mirror" => Some(CellProjection::Mirror),
-        _ => return None,
-    })
+    if variant != "Project" {
+        return None;
+    }
+    Some(Some(CellProjection {
+        shape: try_read_authored_shape(ctx, "space.OneD.in_2d.Project.shape"),
+        mirror: try_read_authored_mode(ctx, "space.OneD.in_2d.Project.mirror", "Mirrored"),
+        flip: try_read_authored_mode(ctx, "space.OneD.in_2d.Project.flip", "Flipped"),
+    }))
+}
+
+/// The authored shape payload of a `Project` cell. A path that does not
+/// resolve (or is not an enum) reads as the default `ExtrudeX` — the
+/// behavior-preserving default the whole vocabulary anchors on.
+fn try_read_authored_shape(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape as Runtime;
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return Runtime::ExtrudeX;
+    };
+    let lpc_model::SlotData::Enum(shape) = production.data() else {
+        return Runtime::ExtrudeX;
+    };
+    match shape.variant.as_str() {
+        "ExtrudeY" => Runtime::ExtrudeY,
+        "Radial" => Runtime::Radial,
+        "Angular" => Runtime::Angular,
+        _ => Runtime::ExtrudeX,
+    }
+}
+
+/// An authored modifier of a `Project` cell (`mirror`/`flip`) — a
+/// two-variant mode enum whose `on_ident` variant means the modifier is
+/// on. Unresolvable (or `Normal`, or anything unknown) reads as off —
+/// the behavior-preserving default.
+fn try_read_authored_mode(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+    on_ident: &'static str,
+) -> bool {
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return false;
+    };
+    let lpc_model::SlotData::Enum(mode) = production.data() else {
+        return false;
+    };
+    mode.variant.as_str() == on_ident
 }
 
 /// The authored `space` declaration's variant, read through the same
