@@ -295,35 +295,35 @@ fn space_in_definition_variant() -> Element {
 /// (The old per-shape direction rows and their vocabularies retired
 /// with THE FACTORIZATION: shape × mirror × flip.)
 #[story(
-    description = "The MODIFIER TOGGLES — THE FACTORIZATION in the flesh: four shape tiles (extrude-x, extrude-y, radial, angular) with two checkbox toggles beneath ('mirror' folds the strip around the middle, 'flip' reverses it — the same uniform chain the engine runs, in that order). The per-shape direction rows and their four vocabularies are GONE: extrude's directions, mirror's folds, radial's in/out, angular's sweep were all this one grid × two bools. Shown: extrude-y + mirror (the old inward-y fold), radial + flip (the old inward), angular + mirror (the up-and-back sweep no old vocabulary could spell), and angular + flip (the old counter-clockwise). Glyphs are DERIVED — the same transform chain runs over the ramp drawing — so every composite draws itself; captions read `extrude-y · mirrored`."
+    description = "The MODIFIER TILES, MUTUALLY REFLECTIVE — the same shape (radial) under each modifier combination: plain, mirrored, flipped, mirrored+flipped. Every face is a true what-if of pressing it: the four SHAPE tiles redraw with the card's current mirror/flip applied (watch the radial tile change across the four cards), the `mirror` tile always draws the current shape+flip WITH mirror on, the `flip` tile likewise — the selected treatment (accent border + wash + check), not the drawing, says whether a modifier is active. One chain-derived drawing function feeds every face; captions read `radial · mirrored · flipped`. (The checkboxes these replace were 'very small and non-visual compared to the projection'.)"
 )]
 fn space_modifiers() -> Element {
-    let modified = |answer: &str, mirror: bool, flip: bool| {
-        let mut face = shader_face_one_d(answer);
+    let modified = |mirror: bool, flip: bool| {
+        let mut face = shader_face_one_d("Radial");
         face.space = Some(
             crate::app::node::face_story_fixtures::shader_space_section_one_d_modified(
-                answer, mirror, flip,
+                "Radial", mirror, flip,
             ),
         );
         face
     };
-    let extrude_y_mirror = modified("ExtrudeY", true, false);
-    let radial_flip = modified("Radial", false, true);
-    let angular_mirror = modified("Angular", true, false);
-    let angular_flip = modified("Angular", false, true);
+    let plain = modified(false, false);
+    let mirrored = modified(true, false);
+    let flipped = modified(false, true);
+    let both = modified(true, true);
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: extrude_y_mirror, space_open: true }
+                ShaderBodyCard { face: plain, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: radial_flip, space_open: true }
+                ShaderBodyCard { face: mirrored, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: angular_mirror, space_open: true }
+                ShaderBodyCard { face: flipped, space_open: true }
             }
             div { class: "tw:w-full tw:max-w-md",
-                ShaderBodyCard { face: angular_flip, space_open: true }
+                ShaderBodyCard { face: both, space_open: true }
             }
         }
     }

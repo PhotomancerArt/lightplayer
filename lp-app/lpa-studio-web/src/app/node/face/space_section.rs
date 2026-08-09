@@ -82,12 +82,15 @@ const CONSUMER_ALONG_WIRE: &str = "along the wire";
 /// variant — the pick dispatches the bool `SetValue`, never an ensure).
 const ALONG_WIRE_VARIANT: &str = "AlongWire";
 
-/// The wire-direction row under the along-the-wire selection.
-const DIRECTION_ROW_LABEL: &str = "direction";
-/// The modifier toggles' tooltips (the same uniform chain the engine
+/// The modifier tiles' hint lines (the same uniform chain the engine
 /// runs: mirror folds first, flip reverses after).
-const MIRROR_TITLE: &str = "fold the strip around the middle — out and back";
+const MIRROR_TITLE: &str = "fold at the middle — out and back";
 const FLIP_TITLE: &str = "reverse the strip";
+/// The along-the-wire direction tiles.
+const WIRE_FORWARD: &str = "forward";
+const WIRE_REVERSED: &str = "reversed";
+const HINT_WIRE_FORWARD: &str = "wire order, as wired";
+const HINT_WIRE_REVERSED: &str = "wire order, read back to front";
 
 /// One line per choice in the picker's tiles.
 const HINT_FOLLOW: &str = "each source projects the way it declares";
@@ -254,6 +257,7 @@ fn SpaceCellRow(
 ) -> Element {
     let modifiers = cell.modifiers.clone();
     let wire_direction = cell.wire_direction.clone();
+    let base = active_projection(&cell);
     let choosable = cell.is_choosable() && on_action.is_some();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
@@ -265,6 +269,10 @@ fn SpaceCellRow(
                     role: cell.role,
                     address: cell.address.clone(),
                     strip_order: cell.strip_order.as_ref().and_then(|strip| strip.address.clone()),
+                    current_modifiers: cell
+                        .modifiers
+                        .as_ref()
+                        .map(|rows| (rows.mirror.value, rows.flip.value)),
                     on_action,
                 }
             } else {
@@ -282,35 +290,61 @@ fn SpaceCellRow(
                 }
             }
         }
-        if let Some(modifiers) = modifiers {
-            SpaceModifierToggles { modifiers, on_action }
+        if let (Some(modifiers), Some(base)) = (modifiers, base) {
+            SpaceModifierTiles { modifiers, base, on_action }
         }
         if let Some(wire) = wire_direction {
-            WireDirectionRow { wire, on_action }
+            WireDirectionTiles { wire, on_action }
         }
     }
 }
 
-/// The two modifier toggles under the shape tiles ("mirror", "flip") in
-/// the discrete checkbox style — each an ordinary bool `SetValue` at the
-/// flattened `Project` payload row it presents.
+/// The ACTIVE factored projection a cell currently spells — the base the
+/// modifier tiles draw their what-if faces over. `None` when the active
+/// choice is not a projection (Auto / along-the-wire / the scanline
+/// statement).
+fn active_projection(cell: &UiSpaceCell) -> Option<UiCellProjection> {
+    match active_glyph(cell) {
+        SpaceGlyph::Projection(projection) => Some(projection),
+        _ => None,
+    }
+}
+
+/// The two modifier TILES under the shape tiles ("mirror", "flip") —
+/// the modifier-tiles ruling: the checkboxes were "very small and
+/// non-visual compared to the projection", so the modifiers wear the
+/// same ChoiceTiles clothing, MUTUALLY REFLECTIVE with the shapes:
+///
+/// - each modifier tile draws the CURRENT shape and other modifier with
+///   ITS OWN modifier forced ON — the tile always shows what pressing it
+///   produces; the selected treatment (accent border + wash + check),
+///   not the drawing, says whether it is active;
+/// - the shape tiles (in [`ChoiceTiles`]) draw with the current
+///   modifiers applied, closing the loop.
+///
+/// All faces come from the one chain-derived drawing function, so
+/// reflectivity is free. A press is still the ordinary bool `SetValue`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceModifierToggles(
+fn SpaceModifierTiles(
     modifiers: UiSpaceModifiers,
+    /// The active factored projection the what-if faces build on.
+    base: UiCellProjection,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-4",
-            ModifierCheckbox {
+        div { class: TILE_GRID_CLASS,
+            ModifierTile {
                 label: MODIFIER_MIRROR,
-                title: MIRROR_TITLE,
+                hint: MIRROR_TITLE,
+                projection: modifier_tile_projection(base, Modifier::Mirror),
                 row: modifiers.mirror,
                 on_action,
             }
-            ModifierCheckbox {
+            ModifierTile {
                 label: MODIFIER_FLIP,
-                title: FLIP_TITLE,
+                hint: FLIP_TITLE,
+                projection: modifier_tile_projection(base, Modifier::Flip),
                 row: modifiers.flip,
                 on_action,
             }
@@ -318,99 +352,104 @@ fn SpaceModifierToggles(
     }
 }
 
-/// One modifier checkbox: a squared box plus its word, dispatching the
-/// ordinary `SetValue` a bool row dispatches.
+/// Which modifier a tile toggles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Modifier {
+    Mirror,
+    Flip,
+}
+
+/// The what-if face a modifier tile draws: the current projection with
+/// THIS modifier forced on (the reflectivity rule — the tile shows what
+/// it produces, always).
+fn modifier_tile_projection(base: UiCellProjection, which: Modifier) -> UiCellProjection {
+    match which {
+        Modifier::Mirror => UiCellProjection {
+            mirror: true,
+            ..base
+        },
+        Modifier::Flip => UiCellProjection { flip: true, ..base },
+    }
+}
+
+/// One modifier tile: the what-if drawing, the word, and the selected
+/// treatment when the bool is ON. A press dispatches the ordinary bool
+/// `SetValue` (toggling), never a second write path.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ModifierCheckbox(
+fn ModifierTile(
     label: &'static str,
-    title: &'static str,
+    hint: &'static str,
+    projection: UiCellProjection,
     row: UiSpaceBoolRow,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let value = row.value;
-    let Some((address, handler)) = field_wiring(&row.state, &row.address, on_action) else {
-        return rsx! {
-            span {
-                class: "tw:inline-flex tw:items-center tw:gap-1.5 tw:text-[11px] tw:text-dim-foreground",
-                title,
-                span { class: checkbox_box_class(value), aria_hidden: "true",
-                    if value {
-                        StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                    }
-                }
-                "{label}"
-            }
-        };
-    };
-
+    let wiring = field_wiring(&row.state, &row.address, on_action);
     rsx! {
         button {
-            class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-[11px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
+            class: tile_class(value),
             r#type: "button",
-            title,
+            title: hint,
             aria_pressed: "{value}",
-            onclick: move |event| {
+            onclick: move |event: MouseEvent| {
                 event.stop_propagation();
-                handler.call(slot_set_value_action(address.clone(), LpValue::Bool(!value)));
-            },
-            span { class: checkbox_box_class(value), aria_hidden: "true",
-                if value {
-                    StudioIcon { name: StudioIconName::StepComplete, size: 10 }
+                if let Some((address, handler)) = wiring.clone() {
+                    handler.call(slot_set_value_action(address, LpValue::Bool(!value)));
                 }
+            },
+            TileFace {
+                kind: SpaceGlyph::Projection(projection),
+                selected: value,
+                label: label.to_string(),
+                hint: hint.to_string(),
             }
-            "{label}"
         }
     }
 }
 
-/// The along-the-wire [forward|reversed] row: two arrow segments in the
-/// squared-blocks discrete language, over the fixture's `wire_reversed`
-/// bool — an ordinary `SetValue` behind each segment.
+/// The along-the-wire direction as two TILES — adopted into the tile
+/// form with the modifiers (the modifier-tiles ruling's consistency
+/// note): "forward" draws the serpentine as wired, "reversed" draws it
+/// read back to front; the selected treatment marks the current
+/// direction. A press is the ordinary bool `SetValue` over
+/// `wire_reversed`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn WireDirectionRow(
+fn WireDirectionTiles(
     wire: UiWireDirectionRow,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let reversed = wire.reversed;
     let wiring = field_wiring(&wire.state, &wire.address, on_action);
     rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
-            span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
-            span { class: DIRECTION_GROUP_CLASS,
-                for (candidate_reversed , glyph , title) in [
-                    (false, "→", "wire order, as wired"),
-                    (true, "←", "wire order, reversed"),
-                ] {
-                    if let Some((address, handler)) = wiring.clone() {
-                        button {
-                            key: "{candidate_reversed}",
-                            class: direction_segment_class(candidate_reversed == reversed),
-                            r#type: "button",
-                            title,
-                            onclick: move |event: MouseEvent| {
-                                event.stop_propagation();
-                                if candidate_reversed == reversed {
-                                    return;
-                                }
-                                handler
-                                    .call(
-                                        slot_set_value_action(
-                                            address.clone(),
-                                            LpValue::Bool(candidate_reversed),
-                                        ),
-                                    );
-                            },
-                            "{glyph}"
+        div { class: TILE_GRID_CLASS,
+            for (candidate , label , hint) in [
+                (false, WIRE_FORWARD, HINT_WIRE_FORWARD),
+                (true, WIRE_REVERSED, HINT_WIRE_REVERSED),
+            ] {
+                button {
+                    key: "{candidate}",
+                    class: tile_class(candidate == reversed),
+                    r#type: "button",
+                    title: hint,
+                    onclick: {
+                        let wiring = wiring.clone();
+                        move |event: MouseEvent| {
+                            event.stop_propagation();
+                            if candidate == reversed {
+                                return;
+                            }
+                            if let Some((address, handler)) = wiring.clone() {
+                                handler.call(slot_set_value_action(address, LpValue::Bool(candidate)));
+                            }
                         }
-                    } else {
-                        span {
-                            key: "{candidate_reversed}",
-                            class: direction_segment_class(candidate_reversed == reversed),
-                            title,
-                            "{glyph}"
-                        }
+                    },
+                    TileFace {
+                        kind: SpaceGlyph::AlongWire(candidate),
+                        selected: candidate == reversed,
+                        label: label.to_string(),
+                        hint: hint.to_string(),
                     }
                 }
             }
@@ -500,10 +539,15 @@ pub fn ChoiceTiles(
     /// consumer pick includes its `SetValue` (see [`choice_actions`]).
     #[props(default = None)]
     strip_order: Option<ProjectSlotAddress>,
+    /// The cell's CURRENT (mirror, flip) — the reflectivity rule (the
+    /// modifier-tiles ruling): shape tiles draw with the live modifiers
+    /// applied, so every tile face is a true what-if of pressing it.
+    #[props(default = None)]
+    current_modifiers: Option<(bool, bool)>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5",
+        div { class: TILE_GRID_CLASS,
             for choice in choices {
                 button {
                     key: "{choice.variant}",
@@ -532,28 +576,62 @@ pub fn ChoiceTiles(
                             }
                         }
                     },
-                    span { class: "tw:relative tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
-                        ProjectionGlyph { kind: glyph_for(role, &choice.variant) }
-                        // The unmistakable half of the selected state: a
-                        // check badge over the drawing's corner, paired
-                        // with the accent border+wash on the tile.
-                        if choice.selected {
-                            span {
-                                class: TILE_CHECK_CLASS,
-                                aria_hidden: "true",
-                                StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                            }
-                        }
-                    }
-                    span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold",
-                        "{variant_label(side, role, &choice)}"
-                    }
-                    span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                        "{choice_hint(role, &choice.variant)}"
+                    TileFace {
+                        kind: tile_glyph(role, &choice.variant, current_modifiers),
+                        selected: choice.selected,
+                        label: variant_label(side, role, &choice),
+                        hint: choice_hint(role, &choice.variant).to_string(),
                     }
                 }
             }
         }
+    }
+}
+
+/// One tile's inner face — the drawing, the check badge, the word, the
+/// hint — shared by the shape tiles, the modifier tiles, and the wire
+/// tiles so the three sets cannot drift apart visually.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn TileFace(kind: SpaceGlyph, selected: bool, label: String, hint: String) -> Element {
+    rsx! {
+        span { class: "tw:relative tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
+            ProjectionGlyph { kind }
+            // The unmistakable half of the selected state: a check badge
+            // over the drawing's corner, paired with the accent
+            // border+wash on the tile.
+            if selected {
+                span {
+                    class: TILE_CHECK_CLASS,
+                    aria_hidden: "true",
+                    StudioIcon { name: StudioIconName::StepComplete, size: 10 }
+                }
+            }
+        }
+        span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold", "{label}" }
+        span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
+            "{hint}"
+        }
+    }
+}
+
+/// A shape tile's face, reflective (the modifier-tiles ruling): a
+/// projection tile draws its shape WITH the cell's current modifiers
+/// applied; the deferring choices keep their own schematics.
+fn tile_glyph(
+    role: UiSpaceCellRole,
+    variant: &str,
+    current_modifiers: Option<(bool, bool)>,
+) -> SpaceGlyph {
+    match (glyph_for(role, variant), current_modifiers) {
+        (SpaceGlyph::Projection(projection), Some((mirror, flip))) => {
+            SpaceGlyph::Projection(UiCellProjection {
+                mirror,
+                flip,
+                ..projection
+            })
+        }
+        (glyph, _) => glyph,
     }
 }
 
@@ -1141,31 +1219,10 @@ fn segment_class(selected: bool) -> &'static str {
     }
 }
 
-/// The direction segmented control's frame — the squared-blocks discrete
-/// language, compact (four fixed squares, not a full-width tab row).
-const DIRECTION_GROUP_CLASS: &str =
-    "tw:inline-flex tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle";
-
-/// The squared checkbox box the modifier toggles draw (no preflight: a
-/// `<button>`'s box is drawn here or not at all).
-fn checkbox_box_class(value: bool) -> &'static str {
-    if value {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:text-strong-foreground"
-    } else {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page"
-    }
-}
-
-/// One segment of the direction control: pressed reads as filled, the
-/// rest as quiet arrows (the same language as [`segment_class`], sized to
-/// its glyph).
-fn direction_segment_class(selected: bool) -> &'static str {
-    if selected {
-        "tw:inline-flex tw:h-7 tw:min-w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-card-muted tw:px-2 tw:text-xs tw:font-bold tw:text-strong-foreground"
-    } else {
-        "tw:inline-flex tw:h-7 tw:min-w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-transparent tw:px-2 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
-    }
-}
+/// The tile grid every tile set lays out in (shapes, modifiers, wire
+/// direction) — one template, so the sets align into one field.
+const TILE_GRID_CLASS: &str =
+    "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5";
 
 /// One tile of the inline choice grid. Selected = accent border + accent
 /// wash + the check badge ([`TILE_CHECK_CLASS`]) — three signals, because
@@ -1336,6 +1393,49 @@ mod tests {
             state: UiSlotFieldState::editable(),
         });
         assert_eq!(space_section_summary(&wire), "along the wire ←");
+    }
+
+    /// The reflectivity rules (the modifier-tiles ruling): shape tiles
+    /// draw with the CURRENT modifiers applied; each modifier tile draws
+    /// the current projection with ITS modifier forced on — every face a
+    /// true what-if of pressing it.
+    #[test]
+    fn tiles_reflect_each_other() {
+        // Shape tiles wear the live modifiers…
+        assert_eq!(
+            tile_glyph(UiSpaceCellRole::ProducerIn2d, "Radial", Some((true, false))),
+            SpaceGlyph::Projection(UiCellProjection {
+                shape: UiProjectionShape::Radial,
+                mirror: true,
+                flip: false,
+            })
+        );
+        // …the deferring choices keep their schematics…
+        assert_eq!(
+            tile_glyph(UiSpaceCellRole::Primary, "Auto", Some((true, true))),
+            SpaceGlyph::FollowSource
+        );
+        // …and a modifier tile forces its own bit over the current cell
+        // (the drawing shows what pressing produces — selected state
+        // alone says whether it is already active).
+        let base = UiCellProjection {
+            shape: UiProjectionShape::Angular,
+            mirror: false,
+            flip: true,
+        };
+        assert_eq!(
+            modifier_tile_projection(base, Modifier::Mirror),
+            UiCellProjection {
+                shape: UiProjectionShape::Angular,
+                mirror: true,
+                flip: true,
+            }
+        );
+        assert_eq!(
+            modifier_tile_projection(base, Modifier::Flip),
+            base,
+            "flip already on: the tile shows the current state itself"
+        );
     }
 
     /// The active glyph composes the shape with the LIVE toggles — one
