@@ -46,6 +46,10 @@ pub enum LpsValueF32 {
     Mat4x4([[f32; 4]; 4]), // [[col0_row0, col0_row1, col0_row2, col0_row3], [col1_row0, ...], ...]
     /// Fixed-size array; elements use the same recursive shape (scalars, vectors, matrices, nested arrays).
     Array(Box<[LpsValueF32]>),
+    /// Packed buffer for arrays of builtin scalars/vectors: one flat word
+    /// run instead of one boxed enum per element. The decode seams produce
+    /// this form for every `LpsType::Array` whose element is buffer-legal.
+    Buffer(crate::LpsBuffer),
     /// Struct instance; `fields` are in declaration order (names match [`StructMember::name`] when present).
     Struct {
         name: Option<alloc::string::String>,
@@ -106,6 +110,7 @@ impl LpsValueF32 {
                     .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
             }
             (LpsValueF32::Texture2D(a), LpsValueF32::Texture2D(b)) => a == b,
+            (LpsValueF32::Buffer(a), LpsValueF32::Buffer(b)) => a.bits_eq(b),
             _ => false, // Type mismatch
         }
     }
@@ -192,6 +197,7 @@ impl LpsValueF32 {
                     .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
             }
             (LpsValueF32::Texture2D(a), LpsValueF32::Texture2D(b)) => a == b,
+            (LpsValueF32::Buffer(a), LpsValueF32::Buffer(b)) => a.approx_eq(b, tolerance),
             _ => false, // Type mismatch
         }
     }

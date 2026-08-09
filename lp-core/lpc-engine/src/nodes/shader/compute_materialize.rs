@@ -19,6 +19,19 @@ pub fn materialize_produced_slot(
     value: &LpsValueF32,
     revision: Revision,
 ) -> Result<SlotData, ComputeMaterializeError> {
+    // Defense in depth at the allocation site — see the twin check in
+    // `materialize_shader_input`. Estimation needs no registry here: only
+    // builtin-element kinds allocate proportionally to a produced len.
+    let budget = lpc_model::ShaderBudget::default();
+    if let Some(len) = slot.buffer_len() {
+        let bytes = u64::from(len) * 16;
+        if bytes > u64::from(budget.max_slot_bytes) {
+            return Err(ComputeMaterializeError::Unsupported(format!(
+                "produced slot {slot_name:?} declares {bytes} bytes, over the {} byte budget",
+                budget.max_slot_bytes
+            )));
+        }
+    }
     match slot.kind.value() {
         // Timebase kinds declare a plain f32 uniform, so a produced one
         // (meaningless, but authorable) materializes as one.
@@ -31,6 +44,7 @@ pub fn materialize_produced_slot(
             Ok(SlotData::Value(WithRevision::new(revision, value)))
         }
         ShaderSlotKind::Map => materialize_map_slot(slot_name, slot, value, revision),
+        ShaderSlotKind::Buffer => materialize_buffer_slot(slot_name, slot, value, revision),
         // A compute shader writes values, not palettes; a produced sampler is
         // refused rather than converted to something it is not.
         ShaderSlotKind::Palette => Err(ComputeMaterializeError::Unsupported(format!(
@@ -45,6 +59,7 @@ pub enum ComputeMaterializeError {
     MissingMapping(String),
     Unsupported(String),
     ExpectedArray(String),
+    ExpectedBuffer(String),
     ExpectedStruct(String),
     MissingKeyField { slot: String, key: String },
     InvalidKey { slot: String, key: String },
@@ -56,6 +71,9 @@ impl core::fmt::Display for ComputeMaterializeError {
             Self::MissingMapping(slot) => write!(f, "produced map slot {slot:?} missing mapping"),
             Self::Unsupported(message) => f.write_str(message),
             Self::ExpectedArray(slot) => write!(f, "produced map slot {slot:?} was not an array"),
+            Self::ExpectedBuffer(slot) => {
+                write!(f, "produced buffer slot {slot:?} was not a buffer")
+            }
             Self::ExpectedStruct(slot) => {
                 write!(f, "produced map slot {slot:?} item was not a struct")
             }
@@ -119,6 +137,39 @@ fn materialize_map_slot(
     Ok(SlotData::Map(SlotMapDyn::with_revision(revision, entries)))
 }
 
+/// A produced buffer is ONE value: the packed words move across the ABI in
+/// a single conversion, and the whole buffer carries one revision — there
+/// is no per-element identity to key or skip.
+fn materialize_buffer_slot(
+    slot_name: &str,
+    slot: &ShaderSlotDef,
+    value: &LpsValueF32,
+    revision: Revision,
+) -> Result<SlotData, ComputeMaterializeError> {
+    let LpsValueF32::Buffer(buffer) = value else {
+        return Err(ComputeMaterializeError::ExpectedBuffer(String::from(
+            slot_name,
+        )));
+    };
+    let declared_len = slot.buffer_len().ok_or_else(|| {
+        ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} missing len"
+        ))
+    })?;
+    if buffer.len() != declared_len {
+        return Err(ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} has {} elements, declared {declared_len}",
+            buffer.len()
+        )));
+    }
+    let model = lps_value_f32_to_model_value(value).map_err(|e| {
+        ComputeMaterializeError::Unsupported(format!(
+            "produced buffer slot {slot_name:?} cannot convert value: {e}"
+        ))
+    })?;
+    Ok(SlotData::Value(WithRevision::new(revision, model)))
+}
+
 fn extract_key(
     slot_name: &str,
     key_field: &str,
@@ -178,6 +229,47 @@ mod tests {
             value.value(),
             LpValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "id" && value == &LpValue::U32(7))
         ));
+    }
+
+    /// A produced buffer materializes as ONE packed value with one
+    /// revision — no per-element entries anywhere.
+    #[test]
+    fn buffer_materializes_to_single_packed_value() {
+        let slot = ShaderSlotDef::buffer_builtin("f32", 3);
+        let value = LpsValueF32::Buffer(
+            lps_shared::LpsBuffer::from_words(
+                lps_shared::LpsBufferElem::F32,
+                Box::new([f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.25)]),
+            )
+            .expect("buffer"),
+        );
+
+        let data =
+            materialize_produced_slot("heat", &slot, &value, Revision::new(4)).expect("value");
+
+        let SlotData::Value(value) = data else {
+            panic!("value");
+        };
+        assert_eq!(value.changed_at(), Revision::new(4));
+        let LpValue::Buffer(buffer) = value.value() else {
+            panic!("buffer");
+        };
+        assert_eq!(buffer.elem, lpc_model::BufferElem::F32);
+        assert_eq!(
+            buffer.words(),
+            &[f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.25)]
+        );
+    }
+
+    #[test]
+    fn buffer_rejects_length_disagreement() {
+        let slot = ShaderSlotDef::buffer_builtin("f32", 4);
+        let value = LpsValueF32::Buffer(lps_shared::LpsBuffer::zeroed(
+            lps_shared::LpsBufferElem::F32,
+            3,
+        ));
+
+        assert!(materialize_produced_slot("heat", &slot, &value, Revision::new(4)).is_err());
     }
 
     fn emitter(id: u32, x: f32) -> LpsValueF32 {

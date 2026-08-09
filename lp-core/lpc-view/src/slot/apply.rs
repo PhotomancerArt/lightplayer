@@ -295,6 +295,9 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
         | (LpValue::Mat3x3(_), LpType::Mat3x3)
         | (LpValue::Mat4x4(_), LpType::Mat4x4)
         | (LpValue::Resource(_), LpType::Resource) => true,
+        (LpValue::Buffer(buffer), LpType::Buffer { elem, len }) => {
+            buffer.elem == *elem && buffer.len() == *len
+        }
         (LpValue::Array(values), LpType::Array(item_ty, len)) => {
             values.len() == *len
                 && values

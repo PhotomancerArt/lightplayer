@@ -38,6 +38,13 @@ pub enum LpsValueQ32 {
     Mat3x3([[Q32; 3]; 3]),
     Mat4x4([[Q32; 4]; 4]),
     Array(Box<[LpsValueQ32]>),
+    /// Packed buffer twin of [`LpsValueF32::Buffer`]: float lanes already
+    /// encoded per the chosen [`FloatLaneAbi`], integer lanes raw. PACKED
+    /// words — any layout stride padding is added where bytes are emitted.
+    Buffer {
+        elem: crate::LpsBufferElem,
+        words: Box<[i32]>,
+    },
     Struct {
         name: Option<String>,
         fields: Vec<(String, LpsValueQ32)>,
@@ -229,6 +236,33 @@ pub fn lps_value_f32_to_lanes(
             LpsValueQ32::Array(out.into_boxed_slice())
         }
 
+        (LpsType::Array { element, len }, LpsValueF32::Buffer(buffer)) => {
+            let elem = crate::LpsBufferElem::from_lps_type(element).ok_or_else(|| {
+                LpsValueQ32Error::TypeMismatch(format!(
+                    "buffer value for array of non-buffer element {element:?}"
+                ))
+            })?;
+            if buffer.elem != elem || buffer.len() != *len {
+                return Err(LpsValueQ32Error::TypeMismatch(format!(
+                    "buffer shape mismatch: expected {elem:?}[{len}], got {:?}[{}]",
+                    buffer.elem,
+                    buffer.len()
+                )));
+            }
+            // One loop over words, no per-element boxing: integer lanes are
+            // the same bits in both ABIs, float lanes transcode per `abi`.
+            let words = if elem.is_float() {
+                buffer
+                    .words()
+                    .iter()
+                    .map(|w| f32_to_q32_abi(f32::from_bits(*w)).to_fixed())
+                    .collect()
+            } else {
+                buffer.words().iter().map(|w| *w as i32).collect()
+            };
+            LpsValueQ32::Buffer { elem, words }
+        }
+
         (LpsType::Struct { members, .. }, LpsValueF32::Struct { name, fields }) => {
             if members.len() != fields.len() {
                 return Err(LpsValueQ32Error::TypeMismatch(format!(
@@ -333,6 +367,25 @@ pub fn lanes_to_lps_value_f32(
                 elems.push(lanes_to_lps_value_f32(element, g, abi)?);
             }
             LpsValueF32::Array(elems.into_boxed_slice())
+        }
+
+        (LpsType::Array { element, len }, LpsValueQ32::Buffer { elem, words }) => {
+            if crate::LpsBufferElem::from_lps_type(element) != Some(elem)
+                || words.len() != (*len as usize) * elem.word_stride() as usize
+            {
+                return Err(bad());
+            }
+            let words: alloc::vec::Vec<u32> = if elem.is_float() {
+                words
+                    .iter()
+                    .map(|w| dec(Q32::from_fixed(*w)).to_bits())
+                    .collect()
+            } else {
+                words.iter().map(|w| *w as u32).collect()
+            };
+            LpsValueF32::Buffer(
+                crate::LpsBuffer::from_words(elem, words.into_boxed_slice()).map_err(|_| bad())?,
+            )
         }
 
         (
