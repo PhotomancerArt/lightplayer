@@ -1035,7 +1035,8 @@ function frame(now){
 }
 
 /* ---------- boot ---------- */
-buildRopeA(); buildRopeBshape(); buildWirebar(); buildRail(); setState("patched");
+buildRopeA(); buildRopeBshape(); buildWirebar(); buildRail();
+setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
 buildPlane(); buildRope3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
 requestAnimationFrame(frame);
 window.addEventListener("resize", buildWirebar);
