@@ -1,12 +1,13 @@
-//! Derivation of the `space` section both visual-side faces carry
+//! Derivation of the `dimensionality` section both visual-side faces carry
 //! ([`UiSpaceSection`]) — the two-sided space model lifted out of the
-//! advanced drawer and onto the card (dimensionality plan-B P3).
+//! advanced drawer and onto the card (ADR
+//! `2026-08-09-dimensionality-authoring-surface.md`).
 //!
 //! One derivation, two sides. The shader's `space` enum
 //! (`TwoD { in_1d } | OneD { in_2d }`) and the fixture's `consume` enum
-//! (`Auto | Policy { from_1d, force }`) plus `strip_order_meaningful` land
-//! in the SAME DTO, so D13's "the two sections are visual mirrors" is a
-//! data fact the web cannot accidentally break.
+//! (`Auto | Policy { from_1d, force }`) plus `strip_order_meaningful` and
+//! `wire_reversed` land in the SAME DTO, so D13's "the two sections are
+//! visual mirrors" is a data fact the web cannot accidentally break.
 //!
 //! Everything is read off the already-projected config rows — the same
 //! rows the advanced drawer would render, which is exactly why the face
@@ -14,8 +15,14 @@
 //! surface now, and two controls writing one slot is the defect this
 //! avoids. No gesture is invented here either: a cell carries its enum
 //! row's address so a choice is the `EnsurePresent <enum>.<Variant>` the
-//! generic variant field already dispatches, and a flag carries its bool
-//! row's address for the ordinary `SetValue`.
+//! generic variant field already dispatches, and a bool row carries its
+//! own address for the ordinary `SetValue`.
+//!
+//! The consumer's single control is a PRESENTATION over two slots: its
+//! first choice, "along the wire", is `strip_order_meaningful` — which
+//! the engine reads as a gate on the projection, so a pick anywhere in
+//! this control writes that bit as part of the same batch. Nothing else
+//! would be honest about which control is live.
 //!
 //! Enum payload rows arrive FLATTENED (`SlotController` hoists a variant's
 //! record fields to the enum row's own record body), so the shader's

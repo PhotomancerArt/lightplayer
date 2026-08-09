@@ -1,31 +1,39 @@
-//! The `space` section both visual-side faces grow — one component, both
-//! sides of the two-sided space model (dimensionality plan-B P4, spike
+//! The `dimensionality` section both visual-side faces grow — one
+//! component, both sides of the two-sided space model (ADR
+//! `2026-08-09-dimensionality-authoring-surface.md`; spike
 //! `spikes/dimensionality/index.html` §2/§3/§4B).
 //!
 //! **One component, two sides.** P3 made the mirror a data fact: a shader's
 //! declaration and a fixture's consume policy arrive in the same
 //! [`UiSpaceSection`] DTO, differing only by [`UiSpaceSide`]. This renders
 //! that DTO, so the two cards cannot drift apart by styling accident — the
-//! producer's "default projection" cell and the consumer's "from 1D
-//! sources" cell are literally the same row renderer with the same picker
-//! behind it.
+//! producer's "show in 2D by" cell and the consumer's "show 1D sources by"
+//! cell are literally the same row renderer.
+//!
+//! **Everything is inline tiles.** No dropdown, no popover: a drawer
+//! containing a dropdown that expands into a grid was two nested
+//! expansions to reach one choice. The shape choices render as a tile grid
+//! in the section body, and each modifier (`mirror`, `flip`) is a
+//! two-card single-select row in that same treatment.
 //!
 //! **No parallel write path.** Every gesture here is the op the generic
-//! drawer row would have sent: a variant tile dispatches `EnsurePresent` at
+//! drawer row would have sent: a shape tile dispatches `EnsurePresent` at
 //! `cell.address.child_field(&variant)` (exactly `EnumVariantField`'s
-//! gesture), a flag checkbox dispatches `SetValue` at `flag.address`
+//! gesture), and the bool rows dispatch `SetValue` at their own addresses
 //! (exactly `BoolSlotField`'s). The section is a different PRESENTATION of
 //! the rows it claimed out of the advanced drawer, never a second writer.
 //!
-//! **Tiles are schematic, not live** (plan A2, decided here — see the
-//! `ProjectionGlyph` doc): the picker draws each projection's shape rather
-//! than probing the product through it, because nothing on the web side can
-//! issue an ad-hoc forced-policy probe today.
+//! **Tiles are schematic, not live** (plan A2 — see the `ProjectionGlyph`
+//! doc): nothing on the web side can issue an ad-hoc forced-policy probe
+//! today. They are not hand-drawn per case either — one drawing function
+//! runs the engine's own `shape → mirror → flip` chain over a ramp grid,
+//! so every tile shows what its choice actually does, and the modifier
+//! rows can reflect the live shape for free.
 //!
-//! **Wording lives at the top of this file.** The G1 gate rules on the
-//! labels (plan Q10/D16), and a ruling has to be a one-file edit — so the
+//! **Wording lives at the top of this file** and is FINAL as of G2: the
 //! component reads a cell's ROLE from the DTO and spells the label here,
-//! rather than printing the derivation's own `label` strings.
+//! rather than printing the derivation's own `label` strings, so a wording
+//! ruling stays a one-file edit.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -40,18 +48,20 @@ use crate::app::node::slot_fields::{field_class, field_wiring};
 use crate::base::{StudioIcon, StudioIconName};
 
 // ---------------------------------------------------------------------------
-// Wording (G1 ruled 2026-08-08; G1b rules on this pass — keep every
-// user-facing string here)
+// Wording — FINAL (G1 2026-08-08, G1b + G2 2026-08-09). Keep every
+// user-facing string here.
 // ---------------------------------------------------------------------------
 
 /// The section's rail label. G1 sent "space" back ("it should have a very
-/// clear 'Dimensionality'…"); G1b rules on this candidate.
+/// clear 'Dimensionality'…") and G1b kept this word with a noted
+/// reservation ("a bit long"); `dimension` / `geometry` are a one-const
+/// swap here if that reservation ever wins.
 pub(crate) const SPACE_SECTION_LABEL: &str = "dimensionality";
 
 /// Per-other-dimension answer rows, in G1's "Show in 1d by:" shape.
 const PRODUCER_IN_2D_LABEL: &str = "show in 2D by";
 const PRODUCER_IN_1D_LABEL: &str = "show in 1D by";
-/// The consumer's ONE dropdown (P4b — "then we just have one control").
+/// The consumer's ONE control (P4b — "then we just have one control").
 const CONSUMER_PRIMARY_LABEL: &str = "show 1D sources by";
 
 /// Variant vocabulary, keyed by role where one variant name reads
@@ -71,12 +81,12 @@ const MODIFIER_FLIP: &str = "flip";
 const MODIFIER_MIRRORED: &str = "mirrored";
 const MODIFIER_FLIPPED: &str = "flipped";
 const PROJECTION_CENTRE_SCANLINE: &str = "centre scanline";
-/// The consumer dropdown's default entry.
+/// The consumer's follow-the-declaration choice.
 const CONSUMER_FOLLOW: &str = "follow the source";
-/// The consumer dropdown's FIRST entry — the `strip_order_meaningful` bit
+/// The consumer's FIRST choice — the `strip_order_meaningful` bit
 /// absorbed into the one control (strip-order unification ruling: the
-/// checkbox GATED the dropdown, so it became a choice of it). Vision D3's
-/// scarf case, made pickable.
+/// checkbox GATED the projection, so it became a choice beside it).
+/// Vision D3's scarf case, made pickable.
 const CONSUMER_ALONG_WIRE: &str = "along the wire";
 /// The synthetic variant ident the derivation emits for it (not a model
 /// variant — the pick dispatches the bool `SetValue`, never an ensure).
@@ -97,7 +107,7 @@ const WIRE_REVERSED: &str = "reversed";
 const HINT_WIRE_FORWARD: &str = "wire order, as wired";
 const HINT_WIRE_REVERSED: &str = "wire order, read back to front";
 
-/// One line per choice in the picker's tiles.
+/// One line per choice tile.
 const HINT_FOLLOW: &str = "each source projects the way it declares";
 const HINT_ALONG_WIRE: &str = "run in wire order — the map doesn't apply";
 const HINT_EXTRUDE_X: &str = "the strip, stretched down";
