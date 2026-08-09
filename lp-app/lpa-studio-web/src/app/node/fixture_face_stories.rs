@@ -5,7 +5,6 @@
 //! advanced drawer open.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiSpaceCellRole;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
@@ -279,14 +278,14 @@ fn space_policy_forced() -> Element {
 }
 
 #[story(
-    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). Same tiles, glyphs, merged outline and select-and-close as the shader card; the leading tiles are `along the wire` (serpentine: wire order, the map doesn't apply) and `follow the source` (dashed: the answer lives on the source)."
+    description = "The choice tiles INLINE on the CONSUMER side — one component, both sides of the binding (D16), no popover anywhere in the section (the inline-tiles ruling). Six always-visible tiles: `along the wire` (serpentine: wire order, the map doesn't apply), `follow the source` (dashed: the answer lives on the source), and the four projections. Selected = accent border + wash + check badge."
 )]
-fn space_projection_picker_open() -> Element {
+fn space_choices_inline() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
                 face: fixture_face_override("Auto"),
-                space_picker_open_cell: UiSpaceCellRole::Primary,
+                space_initially_open: true,
                 on_action: move |_| {},
             }
         }

@@ -696,8 +696,14 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
                 .as_deref()
                 .unwrap_or("Extrude")
             {
-                "Radial" => CellProjection::Radial,
-                "Angular" => CellProjection::Angular,
+                "Radial" => CellProjection::Radial(try_read_def_radial_direction(
+                    ctx,
+                    "consume.Policy.from_1d.Radial.direction",
+                )),
+                "Angular" => CellProjection::Angular(try_read_def_angular_direction(
+                    ctx,
+                    "consume.Policy.from_1d.Angular.direction",
+                )),
                 "Mirror" => CellProjection::Mirror(try_read_def_mirror_direction(
                     ctx,
                     "consume.Policy.from_1d.Mirror.direction",
@@ -734,6 +740,32 @@ fn try_read_def_direction(
         Some("Down") => ProjectionDirection::Down,
         Some("Up") => ProjectionDirection::Up,
         _ => ProjectionDirection::Right,
+    }
+}
+
+/// The authored flip payload of a radial `from_1d` cell. Unresolvable
+/// reads as the default `Outward` (the additive contract).
+fn try_read_def_radial_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::RadialDirection {
+    use crate::products::visual::RadialDirection;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("Inward") => RadialDirection::Inward,
+        _ => RadialDirection::Outward,
+    }
+}
+
+/// The authored sweep payload of an angular `from_1d` cell. Unresolvable
+/// reads as the default `Clockwise` (the additive contract).
+fn try_read_def_angular_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::AngularDirection {
+    use crate::products::visual::AngularDirection;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("CounterClockwise") => AngularDirection::CounterClockwise,
+        _ => AngularDirection::Clockwise,
     }
 }
 
@@ -4311,8 +4343,8 @@ mod space_negotiation {
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
     use crate::products::visual::{
-        MirrorDirection, ProductSpaceInfo, ProjectionDirection, VisualSampleBufferRequest,
-        VisualSampleTarget,
+        AngularDirection, MirrorDirection, ProductSpaceInfo, ProjectionDirection, RadialDirection,
+        VisualSampleBufferRequest, VisualSampleTarget,
     };
     use alloc::boxed::Box;
     use alloc::string::String;
@@ -4642,7 +4674,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
+                    direction: EnumSlot::default(),
+                }),
             },
             RAMP_1D,
         );
@@ -4739,7 +4773,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
+                    direction: EnumSlot::default(),
+                }),
             },
             RAMP_1D,
         );
@@ -4917,7 +4953,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             1,
             VisualSpace::OneD,
             ConsumerPolicy {
-                default_1d_to_2d: CellProjection::Radial,
+                default_1d_to_2d: CellProjection::Radial(RadialDirection::Outward),
                 force: true,
             },
             false,
@@ -4995,7 +5031,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn a_1d_source_fills_a_2d_texture_through_the_projection() {
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+                in_2d: EnumSlot::new(SpaceAnswer2::Radial {
+                    direction: EnumSlot::default(),
+                }),
             },
             RAMP_1D,
         );
@@ -5102,7 +5140,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn the_render_node_route_answers_the_same_space() {
         let producer = ShaderProducer::new(
             ShaderSpace::OneD {
-                in_2d: EnumSlot::new(SpaceAnswer2::Angular),
+                in_2d: EnumSlot::new(SpaceAnswer2::Angular {
+                    direction: EnumSlot::default(),
+                }),
             },
             RAMP_1D,
         );
@@ -5111,7 +5151,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             let node = ShaderNode::new(
                 NodeId::new(1),
                 shader_def(ShaderSpace::OneD {
-                    in_2d: EnumSlot::new(SpaceAnswer2::Angular),
+                    in_2d: EnumSlot::new(SpaceAnswer2::Angular {
+                        direction: EnumSlot::default(),
+                    }),
                 }),
                 asset(RAMP_1D),
             );
@@ -5125,7 +5167,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             .expect("space");
         assert_eq!(
             via_trait,
-            ProductSpaceInfo::one_d(Some(CellProjection::Angular))
+            ProductSpaceInfo::one_d(Some(CellProjection::Angular(AngularDirection::Clockwise)))
         );
         let _ = VisualConsumerSpace::default();
     }

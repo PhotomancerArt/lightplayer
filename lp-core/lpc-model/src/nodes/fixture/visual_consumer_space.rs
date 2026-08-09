@@ -1,4 +1,7 @@
-use crate::{EnumSlot, MirrorDirection, ProjectionDirection, Slotted, ValueSlot};
+use crate::{
+    AngularDirection, EnumSlot, MirrorDirection, ProjectionDirection, RadialDirection, Slotted,
+    ValueSlot,
+};
 
 /// A fixture's consumer-side space policy — the answer side of the
 /// two-sided space declaration (vision D14), mirroring the shader
@@ -42,8 +45,14 @@ pub enum ConsumerCell2 {
         /// Which way the strip runs across the surface.
         direction: EnumSlot<ProjectionDirection>,
     },
-    Radial,
-    Angular,
+    Radial {
+        /// Which way the strip runs the rings (centre→edge or back).
+        direction: EnumSlot<RadialDirection>,
+    },
+    Angular {
+        /// Which way the strip sweeps around the centre.
+        direction: EnumSlot<AngularDirection>,
+    },
     Mirror {
         /// Which way the fold runs — mirror's own vocabulary (fold sense
         /// × axis).
@@ -73,14 +82,37 @@ mod tests {
 
     #[test]
     fn policy_carries_default_cell_and_force_bit() {
+        let radial = ConsumerCell2::Radial {
+            direction: EnumSlot::default(),
+        };
         let policy = VisualConsumerSpace::Policy {
-            from_1d: EnumSlot::new(ConsumerCell2::Radial),
+            from_1d: EnumSlot::new(radial.clone()),
             force: ValueSlot::new(true),
         };
         let VisualConsumerSpace::Policy { from_1d, force } = &policy else {
             panic!("expected Policy");
         };
-        assert_eq!(*from_1d.value(), ConsumerCell2::Radial);
+        assert_eq!(*from_1d.value(), radial);
         assert!(*force.value());
+    }
+
+    /// The additive-compat contract for the flip ruling: selecting the
+    /// bare variant name — exactly what parsing a pre-flip persisted
+    /// `"Radial"`/`"Angular"` does — lands on the behavior-preserving
+    /// defaults (`Outward` / `Clockwise`).
+    #[test]
+    fn bare_radial_and_angular_default_to_todays_behavior() {
+        use crate::{AngularDirection, RadialDirection, SlottedEnumMut};
+        let mut cell = ConsumerCell2::default();
+        cell.set_variant_default("Radial").expect("variant");
+        let ConsumerCell2::Radial { direction } = &cell else {
+            panic!("expected Radial");
+        };
+        assert_eq!(*direction.value(), RadialDirection::Outward);
+        cell.set_variant_default("Angular").expect("variant");
+        let ConsumerCell2::Angular { direction } = &cell else {
+            panic!("expected Angular");
+        };
+        assert_eq!(*direction.value(), AngularDirection::Clockwise);
     }
 }

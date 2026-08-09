@@ -12,17 +12,17 @@ use lpc_wire::{
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingGraph, WireCellProjection, WireChannelSampleFormat,
-    WireConsumerPolicy, WireMirrorDirection, WireProjectionDirection, WireProjectionOrigin,
-    WireTextureFormat, WireVisualSpace,
+    TimebaseProbeResult, WireAngularDirection, WireBindingGraph, WireCellProjection,
+    WireChannelSampleFormat, WireConsumerPolicy, WireMirrorDirection, WireProjectionDirection,
+    WireProjectionOrigin, WireRadialDirection, WireTextureFormat, WireVisualSpace,
 };
 
 use crate::{
-    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
-    UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
-    UiMirrorDirection, UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductSpaceView, UiProjectionDirection, UiProjectionOrigin, UiVisualProductSpace,
-    UiVisualSpace,
+    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiAngularDirection,
+    UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError,
+    UiIssue, UiMirrorDirection, UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame,
+    UiProductRef, UiProductSpaceView, UiProjectionDirection, UiProjectionOrigin, UiRadialDirection,
+    UiVisualProductSpace, UiVisualSpace,
 };
 
 pub struct ProjectSync {
@@ -1156,8 +1156,12 @@ fn wire_cell_projection(cell: UiCellProjection) -> WireCellProjection {
         UiCellProjection::Extrude(direction) => {
             WireCellProjection::Extrude(wire_projection_direction(direction))
         }
-        UiCellProjection::Radial => WireCellProjection::Radial,
-        UiCellProjection::Angular => WireCellProjection::Angular,
+        UiCellProjection::Radial(direction) => {
+            WireCellProjection::Radial(wire_radial_direction(direction))
+        }
+        UiCellProjection::Angular(direction) => {
+            WireCellProjection::Angular(wire_angular_direction(direction))
+        }
         UiCellProjection::Mirror(direction) => {
             WireCellProjection::Mirror(wire_mirror_direction(direction))
         }
@@ -1185,8 +1189,12 @@ fn ui_cell_projection(cell: WireCellProjection) -> UiCellProjection {
         WireCellProjection::Extrude(direction) => {
             UiCellProjection::Extrude(ui_projection_direction(direction))
         }
-        WireCellProjection::Radial => UiCellProjection::Radial,
-        WireCellProjection::Angular => UiCellProjection::Angular,
+        WireCellProjection::Radial(direction) => {
+            UiCellProjection::Radial(ui_radial_direction(direction))
+        }
+        WireCellProjection::Angular(direction) => {
+            UiCellProjection::Angular(ui_angular_direction(direction))
+        }
         WireCellProjection::Mirror(direction) => {
             UiCellProjection::Mirror(ui_mirror_direction(direction))
         }
@@ -1199,6 +1207,34 @@ fn ui_projection_direction(direction: WireProjectionDirection) -> UiProjectionDi
         WireProjectionDirection::Left => UiProjectionDirection::Left,
         WireProjectionDirection::Down => UiProjectionDirection::Down,
         WireProjectionDirection::Up => UiProjectionDirection::Up,
+    }
+}
+
+fn wire_radial_direction(direction: UiRadialDirection) -> WireRadialDirection {
+    match direction {
+        UiRadialDirection::Outward => WireRadialDirection::Outward,
+        UiRadialDirection::Inward => WireRadialDirection::Inward,
+    }
+}
+
+fn ui_radial_direction(direction: WireRadialDirection) -> UiRadialDirection {
+    match direction {
+        WireRadialDirection::Outward => UiRadialDirection::Outward,
+        WireRadialDirection::Inward => UiRadialDirection::Inward,
+    }
+}
+
+fn wire_angular_direction(direction: UiAngularDirection) -> WireAngularDirection {
+    match direction {
+        UiAngularDirection::Clockwise => WireAngularDirection::Clockwise,
+        UiAngularDirection::CounterClockwise => WireAngularDirection::CounterClockwise,
+    }
+}
+
+fn ui_angular_direction(direction: WireAngularDirection) -> UiAngularDirection {
+    match direction {
+        WireAngularDirection::Clockwise => UiAngularDirection::Clockwise,
+        WireAngularDirection::CounterClockwise => UiAngularDirection::CounterClockwise,
     }
 }
 
@@ -1589,7 +1625,7 @@ mod tests {
                 texture(WireVisualSpace::OneD, None, vec![1, 1, 1, 2, 2, 2]),
                 texture(
                     WireVisualSpace::TwoD,
-                    Some(WireCellProjection::Radial),
+                    Some(WireCellProjection::Radial(WireRadialDirection::Outward)),
                     vec![3, 3, 3, 4, 4, 4],
                 ),
             ],
@@ -1616,7 +1652,7 @@ mod tests {
         );
         assert_eq!(
             views[1].meta.expect("2D metadata").projection,
-            Some(UiCellProjection::Radial),
+            Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
             "each space keeps its OWN caption metadata"
         );
         assert_eq!(views[0].meta.expect("1D metadata").projection, None);
@@ -1670,7 +1706,7 @@ mod tests {
             product,
             UiProductPreviewFrame::VISUAL_DEFAULT,
             UiVisualSpace::TwoD,
-            UiConsumerPolicy::forcing(UiCellProjection::Angular),
+            UiConsumerPolicy::forcing(UiCellProjection::Angular(UiAngularDirection::Clockwise)),
         );
 
         assert_eq!(
@@ -1682,7 +1718,7 @@ mod tests {
                 format: WireTextureFormat::Srgb8,
                 space: Some(WireVisualSpace::TwoD),
                 policy: Some(WireConsumerPolicy {
-                    default_1d_to_2d: WireCellProjection::Angular,
+                    default_1d_to_2d: WireCellProjection::Angular(WireAngularDirection::Clockwise),
                     force: true,
                 }),
             },
@@ -1784,7 +1820,7 @@ mod tests {
                     format: WireTextureFormat::Srgb8,
                     bytes: bytes.clone(),
                     space: WireVisualSpace::TwoD,
-                    projection: Some(WireCellProjection::Radial),
+                    projection: Some(WireCellProjection::Radial(WireRadialDirection::Outward)),
                     origin: Some(WireProjectionOrigin::Declared),
                     primary: WireVisualSpace::OneD,
                 },
@@ -1807,7 +1843,7 @@ mod tests {
             sync.product_space(&UiProductRef::from_visual_product(product)),
             Some(&UiVisualProductSpace {
                 space: UiVisualSpace::TwoD,
-                projection: Some(UiCellProjection::Radial),
+                projection: Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
                 origin: Some(UiProjectionOrigin::Declared),
                 primary: UiVisualSpace::OneD,
             })

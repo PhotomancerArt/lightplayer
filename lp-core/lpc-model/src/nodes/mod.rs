@@ -43,7 +43,9 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
-pub use projection_direction::{MirrorDirection, ProjectionDirection};
+pub use projection_direction::{
+    AngularDirection, MirrorDirection, ProjectionDirection, RadialDirection,
+};
 pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{

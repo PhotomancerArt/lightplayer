@@ -27,21 +27,17 @@
 //! component reads a cell's ROLE from the DTO and spells the label here,
 //! rather than printing the derivation's own `label` strings.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiMirrorDirection, UiNodeFace,
-    UiProjectionDirection, UiProjectionOrigin, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    LpValue, ProjectSlotAddress, UiAction, UiAngularDirection, UiCellProjection, UiMirrorDirection,
+    UiNodeFace, UiProjectionDirection, UiProjectionOrigin, UiRadialDirection, UiSpaceCell,
+    UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
+    UiVisualSpace,
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_value_action};
 use crate::app::node::slot_fields::{field_class, field_wiring};
-use crate::base::{
-    PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
-    detail_popover_card_class,
-};
+use crate::base::{StudioIcon, StudioIconName};
 
 // ---------------------------------------------------------------------------
 // Wording (G1 ruled 2026-08-08; G1b rules on this pass — keep every
@@ -105,6 +101,10 @@ fn direction_segment_face(variant: &str) -> (&'static str, &'static str) {
         "OutwardY" => ("↑↓", "from the centre toward top and bottom"),
         "Forward" => ("→", "wire order, as wired"),
         "Reversed" => ("←", "wire order, reversed"),
+        "Outward" => ("outward", "centre → edge"),
+        "Inward" => ("inward", "edge → centre"),
+        "Clockwise" => ("↻", "swept clockwise"),
+        "CounterClockwise" => ("↺", "swept counter-clockwise"),
         _ => ("·", "unknown direction"),
     }
 }
@@ -137,10 +137,6 @@ const MISMATCH_FIX: &str = "Change the declaration here, or rename the entry in 
 const ENTRY_ONE_D: &str = "render_1d";
 const ENTRY_TWO_D: &str = "render_2d";
 
-/// The picker.
-const PICKER_LABEL: &str = "Choose a projection";
-const PICKER_TITLE: &str = "How a 1D source fills 2D space";
-
 /// The card header's dimensionality badge (spike §4B).
 const BADGE_TITLE: &str = "The space this shader renders in";
 
@@ -164,20 +160,10 @@ const ORIGIN_FORCED: &str = "forced";
 // Component
 // ---------------------------------------------------------------------------
 
-/// Anchored-outline ids for the picker fields (one per mounted cell).
-static NEXT_PICKER_ID: AtomicUsize = AtomicUsize::new(1);
-
-/// How wide the tile picker gets regardless of the field it hangs from: two
-/// tile columns plus their labels need more room than a cell field has.
-const PICKER_MIN_WIDTH_PX: f64 = 268.0;
-
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SpaceSection(
     section: UiSpaceSection,
-    /// Open this cell's tile picker on first render (stories).
-    #[props(default = None)]
-    picker_open_cell: Option<UiSpaceCellRole>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let side = section.side;
@@ -188,7 +174,8 @@ pub fn SpaceSection(
             // Producer: the declaration leads as a tab-like segmented pair
             // (G1: "almost like tabs") — the section header carries the
             // word, so the control needs no row label of its own.
-            // Consumer (P4b): the primary IS the one projection dropdown.
+            // Consumer: the primary IS the one projection choice, its
+            // tiles inline (the inline-tiles ruling — no popover here).
             match side {
                 UiSpaceSide::Producer => rsx! {
                     SpaceSegments {
@@ -199,12 +186,7 @@ pub fn SpaceSection(
                     }
                 },
                 UiSpaceSide::Consumer => rsx! {
-                    SpaceCellRow {
-                        cell: section.primary.clone(),
-                        side,
-                        picker_initially_open: picker_open_cell == Some(UiSpaceCellRole::Primary),
-                        on_action,
-                    }
+                    SpaceCellRow { cell: section.primary.clone(), side, on_action }
                 },
             }
             p { class: HINT_CLASS, "{primary_hint(&section)}" }
@@ -213,7 +195,6 @@ pub fn SpaceSection(
                     key: "{cell.role:?}",
                     cell: cell.clone(),
                     side,
-                    picker_initially_open: picker_open_cell == Some(cell.role),
                     on_action,
                 }
             }
@@ -273,30 +254,51 @@ fn SpaceSegments(
     }
 }
 
-/// One answer cell: its label and the projection field (picker or
-/// statement). The consumer's old inline `force` bit is gone (P4b): an
-/// explicit pick IS the override, dispatched as part of the choice.
+/// One answer cell: its label and the projection choice — inline tiles
+/// when there is a real choice (the inline-tiles ruling: no popover, no
+/// dropdown; the choices are always visible like the 1D/2D tab pair), a
+/// read-only statement when there is not (`UiSpaceCell::is_choosable` —
+/// the 2D→1D answer has one declared variant today). The consumer's old
+/// inline `force` bit is gone (P4b): an explicit pick IS the override,
+/// dispatched as part of the choice.
 ///
 /// When the ACTIVE shape is directional the `direction` row renders
-/// beneath the field (G1b ruling 4's second section) — shape first,
-/// direction under it, never a flattened 8-tile grid.
+/// beneath the tiles (G1b ruling 4's second section) — shape first,
+/// direction under it, never a flattened everything-grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceCellRow(
     cell: UiSpaceCell,
     side: UiSpaceSide,
-    #[props(default = false)] picker_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let direction = cell.direction.clone();
+    let choosable = cell.is_choosable() && on_action.is_some();
     rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
+        div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
             span { class: ROW_LABEL_CLASS, "{cell_label(side, cell.role)}" }
-            ProjectionField {
-                cell: cell.clone(),
-                side,
-                initially_open: picker_initially_open,
-                on_action,
+            if choosable {
+                ChoiceTiles {
+                    choices: cell.choices.clone(),
+                    side,
+                    role: cell.role,
+                    address: cell.address.clone(),
+                    strip_order: cell.strip_order.as_ref().and_then(|strip| strip.address.clone()),
+                    on_action,
+                }
+            } else {
+                // The statement still carries its glyph (G1: the
+                // text-only 2D→1D cell "feels odd").
+                span { class: field_class(&cell.state),
+                    span {
+                        class: "tw:inline-flex tw:h-4 tw:w-6 tw:flex-none tw:items-center",
+                        aria_hidden: "true",
+                        ProjectionGlyph { kind: active_glyph(&cell) }
+                    }
+                    span { class: "tw:min-w-0 tw:truncate",
+                        "{active_variant_label(side, &cell)}{directional_suffix(&cell)}"
+                    }
+                }
             }
         }
         if let Some(direction) = direction {
@@ -439,111 +441,21 @@ fn choice_actions(
         .collect()
 }
 
-/// The cell's control: an anchored tile picker when there is a real choice,
-/// a read-only statement when there is not (`UiSpaceCell::is_choosable` —
-/// the 2D→1D answer has one declared variant today, and a dropdown over one
-/// option invites a gesture with nothing to change). The statement still
-/// carries its glyph (G1: the text-only 2D→1D cell "feels odd").
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectionField(
-    cell: UiSpaceCell,
-    side: UiSpaceSide,
-    #[props(default = false)] initially_open: bool,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    // The face wears the direction arrow beside the shape name (the
-    // direction row beneath spells it out; the closed field should not
-    // hide it).
-    let active_label = format!(
-        "{}{}",
-        active_variant_label(side, &cell),
-        directional_suffix(&cell)
-    );
-    let reachable = cell.is_choosable() && on_action.is_some();
-    if !reachable {
-        let kind = active_glyph(&cell);
-        return rsx! {
-            span { class: field_class(&cell.state),
-                span { class: "tw:inline-flex tw:h-4 tw:w-6 tw:flex-none tw:items-center", aria_hidden: "true",
-                    ProjectionGlyph { kind }
-                }
-                span { class: "tw:min-w-0 tw:truncate", "{active_label}" }
-            }
-        };
-    }
-
-    // Anchored mode: the FIELD is the trigger, so the merged outline grows
-    // out of the control the tiles are about (`palette_swatch_field`'s
-    // idiom — "the control IS the trigger").
-    let anchor_id = use_hook(|| {
-        let id = NEXT_PICKER_ID.fetch_add(1, Ordering::Relaxed);
-        format!("ux-projection-field-{id}")
-    });
-    let face = projection_field_face(&cell, &active_label);
-
-    rsx! {
-        span {
-            id: "{anchor_id}",
-            class: "tw:inline-grid tw:min-w-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page",
-            PopoverButton {
-                class: FIELD_TRIGGER_CLASS.to_string(),
-                open_class: FIELD_TRIGGER_CLASS.to_string(),
-                trigger: face.clone(),
-                label: PICKER_LABEL.to_string(),
-                title: PICKER_TITLE.to_string(),
-                popup_class: detail_popover_card_class().to_string(),
-                placement: PopoverPlacement::BottomStart,
-                initially_open,
-                match_anchor_width: true,
-                min_panel_width_px: Some(PICKER_MIN_WIDTH_PX),
-                anchor_id: Some(anchor_id.clone()),
-                anchor_visual: face,
-                ProjectionTileGrid {
-                    choices: cell.choices.clone(),
-                    side,
-                    role: cell.role,
-                    address: cell.address.clone(),
-                    strip_order: cell.strip_order.as_ref().and_then(|strip| strip.address.clone()),
-                    on_action,
-                }
-            }
-        }
-    }
-}
-
-/// The closed field's face: the active choice's own glyph, its name, and
-/// the caret that says a picker lives behind it. Rendered twice while the
-/// popover is open (in-flow placeholder + top-layer copy), so it stays a
-/// plain function of the cell.
-fn projection_field_face(cell: &UiSpaceCell, active_label: &str) -> Element {
-    let kind = active_glyph(cell);
-    rsx! {
-        span { class: "tw:inline-flex tw:h-4 tw:w-6 tw:flex-none tw:items-center", aria_hidden: "true",
-            ProjectionGlyph { kind }
-        }
-        span { class: "tw:min-w-0 tw:grow tw:truncate", "{active_label}" }
-        span { class: "tw:inline-flex tw:flex-none tw:text-subtle-foreground", aria_hidden: "true",
-            StudioIcon { name: StudioIconName::Expanded, size: 12 }
-        }
-    }
-}
-
 /// The glyph for a cell's active choice, oriented to its active
 /// direction.
 fn active_glyph(cell: &UiSpaceCell) -> SpaceGlyph {
     glyph_with_active_direction(cell)
 }
 
-/// The picker's content: one tile per declared variant, each drawing what
-/// that answer does to a strip. A pick dispatches and closes — a selection
-/// is a completed gesture (the palette chooser's rule).
-///
-/// Its own component so a story can capture the grid directly as well as
-/// through an open popover.
+/// The shared choice-tiles control (the inline-tiles ruling): one
+/// glyph+label tile per declared variant, rendered DIRECTLY in the
+/// section body on both cards — always visible, like the 1D/2D tab pair;
+/// no popover, no dropdown, no nested expansion. The selected tile is
+/// unmistakable: accent border, accent wash fill, and a check glyph
+/// (G1b follow-up: the old selected treatment was hard to read).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProjectionTileGrid(
+pub fn ChoiceTiles(
     choices: Vec<UiSpaceChoice>,
     side: UiSpaceSide,
     role: UiSpaceCellRole,
@@ -554,9 +466,8 @@ pub fn ProjectionTileGrid(
     strip_order: Option<ProjectSlotAddress>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let close = try_consume_context::<PopoverCloseHandle>();
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:grid-cols-2 tw:gap-1.5 tw:p-2",
+        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5",
             for choice in choices {
                 button {
                     key: "{choice.variant}",
@@ -583,13 +494,20 @@ pub fn ProjectionTileGrid(
                                     handler.call(action);
                                 }
                             }
-                            if let Some(mut close) = close {
-                                close.close();
-                            }
                         }
                     },
-                    span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
+                    span { class: "tw:relative tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
                         ProjectionGlyph { kind: glyph_for(role, &choice.variant) }
+                        // The unmistakable half of the selected state: a
+                        // check badge over the drawing's corner, paired
+                        // with the accent border+wash on the tile.
+                        if choice.selected {
+                            span {
+                                class: TILE_CHECK_CLASS,
+                                aria_hidden: "true",
+                                StudioIcon { name: StudioIconName::StepComplete, size: 10 }
+                            }
+                        }
                     }
                     span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold",
                         "{variant_label(side, role, &choice)}"
@@ -613,8 +531,8 @@ pub fn ProjectionTileGrid(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SpaceGlyph {
     Extrude(UiProjectionDirection),
-    Radial,
-    Angular,
+    Radial(UiRadialDirection),
+    Angular(UiAngularDirection),
     Mirror(UiMirrorDirection),
     /// The 2D→1D answer: the texture's centre row, read as a strip.
     CentreScanline,
@@ -635,8 +553,8 @@ pub(crate) enum SpaceGlyph {
 fn glyph_for(role: UiSpaceCellRole, variant: &str) -> SpaceGlyph {
     match variant {
         "Extrude" => SpaceGlyph::Extrude(UiProjectionDirection::Right),
-        "Radial" => SpaceGlyph::Radial,
-        "Angular" => SpaceGlyph::Angular,
+        "Radial" => SpaceGlyph::Radial(UiRadialDirection::Outward),
+        "Angular" => SpaceGlyph::Angular(UiAngularDirection::Clockwise),
         "Mirror" => SpaceGlyph::Mirror(UiMirrorDirection::OutwardX),
         "Auto" => SpaceGlyph::FollowSource,
         ALONG_WIRE_VARIANT => SpaceGlyph::AlongWire(false),
@@ -658,6 +576,8 @@ fn glyph_with_active_direction(cell: &UiSpaceCell) -> SpaceGlyph {
     let active_direction = cell.direction.as_ref().map(|row| row.active.as_str());
     match (cell.active.as_str(), active_direction) {
         ("Extrude", Some(ident)) => SpaceGlyph::Extrude(UiProjectionDirection::from_variant(ident)),
+        ("Radial", Some(ident)) => SpaceGlyph::Radial(UiRadialDirection::from_variant(ident)),
+        ("Angular", Some(ident)) => SpaceGlyph::Angular(UiAngularDirection::from_variant(ident)),
         ("Mirror", Some(ident)) => SpaceGlyph::Mirror(UiMirrorDirection::from_variant(ident)),
         (ALONG_WIRE_VARIANT, Some(ident)) => SpaceGlyph::AlongWire(ident == "Reversed"),
         _ => glyph_for(cell.role, &cell.active),
@@ -718,8 +638,11 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
                         }
                     }
                 },
-                SpaceGlyph::Radial => rsx! {
-                    for (index , (radius , opacity)) in RADIAL_RINGS.iter().copied().enumerate() {
+                SpaceGlyph::Radial(direction) => rsx! {
+                    for (index , (radius , opacity)) in radial_rings(direction)
+                        .into_iter()
+                        .enumerate()
+                    {
                         circle {
                             key: "{index}",
                             cx: "32",
@@ -733,8 +656,8 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
                 // The strip swept around the centre: adjacent pie sectors
                 // whose opacity ramps with angle — a conic sweep. (G1: the
                 // old ray spokes read as an asterisk.)
-                SpaceGlyph::Angular => rsx! {
-                    for (index , (path , opacity)) in angular_sectors().into_iter().enumerate() {
+                SpaceGlyph::Angular(direction) => rsx! {
+                    for (index , (path , opacity)) in angular_sectors(direction).into_iter().enumerate() {
                         path {
                             key: "{index}",
                             d: "{path}",
@@ -890,15 +813,34 @@ fn serpentine_segments(reversed: bool) -> Vec<(u32, u32, u32, u32, f32)> {
         .collect()
 }
 
-/// Concentric rings, outermost first so the inner ones paint over.
+/// Concentric rings, outermost first so the inner ones paint over — the
+/// ramp runs per the flip (outward = bright centre reaching dim edges is
+/// the DIM-outer drawing below; inward reverses the ring opacities).
 const RADIAL_RINGS: [(u32, f32); 4] = [(26, 0.18), (19, 0.38), (12, 0.62), (5, 0.95)];
+
+/// The rings with the ramp run per the radial flip: `Outward` is the
+/// ratified drawing (bright centre — strip start — fading outward),
+/// `Inward` reverses the opacities (bright edges, dim centre).
+fn radial_rings(direction: UiRadialDirection) -> Vec<(u32, f32)> {
+    match direction {
+        UiRadialDirection::Outward => RADIAL_RINGS.to_vec(),
+        UiRadialDirection::Inward => {
+            let mut rings = RADIAL_RINGS;
+            let opacities: Vec<f32> = rings.iter().rev().map(|(_, opacity)| *opacity).collect();
+            for (ring, opacity) in rings.iter_mut().zip(opacities) {
+                ring.1 = opacity;
+            }
+            rings.to_vec()
+        }
+    }
+}
 
 /// Twelve adjacent pie sectors around (32, 20), radius 30, opacity
 /// ramping with angle — the conic sweep the angular projection actually
 /// performs. Computed rather than tabulated: twelve hand-written arc
 /// paths would hide the one fact that matters (adjacent sectors, one
 /// ramp).
-fn angular_sectors() -> Vec<(String, f32)> {
+fn angular_sectors(direction: UiAngularDirection) -> Vec<(String, f32)> {
     const SECTORS: usize = 12;
     const CX: f32 = 32.0;
     const CY: f32 = 20.0;
@@ -910,7 +852,15 @@ fn angular_sectors() -> Vec<(String, f32)> {
             let (x0, y0) = (CX + R * start.cos(), CY + R * start.sin());
             let (x1, y1) = (CX + R * end.cos(), CY + R * end.sin());
             let path = format!("M {CX} {CY} L {x0:.1} {y0:.1} A {R} {R} 0 0 1 {x1:.1} {y1:.1} Z");
-            let opacity = 0.14 + 0.82 * (index as f32) / ((SECTORS - 1) as f32);
+            // The sweep's flip reverses which way the ramp climbs around
+            // the circle — the same sectors, the opposite direction of
+            // travel (SVG y points down like texture space, so the
+            // ascending-index sweep IS the engine's clockwise).
+            let step = match direction {
+                UiAngularDirection::Clockwise => index,
+                UiAngularDirection::CounterClockwise => SECTORS - 1 - index,
+            };
+            let opacity = 0.14 + 0.82 * (step as f32) / ((SECTORS - 1) as f32);
             (path, opacity)
         })
         .collect()
@@ -983,8 +933,20 @@ fn projection_label(projection: UiCellProjection) -> String {
                 format!("{PROJECTION_EXTRUDE} {}", direction.arrow())
             }
         }
-        UiCellProjection::Radial => PROJECTION_RADIAL.to_string(),
-        UiCellProjection::Angular => PROJECTION_ANGULAR.to_string(),
+        UiCellProjection::Radial(direction) => {
+            if direction == UiRadialDirection::Outward {
+                PROJECTION_RADIAL.to_string()
+            } else {
+                format!("{PROJECTION_RADIAL} · {}", direction.word())
+            }
+        }
+        UiCellProjection::Angular(direction) => {
+            if direction == UiAngularDirection::Clockwise {
+                PROJECTION_ANGULAR.to_string()
+            } else {
+                format!("{PROJECTION_ANGULAR} {}", direction.arrow())
+            }
+        }
         UiCellProjection::Mirror(direction) => {
             if direction == UiMirrorDirection::OutwardX {
                 PROJECTION_MIRROR.to_string()
@@ -1018,6 +980,22 @@ fn directional_suffix(cell: &UiSpaceCell) -> String {
                 String::new()
             } else {
                 format!(" {}", direction.arrows())
+            }
+        }
+        "Radial" => {
+            let direction = UiRadialDirection::from_variant(&row.active);
+            if direction == UiRadialDirection::Outward {
+                String::new()
+            } else {
+                format!(" · {}", direction.word())
+            }
+        }
+        "Angular" => {
+            let direction = UiAngularDirection::from_variant(&row.active);
+            if direction == UiAngularDirection::Clockwise {
+                String::new()
+            } else {
+                format!(" {}", direction.arrow())
             }
         }
         // The along-the-wire choice: a reversed wire wears the back
@@ -1125,6 +1103,14 @@ fn active_variant_label(side: UiSpaceSide, cell: &UiSpaceCell) -> String {
         .iter()
         .find(|choice| choice.selected)
         .map(|choice| variant_label(side, cell.role, choice))
+        .or_else(|| {
+            // No selected choice — the Default-tile drop leaves an
+            // unauthored cell with `Default` active but not offered. This
+            // file's vocabulary still spells it honestly
+            // (`extrude · default`); anything unknown falls through to the
+            // DTO's own label.
+            known_variant_label(side, cell.role, &cell.active).map(str::to_string)
+        })
         .unwrap_or_else(|| cell.active_label.clone())
 }
 
@@ -1243,10 +1229,6 @@ const HINT_CLASS: &str = "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-fore
 
 const LADDER_CLASS: &str = "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-subtle-foreground";
 
-/// The field's trigger: no chrome of its own — the frame around it is the
-/// visual, and the frame is the popover's outline anchor.
-const FIELD_TRIGGER_CLASS: &str = "tw:flex tw:min-h-7 tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:px-2 tw:py-1 tw:text-left tw:text-sm tw:font-medium tw:text-muted-foreground";
-
 /// The segmented group's frame — full-width since P4b (G1: "almost like
 /// tabs"; the declaration is the section's headline, not one row among
 /// many). Mismatched declarations wear the error border: the segment row
@@ -1280,20 +1262,25 @@ const DIRECTION_GROUP_CLASS: &str =
 /// its glyph).
 fn direction_segment_class(selected: bool) -> &'static str {
     if selected {
-        "tw:inline-flex tw:h-7 tw:w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-card-muted tw:text-xs tw:font-bold tw:text-strong-foreground"
+        "tw:inline-flex tw:h-7 tw:min-w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-card-muted tw:px-2 tw:text-xs tw:font-bold tw:text-strong-foreground"
     } else {
-        "tw:inline-flex tw:h-7 tw:w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-transparent tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
+        "tw:inline-flex tw:h-7 tw:min-w-9 tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:bg-transparent tw:px-2 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
     }
 }
 
-/// One tile of the picker grid.
+/// One tile of the inline choice grid. Selected = accent border + accent
+/// wash + the check badge ([`TILE_CHECK_CLASS`]) — three signals, because
+/// the old filled-grey treatment was ruled hard to read.
 fn tile_class(selected: bool) -> &'static str {
     if selected {
-        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:p-1.5 tw:text-left tw:text-strong-foreground"
+        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-accent tw:bg-accent-wash tw:p-1.5 tw:text-left tw:text-strong-foreground"
     } else {
         "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
     }
 }
+
+/// The selected tile's check badge, over the drawing's top-right corner.
+const TILE_CHECK_CLASS: &str = "tw:absolute tw:right-1 tw:top-1 tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:rounded-pill tw:bg-accent tw:text-accent-foreground";
 
 #[cfg(test)]
 mod tests {
@@ -1439,7 +1426,26 @@ mod tests {
             projection_label(UiCellProjection::Mirror(UiMirrorDirection::OutwardY)),
             "mirror ↑↓"
         );
-        assert_eq!(projection_label(UiCellProjection::Radial), "radial");
+        assert_eq!(
+            projection_label(UiCellProjection::Radial(UiRadialDirection::Outward)),
+            "radial"
+        );
+        // The radial/angular flips (post-G1b): the default stays bare,
+        // the flip wears its word / rotation arrow.
+        assert_eq!(
+            projection_label(UiCellProjection::Radial(UiRadialDirection::Inward)),
+            "radial · inward"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection::Angular(UiAngularDirection::Clockwise)),
+            "angular"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection::Angular(
+                UiAngularDirection::CounterClockwise
+            )),
+            "angular ↺"
+        );
     }
 
     /// The drawer summary and the active glyph follow the direction row —
@@ -1648,7 +1654,7 @@ mod tests {
 
         let declared = UiVisualProductSpace {
             space: UiVisualSpace::TwoD,
-            projection: Some(UiCellProjection::Radial),
+            projection: Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
             origin: Some(UiProjectionOrigin::Declared),
             primary: UiVisualSpace::OneD,
         };

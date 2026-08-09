@@ -1,4 +1,6 @@
-use crate::{EnumSlot, MirrorDirection, ProjectionDirection, Slotted};
+use crate::{
+    AngularDirection, EnumSlot, MirrorDirection, ProjectionDirection, RadialDirection, Slotted,
+};
 
 /// Space a shader (or any future visual source) declares it lives in, plus
 /// the per-target answer for the opposite dimension.
@@ -37,10 +39,11 @@ pub enum ShaderSpace {
 /// parameters (radial centre, etc.) arrive with the explicit projection
 /// node later (vision Q3 lean: declared defaults stay static).
 ///
-/// `Extrude`/`Mirror` carry a [`ProjectionDirection`] (G1b ruling 4) —
-/// additive: a bare persisted `"Extrude"` parses with the payload at its
-/// default (`Right`), which is exactly the pre-directional behavior, so
-/// no format bump. Radial/angular are direction-free by construction.
+/// Every shape carries its OWN direction vocabulary (G1b ruling 4, the
+/// mirror-direction ruling, and the radial/angular flip ruling) —
+/// additive: a bare persisted variant name parses with the payload at
+/// its default, which is exactly the pre-directional behavior, so no
+/// format bump.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum SpaceAnswer2 {
     /// Consumer decides (the extrude system default) — no opinion authored.
@@ -50,8 +53,14 @@ pub enum SpaceAnswer2 {
         /// Which way the strip runs across the surface.
         direction: EnumSlot<ProjectionDirection>,
     },
-    Radial,
-    Angular,
+    Radial {
+        /// Which way the strip runs the rings (centre→edge or back).
+        direction: EnumSlot<RadialDirection>,
+    },
+    Angular {
+        /// Which way the strip sweeps around the centre.
+        direction: EnumSlot<AngularDirection>,
+    },
     Mirror {
         /// Which way the fold runs — mirror's own vocabulary (fold sense
         /// × axis), since a fold is symmetric in run direction.
@@ -88,13 +97,16 @@ mod tests {
 
     #[test]
     fn one_d_variant_carries_a_two_d_answer_cell() {
+        let radial = SpaceAnswer2::Radial {
+            direction: EnumSlot::default(),
+        };
         let space = ShaderSpace::OneD {
-            in_2d: EnumSlot::new(SpaceAnswer2::Radial),
+            in_2d: EnumSlot::new(radial.clone()),
         };
         let ShaderSpace::OneD { in_2d } = &space else {
             panic!("expected OneD");
         };
-        assert_eq!(*in_2d.value(), SpaceAnswer2::Radial);
+        assert_eq!(*in_2d.value(), radial);
     }
 
     /// The additive-compat contract (G1b ruling 4 + the mirror-direction

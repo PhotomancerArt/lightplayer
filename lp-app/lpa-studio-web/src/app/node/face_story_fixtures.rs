@@ -682,9 +682,10 @@ pub(crate) fn fixture_space_section_wire_reversed() -> lpa_studio_core::UiSpaceS
 }
 
 /// Every projection a 1D producer can answer 2D consumers with — the
-/// choices the tile picker lays out.
+/// inline choice tiles. No `Default` entry (post-G1b Default-tile drop:
+/// it was behaviorally identical to authored extrude; an unauthored cell
+/// simply selects nothing).
 const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
-    ("Default", "default", None),
     (
         "Extrude",
         "extrude",
@@ -695,12 +696,16 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
     (
         "Radial",
         "radial",
-        Some(lpa_studio_core::UiCellProjection::Radial),
+        Some(lpa_studio_core::UiCellProjection::Radial(
+            lpa_studio_core::UiRadialDirection::Outward,
+        )),
     ),
     (
         "Angular",
         "angular",
-        Some(lpa_studio_core::UiCellProjection::Angular),
+        Some(lpa_studio_core::UiCellProjection::Angular(
+            lpa_studio_core::UiAngularDirection::Clockwise,
+        )),
     ),
     (
         "Mirror",
@@ -728,12 +733,16 @@ const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellPr
     (
         "Radial",
         "radial",
-        Some(lpa_studio_core::UiCellProjection::Radial),
+        Some(lpa_studio_core::UiCellProjection::Radial(
+            lpa_studio_core::UiRadialDirection::Outward,
+        )),
     ),
     (
         "Angular",
         "angular",
-        Some(lpa_studio_core::UiCellProjection::Angular),
+        Some(lpa_studio_core::UiCellProjection::Angular(
+            lpa_studio_core::UiAngularDirection::Clockwise,
+        )),
     ),
     (
         "Mirror",
@@ -783,6 +792,8 @@ pub(crate) fn shader_space_section_one_d_directed(
 ) -> lpa_studio_core::UiSpaceSection {
     let variants: &[&str] = match answer {
         "Mirror" => &["InwardX", "OutwardX", "InwardY", "OutwardY"],
+        "Radial" => &["Outward", "Inward"],
+        "Angular" => &["Clockwise", "CounterClockwise"],
         _ => &["Right", "Left", "Down", "Up"],
     };
     let mut section = shader_space_section_one_d(answer);

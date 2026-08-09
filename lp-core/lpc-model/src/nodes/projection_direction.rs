@@ -52,6 +52,37 @@ pub enum MirrorDirection {
     OutwardY,
 }
 
+/// Which way a RADIAL projection runs the strip — radial's own vocabulary
+/// (radial/angular flip ruling, post-G1b): the ring pattern has no
+/// left/right, only the analogue of mirror's fold sense.
+///
+/// `Outward` is the default and IS the pre-flip radial behavior (the
+/// strip coordinate is the distance from the centre), which keeps a bare
+/// persisted `"Radial"` meaning what it always meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Slotted)]
+pub enum RadialDirection {
+    /// The strip runs centre → edge (`u = r`, today's behavior).
+    #[default]
+    Outward,
+    /// The strip runs edge → centre (`u = 1 − r`).
+    Inward,
+}
+
+/// Which way an ANGULAR projection sweeps the strip around the centre —
+/// angular's own vocabulary (radial/angular flip ruling, post-G1b).
+///
+/// `Clockwise` is the default and IS the pre-flip angular sweep (the
+/// strip coordinate follows the existing angle math), which keeps a bare
+/// persisted `"Angular"` meaning what it always meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Slotted)]
+pub enum AngularDirection {
+    /// `↻` — the existing sweep (today's behavior).
+    #[default]
+    Clockwise,
+    /// `↺` — the sweep negated (`u = 1 − a`).
+    CounterClockwise,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +95,11 @@ mod tests {
     #[test]
     fn the_default_mirror_fold_is_outward_x() {
         assert_eq!(MirrorDirection::default(), MirrorDirection::OutwardX);
+    }
+
+    #[test]
+    fn the_default_flips_are_todays_behavior() {
+        assert_eq!(RadialDirection::default(), RadialDirection::Outward);
+        assert_eq!(AngularDirection::default(), AngularDirection::Clockwise);
     }
 }

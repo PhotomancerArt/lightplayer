@@ -12,11 +12,11 @@ use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
     OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
-    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
-    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
-    WireMirrorDirection, WirePhasorOrigin, WirePhasorRow, WireProjectionDirection,
-    WireProjectionOrigin, WireVisualSpace,
+    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireAngularDirection,
+    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
+    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
+    WireEffectiveBinding, WireMirrorDirection, WirePhasorOrigin, WirePhasorRow,
+    WireProjectionDirection, WireProjectionOrigin, WireRadialDirection, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -32,8 +32,9 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSamp
 
 use super::Engine;
 use crate::products::visual::{
-    CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo, ProjectionDirection,
-    ProjectionOrigin, VisualSpace, resolve_1d_to_2d_with_origin,
+    AngularDirection, CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo,
+    ProjectionDirection, ProjectionOrigin, RadialDirection, VisualSpace,
+    resolve_1d_to_2d_with_origin,
 };
 
 /// One output node found by the published-frame tree walk, snapshotted so the
@@ -619,8 +620,12 @@ fn wire_cell_projection(cell: CellProjection) -> WireCellProjection {
         CellProjection::Extrude(direction) => {
             WireCellProjection::Extrude(wire_projection_direction(direction))
         }
-        CellProjection::Radial => WireCellProjection::Radial,
-        CellProjection::Angular => WireCellProjection::Angular,
+        CellProjection::Radial(direction) => {
+            WireCellProjection::Radial(wire_radial_direction(direction))
+        }
+        CellProjection::Angular(direction) => {
+            WireCellProjection::Angular(wire_angular_direction(direction))
+        }
         CellProjection::Mirror(direction) => {
             WireCellProjection::Mirror(wire_mirror_direction(direction))
         }
@@ -632,8 +637,12 @@ fn engine_cell_projection(cell: WireCellProjection) -> CellProjection {
         WireCellProjection::Extrude(direction) => {
             CellProjection::Extrude(engine_projection_direction(direction))
         }
-        WireCellProjection::Radial => CellProjection::Radial,
-        WireCellProjection::Angular => CellProjection::Angular,
+        WireCellProjection::Radial(direction) => {
+            CellProjection::Radial(engine_radial_direction(direction))
+        }
+        WireCellProjection::Angular(direction) => {
+            CellProjection::Angular(engine_angular_direction(direction))
+        }
         WireCellProjection::Mirror(direction) => {
             CellProjection::Mirror(engine_mirror_direction(direction))
         }
@@ -655,6 +664,34 @@ fn engine_projection_direction(direction: WireProjectionDirection) -> Projection
         WireProjectionDirection::Left => ProjectionDirection::Left,
         WireProjectionDirection::Down => ProjectionDirection::Down,
         WireProjectionDirection::Up => ProjectionDirection::Up,
+    }
+}
+
+fn wire_radial_direction(direction: RadialDirection) -> WireRadialDirection {
+    match direction {
+        RadialDirection::Outward => WireRadialDirection::Outward,
+        RadialDirection::Inward => WireRadialDirection::Inward,
+    }
+}
+
+fn engine_radial_direction(direction: WireRadialDirection) -> RadialDirection {
+    match direction {
+        WireRadialDirection::Outward => RadialDirection::Outward,
+        WireRadialDirection::Inward => RadialDirection::Inward,
+    }
+}
+
+fn wire_angular_direction(direction: AngularDirection) -> WireAngularDirection {
+    match direction {
+        AngularDirection::Clockwise => WireAngularDirection::Clockwise,
+        AngularDirection::CounterClockwise => WireAngularDirection::CounterClockwise,
+    }
+}
+
+fn engine_angular_direction(direction: WireAngularDirection) -> AngularDirection {
+    match direction {
+        WireAngularDirection::Clockwise => AngularDirection::Clockwise,
+        WireAngularDirection::CounterClockwise => AngularDirection::CounterClockwise,
     }
 }
 

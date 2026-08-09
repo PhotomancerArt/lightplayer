@@ -801,7 +801,14 @@ mod tests {
         let ShaderSpace::OneD { in_2d } = shader.space.value() else {
             panic!("expected OneD");
         };
-        assert_eq!(*in_2d.value(), SpaceAnswer2::Radial);
+        // A bare "Radial" (pre-flip JSON) parses with the direction at
+        // its behavior-preserving default (additive — no format bump).
+        assert_eq!(
+            *in_2d.value(),
+            SpaceAnswer2::Radial {
+                direction: EnumSlot::default()
+            }
+        );
 
         let text = NodeDef::Shader(shader)
             .write_json(&registry)
@@ -813,7 +820,14 @@ mod tests {
         let ShaderSpace::OneD { in_2d } = read.space.value() else {
             panic!("expected OneD after round trip");
         };
-        assert_eq!(*in_2d.value(), SpaceAnswer2::Radial);
+        // A bare "Radial" (pre-flip JSON) parses with the direction at
+        // its behavior-preserving default (additive — no format bump).
+        assert_eq!(
+            *in_2d.value(),
+            SpaceAnswer2::Radial {
+                direction: EnumSlot::default()
+            }
+        );
     }
 
     #[test]
@@ -856,7 +870,12 @@ mod tests {
         let VisualConsumerSpace::Policy { from_1d, force } = fixture.consume.value() else {
             panic!("expected Policy");
         };
-        assert_eq!(*from_1d.value(), ConsumerCell2::Radial);
+        assert_eq!(
+            *from_1d.value(),
+            ConsumerCell2::Radial {
+                direction: EnumSlot::default()
+            }
+        );
         assert!(*force.value());
 
         let text = NodeDef::Fixture(fixture)
@@ -870,7 +889,12 @@ mod tests {
         let VisualConsumerSpace::Policy { from_1d, force } = read.consume.value() else {
             panic!("expected Policy after round trip");
         };
-        assert_eq!(*from_1d.value(), ConsumerCell2::Radial);
+        assert_eq!(
+            *from_1d.value(),
+            ConsumerCell2::Radial {
+                direction: EnumSlot::default()
+            }
+        );
         assert!(*force.value());
     }
 

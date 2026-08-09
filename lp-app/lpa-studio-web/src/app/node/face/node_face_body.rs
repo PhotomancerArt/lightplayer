@@ -43,10 +43,6 @@ pub fn NodeFaceBody(
     /// render (stories).
     #[props(default = None)]
     detail_open_control: Option<String>,
-    /// Open this space cell's tile picker on first render (stories —
-    /// shader faces only; forwarded into the dimensionality drawer).
-    #[props(default = None)]
-    space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
     /// Platform for code-editor shortcut hints; stories pin it.
     #[props(default = None)]
     platform: Option<Platform>,
@@ -89,7 +85,6 @@ pub fn NodeFaceBody(
                         sections,
                         code_open: card_ui.code_open,
                         space_open: card_ui.space_open,
-                        space_picker_open_cell,
                         advanced_open: card_ui.advanced_open,
                         debug_open: card_ui.debug_open,
                         platform,

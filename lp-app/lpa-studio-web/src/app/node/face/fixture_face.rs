@@ -81,9 +81,6 @@ pub fn FixtureFace(
     /// tap. Absent (stories) leaves the readout inert.
     #[props(default = None)]
     node: Option<String>,
-    /// Open this space cell's tile picker on first render (stories).
-    #[props(default = None)]
-    space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
     /// Open the dimensionality drawer on first render (stories — the
     /// drawer defaults collapsed, P4b).
     #[props(default = false)]
@@ -91,9 +88,8 @@ pub fn FixtureFace(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // The dimensionality drawer's open state (P4b: default collapsed,
-    // below settings; an open picker implies an open drawer).
-    let mut space_open =
-        use_signal(move || space_initially_open || space_picker_open_cell.is_some());
+    // below settings).
+    let mut space_open = use_signal(move || space_initially_open);
     let preview = face.preview.clone();
     // One view state for both faces of the section: the same toggle bar
     // (and its state) survives the view ⇄ edit flip, and the toggles drive
@@ -240,11 +236,7 @@ pub fn FixtureFace(
                     let open = space_open();
                     space_open.set(!open);
                 },
-                SpaceSection {
-                    section: space,
-                    picker_open_cell: space_picker_open_cell,
-                    on_action,
-                }
+                SpaceSection { section: space, on_action }
             }
         }
     }

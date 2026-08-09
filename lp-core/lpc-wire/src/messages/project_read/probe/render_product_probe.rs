@@ -42,16 +42,38 @@ pub enum WireMirrorDirection {
     OutwardY,
 }
 
+/// Wire mirror of `lpc_engine::products::visual::RadialDirection` — a
+/// radial projection's flip (radial/angular flip ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireRadialDirection {
+    /// Today's behavior (the runtime-side default).
+    Outward,
+    Inward,
+}
+
+/// Wire mirror of `lpc_engine::products::visual::AngularDirection` — an
+/// angular projection's sweep (radial/angular flip ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireAngularDirection {
+    /// Today's behavior (the runtime-side default).
+    Clockwise,
+    CounterClockwise,
+}
+
 /// Wire mirror of `lpc_engine::products::visual::CellProjection` — one cell
-/// of the 1D→2D projection matrix. Extrude carries its run direction,
-/// mirror its fold; radial/angular are direction-free by construction.
+/// of the 1D→2D projection matrix. Every shape carries its own direction
+/// vocabulary (G1b ruling 4 + the mirror and radial/angular flip rulings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireCellProjection {
     Extrude(WireProjectionDirection),
-    Radial,
-    Angular,
+    Radial(WireRadialDirection),
+    Angular(WireAngularDirection),
     Mirror(WireMirrorDirection),
 }
 
@@ -279,7 +301,7 @@ mod tests {
             format: WireTextureFormat::Rgba16,
             bytes: alloc::vec![1, 2, 3, 4, 5, 6],
             space: WireVisualSpace::TwoD,
-            projection: Some(WireCellProjection::Radial),
+            projection: Some(WireCellProjection::Radial(WireRadialDirection::Outward)),
             origin: Some(WireProjectionOrigin::Declared),
             primary: WireVisualSpace::OneD,
         };
