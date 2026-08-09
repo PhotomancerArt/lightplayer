@@ -218,7 +218,7 @@ fn space_auto() -> Element {
 }
 
 #[story(
-    description = "The drawer OPEN in its default state: one dropdown — `show 1D sources by: follow the source` — and nothing else. The strip-order bit was ruled OFF this surface (2026-08-09: the patching vision's declared fixture space will absorb it; until then the raw bool lives in the advanced drawer). No `force` checkbox anywhere either: with one control, following is the default entry and an explicit pick IS the override."
+    description = "The drawer OPEN in its default state: one dropdown — `show 1D sources by: follow the source` — plus the one authored bit a shape cannot answer for itself (D3, reworded at G1: `1D patterns follow the wire`). No `force` checkbox anywhere: with one control, following is the default entry and an explicit pick IS the override."
 )]
 fn space_policy() -> Element {
     rsx! {

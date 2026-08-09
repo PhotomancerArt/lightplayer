@@ -4,7 +4,7 @@
 //! **One shape, both sides.** A shader declares where it renders
 //! (`ShaderDef.space`: `TwoD { in_1d } | OneD { in_2d }`) and a fixture
 //! declares how it consumes (`FixtureDef.consume`: `Auto | Policy {
-//! from_1d, force }`). D13 says the two
+//! from_1d, force }`, plus `strip_order_meaningful`). D13 says the two
 //! sections are visual mirrors; making them ONE DTO makes that a
 //! data-level fact rather than a styling coincidence, so the web renders
 //! both through a single component and they cannot drift apart.
@@ -34,7 +34,8 @@ use crate::{ProjectSlotAddress, UiCellProjection, UiSlotFieldState, UiVisualSpac
 pub enum UiSpaceSide {
     /// A visual PRODUCER's declaration — the shader card's `space` slot.
     Producer,
-    /// A visual CONSUMER's policy — the fixture card's `consume` slot.
+    /// A visual CONSUMER's policy — the fixture card's `consume` slot
+    /// (plus `strip_order_meaningful`).
     Consumer,
 }
 
@@ -52,6 +53,13 @@ pub enum UiSpaceCellRole {
     /// A 2D producer's answer for 1D consumers (`space.TwoD.in_1d`) —
     /// centre scanline only today, so a single-choice read-only cell.
     ProducerIn1d,
+}
+
+/// A boolean row a space section owns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiSpaceFlagRole {
+    /// The fixture's "does strip order mean something?" bit (vision D3).
+    StripOrderMeaningful,
 }
 
 /// One selectable answer inside a [`UiSpaceCell`].
@@ -138,6 +146,22 @@ impl UiSpaceCell {
     }
 }
 
+/// One boolean row of a space section.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiSpaceFlag {
+    /// What this flag says.
+    pub role: UiSpaceFlagRole,
+    /// Row label, from the backing slot row.
+    pub label: String,
+    /// Current value.
+    pub value: bool,
+    /// The bool row's address: the checkbox dispatches `SetValue` here,
+    /// exactly as the generic value row does. `None` renders inert.
+    pub address: Option<ProjectSlotAddress>,
+    /// The backing row's interaction/validation state.
+    pub state: UiSlotFieldState,
+}
+
 /// The D1 failure made visible: the shader DECLARES one space and its GLSL
 /// defines the other space's entry.
 ///
@@ -177,6 +201,8 @@ pub struct UiSpaceSection {
     pub declared_space: Option<UiVisualSpace>,
     /// The answer cells under the primary, in render order.
     pub cells: Vec<UiSpaceCell>,
+    /// The boolean rows this section owns.
+    pub flags: Vec<UiSpaceFlag>,
     /// The declared-vs-entry mismatch, when the node is in it (D1).
     pub mismatch: Option<UiSpaceMismatch>,
 }
@@ -190,6 +216,11 @@ impl UiSpaceSection {
     /// The cell in this section filling `role`.
     pub fn cell(&self, role: UiSpaceCellRole) -> Option<&UiSpaceCell> {
         self.all_cells().find(|cell| cell.role == role)
+    }
+
+    /// The flag in this section filling `role`.
+    pub fn flag(&self, role: UiSpaceFlagRole) -> Option<&UiSpaceFlag> {
+        self.flags.iter().find(|flag| flag.role == role)
     }
 }
 
@@ -239,16 +270,28 @@ mod tests {
     }
 
     #[test]
-    fn cells_are_addressable_by_role() {
+    fn cells_and_flags_are_addressable_by_role() {
         let section = UiSpaceSection {
             side: UiSpaceSide::Producer,
             primary: cell(UiSpaceCellRole::Primary, 2),
             declared_space: Some(UiVisualSpace::TwoD),
             cells: vec![cell(UiSpaceCellRole::ProducerIn1d, 1)],
+            flags: vec![UiSpaceFlag {
+                role: UiSpaceFlagRole::StripOrderMeaningful,
+                label: "Strip order".to_string(),
+                value: true,
+                address: None,
+                state: UiSlotFieldState::editable(),
+            }],
             mismatch: None,
         };
         assert_eq!(section.all_cells().count(), 2);
         assert!(section.cell(UiSpaceCellRole::Primary).is_some());
         assert!(section.cell(UiSpaceCellRole::ProducerIn2d).is_none());
+        assert!(
+            section
+                .flag(UiSpaceFlagRole::StripOrderMeaningful)
+                .is_some()
+        );
     }
 }
