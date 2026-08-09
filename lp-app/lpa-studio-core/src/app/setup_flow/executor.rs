@@ -9,7 +9,7 @@
 //! The mapping is a pure function so it can be asserted in tests: the
 //! wiring that actually awaits these ops belongs to the controller (P06).
 
-use lpa_link::LinkProviderKind;
+use lpa_link::{LinkEndpointId, LinkProviderKind};
 
 use crate::app::device::{DeployOp, DeviceOp};
 use crate::app::library::CatalogOp;
@@ -109,9 +109,18 @@ pub enum SetupDispatch {
 /// Resolve one command. Pure: it builds op values, it does not run them.
 pub fn dispatch_for(command: &SetupCommand, context: &SetupExecutorContext) -> SetupDispatch {
     match command {
-        SetupCommand::RequestPort => SetupDispatch::Device(DeviceOp::OpenProvider {
+        // The strategy and board hint stay ON the command: the controller
+        // reads them from there when it walks the D7 grant ladder, and the
+        // op value keeps naming the machinery (the serial provider).
+        SetupCommand::RequestPort { .. } => SetupDispatch::Device(DeviceOp::OpenProvider {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
         }),
+        SetupCommand::ConnectGrantedPort { endpoint_id } => {
+            SetupDispatch::Device(DeviceOp::ConnectEndpoint {
+                provider_id: LinkProviderKind::BrowserSerialEsp32,
+                endpoint_id: LinkEndpointId::new(endpoint_id.clone()),
+            })
+        }
         SetupCommand::ProbeBoard => SetupDispatch::ReadProbe,
         SetupCommand::ReleasePort => SetupDispatch::Device(DeviceOp::DisconnectDevice {
             target: context.target(),
@@ -215,10 +224,34 @@ mod tests {
 
     #[test]
     fn request_port_opens_the_serial_provider() {
+        // Whatever the D7 strategy, the machinery is the serial provider;
+        // the controller reads strategy and hint off the command itself.
+        for strategy in [
+            crate::PortRequestStrategy::AutoAdopt,
+            crate::PortRequestStrategy::ListOnly,
+            crate::PortRequestStrategy::ChooserOnly,
+        ] {
+            assert_eq!(
+                device_op(&SetupCommand::RequestPort {
+                    strategy,
+                    board_hint: Some("quinled/dig2go".to_string()),
+                }),
+                DeviceOp::OpenProvider {
+                    provider_id: LinkProviderKind::BrowserSerialEsp32,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_chosen_grant_connects_its_endpoint_without_a_chooser() {
         assert_eq!(
-            device_op(&SetupCommand::RequestPort),
-            DeviceOp::OpenProvider {
+            device_op(&SetupCommand::ConnectGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+            }),
+            DeviceOp::ConnectEndpoint {
                 provider_id: LinkProviderKind::BrowserSerialEsp32,
+                endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
             }
         );
     }
