@@ -89,5 +89,12 @@ Ambiance fat-signature anti-pattern, and the UX spike
 - Palette-side space declaration (palettes are values, not nodes — open
   question Q5 in the planning directory).
 - 3D/voxel cells; authored 2D→1D scanline choice; 1D mappings.
-- Studio surface (space sections, projection picker, preview space
-  toggles) — Plan B of the planning directory.
+- ~~Studio surface (space sections, projection picker, preview space
+  toggles) — Plan B of the planning directory.~~ **Shipped
+  2026-08-09** as ADR `2026-08-09-dimensionality-authoring-surface.md`,
+  which amends decision 1 above: the per-pair answer is now a factored
+  `Project { shape × mirror × flip }` record with no deferring `Default`
+  variant (format v9), and the fixture's `strip_order_meaningful` bit is
+  presented as the first *choice* of the consumer's one control rather
+  than as a sibling checkbox. The 1D pattern template ships a true
+  `render_1d` body under a `OneD` declaration.

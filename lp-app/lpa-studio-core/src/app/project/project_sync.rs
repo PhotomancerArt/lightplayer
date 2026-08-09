@@ -12,12 +12,16 @@ use lpc_wire::{
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingGraph, WireChannelSampleFormat, WireTextureFormat,
+    TimebaseProbeResult, WireBindingGraph, WireCellProjection, WireChannelSampleFormat,
+    WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape, WireTextureFormat,
+    WireVisualSpace,
 };
 
 use crate::{
-    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiControlProductPreview,
-    UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
+    UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
+    UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductSpaceView,
+    UiProjectionOrigin, UiProjectionShape, UiVisualProductSpace, UiVisualSpace,
 };
 
 pub struct ProjectSync {
@@ -34,6 +38,24 @@ pub struct ProjectSync {
     /// asks for its listing exactly while it is subscribed for products, so
     /// the debug surface costs nothing on an unfocused clock.
     timebases: BTreeMap<UiProductRef, UiTimebaseRead>,
+    /// Latest space metadata a render-product probe answered, per
+    /// (visual product, space) (plan-B P2, re-keyed in P3 for the D15
+    /// checkboxes). Rides beside the previews rather than inside them, so
+    /// the metadata is available without widening the `VisualSrgb8` DTO
+    /// every hand-built preview fixture constructs.
+    product_spaces: BTreeMap<(UiProductRef, UiVisualSpace), UiVisualProductSpace>,
+    /// Per-space preview bytes for visual products (P3). A card previewing
+    /// one space has one entry here and it also mirrors into
+    /// `product_previews`; a card previewing BOTH has two, and only the
+    /// hero mirrors. Keeping `product_previews` as the hero's home is what
+    /// lets every space-unaware surface — module heroes, playlist thumbs,
+    /// the GPU gallery — stay exactly as it was.
+    product_space_previews: BTreeMap<(UiProductRef, UiVisualSpace), UiProductPreview>,
+    /// What each visual product's card asks its previews to be (D15's
+    /// checkbox state, resolved). Pushed down by the project controller
+    /// before each request build, exactly like `visual_preview_frame`;
+    /// products with no entry keep today's single 2D probe.
+    preview_spaces: BTreeMap<UiProductRef, UiProductSpaceRequest>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -62,6 +84,9 @@ impl ProjectSync {
             visual_preview_frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             product_previews: BTreeMap::new(),
             timebases: BTreeMap::new(),
+            product_spaces: BTreeMap::new(),
+            product_space_previews: BTreeMap::new(),
+            preview_spaces: BTreeMap::new(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -286,6 +311,84 @@ impl ProjectSync {
         self.timebases.get(product)
     }
 
+    /// Latest cached space metadata for a visual product's HERO probe —
+    /// the resolved space/projection/origin and the producer's own primary
+    /// space. `None` means no probe result with space metadata has landed
+    /// yet (e.g. still `Pending`, or the last result was
+    /// `Unsupported`/`Error`).
+    ///
+    /// The hero is the space the card leads with (its primary, until the
+    /// checkboxes say otherwise); ask [`Self::product_space_in`] for a
+    /// specific one.
+    pub fn product_space(&self, product: &UiProductRef) -> Option<&UiVisualProductSpace> {
+        self.product_space_in(product, self.hero_space(product))
+            .or_else(|| {
+                self.product_spaces
+                    .range((*product, UiVisualSpace::OneD)..=(*product, UiVisualSpace::TwoD))
+                    .next()
+                    .map(|(_, space)| space)
+            })
+    }
+
+    /// Latest cached space metadata for one specific probed space.
+    pub fn product_space_in(
+        &self,
+        product: &UiProductRef,
+        space: UiVisualSpace,
+    ) -> Option<&UiVisualProductSpace> {
+        self.product_spaces.get(&(*product, space))
+    }
+
+    /// Latest cached preview for one specific probed space. `None` when
+    /// that space has never been asked for.
+    pub fn product_preview_in(
+        &self,
+        product: &UiProductRef,
+        space: UiVisualSpace,
+    ) -> Option<&UiProductPreview> {
+        self.product_space_previews.get(&(*product, space))
+    }
+
+    /// The per-space preview views a card's face renders (D15's stacked
+    /// previews and their captions), in checked order with the hero
+    /// flagged.
+    ///
+    /// A product no card has registered yet — every product on the FIRST
+    /// read, since the card tree does not exist when that request is built
+    /// — reports the default single 2D view, which is exactly what was
+    /// probed for it. The next read resolves against the producer's real
+    /// primary.
+    pub fn product_space_views(&self, product: &UiProductRef) -> Vec<UiProductSpaceView> {
+        let request = self
+            .preview_spaces
+            .get(product)
+            .copied()
+            .unwrap_or_default();
+        request
+            .spaces
+            .checked()
+            .map(|space| UiProductSpaceView {
+                space,
+                preview: self
+                    .product_preview_in(product, space)
+                    .cloned()
+                    .unwrap_or(UiProductPreview::Pending),
+                frame: probe_frame(self.visual_preview_frame, space),
+                meta: self.product_space_in(product, space).copied(),
+                hero: space == request.hero,
+            })
+            .collect()
+    }
+
+    /// The space whose probe feeds this product's product-keyed (hero)
+    /// preview. `TwoD` for every product no card registered — today's
+    /// behavior, unchanged.
+    fn hero_space(&self, product: &UiProductRef) -> UiVisualSpace {
+        self.preview_spaces
+            .get(product)
+            .map_or(UiVisualSpace::TwoD, |request| request.hero)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.phase == ProjectSyncPhase::Ready
     }
@@ -373,6 +476,8 @@ impl ProjectSync {
         self.view = ProjectView::new();
         self.product_previews.clear();
         self.timebases.clear();
+        self.product_spaces.clear();
+        self.product_space_previews.clear();
         self.binding_graph = None;
     }
 
@@ -401,6 +506,35 @@ impl ProjectSync {
         self.visual_preview_frame = frame;
     }
 
+    /// Set which spaces each visual product's previews are probed in (D15
+    /// checkbox state, resolved per card). Pushed down by the project
+    /// controller before each request build, exactly like
+    /// [`Self::set_visual_preview_frame`] — the sync knows products, not
+    /// cards.
+    ///
+    /// Products dropped from the map lose their extra per-space previews
+    /// so a card that goes back to one space stops carrying the other's
+    /// stale bytes.
+    pub fn set_preview_spaces(&mut self, requests: BTreeMap<UiProductRef, UiProductSpaceRequest>) {
+        self.product_space_previews.retain(|(product, space), _| {
+            requests
+                .get(product)
+                .is_some_and(|request| request.spaces.is_checked(*space))
+        });
+        self.product_spaces.retain(|(product, space), _| {
+            requests
+                .get(product)
+                .is_some_and(|request| request.spaces.is_checked(*space))
+                // A product no card registered keeps its single 2D entry:
+                // that is the metadata every unregistered product has ever
+                // had, and dropping it would blind the very first
+                // resolution pass (which reads `primary` to decide what to
+                // ask for next).
+                || (!requests.contains_key(product) && *space == UiVisualSpace::TwoD)
+        });
+        self.preview_spaces = requests;
+    }
+
     /// Toggle the binding-graph probe on project reads. Unsubscribing drops
     /// the cached snapshot so stale topology never renders — and with it
     /// every module face, which cannot derive without a graph.
@@ -427,19 +561,33 @@ impl ProjectSync {
         let mut probes = Vec::new();
         for product in products {
             match product {
+                // ONE PROBE PER CHECKED SPACE (D15). A card previewing
+                // both spaces asks the engine twice for the same product —
+                // the two renders are genuinely different frames, and the
+                // resolved `space` on each result is what keys them apart
+                // on the way back. A product no card registered asks once,
+                // in 2D, exactly as before.
                 UiProductRef::Visual { .. } => {
                     self.product_previews
                         .entry(product)
                         .or_insert(UiProductPreview::Pending);
                     if let Some(visual) = product.visual_product() {
-                        probes.push(ProjectProbeRequest::RenderProduct(
-                            RenderProductProbeRequest {
-                                product: visual,
-                                width: self.visual_preview_frame.width,
-                                height: self.visual_preview_frame.height,
-                                format: WireTextureFormat::Srgb8,
-                            },
-                        ));
+                        let request = self
+                            .preview_spaces
+                            .get(&product)
+                            .copied()
+                            .unwrap_or_default();
+                        for space in request.spaces.checked() {
+                            self.product_space_previews
+                                .entry((product, space))
+                                .or_insert(UiProductPreview::Pending);
+                            probes.push(ProjectProbeRequest::RenderProduct(visual_probe_request(
+                                visual,
+                                self.visual_preview_frame,
+                                space,
+                                UiConsumerPolicy::AUTO,
+                            )));
+                        }
                     }
                 }
                 UiProductRef::Control { .. } => {
@@ -475,10 +623,35 @@ impl ProjectSync {
     fn apply_product_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
         for probe in probes {
             if let Some((product, preview)) = self.product_preview_from_probe(probe) {
-                self.product_previews.insert(product, preview);
+                match probe_result_space(probe) {
+                    // A space-tagged visual result files per (product,
+                    // space); it ALSO becomes the product-keyed preview
+                    // when it is the hero, which is what keeps every
+                    // space-unaware surface reading the right frame. Two
+                    // results for one product can no longer overwrite each
+                    // other.
+                    Some(space) => {
+                        if self.hero_space(&product) == space {
+                            self.product_previews.insert(product, preview.clone());
+                        }
+                        self.product_space_previews
+                            .insert((product, space), preview);
+                    }
+                    // Control/time results, and the visual refusals that
+                    // name no space (`Unsupported`/`Error`): product-keyed
+                    // as they have always been. A refusal leaves the
+                    // per-space entries holding their last good frame
+                    // rather than blanking a stack.
+                    None => {
+                        self.product_previews.insert(product, preview);
+                    }
+                }
             }
             if let Some((product, read)) = timebase_from_probe(probe) {
                 self.timebases.insert(product, read);
+            }
+            if let Some((product, space, meta)) = product_space_from_probe(probe) {
+                self.product_spaces.insert((product, space), meta);
             }
         }
     }
@@ -747,6 +920,7 @@ fn product_preview_from_probe(
             height,
             format: WireTextureFormat::Srgb8,
             bytes,
+            ..
         }) => Some((
             UiProductRef::from_visual_product(*product),
             UiProductPreview::VisualSrgb8 {
@@ -847,6 +1021,180 @@ fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTi
             UiTimebaseRead::Unknown,
         )),
         _ => None,
+    }
+}
+
+/// What a visual product's card asks its previews to be: which spaces to
+/// probe (D15's checkboxes) and which of them feeds the product-keyed hero
+/// preview.
+///
+/// The hero is normally the producer's own primary space — a 1D shader
+/// leads with its strip — so the space-unaware surfaces render the
+/// producer as it actually is. [`Default`] is today's answer for every
+/// product no card registered: 2D, alone.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiProductSpaceRequest {
+    /// The checked spaces (at least one, by [`UiPreviewSpaces`]'s own
+    /// invariant).
+    pub spaces: UiPreviewSpaces,
+    /// The space whose probe becomes the product-keyed preview.
+    pub hero: UiVisualSpace,
+}
+
+impl UiProductSpaceRequest {
+    /// A card previewing one space, leading with it.
+    pub fn only(space: UiVisualSpace) -> Self {
+        Self {
+            spaces: UiPreviewSpaces::only(space),
+            hero: space,
+        }
+    }
+}
+
+impl Default for UiProductSpaceRequest {
+    fn default() -> Self {
+        Self::only(UiVisualSpace::TwoD)
+    }
+}
+
+/// The probe frame a space asks for: a 1D render is one row of `width`
+/// samples, which is exactly what the shader compiler's 1D entry contract
+/// requires (`outputSize` reports `(N, 1)`).
+fn probe_frame(frame: UiProductPreviewFrame, space: UiVisualSpace) -> UiProductPreviewFrame {
+    match space {
+        UiVisualSpace::OneD => UiProductPreviewFrame::new(frame.width, 1),
+        UiVisualSpace::TwoD => frame,
+    }
+}
+
+/// Build one space-tagged render-product probe request.
+///
+/// The single place a visual preview request is composed — the per-card
+/// checkbox probes below and P4's forced-policy TILE probes (pass
+/// [`UiConsumerPolicy::forcing`]) go through here, so a tile and a preview
+/// can never disagree about frame geometry or format.
+pub fn visual_probe_request(
+    product: lpc_model::VisualProduct,
+    frame: UiProductPreviewFrame,
+    space: UiVisualSpace,
+    policy: UiConsumerPolicy,
+) -> RenderProductProbeRequest {
+    let frame = probe_frame(frame, space);
+    RenderProductProbeRequest {
+        product,
+        width: frame.width,
+        height: frame.height,
+        format: WireTextureFormat::Srgb8,
+        space: Some(wire_visual_space(space)),
+        policy: Some(WireConsumerPolicy {
+            default_1d_to_2d: wire_cell_projection(policy.default_1d_to_2d),
+            force: policy.force,
+        }),
+    }
+}
+
+/// The space a render-product result rendered in, when it names one.
+/// `None` for `Unsupported`/`Error` (and every non-render probe): those
+/// answer for the product as a whole, not for one space.
+fn probe_result_space(probe: &ProjectProbeResult) -> Option<UiVisualSpace> {
+    match probe {
+        ProjectProbeResult::RenderProduct(
+            RenderProductProbeResult::Texture { space, .. }
+            | RenderProductProbeResult::GpuResident { space, .. },
+        ) => Some(ui_visual_space(*space)),
+        _ => None,
+    }
+}
+
+/// Space metadata riding a render-product probe result (plan-B P2), keyed
+/// by the space it rendered in (P3). `None` for `Unsupported`/`Error`
+/// results — those carry no space to cache, and the previous cached answer
+/// (if any) is left as the last known one.
+fn product_space_from_probe(
+    probe: &ProjectProbeResult,
+) -> Option<(UiProductRef, UiVisualSpace, UiVisualProductSpace)> {
+    match probe {
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            product,
+            space,
+            projection,
+            origin,
+            primary,
+            ..
+        })
+        | ProjectProbeResult::RenderProduct(RenderProductProbeResult::GpuResident {
+            product,
+            space,
+            projection,
+            origin,
+            primary,
+            ..
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            ui_visual_space(*space),
+            UiVisualProductSpace {
+                space: ui_visual_space(*space),
+                projection: projection.map(ui_cell_projection),
+                origin: origin.map(ui_projection_origin),
+                primary: ui_visual_space(*primary),
+            },
+        )),
+        _ => None,
+    }
+}
+
+fn wire_visual_space(space: UiVisualSpace) -> WireVisualSpace {
+    match space {
+        UiVisualSpace::OneD => WireVisualSpace::OneD,
+        UiVisualSpace::TwoD => WireVisualSpace::TwoD,
+    }
+}
+
+fn wire_cell_projection(cell: UiCellProjection) -> WireCellProjection {
+    WireCellProjection {
+        shape: wire_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
+    }
+}
+
+fn wire_projection_shape(shape: UiProjectionShape) -> WireProjectionShape {
+    match shape {
+        UiProjectionShape::ExtrudeX => WireProjectionShape::ExtrudeX,
+        UiProjectionShape::ExtrudeY => WireProjectionShape::ExtrudeY,
+        UiProjectionShape::Radial => WireProjectionShape::Radial,
+        UiProjectionShape::Angular => WireProjectionShape::Angular,
+    }
+}
+
+fn ui_visual_space(space: WireVisualSpace) -> UiVisualSpace {
+    match space {
+        WireVisualSpace::OneD => UiVisualSpace::OneD,
+        WireVisualSpace::TwoD => UiVisualSpace::TwoD,
+    }
+}
+
+fn ui_cell_projection(cell: WireCellProjection) -> UiCellProjection {
+    UiCellProjection {
+        shape: ui_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
+    }
+}
+
+fn ui_projection_shape(shape: WireProjectionShape) -> UiProjectionShape {
+    match shape {
+        WireProjectionShape::ExtrudeX => UiProjectionShape::ExtrudeX,
+        WireProjectionShape::ExtrudeY => UiProjectionShape::ExtrudeY,
+        WireProjectionShape::Radial => UiProjectionShape::Radial,
+        WireProjectionShape::Angular => UiProjectionShape::Angular,
+    }
+}
+
+fn ui_projection_origin(origin: WireProjectionOrigin) -> UiProjectionOrigin {
+    match origin {
+        WireProjectionOrigin::Declared => UiProjectionOrigin::Declared,
+        WireProjectionOrigin::Forced => UiProjectionOrigin::Forced,
     }
 }
 
@@ -1112,6 +1460,8 @@ mod tests {
                 width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                 height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                 format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy::AUTO),
             })
         );
         assert_eq!(
@@ -1136,7 +1486,176 @@ mod tests {
                 width: UiProductPreviewFrame::VISUAL_DEVICE.width,
                 height: UiProductPreviewFrame::VISUAL_DEVICE.height,
                 format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy::AUTO),
             })
+        );
+    }
+
+    /// D15: a card with both checkboxes on asks the engine TWICE for one
+    /// product — a 1D render (one row of samples) and a 2D one — and the
+    /// two results file separately instead of overwriting each other.
+    #[test]
+    fn a_two_space_card_fans_out_one_probe_per_checked_space() {
+        let mut sync = ProjectSync::new();
+        let product = VisualProduct::new(NodeId::new(7), 2);
+        let key = UiProductRef::from_visual_product(product);
+        sync.set_preview_spaces(BTreeMap::from([(
+            key,
+            UiProductSpaceRequest {
+                spaces: UiPreviewSpaces {
+                    one_d: true,
+                    two_d: true,
+                },
+                hero: UiVisualSpace::OneD,
+            },
+        )]));
+
+        let request = sync.refresh_project_read_request(vec![key]);
+
+        assert_eq!(request.probes.len(), 2, "one probe per checked space");
+        assert_eq!(
+            request.probes[0],
+            ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                product,
+                width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                // A 1D render is one row: the compiler's 1D entry contract
+                // reports `outputSize` as `(N, 1)`.
+                height: 1,
+                format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::OneD),
+                policy: Some(WireConsumerPolicy::AUTO),
+            }),
+        );
+        assert_eq!(
+            request.probes[1],
+            ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                product,
+                width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
+                format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy::AUTO),
+            }),
+        );
+
+        let texture = |space, projection, bytes: Vec<u8>| {
+            ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+                product,
+                revision: Revision::new(8),
+                width: 2,
+                height: 1,
+                format: WireTextureFormat::Srgb8,
+                bytes,
+                space,
+                projection,
+                origin: projection.map(|_| WireProjectionOrigin::Declared),
+                primary: WireVisualSpace::OneD,
+            })
+        };
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![
+                texture(WireVisualSpace::OneD, None, vec![1, 1, 1, 2, 2, 2]),
+                texture(
+                    WireVisualSpace::TwoD,
+                    Some(WireCellProjection::plain(WireProjectionShape::Radial)),
+                    vec![3, 3, 3, 4, 4, 4],
+                ),
+            ],
+        ))
+        .unwrap();
+
+        let views = sync.product_space_views(&key);
+        assert_eq!(
+            views
+                .iter()
+                .map(|view| (view.space, view.hero))
+                .collect::<Vec<_>>(),
+            vec![(UiVisualSpace::OneD, true), (UiVisualSpace::TwoD, false)],
+        );
+        let bytes_of = |view: &UiProductSpaceView| match &view.preview {
+            UiProductPreview::VisualSrgb8 { bytes, .. } => bytes.to_vec(),
+            other => panic!("expected preview bytes, got {other:?}"),
+        };
+        assert_eq!(bytes_of(&views[0]), vec![1, 1, 1, 2, 2, 2]);
+        assert_eq!(
+            bytes_of(&views[1]),
+            vec![3, 3, 3, 4, 4, 4],
+            "the second render did not overwrite the first"
+        );
+        assert_eq!(
+            views[1].meta.expect("2D metadata").projection,
+            Some(UiCellProjection::plain(UiProjectionShape::Radial)),
+            "each space keeps its OWN caption metadata"
+        );
+        assert_eq!(views[0].meta.expect("1D metadata").projection, None);
+        // The product-keyed preview — what every space-unaware surface
+        // reads — is the HERO's frame, unambiguously.
+        assert_eq!(
+            match sync.product_preview(&key) {
+                Some(UiProductPreview::VisualSrgb8 { bytes, .. }) => bytes.to_vec(),
+                other => panic!("expected hero bytes, got {other:?}"),
+            },
+            vec![1, 1, 1, 2, 2, 2],
+        );
+    }
+
+    /// Dropping a space (unchecking a box) drops its cached frame, so a
+    /// card back on one space cannot render the other's stale bytes.
+    #[test]
+    fn unchecking_a_space_drops_its_cached_frame() {
+        let mut sync = ProjectSync::new();
+        let product = VisualProduct::new(NodeId::new(7), 2);
+        let key = UiProductRef::from_visual_product(product);
+        sync.set_preview_spaces(BTreeMap::from([(
+            key,
+            UiProductSpaceRequest {
+                spaces: UiPreviewSpaces {
+                    one_d: true,
+                    two_d: true,
+                },
+                hero: UiVisualSpace::TwoD,
+            },
+        )]));
+        let _ = sync.refresh_project_read_request(vec![key]);
+        assert!(sync.product_preview_in(&key, UiVisualSpace::OneD).is_some());
+
+        sync.set_preview_spaces(BTreeMap::from([(
+            key,
+            UiProductSpaceRequest::only(UiVisualSpace::TwoD),
+        )]));
+
+        assert_eq!(sync.product_preview_in(&key, UiVisualSpace::OneD), None);
+        assert!(sync.product_preview_in(&key, UiVisualSpace::TwoD).is_some());
+    }
+
+    /// The helper P4's forced-policy tile probes reuse: same frame rules,
+    /// same format, only the policy differs.
+    #[test]
+    fn a_tile_probe_forces_its_cell_through_the_shared_request_builder() {
+        let product = VisualProduct::new(NodeId::new(3), 0);
+
+        let request = visual_probe_request(
+            product,
+            UiProductPreviewFrame::VISUAL_DEFAULT,
+            UiVisualSpace::TwoD,
+            UiConsumerPolicy::forcing(UiCellProjection::plain(UiProjectionShape::Angular)),
+        );
+
+        assert_eq!(
+            request,
+            RenderProductProbeRequest {
+                product,
+                width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
+                format: WireTextureFormat::Srgb8,
+                space: Some(WireVisualSpace::TwoD),
+                policy: Some(WireConsumerPolicy {
+                    default_1d_to_2d: WireCellProjection::plain(WireProjectionShape::Angular),
+                    force: true,
+                }),
+            },
         );
     }
 
@@ -1234,6 +1753,10 @@ mod tests {
                     height: 2,
                     format: WireTextureFormat::Srgb8,
                     bytes: bytes.clone(),
+                    space: WireVisualSpace::TwoD,
+                    projection: Some(WireCellProjection::plain(WireProjectionShape::Radial)),
+                    origin: Some(WireProjectionOrigin::Declared),
+                    primary: WireVisualSpace::OneD,
                 },
             )],
         ))
@@ -1246,6 +1769,17 @@ mod tests {
                 height: 2,
                 revision: 8,
                 bytes: Rc::from(bytes.as_slice()),
+            })
+        );
+        // P2 carries the result's space metadata into its own cache
+        // (P3 wires it into the preview checkboxes' captions).
+        assert_eq!(
+            sync.product_space(&UiProductRef::from_visual_product(product)),
+            Some(&UiVisualProductSpace {
+                space: UiVisualSpace::TwoD,
+                projection: Some(UiCellProjection::plain(UiProjectionShape::Radial)),
+                origin: Some(UiProjectionOrigin::Declared),
+                primary: UiVisualSpace::OneD,
             })
         );
     }

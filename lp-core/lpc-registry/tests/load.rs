@@ -19,7 +19,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -102,7 +102,7 @@ fn load_root_reports_parse_error_for_inline_child_def() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -139,7 +139,7 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -172,7 +172,7 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -217,7 +217,7 @@ fn load_root_accepts_current_project_format() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -283,7 +283,7 @@ fn vendored_module_folder_loads_under_the_projects_gate() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 8\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
     write_file(
         &mut fs,
         "/module.json",

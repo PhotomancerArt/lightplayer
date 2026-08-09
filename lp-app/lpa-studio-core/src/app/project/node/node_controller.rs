@@ -321,7 +321,24 @@ impl NodeController {
         sections: &[UiNodeSection],
         children: &mut Vec<UiNodeChild>,
     ) -> Option<UiNodeFace> {
-        super::node_face_builder::kind_face(self.node_ty()?, self.address(), sections, children)
+        super::node_face_builder::kind_face(
+            self.node_ty()?,
+            self.address(),
+            sections,
+            children,
+            self.error_detail(),
+        )
+    }
+
+    /// This node's status text WHEN THE STATUS IS AN ERROR — the shader
+    /// face's space section reads the D1 declared-vs-entry mismatch out of
+    /// it (there is no structured error class; see
+    /// [`super::node_space_section`]). `None` for every healthy status, so
+    /// a warning's detail can never be mistaken for a compile refusal.
+    fn error_detail(&self) -> Option<&str> {
+        (self.status.tone == crate::ProjectNodeStatusTone::Error)
+            .then(|| self.status.detail.as_deref())
+            .flatten()
     }
 
     /// True when any of this node's slot roots carries a top-level field
@@ -833,12 +850,18 @@ fn face_claimed_debug_rows(face: &crate::UiNodeFace) -> &'static [&'static str] 
     }
 }
 
-/// Drop face-claimed rows from the `DebugSlots` section, and the section
-/// itself when nothing is left — the face IS those rows' surface now
-/// (tint + Clear included), and a striped drawer with zero rows would
-/// read as broken. Runs strictly after `kind_face` consumed the sections;
-/// core-side on purpose, so the DTO and the e2e assertions tell the same
-/// story the pixels do.
+/// Drop face-claimed rows from the `DebugSlots` and `ConfigSlots`
+/// sections, and either section itself when nothing is left — the face IS
+/// those rows' surface now (the clock's tape transport for the Debug
+/// three; the `space` section for the shader's `space` and the fixture's
+/// `consume` + `strip_order_meaningful`), and a striped drawer with zero
+/// rows would read as broken. Two controls writing one slot is the defect
+/// this prevents.
+///
+/// Runs strictly after `kind_face` consumed the sections — the faces LIFT
+/// their values out of these very rows, so filtering earlier would starve
+/// the derivation. Core-side on purpose, so the DTO and the e2e
+/// assertions tell the same story the pixels do.
 fn retire_face_claimed_debug_rows(
     sections: &mut Vec<crate::UiNodeSection>,
     face: Option<&crate::UiNodeFace>,
@@ -846,14 +869,20 @@ fn retire_face_claimed_debug_rows(
     let Some(face) = face else {
         return;
     };
-    let claimed = face_claimed_debug_rows(face);
-    if claimed.is_empty() {
+    let claimed_debug = face_claimed_debug_rows(face);
+    let claimed_config = super::node_space_section::claimed_config_rows(face);
+    if claimed_debug.is_empty() && claimed_config.is_empty() {
         return;
     }
     sections.retain_mut(|section| {
-        let crate::UiNodeSection::DebugSlots(rows) = section else {
-            return true;
+        let (rows, claimed) = match section {
+            crate::UiNodeSection::DebugSlots(rows) => (rows, claimed_debug),
+            crate::UiNodeSection::ConfigSlots(rows) => (rows, claimed_config),
+            _ => return true,
         };
+        if claimed.is_empty() {
+            return true;
+        }
         rows.retain(|row| !claimed.contains(&row.key.as_str()));
         !rows.is_empty()
     });

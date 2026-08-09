@@ -33,6 +33,12 @@
 //! edit-mode state are view-local for now, same as the drawer open-state (a
 //! CardUiState re-home is an existing follow-up).
 //!
+//! Between the output and the settings sits the `space` section — the
+//! CONSUMER half of the two-sided space model (D13): this fixture's
+//! `consume` policy and its "does strip order mean something?" bit,
+//! rendered by the same component the shader card renders its declaration
+//! with, so the two cannot drift apart.
+//!
 //! The `controls` section holds one dominant horizontal fader bound to
 //! `FixtureDef.brightness.some`.
 
@@ -43,13 +49,15 @@ use lpa_studio_core::{
     UiProductPreview,
 };
 
-use crate::app::node::face::node_ui_action;
+use crate::app::node::face::{FixtureShapeMoment, node_ui_action};
 use crate::app::node::lamp_view::control_live_lamp_colors;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
 use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
+
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -73,8 +81,19 @@ pub fn FixtureFace(
     /// tap. Absent (stories) leaves the readout inert.
     #[props(default = None)]
     node: Option<String>,
+    /// Open the dimensionality drawer on first render (stories — the
+    /// drawer defaults collapsed, P4b).
+    #[props(default = false)]
+    space_initially_open: bool,
+    /// Render the dimensionality drawer as the guided Shape moment
+    /// (`NodeCardUiState::shape_guided` — a freshly created fixture).
+    #[props(default = false)]
+    shape_guided: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The dimensionality drawer's open state (P4b: default collapsed,
+    // below settings).
+    let mut space_open = use_signal(move || space_initially_open);
     let preview = face.preview.clone();
     // One view state for both faces of the section: the same toggle bar
     // (and its state) survives the view ⇄ edit flip, and the toggles drive
@@ -204,8 +223,44 @@ pub fn FixtureFace(
                     on_action,
                 }
                 if let Some(power) = face.power {
-                    PowerReadout { power, node, on_action }
+                    PowerReadout { power, node: node.clone(), on_action }
                 }
+            }
+        }
+        // The consumer half of the mirror, in the same slot the shader
+        // card gives the producer half — below settings, as a
+        // default-collapsed drawer whose summary states the policy (G1
+        // rework, P4b). Same DTO, same component, opposite side. A
+        // guided card (P5's Shape moment) renders the preset tiles in
+        // its place, forced open: the moment IS this section in guided
+        // clothing, and a moment folded away is no moment.
+        if shape_guided && face.shape_presets.is_some() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                open: Some(true),
+                on_toggle: move |()| {},
+                FixtureShapeMoment {
+                    presets: face.shape_presets.clone().expect("checked above"),
+                    node: node.clone(),
+                    on_open_mapping: editable
+                        .then_some(
+                            EventHandler::new(move |()| {
+                                editing.set(true);
+                            }),
+                        ),
+                    on_action,
+                }
+            }
+        } else if let Some(space) = face.space.clone() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                summary: Some(space_section_summary(&space)),
+                open: Some(space_open()),
+                on_toggle: move |()| {
+                    let open = space_open();
+                    space_open.set(!open);
+                },
+                SpaceSection { section: space, on_action }
             }
         }
     }

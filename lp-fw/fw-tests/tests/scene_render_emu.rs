@@ -196,6 +196,8 @@ async fn read_large_render_probe_crossing_frame_boundary(
                         width: WIDTH,
                         height: HEIGHT,
                         format: WireTextureFormat::Rgba16,
+                        space: None,
+                        policy: None,
                     },
                 )],
             },

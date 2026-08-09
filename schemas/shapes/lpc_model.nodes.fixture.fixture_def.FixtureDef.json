@@ -258,6 +258,19 @@
         }
       },
       {
+        "name": "wire_reversed",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
         "name": "consume",
         "shape": {
           "enum": {
@@ -283,33 +296,105 @@
                             "meta": {},
                             "variants": [
                               {
-                                "name": "Extrude",
+                                "name": "Project",
                                 "shape": {
-                                  "unit": {
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Radial",
-                                "shape": {
-                                  "unit": {
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Angular",
-                                "shape": {
-                                  "unit": {
-                                    "meta": {}
-                                  }
-                                }
-                              },
-                              {
-                                "name": "Mirror",
-                                "shape": {
-                                  "unit": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "shape",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "ExtrudeX",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "ExtrudeY",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Radial",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Angular",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "name": "mirror",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Mirrored",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "name": "flip",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Flipped",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
                                     "meta": {}
                                   }
                                 }

@@ -522,6 +522,10 @@ mod tests {
             height: 4,
             format: lpc_wire::WireTextureFormat::Rgba16,
             bytes: vec![7u8; byte_len],
+            space: lpc_wire::WireVisualSpace::TwoD,
+            projection: None,
+            origin: None,
+            primary: lpc_wire::WireVisualSpace::TwoD,
         })
     }
 
@@ -838,7 +842,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         // Both halves: the container manifest gates the load (D-A refuses a
         // project without one), the root module carries the def.
-        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 8}"#)
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 9}"#)
             .expect("write container manifest");
         fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
             .expect("write root module");
@@ -1209,7 +1213,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 8\n}\n",
+            b"{\n  \"format\": 9\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(

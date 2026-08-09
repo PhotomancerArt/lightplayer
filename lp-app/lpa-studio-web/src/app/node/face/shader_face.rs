@@ -7,7 +7,12 @@
 //! agent chat is the `agent` section — labeled with the sparkles role icon
 //! and a plain-language subline so it reads as *an agent that edits this
 //! shader* (item 2). The code and advanced drawers render below via
-//! [`super::NodeCardDrawers`], never hiding the face.
+//! [`super::NodeCardDrawers`] — which since G1b ruling 1 also owns the
+//! producer-side `dimensionality` drawer (between `code` and `advanced`,
+//! core-owned open state): the declaration is authoring that belongs next
+//! to the code, so the face itself no longer renders the space section.
+//! The face still READS `face.space` for the header badge and the D15
+//! preview-space checkboxes.
 //!
 //! The hero carries a slim product header —
 //! [`ProductIdentity`](crate::app::node::ProductIdentity) plus the detail
@@ -30,14 +35,17 @@
 //! `NodeCardUiState` module doc).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{NodeUiOp, UiAction, UiAgentView, UiShaderFace as UiShaderFaceData};
+use lpa_studio_core::{
+    NodeUiOp, UiAction, UiAgentView, UiProductKind, UiShaderFace as UiShaderFaceData,
+};
 
 use crate::app::node::{
-    AgentChatPane, NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
+    AgentChatPane, NodeCardSection, PanelControl, ProductIdentity, SlotDetailButton,
 };
 use crate::base::StudioIconName;
 
 use super::node_ui_action;
+use super::preview_spaces::{PreviewSpaceToggles, SpacedProductPreview, preview_space_state};
 
 /// The agent section's plain-language role subline (item 2): active voice,
 /// no jargon.
@@ -69,6 +77,18 @@ pub fn ShaderFace(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
+    // D15's checkboxes: shown on a VISUAL hero only (they ask which
+    // coordinate space to render a picture in, which is not a question a
+    // control or time product has). The checked set is read back from the
+    // per-space views core fanned out, so the bar and the hero can never
+    // disagree — see `preview_space_state`.
+    let space_toggles = preview.kind == UiProductKind::Visual;
+    let preview_spaces = preview_space_state(
+        &preview,
+        face.space
+            .as_ref()
+            .and_then(|section| section.declared_space),
+    );
     // The OpenRouter connect wiring, #142 parity with `ShaderEditorTabs`:
     // App-provided context (absent under stories, which render the
     // needs-setup CTA inert) so the agent section's empty state leads with
@@ -102,6 +122,17 @@ pub fn ShaderFace(
             div { class: "ux-product-header",
                 ProductIdentity { product: preview.clone() }
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                    // The space checkboxes ride the hero's own chrome row,
+                    // beside the detail affordance: they are about THIS
+                    // preview, and a second bar over the same picture is
+                    // exactly the chrome two toggles have not earned.
+                    if space_toggles {
+                        PreviewSpaceToggles {
+                            node: Some(node.clone()),
+                            spaces: preview_spaces,
+                            on_action,
+                        }
+                    }
                     SlotDetailButton {
                         label: preview.name.clone(),
                         aspects: preview.visible_aspects(),
@@ -111,14 +142,7 @@ pub fn ShaderFace(
                     }
                 }
             }
-            ProductPreview {
-                kind: preview.kind,
-                preview: preview.preview.clone(),
-                tracking: preview.tracking,
-                frame: preview.frame,
-                focus_action: None,
-                on_action,
-            }
+            SpacedProductPreview { product: preview.clone(), on_action }
         }
         if !face.controls.is_empty() {
             NodeCardSection { label: "settings",
@@ -134,6 +158,11 @@ pub fn ShaderFace(
                 }
             }
         }
+        // The dimensionality drawer no longer renders here: G1b ruling 1
+        // moved it into the drawer stack between `code` and `advanced`
+        // ([`super::NodeCardDrawers`]'s `space` slot) — its rows are still
+        // claimed out of the advanced drawer in core, so that drawer is
+        // their only surface.
         if let Some(agent) = face.agent.clone() {
             NodeCardSection {
                 label: "agent",
