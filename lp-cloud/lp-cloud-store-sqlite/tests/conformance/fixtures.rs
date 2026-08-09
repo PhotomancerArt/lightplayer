@@ -10,7 +10,7 @@ use lp_cloud_domain::{
     CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore, ProjectRefs,
     SessionRecord,
 };
-use lpc_cloud_api::{SidecarMeta, Visibility};
+use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 
 /// A stable user uid: the same `n` is the same account in every check.
@@ -54,14 +54,15 @@ pub fn sample_user(uid: PrefixedUid, email: &str) -> CloudUser {
     }
 }
 
-/// A private project with a cosmetic slug.
+/// A project whose link opens nothing, with a cosmetic slug.
 pub fn sample_project(uid: PrefixedUid, owner: PrefixedUid) -> CloudProject {
     CloudProject {
         uid,
         owner,
-        visibility: Visibility::Private,
+        access: Access::None,
         slug: "sample".to_string(),
         created_at: 1.0,
+        archived_at: None,
     }
 }
 

@@ -388,6 +388,24 @@ impl<'r> SchemaCompiler<'r> {
                 "type": "array",
                 "items": self.lp_type_schema(item),
             }),
+            // Buffers are a bare base64 string of the packed little-endian
+            // words (`ValueReader::base64_bytes`): exactly
+            // `len × stride × 4` bytes, so the base64 text length is fixed
+            // and checkable.
+            LpType::Buffer { elem, len } => {
+                let byte_len = (*len as u64) * u64::from(elem.word_stride()) * 4;
+                let encoded_len = byte_len.div_ceil(3) * 4;
+                json!({
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "minLength": encoded_len,
+                    "maxLength": encoded_len,
+                    "description": format!(
+                        "base64 of {byte_len} little-endian bytes ({len} × {} packed words)",
+                        elem.word_stride()
+                    ),
+                })
+            }
             LpType::Struct { fields, .. } => self.lp_struct_schema(fields),
             LpType::Enum { variants, .. } => self.lp_enum_schema(variants),
             LpType::Resource => resource_ref_schema(),

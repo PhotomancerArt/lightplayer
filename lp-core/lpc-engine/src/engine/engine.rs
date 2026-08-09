@@ -1577,6 +1577,9 @@ impl EngineResolveHost<'_> {
             .shader_consumed_slot_def(node, slot)?
             .map(|slot| match slot.kind.value() {
                 lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
+                // A buffer is ONE value that rewrites wholesale every tick;
+                // by-key merging has nothing to key on.
+                lpc_model::ShaderSlotKind::Buffer => SlotMerge::Latest,
                 // A timebase or palette uniform's binding, when it has one,
                 // names a single config channel — never an aggregate.
                 lpc_model::ShaderSlotKind::Value
@@ -1636,6 +1639,23 @@ impl EngineResolveHost<'_> {
                     SlotData::Map(lpc_model::SlotMapDyn::with_revision(
                         self.frame_revision,
                         lp_collection::VecMap::new(),
+                    ))
+                }
+                // The zeroed buffer of the declared shape — the same value
+                // `materialize_shader_input` runs on for absent data, so an
+                // unbound buffer input never warns. A malformed def (no
+                // builtin element / no len) zeroes out honest-empty; the
+                // materializer is where that def error gets its diagnostic.
+                lpc_model::ShaderSlotKind::Buffer => {
+                    let elem = slot
+                        .value_lp_type()
+                        .as_ref()
+                        .and_then(lpc_model::BufferElem::from_lp_type)
+                        .unwrap_or(lpc_model::BufferElem::F32);
+                    let len = slot.buffer_len().unwrap_or(0);
+                    SlotData::Value(WithRevision::new(
+                        self.frame_revision,
+                        lpc_model::LpValue::Buffer(lpc_model::LpBuffer::zeroed(elem, len)),
                     ))
                 }
             }))

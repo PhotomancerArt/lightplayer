@@ -39,6 +39,9 @@ pub fn format_lp_value(value: &LpValue) -> String {
                 .join(", ");
             format!("[{values}]")
         }
+        // A summary, never a word dump — per-cell state can be thousands of
+        // elements. Mirrored by the server's `format_base_lp_value`.
+        LpValue::Buffer(buffer) => format!("{} × {}", buffer.elem.glsl_name(), buffer.len()),
         LpValue::Struct { name, fields } => {
             let fields = fields
                 .iter()

@@ -229,6 +229,10 @@ pub enum StaticLpType {
     Mat3x3,
     Mat4x4,
     Array(&'static StaticLpType, usize),
+    Buffer {
+        elem: crate::BufferElem,
+        len: u32,
+    },
     List(&'static StaticLpType),
     Struct {
         name: Option<&'static str>,
@@ -267,6 +271,7 @@ impl StaticLpType {
             Self::Mat3x3 => LpType::Mat3x3,
             Self::Mat4x4 => LpType::Mat4x4,
             Self::Array(item, len) => LpType::Array(Box::new(item.to_owned_type()), len),
+            Self::Buffer { elem, len } => LpType::Buffer { elem, len },
             Self::List(item) => LpType::List(Box::new(item.to_owned_type())),
             Self::Struct { name, fields } => LpType::Struct {
                 name: name.map(ToString::to_string),

@@ -162,6 +162,11 @@ fn format_base_lp_value(value: &LpValue) -> String {
                 .join(", ");
             format!("[{values}]")
         }
+        // A summary, never a word dump: a buffer is per-cell state and can
+        // be thousands of elements.
+        LpValue::Buffer(buffer) => {
+            format!("{} × {}", buffer.elem.glsl_name(), buffer.len())
+        }
         LpValue::Struct { name, fields } => {
             let fields = fields
                 .iter()

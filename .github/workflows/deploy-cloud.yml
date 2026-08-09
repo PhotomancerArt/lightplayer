@@ -10,8 +10,11 @@ name: Deploy Cloud Service
 # with the 2026-08-06 DNS cutover; the last-deployed Pages site remains as
 # the DNS-rollback target — see docs/runbooks/godaddy-dns-cutover.md §5).
 
-# Deploys ride CI, not raw pushes: "Main push" green on main is the
-# trigger, so a red main never ships. workflow_dispatch remains the manual
+# Deploys ride the "Main push" workflow (tag + release, ~90 s) — NOT the
+# full "CI" validation workflow, so a red CI run on main does not block a
+# deploy today. Retargeting workflow_run to "CI" would close that gap at
+# the cost of ~20 min extra merge→live latency; that trade is still open
+# (post-merge CI audit, 2026-08-08). workflow_dispatch remains the manual
 # override for re-deploys and incident response.
 on:
   workflow_run:
@@ -32,6 +35,15 @@ env:
   RUST_BACKTRACE: 1
   RISC_V_TARGET: riscv32imac-unknown-none-elf
   RUSTUP_PERMIT_COPY_RENAME: 1
+  # Same compile-reuse shape as pre-merge.yml: sccache (GHA backend) caches
+  # individual rustc invocations content-addressed, workspace members
+  # included. CARGO_INCREMENTAL=0 because sccache cannot cache incremental
+  # compiles. The wrapper also covers the Xtensa firmware cross-builds —
+  # sccache + Espressif toolchain + build-std is proven by pre-merge's
+  # firmware-size job.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 jobs:
   # A 20-minute wasm+firmware build that then discovers it has no deploy
@@ -124,34 +136,36 @@ jobs:
           default: false
           ldproxy: false
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      # target/ is deliberately NOT cached (cache-targets: false): the old
+      # multi-GB `cloud-cargo` actions/cache entry was LRU-evicted between
+      # deploys every single time (the repo's 10 GB Actions-cache budget
+      # lives in thousands of small sccache entries), so it never restored —
+      # it only burned 48 s of save time and cache budget per run. sccache
+      # re-materializes crate compiles content-addressed instead, same shape
+      # as pre-merge.yml. `shared-key` is shared with deploy-pages-channel.yml
+      # on purpose: the two build the same artifact from the same tree.
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ runner.arch }}-cloud-cargo-${{ hashFiles('**/Cargo.lock') }}
-          # Falls back to the Pages workflow's cache: the two build the same
-          # artifact from the same tree, so a warm pages cache is a warm
-          # cloud cache. Saved under our own key so the two never fight.
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cloud-cargo-
-            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
+          cache-targets: false
+          shared-key: deploy
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked --force
+      # Prebuilt binaries, not `cargo install`: these three compiled from
+      # source on EVERY deploy (dx alone ~8 min, ~11 min total — `--force`
+      # defeats even a warm ~/.cargo/bin). All three publish binaries for
+      # exactly these pins; binstall verifies the requested version and falls
+      # back to a `--locked` source build only if an asset ever disappears.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
 
-      - name: Install dioxus-cli
-        run: cargo install dioxus-cli --version 0.7.9 --locked --force
-
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked --force
+      - name: Install web build tools (prebuilt)
+        run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9 espflash@3.3.0
 
       # `production` + the domain are what put the canonical origin into the
       # artifact. The output path is contractual: infra/Dockerfile COPYs
@@ -161,6 +175,14 @@ jobs:
 
       - name: Smoke-check web artifact
         run: just studio-web-smoke target/pages/studio
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Install flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master

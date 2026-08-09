@@ -37,6 +37,10 @@ pub enum PackageProvenance {
         device_uid: String,
         device_name: String,
     },
+    /// A tracking copy of somebody else's cloud project, opened from its
+    /// share link (`open_shared`, P6). Uid preserved, history verbatim —
+    /// this sidecar is bookkeeping only; the event log is the origin truth.
+    OpenedFromLink,
 }
 
 /// The sidecar contents.

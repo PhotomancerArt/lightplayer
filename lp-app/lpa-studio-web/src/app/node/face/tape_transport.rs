@@ -339,12 +339,18 @@ pub fn TapeTransport(
     } else {
         "tw:overflow-hidden tw:rounded-md tw:border tw:border-border-muted tw:bg-terminal"
     };
+    // The BOX is inline (`TAPE_CANVAS_BOX_STYLE`) rather than tailwind
+    // classes, and `ux-box-sized-canvas` puts the canvas under the story
+    // capture's backing-store gate — the same pair of guards the trace
+    // canvases carry, for the same defect (see `phasor_trace`'s module docs
+    // and 2026-08-05-clock-face-baselines-oscillate): the stylesheet lands
+    // after boot, and a paint that beats it must not bake the unstyled box.
     let canvas_class = if scrub_wired.is_none() {
-        "tw:block tw:h-[62px] tw:w-full tw:text-strong-foreground"
+        "ux-box-sized-canvas tw:text-strong-foreground"
     } else if scrub_drag().is_some() {
-        "tw:block tw:h-[62px] tw:w-full tw:cursor-grabbing tw:touch-none tw:text-strong-foreground"
+        "ux-box-sized-canvas tw:cursor-grabbing tw:touch-none tw:text-strong-foreground"
     } else {
-        "tw:block tw:h-[62px] tw:w-full tw:cursor-grab tw:touch-none tw:text-strong-foreground"
+        "ux-box-sized-canvas tw:cursor-grab tw:touch-none tw:text-strong-foreground"
     };
     // The transport is Debug territory: a control with an ACTIVE session
     // override wears the debug family's orange tint (no hazard stripes —
@@ -410,6 +416,12 @@ pub fn TapeTransport(
                 // current zoom.
                 canvas {
                     id: "{driver.canvas_id()}",
+                    // Inline declarations apply on the FIRST layout, before
+                    // the wasm-injected stylesheet — and keep the box
+                    // independent of the `width`/`height` attributes the
+                    // driver writes (at dpr > 1 an unstyled canvas takes its
+                    // box from those attributes and a repaint feeds itself).
+                    style: "display:block;width:100%;height:62px",
                     class: canvas_class,
                     onmounted: move |_| mounted_driver.canvas_mounted(),
                     onpointerdown: move |event| {

@@ -19,6 +19,21 @@ pub fn generate_compute_shader_header(
     def: &ComputeShaderDef,
     registry: &SlotShapeRegistry,
 ) -> Result<String, ShaderHeaderGenError> {
+    // The budget valve sits here — the first place an authored `len` meets
+    // code — so `len: 1000000000` is a named authoring diagnostic, never a
+    // downstream allocation attempt. Fixed default for now
+    // (docs/debt/shader-budget-is-a-fixed-default.md).
+    crate::validate_shader_slot_budget(
+        def.consumed_slots
+            .entries
+            .iter()
+            .chain(def.produced_slots.entries.iter())
+            .map(|(name, slot)| (name.as_str(), slot)),
+        registry,
+        &crate::ShaderBudget::default(),
+    )
+    .map_err(ShaderHeaderGenError::BudgetExceeded)?;
+
     let mut out = String::new();
     let mut emitted_structs = Vec::new();
 
@@ -63,15 +78,28 @@ pub fn generate_compute_shader_header(
                 match mapping.kind.value() {
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
-                        writeln!(&mut out, "// consumed: {name}").expect("write string");
-                        writeln!(
-                            &mut out,
-                            "layout(binding = {binding}) uniform {ty} {name}[{}];",
-                            mapping.len.value()
-                        )
-                        .expect("write string");
                     }
                 }
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(
+                    &mut out,
+                    "layout(binding = {binding}) uniform {ty} {name}[{}];",
+                    mapping.len.value()
+                )
+                .expect("write string");
+            }
+            ShaderSlotKind::Buffer => {
+                let elem = validate_buffer_element(slot.value.value())?;
+                let len = slot
+                    .buffer_len()
+                    .ok_or(ShaderHeaderGenError::MissingBufferLen)?;
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(
+                    &mut out,
+                    "layout(binding = {binding}) uniform {} {name}[{len}];",
+                    elem.glsl_name()
+                )
+                .expect("write string");
             }
         }
     }
@@ -104,11 +132,18 @@ pub fn generate_compute_shader_header(
                 match mapping.kind.value() {
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
-                        writeln!(&mut out, "// produced: {name}").expect("write string");
-                        writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value())
-                            .expect("write string");
                     }
                 }
+                writeln!(&mut out, "// produced: {name}").expect("write string");
+                writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value()).expect("write string");
+            }
+            ShaderSlotKind::Buffer => {
+                let elem = validate_buffer_element(slot.value.value())?;
+                let len = slot
+                    .buffer_len()
+                    .ok_or(ShaderHeaderGenError::MissingBufferLen)?;
+                writeln!(&mut out, "// produced: {name}").expect("write string");
+                writeln!(&mut out, "{} {name}[{len}];", elem.glsl_name()).expect("write string");
             }
         }
     }
@@ -120,6 +155,8 @@ pub fn generate_compute_shader_header(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShaderHeaderGenError {
     MissingMapping,
+    MissingBufferLen,
+    BudgetExceeded(crate::ShaderBudgetError),
     UnknownNativeShape(String),
     Unsupported(&'static str),
     UnsupportedType(String),
@@ -130,6 +167,8 @@ impl core::fmt::Display for ShaderHeaderGenError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::MissingMapping => f.write_str("shader map slot is missing mapping"),
+            Self::MissingBufferLen => f.write_str("shader buffer slot is missing len"),
+            Self::BudgetExceeded(err) => write!(f, "{err}"),
             Self::UnknownNativeShape(name) => write!(f, "unknown native shader shape {name:?}"),
             Self::Unsupported(message) => f.write_str(message),
             Self::UnsupportedType(ty) => write!(f, "unsupported shader value type {ty}"),
@@ -172,6 +211,23 @@ fn emit_native_struct_if_needed(
 
     emitted.push(String::from(value_ref.as_str()));
     Ok(())
+}
+
+/// A buffer's element must be a builtin scalar/vector: per-cell state has
+/// no key field to carry, and a struct element would silently lose runtime
+/// indexability (struct arrays are constant-index-only on `Frontend::Lp`;
+/// scalar/vector arrays index dynamically — `lps-filetests
+/// filetests/uniform/array.glsl`, `filetests/global/type-array.glsl`).
+fn validate_buffer_element(
+    value_ref: &ShaderValueShapeRef,
+) -> Result<crate::BufferElem, ShaderHeaderGenError> {
+    value_ref
+        .as_lp_type()
+        .as_ref()
+        .and_then(crate::BufferElem::from_lp_type)
+        .ok_or(ShaderHeaderGenError::Unsupported(
+            "buffer slots require builtin scalar/vector values",
+        ))
 }
 
 fn validate_key_field(
@@ -276,6 +332,7 @@ mod tests {
                 max: crate::OptionSlot::none(),
                 step: crate::OptionSlot::none(),
                 mapping: crate::OptionSlot::none(),
+                len: crate::OptionSlot::none(),
                 label: crate::ValueSlot::default(),
                 description: crate::ValueSlot::default(),
                 unit: crate::OptionSlot::none(),
@@ -343,6 +400,101 @@ mod tests {
             "{header}"
         );
         assert!(!header.contains("PhasorConfig"), "{header}");
+    }
+
+    /// A buffer slot declares a plain builtin array on both sides — no
+    /// struct emission, no key field anywhere.
+    #[test]
+    fn buffer_slots_declare_builtin_arrays() {
+        let mut consumed = VecMap::new();
+        consumed.insert(
+            String::from("heat_in"),
+            ShaderSlotDef::buffer_builtin("f32", 8),
+        );
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef::buffer_builtin("f32", 8),
+        );
+        let def = ComputeShaderDef {
+            source: AssetSlot::path("heat.glsl"),
+            bindings: crate::BindingDefs::default(),
+            float_mode: crate::OptionSlot::none(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        let header =
+            generate_compute_shader_header(&def, &SlotShapeRegistry::default()).expect("header");
+
+        assert!(
+            header.contains("layout(binding = 0) uniform float heat_in[8];"),
+            "{header}"
+        );
+        assert!(header.contains("float heat[8];"), "{header}");
+        assert!(!header.contains("struct"), "{header}");
+    }
+
+    /// Per-cell state has no key field to carry, and struct arrays are
+    /// constant-index-only on `Frontend::Lp`, which would defeat the point
+    /// of a buffer slot.
+    #[test]
+    fn buffer_slots_reject_struct_values() {
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef {
+                kind: crate::ValueSlot::new(ShaderSlotKind::Buffer),
+                value: crate::ValueSlot::new(ShaderValueShapeRef::native("lp::fluid::Emitter")),
+                len: crate::OptionSlot::some(crate::ValueSlot::new(8)),
+                ..ShaderSlotDef::default()
+            },
+        );
+        let def = ComputeShaderDef {
+            source: AssetSlot::path("heat.glsl"),
+            bindings: crate::BindingDefs::default(),
+            float_mode: crate::OptionSlot::none(),
+            consumed_slots: MapSlot::default(),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        assert!(matches!(
+            generate_compute_shader_header(&def, &SlotShapeRegistry::default()),
+            Err(ShaderHeaderGenError::Unsupported(
+                "buffer slots require builtin scalar/vector values"
+            ))
+        ));
+    }
+
+    /// The regression test for the hole that existed before the budget: an
+    /// authored sentinel len of a billion reached the engine's Vec resize
+    /// and the VMContext sizing unchecked.
+    #[test]
+    fn absurd_lens_fail_at_header_generation() {
+        for slot in [
+            ShaderSlotDef::map_u32_native(
+                "lp::fluid::Emitter",
+                ShaderSlotMappingDef::sentinel(1_000_000_000, "id", 0),
+            ),
+            ShaderSlotDef::buffer_builtin("f32", 1_000_000_000),
+        ] {
+            let mut produced = VecMap::new();
+            produced.insert(String::from("state"), slot);
+            let def = ComputeShaderDef {
+                source: AssetSlot::path("state.glsl"),
+                bindings: crate::BindingDefs::default(),
+                float_mode: crate::OptionSlot::none(),
+                consumed_slots: MapSlot::default(),
+                produced_slots: MapSlot::new(produced),
+            };
+
+            let err = generate_compute_shader_header(&def, &SlotShapeRegistry::default())
+                .expect_err("over budget");
+            assert!(
+                matches!(err, ShaderHeaderGenError::BudgetExceeded(ref e) if e.slot == "state"),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]
