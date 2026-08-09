@@ -297,22 +297,34 @@ fn space_in_definition_variant() -> Element {
 }
 
 /// G1b ruling 4's two-section design, in the flesh: shape, then
-/// direction. (The old `space_projection_candidates` story — the Y-twin
-/// drawings with no model behind them — retired with the ruling: the
-/// directional vocabulary is real now.)
+/// direction — each shape with its OWN direction vocabulary
+/// (mirror-direction ruling). (The old `space_projection_candidates`
+/// story — the Y-twin drawings with no model behind them — retired with
+/// the ruling: the directional vocabulary is real now.)
 #[story(
-    description = "The direction row — RULING 4's two-section design (2026-08-09): the top section is the general SHAPE (the picker keeps its four tiles plus the default), and when the active shape is directional a `direction` row appears under the projection field — a 4-way segmented control (→ ← ↓ ↑) in the same squared-blocks discrete language as the 2D|1D tabs. Here: mirror ↓ — the strip folds along the rows; the field face, the glyph, and the collapsed summary all wear the arrow. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>`, the generic enum-row gesture at the flattened payload row's real address. Radial/angular show no row."
+    description = "The direction row — RULING 4's two-section design (2026-08-09): the top section is the general SHAPE (the picker keeps its four tiles plus the default), and when the active shape is directional a `direction` row appears under the projection field — a segmented control in the same squared-blocks discrete language as the 2D|1D tabs, whose vocabulary comes from the SHAPE (mirror-direction ruling): single run-direction arrows for extrude (→ ← ↓ ↑), paired FOLD arrows for mirror (→← ←→ ↓↑ ↑↓ — a fold is symmetric in run direction, so mirror gets sense × axis instead). Left card: extrude ↓. Right card: mirror ↓↑ (inward-y) — field face, glyph, and collapsed summary all wear the shape's glyph. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>`, the generic enum-row gesture at the flattened payload row's real address. Radial/angular show no row."
 )]
 fn space_direction_row() -> Element {
-    let mut face = shader_face_one_d("Mirror");
-    face.space = Some(
+    let mut extrude = shader_face_one_d("Extrude");
+    extrude.space = Some(
         crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
-            "Mirror", "Down",
+            "Extrude", "Down",
+        ),
+    );
+    let mut mirror = shader_face_one_d("Mirror");
+    mirror.space = Some(
+        crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
+            "Mirror", "InwardY",
         ),
     );
     rsx! {
-        ShaderCardCanvas {
-            ShaderBodyCard { face, space_open: true }
+        div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
+            div { class: "tw:w-full tw:max-w-md",
+                ShaderBodyCard { face: extrude, space_open: true }
+            }
+            div { class: "tw:w-full tw:max-w-md",
+                ShaderBodyCard { face: mirror, space_open: true }
+            }
         }
     }
 }

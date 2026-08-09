@@ -1148,7 +1148,7 @@ fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjectio
         lpc_model::SpaceAnswer2::Radial => Some(CellProjection::Radial),
         lpc_model::SpaceAnswer2::Angular => Some(CellProjection::Angular),
         lpc_model::SpaceAnswer2::Mirror { direction } => Some(CellProjection::Mirror(
-            runtime_projection_direction(*direction.value()),
+            runtime_mirror_direction(*direction.value()),
         )),
     }
 }
@@ -1163,6 +1163,19 @@ fn runtime_projection_direction(
         lpc_model::ProjectionDirection::Left => Runtime::Left,
         lpc_model::ProjectionDirection::Down => Runtime::Down,
         lpc_model::ProjectionDirection::Up => Runtime::Up,
+    }
+}
+
+/// The runtime twin of an authored [`lpc_model::MirrorDirection`].
+fn runtime_mirror_direction(
+    direction: lpc_model::MirrorDirection,
+) -> crate::products::visual::MirrorDirection {
+    use crate::products::visual::MirrorDirection as Runtime;
+    match direction {
+        lpc_model::MirrorDirection::InwardX => Runtime::InwardX,
+        lpc_model::MirrorDirection::OutwardX => Runtime::OutwardX,
+        lpc_model::MirrorDirection::InwardY => Runtime::InwardY,
+        lpc_model::MirrorDirection::OutwardY => Runtime::OutwardY,
     }
 }
 
@@ -1194,7 +1207,7 @@ fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<
         ))),
         "Radial" => Some(CellProjection::Radial),
         "Angular" => Some(CellProjection::Angular),
-        "Mirror" => Some(CellProjection::Mirror(try_read_authored_direction(
+        "Mirror" => Some(CellProjection::Mirror(try_read_authored_mirror_direction(
             ctx,
             "space.OneD.in_2d.Mirror.direction",
         ))),
@@ -1225,6 +1238,31 @@ fn try_read_authored_direction(
         "Down" => Runtime::Down,
         "Up" => Runtime::Up,
         _ => Runtime::Right,
+    }
+}
+
+/// The authored fold payload of a mirror answer cell. Unresolvable (or
+/// unknown) reads as the default `OutwardX` — the additive contract: a
+/// bare pre-directional `Mirror` means what it always meant.
+fn try_read_authored_mirror_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::MirrorDirection {
+    use crate::products::visual::MirrorDirection as Runtime;
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return Runtime::OutwardX;
+    };
+    let lpc_model::SlotData::Enum(direction) = production.data() else {
+        return Runtime::OutwardX;
+    };
+    match direction.variant.as_str() {
+        "InwardX" => Runtime::InwardX,
+        "InwardY" => Runtime::InwardY,
+        "OutwardY" => Runtime::OutwardY,
+        _ => Runtime::OutwardX,
     }
 }
 

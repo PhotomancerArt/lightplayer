@@ -776,7 +776,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Right"
+                                  "const": "InwardX"
                                 }
                               },
                               "required": [
@@ -788,7 +788,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Left"
+                                  "const": "OutwardX"
                                 }
                               },
                               "required": [
@@ -800,7 +800,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Down"
+                                  "const": "InwardY"
                                 }
                               },
                               "required": [
@@ -812,7 +812,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Up"
+                                  "const": "OutwardY"
                                 }
                               },
                               "required": [
@@ -1343,7 +1343,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Right"
+                                  "const": "InwardX"
                                 }
                               },
                               "required": [
@@ -1355,7 +1355,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Left"
+                                  "const": "OutwardX"
                                 }
                               },
                               "required": [
@@ -1367,7 +1367,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Down"
+                                  "const": "InwardY"
                                 }
                               },
                               "required": [
@@ -1379,7 +1379,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "kind": {
-                                  "const": "Up"
+                                  "const": "OutwardY"
                                 }
                               },
                               "required": [

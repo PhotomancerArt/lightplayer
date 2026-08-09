@@ -26,9 +26,9 @@
 //! there is no intermediate variant row to descend through.
 
 use crate::{
-    UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiProjectionDirection, UiSlotComposite,
-    UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceMismatch, UiSpaceSection,
-    UiSpaceSide, UiVisualSpace,
+    UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiMirrorDirection, UiProjectionDirection,
+    UiSlotComposite, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection,
+    UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
 };
 
 /// The shader def's producer-side declaration row.
@@ -178,6 +178,7 @@ fn direction_cell(row: &UiConfigSlot) -> Option<UiSpaceDirection> {
     };
     Some(UiSpaceDirection {
         active: composite.active.clone(),
+        variants: composite.variants.clone(),
         address: direction_row.address.clone(),
         state: direction_row.state.clone(),
     })
@@ -308,7 +309,7 @@ fn variant_projection(variant: &str) -> Option<UiCellProjection> {
         "Extrude" => Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
         "Radial" => Some(UiCellProjection::Radial),
         "Angular" => Some(UiCellProjection::Angular),
-        "Mirror" => Some(UiCellProjection::Mirror(UiProjectionDirection::Right)),
+        "Mirror" => Some(UiCellProjection::Mirror(UiMirrorDirection::OutwardX)),
         _ => None,
     }
 }
@@ -418,7 +419,7 @@ mod tests {
                 Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
                 Some(UiCellProjection::Radial),
                 Some(UiCellProjection::Angular),
-                Some(UiCellProjection::Mirror(UiProjectionDirection::Right)),
+                Some(UiCellProjection::Mirror(UiMirrorDirection::OutwardX)),
             ],
             "every projecting choice names the cell a live tile forces"
         );
@@ -542,8 +543,8 @@ mod tests {
                 &["Default", "Extrude", "Radial", "Angular", "Mirror"],
                 vec![enum_row(
                     "space.OneD.in_2d.Mirror.direction",
-                    "Down",
-                    &["Right", "Left", "Down", "Up"],
+                    "InwardY",
+                    &["InwardX", "OutwardX", "InwardY", "OutwardY"],
                     Vec::new(),
                 )],
             )],
@@ -553,7 +554,12 @@ mod tests {
             .cell(UiSpaceCellRole::ProducerIn2d)
             .expect("the 2D answer cell");
         let direction = answer.direction.as_ref().expect("the direction row");
-        assert_eq!(direction.active, "Down");
+        assert_eq!(direction.active, "InwardY");
+        assert_eq!(
+            direction.variants,
+            vec!["InwardX", "OutwardX", "InwardY", "OutwardY"],
+            "the row carries the SHAPE's own vocabulary, read from the tree"
+        );
         assert_eq!(
             direction
                 .address

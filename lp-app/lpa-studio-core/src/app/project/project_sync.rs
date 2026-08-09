@@ -13,15 +13,16 @@ use lpc_wire::{
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingGraph, WireCellProjection, WireChannelSampleFormat,
-    WireConsumerPolicy, WireProjectionDirection, WireProjectionOrigin, WireTextureFormat,
-    WireVisualSpace,
+    WireConsumerPolicy, WireMirrorDirection, WireProjectionDirection, WireProjectionOrigin,
+    WireTextureFormat, WireVisualSpace,
 };
 
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
     UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
-    UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductSpaceView,
-    UiProjectionDirection, UiProjectionOrigin, UiVisualProductSpace, UiVisualSpace,
+    UiMirrorDirection, UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductSpaceView, UiProjectionDirection, UiProjectionOrigin, UiVisualProductSpace,
+    UiVisualSpace,
 };
 
 pub struct ProjectSync {
@@ -1158,7 +1159,7 @@ fn wire_cell_projection(cell: UiCellProjection) -> WireCellProjection {
         UiCellProjection::Radial => WireCellProjection::Radial,
         UiCellProjection::Angular => WireCellProjection::Angular,
         UiCellProjection::Mirror(direction) => {
-            WireCellProjection::Mirror(wire_projection_direction(direction))
+            WireCellProjection::Mirror(wire_mirror_direction(direction))
         }
     }
 }
@@ -1187,7 +1188,7 @@ fn ui_cell_projection(cell: WireCellProjection) -> UiCellProjection {
         WireCellProjection::Radial => UiCellProjection::Radial,
         WireCellProjection::Angular => UiCellProjection::Angular,
         WireCellProjection::Mirror(direction) => {
-            UiCellProjection::Mirror(ui_projection_direction(direction))
+            UiCellProjection::Mirror(ui_mirror_direction(direction))
         }
     }
 }
@@ -1198,6 +1199,24 @@ fn ui_projection_direction(direction: WireProjectionDirection) -> UiProjectionDi
         WireProjectionDirection::Left => UiProjectionDirection::Left,
         WireProjectionDirection::Down => UiProjectionDirection::Down,
         WireProjectionDirection::Up => UiProjectionDirection::Up,
+    }
+}
+
+fn wire_mirror_direction(direction: UiMirrorDirection) -> WireMirrorDirection {
+    match direction {
+        UiMirrorDirection::InwardX => WireMirrorDirection::InwardX,
+        UiMirrorDirection::OutwardX => WireMirrorDirection::OutwardX,
+        UiMirrorDirection::InwardY => WireMirrorDirection::InwardY,
+        UiMirrorDirection::OutwardY => WireMirrorDirection::OutwardY,
+    }
+}
+
+fn ui_mirror_direction(direction: WireMirrorDirection) -> UiMirrorDirection {
+    match direction {
+        WireMirrorDirection::InwardX => UiMirrorDirection::InwardX,
+        WireMirrorDirection::OutwardX => UiMirrorDirection::OutwardX,
+        WireMirrorDirection::InwardY => UiMirrorDirection::InwardY,
+        WireMirrorDirection::OutwardY => UiMirrorDirection::OutwardY,
     }
 }
 

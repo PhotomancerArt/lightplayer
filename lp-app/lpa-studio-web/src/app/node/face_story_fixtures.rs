@@ -671,7 +671,7 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
         "Mirror",
         "mirror",
         Some(lpa_studio_core::UiCellProjection::Mirror(
-            lpa_studio_core::UiProjectionDirection::Right,
+            lpa_studio_core::UiMirrorDirection::OutwardX,
         )),
     ),
 ];
@@ -701,7 +701,7 @@ const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellPr
         "Mirror",
         "mirror",
         Some(lpa_studio_core::UiCellProjection::Mirror(
-            lpa_studio_core::UiProjectionDirection::Right,
+            lpa_studio_core::UiMirrorDirection::OutwardX,
         )),
     ),
 ];
@@ -732,19 +732,26 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
     }
 }
 
-/// A 1D producer with a DIRECTIONAL answer (G1b ruling 4): the same
-/// section as [`shader_space_section_one_d`], with the active shape's
-/// `direction` row attached — the flattened payload row a real tree would
-/// carry (`space.OneD.in_2d.<Shape>.direction`), addressed so the story's
-/// segmented control is live.
+/// A 1D producer with a DIRECTIONAL answer (G1b ruling 4 + the
+/// mirror-direction ruling): the same section as
+/// [`shader_space_section_one_d`], with the active shape's `direction`
+/// row attached — the flattened payload row a real tree would carry
+/// (`space.OneD.in_2d.<Shape>.direction`), addressed so the story's
+/// segmented control is live and carrying the SHAPE's own vocabulary
+/// (extrude's run directions, mirror's folds).
 pub(crate) fn shader_space_section_one_d_directed(
     answer: &str,
     direction: &str,
 ) -> lpa_studio_core::UiSpaceSection {
+    let variants: &[&str] = match answer {
+        "Mirror" => &["InwardX", "OutwardX", "InwardY", "OutwardY"],
+        _ => &["Right", "Left", "Down", "Up"],
+    };
     let mut section = shader_space_section_one_d(answer);
     if let Some(cell) = section.cells.first_mut() {
         cell.direction = Some(lpa_studio_core::UiSpaceDirection {
             active: direction.to_string(),
+            variants: variants.iter().map(|ident| ident.to_string()).collect(),
             address: Some(story_slot_address(&format!(
                 "space.OneD.in_2d.{answer}.direction"
             ))),
