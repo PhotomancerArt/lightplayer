@@ -92,7 +92,8 @@ pub fn FixtureFace(
 ) -> Element {
     // The dimensionality drawer's open state (P4b: default collapsed,
     // below settings; an open picker implies an open drawer).
-    let mut space_open = use_signal(move || space_initially_open || space_picker_open_cell.is_some());
+    let mut space_open =
+        use_signal(move || space_initially_open || space_picker_open_cell.is_some());
     let preview = face.preview.clone();
     // One view state for both faces of the section: the same toggle bar
     // (and its state) survives the view ⇄ edit flip, and the toggles drive

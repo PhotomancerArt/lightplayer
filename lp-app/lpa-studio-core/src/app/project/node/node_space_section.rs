@@ -541,7 +541,9 @@ mod tests {
         assert_eq!(section.primary.active_label, "mirror");
         assert!(section.primary.is_choosable());
         assert!(
-            section.flag(UiSpaceFlagRole::StripOrderMeaningful).is_some(),
+            section
+                .flag(UiSpaceFlagRole::StripOrderMeaningful)
+                .is_some(),
             "the strip-order flag survives"
         );
         assert_eq!(section.flags.len(), 1, "no force flag — the pick forces");
