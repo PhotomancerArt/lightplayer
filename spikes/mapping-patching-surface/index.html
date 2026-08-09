@@ -298,6 +298,36 @@
   </div>
 </div>
 
+<h2>3b · continuous vs discrete sources — the other axis (Q11, chipped)</h2>
+<p class="thesis">
+  Punted from this work by ruling, drawn here so the idea isn't lost: <b>what is one unit of shader
+  space?</b> A <b>continuous</b> source (<code>float</code>/<code>vec2</code>, 1 = the whole extent)
+  samples at screen resolution — capped to something reasonable for embedded. A <b>discrete</b> source
+  (<code>int</code>/<code>ivec2</code>, 1 = one cell) renders at its own resolution: <b>line
+  segments</b> in 1D, <b>blocks</b> in 2D — and lamps snap to cells. A per-shader choice, likely as
+  fundamental as dimension.
+</p>
+<div class="row">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">1D · continuous source</span></div>
+      <div class="pbody"><svg id="n3-c1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">1D · discrete source (12 cells)</span></div>
+      <div class="pbody"><svg id="n3-d1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+<div class="row" style="margin-top:14px">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">2D · continuous source</span></div>
+      <div class="pbody"><svg id="n3-c2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">2D · discrete source (6×4 cells)</span></div>
+      <div class="pbody"><svg id="n3-d2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+
 <!-- ================================================================ -->
 <h2>4 · the project canvas — three layers, visualized</h2>
 <p class="thesis">
@@ -633,6 +663,8 @@ function n3Lamps_matrix(){
     out.push([x0 + (j%2 ? cols-1-i : i)*cw, y0 + j*ch]);   /* serpentine = the wire */
   return out;
 }
+/* opts.src = discrete source resolution (1D: cells, 2D: [cx, cy]); absent = continuous.
+   Continuous 2D renders a fine grid ("screen res"); discrete renders its own cells. */
 function buildN3Panel(id, lamps, kind, opts){
   const svg = document.getElementById(id);
   svg.innerHTML = "";
@@ -641,25 +673,37 @@ function buildN3Panel(id, lamps, kind, opts){
   x0-=12; y0-=12; x1+=12; y1+=12;
   if (opts.art) refArt(198, 138, 66, svg);
   const vis = el("g", { class: "n3vis", opacity: showVis?1:0 }, svg);
+  const q1 = w => opts.src ? (Math.floor(Math.min(w,.999)*opts.src)+.5)/opts.src : w;
+  const q2 = (u,v) => opts.src
+    ? [(Math.floor(Math.min(u,.999)*opts.src[0])+.5)/opts.src[0],
+       (Math.floor(Math.min(v,.999)*opts.src[1])+.5)/opts.src[1]]
+    : [u,v];
   if (kind === "2D"){
-    const cols=14, rows=Math.max(4, Math.round(14*(y1-y0)/(x1-x0)));
+    const cols = opts.src ? opts.src[0] : 36;
+    const rows = opts.src ? opts.src[1] : Math.max(6, Math.round(36*(y1-y0)/(x1-x0)));
     const cw=(x1-x0)/cols, ch=(y1-y0)/rows;
     for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
-      el("rect", { x: x0+i*cw, y: y0+j*ch, width: cw+.5, height: ch+.5, class: "n3cell", opacity: .85,
+      el("rect", { x: x0+i*cw, y: y0+j*ch, width: cw+(opts.src?0:.6), height: ch+(opts.src?0:.6),
+                   class: "n3cell", opacity: .85,
+                   "shape-rendering": opts.src ? "crispEdges" : "auto",
+                   stroke: opts.src ? "var(--terminal)" : "none", "stroke-width": opts.src ? 1 : 0,
                    "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, vis);
     el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
                  stroke: "var(--border-strong)", "stroke-width": 1 }, vis);
   } else {
     for (let k=0;k<lamps.length-1;k++)
       el("line", { x1: lamps[k][0], y1: lamps[k][1], x2: lamps[k+1][0], y2: lamps[k+1][1],
-                   "stroke-width": 8.5, "stroke-linecap": "round", class: "n3rope",
-                   "data-w": (k+.5)/(lamps.length-1), opacity: .85 }, vis);
+                   "stroke-width": 8.5, "stroke-linecap": opts.src ? "butt" : "round", class: "n3rope",
+                   "data-w": q1((k+.5)/(lamps.length-1)), opacity: .85 }, vis);
   }
   const lampG = el("g", {}, svg);
-  lamps.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: kind==="2D"&&opts.grid ? 4.2 : 3.3,
-    class: "n3lamp", "data-panel": id,
-    "data-w": k/(lamps.length-1), "data-u": (p[0]-x0)/(x1-x0), "data-v": (p[1]-y0)/(y1-y0),
-    stroke: "rgba(0,0,0,.55)", "stroke-width": 1.4 }, lampG));
+  lamps.forEach((p,k)=>{
+    const [su, sv] = q2((p[0]-x0)/(x1-x0), (p[1]-y0)/(y1-y0));
+    el("circle", { cx: p[0], cy: p[1], r: kind==="2D"&&opts.grid ? 4.2 : 3.3,
+      class: "n3lamp", "data-panel": id,
+      "data-w": q1(k/(lamps.length-1)), "data-u": su, "data-v": sv,
+      stroke: "rgba(0,0,0,.55)", "stroke-width": 1.4 }, lampG);
+  });
   el("text", { x: 14, y: 250, fill: "var(--dim)", "font-size": 9.5 }, svg).textContent = opts.caption;
   N3[id] = { kind };
 }
@@ -671,7 +715,16 @@ function buildN3(){
   buildN3Panel("n3-m1", n3Lamps_matrix(), "1D", {
     caption: "declared 1D — the serpentine wire, visible: a snake" });
   buildN3Panel("n3-m2", n3Lamps_matrix(), "2D", { grid: true,
-    caption: "declared 2D — plane below the lamps" });
+    caption: "declared 2D — plane below the lamps (continuous source)" });
+  /* §3b — the parameterization axis (Q11) */
+  buildN3Panel("n3-c1", n3Lamps_peach(), "1D", { art: true,
+    caption: "continuous · float [0,1] — smooth along the wire" });
+  buildN3Panel("n3-d1", n3Lamps_peach(), "1D", { art: true, src: 12,
+    caption: "discrete · int [0,12) — line segments; lamps snap" });
+  buildN3Panel("n3-c2", n3Lamps_matrix(), "2D", {
+    caption: "continuous · vec2 — smooth plane at screen res" });
+  buildN3Panel("n3-d2", n3Lamps_matrix(), "2D", { src: [6,4],
+    caption: "discrete · ivec2 [0,6)×[0,4) — blocks; 4 lamps per cell" });
 }
 function toggleVis(){
   showVis = !showVis;
