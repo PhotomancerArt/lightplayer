@@ -164,6 +164,20 @@
 
   /* ---- section 5: dome ---- */
   .dome-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* ---- patch bay cells: (fixture span ↔ output span) tuples ---- */
+  .bayrow { position: relative; height: 33px; background: var(--track); border-radius: 3px; margin-top: 2px; }
+  .baycell { position: absolute; top: 2px; border: 1px solid var(--border-strong); border-radius: 3px;
+             overflow: hidden; background: var(--card-muted); cursor: default; }
+  .baycell canvas { display: block; width: 100%; height: 12px; image-rendering: pixelated; }
+  .baycell .clab { font: 8.5px var(--mono); color: var(--dim); padding: 0 3px; line-height: 14px;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .baycell.err { border-color: var(--err-border); }
+  .baycell.err .clab { color: var(--err-text); }
+  .baycell.hl { border-color: var(--sel-border); box-shadow: 0 0 0 1px var(--sel-border); z-index: 2; }
+  .baycell.hl .clab { color: var(--muted); }
+  .baygrp { font-size: 11px; color: var(--muted); font-weight: 700; }
+  .bayhead { font: 9.5px var(--mono); color: var(--subtle); margin-top: 7px; }
   polygon.panelp { cursor: pointer; stroke: var(--border-strong); stroke-width: 1; }
   polygon.panelp:hover { stroke: var(--sel-border); }
   polygon.panelp.selp { stroke: var(--sel-border); stroke-width: 2; }
@@ -249,10 +263,11 @@
     <div class="panel" style="margin-top:10px"><div class="phead"><b>patch bay</b><span class="kind">fixture-side · fixture → range · shader order</span></div>
       <div class="pbody" id="bayfix"></div>
       <div class="statusline" id="statusC" style="padding:0 12px 10px"></div></div>
-    <p class="why">Same lamps, two orderings, live pixels: <b>output-side</b> rows are ports in wire
-      order (gaps dark, contested red); <b>fixture-side</b> rows are fixtures in shader order — the
-      body reads as one unbroken gradient here even though it's split on the wire. That difference IS
-      the patch.</p>
+    <p class="why">Rows are made of <b>cells</b> — <code>(fixture span ↔ output span)</code> tuples,
+      and both views show <b>the same cells</b>: output-side lays them along the wire and labels them
+      with fixture info; fixture-side lays them along shader space and labels them with output info.
+      <b>Hover a cell</b> to light up its twin. Gaps dark, contested red, the split body reads
+      unbroken in shader order — that difference IS the patch.</p>
   </div>
 </div>
 <div class="leannote"><b>Converged:</b> A (shape surface) and the two-sided bay are an "and", not an or —
@@ -625,46 +640,71 @@ function flashCounterpart(k){
   const owners = wireInfo(patchState);
   if (owners[k].length > 1){ flashRanges = owners[k]; flashUntil = performance.now()+1600; }
 }
-/* the patch bay: live PIXEL rows. Output-side = wire order; fixture-side = shader order. */
+/* The patch bay is made of CELLS — (fixture span ↔ output span) tuples. The SAME cells
+   appear in both views; only the label's context changes (fixture view shows output info,
+   output view shows fixture info). Hover a cell to light up its twin. */
+let BAYCELLS = {};
 function buildPatchBay(){
   const st = STATES[patchState];
-  const row = (id, slots, label, chips) =>
-    `<div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:6px">
-       <span style="font:9.5px var(--mono); color:var(--subtle)">${label}</span>
-       ${chips ? `<span style="font:9px var(--mono); color:var(--dim)">${chips}</span>` : ""}</div>
-     <canvas id="${id}" width="${slots}" height="1" style="width:100%; height:13px;
-       image-rendering:pixelated; border-radius:2px; border:1px solid var(--border-muted); display:block"></canvas>`;
+  const owners = wireInfo(patchState);
+  BAYCELLS = {};
+  st.forEach((r,i)=> BAYCELLS["c"+i] = r);
+  const clashCell = r => { for (let k=r.ws;k<r.ws+r.len && k<N_WIRE;k++) if (owners[k].length>1) return true; return false; };
+  const cell = (cid, side, leftPct, widthPct, canvasW, label, err) =>
+    `<div class="baycell${err?" err":""}" data-cid="${cid}" style="left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%">
+       <canvas width="${canvasW}" height="1" data-cv="${cid}" data-side="${side}"></canvas>
+       <div class="clab">${label}</div></div>`;
+  /* output side — cells along the wire; labels carry FIXTURE info */
+  let outA = "";
+  st.forEach((r,i)=> outA += cell("c"+i, "o", r.ws/60*100, r.len/60*100, r.len,
+    `${r.fix} ${r.fs}–${r.fs+r.len-1}${r.rev?" ◀":""}`, clashCell(r)));
   document.getElementById("bayout").innerHTML =
-    `<div style="font-size:11px; color:var(--muted); font-weight:700">out A</div>` +
-    row("bay-a1", 60, "port 1 · 56/170 · wire order") +
-    `<div style="font-size:11px; color:var(--muted); font-weight:700; margin-top:8px">out B</div>` +
-    row("bay-b1", 60, "port 1 · 60/170") +
-    row("bay-b2", 60, "port 2 · 24/170");
-  const dest = r => `${r.fs}–${r.fs+r.len-1}→A·p1 ch${r.ws}${r.rev?"◀":"▶"}`;
+    `<div class="baygrp">out A</div><div class="bayhead">port 1 · 56/170 · wire order</div>` +
+    `<div class="bayrow">${outA}</div>` +
+    `<div class="baygrp" style="margin-top:8px">out B</div><div class="bayhead">port 1 · 60/170</div>` +
+    `<div class="bayrow">${cell("m","o",0,100,60,"matrix 0–59",false)}</div>` +
+    `<div class="bayhead">port 2 · 24/170</div>` +
+    `<div class="bayrow">${cell("s","o",0,40,24,"shelf 0–23",false)}</div>`;
+  /* fixture side — the SAME cells along shader space; labels carry OUTPUT info */
+  const fxRow = (fix, len) => {
+    let cells = "";
+    st.forEach((r,i)=>{ if (r.fix !== fix) return;
+      cells += cell("c"+i, "f", r.fs/len*100, r.len/len*100, r.len,
+        `→ A·p1 ch${r.ws}${r.rev?" ◀":" ▶"}`, clashCell(r)); });
+    return cells;
+  };
   document.getElementById("bayfix").innerHTML =
-    row("bay-fbody", FIXLEN.body, "body · shader order", st.filter(r=>r.fix==="body").map(dest).join(" · ")) +
-    row("bay-fleaf", FIXLEN.leaf, "leaf · shader order", st.filter(r=>r.fix==="leaf").map(dest).join(" · ")) +
-    row("bay-fmatrix", 60, "matrix · shader order", "0–59→B·p1 ch0▶");
+    `<div class="bayhead">body · shader order</div><div class="bayrow">${fxRow("body", FIXLEN.body)}</div>` +
+    `<div class="bayhead">leaf · shader order</div><div class="bayrow">${fxRow("leaf", FIXLEN.leaf)}</div>` +
+    `<div class="bayhead">matrix · shader order</div><div class="bayrow">${cell("m","f",0,100,60,"→ B·p1 ch0 ▶",false)}</div>` +
+    `<div class="bayhead">shelf · shader order</div><div class="bayrow">${cell("s","f",0,100,24,"→ B·p2 ch0 ▶",false)}</div>`;
+  /* same tuple, two views: hover-link the twins */
+  document.querySelectorAll(".baycell").forEach(n=>{
+    n.onmouseenter = () => document.querySelectorAll(`.baycell[data-cid="${n.dataset.cid}"]`)
+      .forEach(m => m.classList.add("hl"));
+    n.onmouseleave = () => document.querySelectorAll(`.baycell[data-cid="${n.dataset.cid}"]`)
+      .forEach(m => m.classList.remove("hl"));
+  });
 }
 function bayFrame(t){
-  const owners = wireInfo(patchState), fmap = fixtureWireIndex(patchState);
-  const draw = (id, n, fn) => {
-    const c = document.getElementById(id); if (!c) return;
-    const g = c.getContext("2d");
-    for (let i=0;i<c.width;i++){ g.fillStyle = i<n ? fn(i) : "#14181d"; g.fillRect(i,0,1,1); }
-  };
-  draw("bay-a1", N_WIRE, k => lampColor(k, owners, t).col);
-  draw("bay-b1", 60, i => plasmaCol(i/59*3, .5, t));
-  draw("bay-b2", 24, i => auroraCol(i/23, t));
-  draw("bay-fbody", FIXLEN.body, fc => {
-    const k = fmap.body[fc];
-    return (k >= 0 && owners[k].length > 1) ? "#ef5350" : bodyCol(fc/(FIXLEN.body-1), t);
+  const owners = wireInfo(patchState);
+  document.querySelectorAll("#bayout canvas, #bayfix canvas").forEach(c=>{
+    const g = c.getContext("2d"), cid = c.dataset.cv, side = c.dataset.side;
+    if (cid === "m"){ for (let i=0;i<60;i++){ g.fillStyle = plasmaCol(i/59*3,.5,t); g.fillRect(i,0,1,1); } return; }
+    if (cid === "s"){ for (let i=0;i<24;i++){ g.fillStyle = auroraCol(i/23,t); g.fillRect(i,0,1,1); } return; }
+    const r = BAYCELLS[cid]; if (!r) return;
+    for (let j=0;j<r.len;j++){
+      let col;
+      if (side === "o") col = lampColor(r.ws+j, owners, t).col;
+      else {
+        const k = r.rev ? r.ws + r.len-1-j : r.ws + j;
+        const fc = r.fs + j, u = fc/(FIXLEN[r.fix]-1);
+        col = (k < N_WIRE && owners[k].length > 1) ? "#ef5350"
+            : (r.fix === "body" ? bodyCol(u,t) : leafCol(u,t));
+      }
+      g.fillStyle = col; g.fillRect(j,0,1,1);
+    }
   });
-  draw("bay-fleaf", FIXLEN.leaf, fc => {
-    const k = fmap.leaf[fc];
-    return (k >= 0 && owners[k].length > 1) ? "#ef5350" : leafCol(fc/(FIXLEN.leaf-1), t);
-  });
-  draw("bay-fmatrix", 60, i => plasmaCol(i/59*3, .5, t));
 }
 function setState(s){
   patchState = s;
