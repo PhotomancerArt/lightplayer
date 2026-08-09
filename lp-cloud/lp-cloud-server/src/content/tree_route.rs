@@ -17,14 +17,12 @@
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use lp_cloud_domain::BlobStore as _;
-use lpc_cloud_api::Actor;
 use lpc_history::TreeManifest;
 
 use crate::app_state::AppState;
-use crate::auth::session_cookie::session_token;
 use crate::content::blob_route::parse_hash;
 use crate::content::{IMMUTABLE_CACHE_CONTROL, tree_preimage};
 
@@ -71,7 +69,6 @@ pub async fn get_tree(State(state): State<AppState>, Path(hash): Path<String>) -
 pub async fn put_tree(
     State(state): State<AppState>,
     Path(hash): Path<String>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let Some(claimed) = parse_hash(&hash) else {
@@ -97,29 +94,24 @@ pub async fn put_tree(
             .into_response();
     }
 
-    let token = session_token(&headers);
+    // Anonymous-legal since API v3, same rationale as `put_blob`: an
+    // anonymous `Access::Edit` push uploads its tree through here, and the
+    // write is verified + idempotent either way.
     let stored = state
-        .with_service(move |core| match core.actor_for(token.as_deref()) {
-            Actor::Anonymous => None,
-            Actor::User(_) => Some(core.store_blob(&tree_preimage::encode(&manifest))),
-        })
+        .with_service(move |core| core.store_blob(&tree_preimage::encode(&manifest)))
         .await;
 
-    match stored {
-        // Belt and braces: the store derives the address from the preimage
-        // and we derived it from the entries. They agree by construction
-        // (`tree_preimage`'s round-trip test), and if they ever stopped, a
-        // silently mis-filed tree would be far worse than a 500.
-        Some(stored) if stored == claimed => (StatusCode::OK, stored.to_string()).into_response(),
-        Some(stored) => (
+    // Belt and braces: the store derives the address from the preimage
+    // and we derived it from the entries. They agree by construction
+    // (`tree_preimage`'s round-trip test), and if they ever stopped, a
+    // silently mis-filed tree would be far worse than a 500.
+    if stored == claimed {
+        (StatusCode::OK, stored.to_string()).into_response()
+    } else {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("tree stored at {stored}, expected {claimed}\n"),
         )
-            .into_response(),
-        None => (
-            StatusCode::UNAUTHORIZED,
-            "a session is required to upload\n",
-        )
-            .into_response(),
+            .into_response()
     }
 }

@@ -70,6 +70,15 @@ struct DriverInner {
     /// Last off-live line written (the digits cluster's amber sub-line —
     /// the separate chip "jumped around" and died at the G1 gate).
     last_offlive: RefCell<String>,
+    /// Watches the tape canvas for box changes and repaints it at the new
+    /// size. Load-bearing on the frozen story page, where the rAF loop stops
+    /// after the first frame: the stylesheet is injected by the wasm bundle
+    /// after boot, so a paint that beats it measures a box the canvas does
+    /// not end up with, and without the observer that stale bitmap is a
+    /// second stable terminal — the exact oscillation of
+    /// 2026-08-05-clock-face-baselines-oscillate, reached through this
+    /// canvas instead of the trace cards.
+    resize: RefCell<Option<web_sys::ResizeObserver>>,
 }
 
 /// The clock face's tape driver. `None` inside when there is no browser
@@ -77,6 +86,10 @@ struct DriverInner {
 pub(crate) struct TapeTransportDriver {
     inner: Option<Rc<DriverInner>>,
     _closure: Option<Closure<dyn FnMut(f64)>>,
+    /// The `ResizeObserver`'s callback. Held here rather than in the shared
+    /// inner so the driver's `Rc` graph stays acyclic (the rAF closure's
+    /// pattern): dropping the driver frees both.
+    _resize_closure: Option<Closure<dyn FnMut(web_sys::js_sys::Array)>>,
     canvas_id: String,
     digits_id: String,
     offlive_id: String,
@@ -88,6 +101,7 @@ impl TapeTransportDriver {
             return Self {
                 inner: None,
                 _closure: None,
+                _resize_closure: None,
                 canvas_id,
                 digits_id,
                 offlive_id,
@@ -97,6 +111,7 @@ impl TapeTransportDriver {
             return Self {
                 inner: None,
                 _closure: None,
+                _resize_closure: None,
                 canvas_id,
                 digits_id,
                 offlive_id,
@@ -116,6 +131,7 @@ impl TapeTransportDriver {
             scrub_preview: Cell::new(None),
             last_digits: RefCell::new(String::new()),
             last_offlive: RefCell::new(String::new()),
+            resize: RefCell::new(None),
         });
         let for_frames = inner.clone();
         let closure = Closure::wrap(Box::new(move |now: f64| {
@@ -129,9 +145,24 @@ impl TapeTransportDriver {
                 .unchecked_ref::<web_sys::js_sys::Function>()
                 .clone(),
         );
+        // The canvas's box changed (the stylesheet landed, the pane
+        // resized): repaint so the backing store matches the box again.
+        // Painting is idempotent — time is pinned to the anchor on a frozen
+        // page and re-derived from it otherwise — so an extra pass only ever
+        // corrects geometry (the trace driver's pattern, same defect).
+        let for_resize = inner.clone();
+        let resize_closure = Closure::<dyn FnMut(web_sys::js_sys::Array)>::new(
+            move |_entries: web_sys::js_sys::Array| {
+                let now = for_resize.performance.now();
+                for_resize.paint(now);
+            },
+        );
+        *inner.resize.borrow_mut() =
+            web_sys::ResizeObserver::new(resize_closure.as_ref().unchecked_ref()).ok();
         Self {
             inner: Some(inner),
             _closure: Some(closure),
+            _resize_closure: Some(resize_closure),
             canvas_id,
             digits_id,
             offlive_id,
@@ -194,12 +225,23 @@ impl TapeTransportDriver {
     }
 
     /// The tape canvas just mounted: paint its first frame (the sync-time
-    /// paint may have run before the element existed). On a frozen page
-    /// the paint pins itself to the anchor so a capture of the mounted
-    /// state is byte-stable run to run.
+    /// paint may have run before the element existed) and put it under the
+    /// resize observer. On a frozen page the paint pins itself to the anchor
+    /// so a capture of the mounted state is byte-stable run to run; the
+    /// observer is what keeps that stable state the STYLED one when this
+    /// paint beat the stylesheet.
     pub(crate) fn canvas_mounted(&self) {
-        if let Some(inner) = &self.inner {
-            inner.paint(inner.performance.now());
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        inner.paint(inner.performance.now());
+        if let Some(observer) = inner.resize.borrow().as_ref()
+            && let Some(canvas) = inner
+                .window
+                .document()
+                .and_then(|document| document.get_element_by_id(&inner.canvas_id))
+        {
+            observer.observe(&canvas);
         }
     }
 
@@ -242,10 +284,14 @@ impl TapeTransportDriver {
 
 impl Drop for TapeTransportDriver {
     fn drop(&mut self) {
-        if let Some(inner) = &self.inner
-            && let Some(id) = inner.raf_id.take()
-        {
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        if let Some(id) = inner.raf_id.take() {
             let _ = inner.window.cancel_animation_frame(id);
+        }
+        if let Some(observer) = inner.resize.borrow_mut().take() {
+            observer.disconnect();
         }
     }
 }

@@ -332,6 +332,11 @@
         "label": {
           "type": "string"
         },
+        "len": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
         "mapping": {
           "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef"
         },

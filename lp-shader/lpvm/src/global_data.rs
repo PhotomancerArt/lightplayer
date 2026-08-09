@@ -76,6 +76,48 @@ pub fn decode_global_read(
         });
     }
     let bytes = &bytes[..need];
+    // Globals of buffer-legal element arrays decode as ONE packed buffer —
+    // the memory-honest form per-cell state rides in. This is deliberately
+    // the GLOBALS seam only: sret returns, uniform read-back, and the
+    // filetest harnesses keep the boxed Array shape they always had.
+    if let LpsType::Array { element, len } = ty
+        && let Some(elem) = lps_shared::LpsBufferElem::from_lps_type(element)
+    {
+        let rules = LayoutRules::Std430;
+        let buffer = match float_mode {
+            FloatMode::F32 => {
+                crate::lpvm_data_q32::read_buffer_words(elem, *len, element, rules, bytes, |b| {
+                    u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+                })?
+            }
+            FloatMode::Q32 => {
+                if elem.is_float() {
+                    crate::lpvm_data_q32::read_buffer_words(
+                        elem,
+                        *len,
+                        element,
+                        rules,
+                        bytes,
+                        |b| {
+                            Q32::from_fixed(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                                .to_f32()
+                                .to_bits()
+                        },
+                    )?
+                } else {
+                    crate::lpvm_data_q32::read_buffer_words(
+                        elem,
+                        *len,
+                        element,
+                        rules,
+                        bytes,
+                        |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+                    )?
+                }
+            }
+        };
+        return Ok(LpsValueF32::Buffer(buffer));
+    }
     match float_mode {
         FloatMode::F32 => {
             let mut data = LpvmDataQ32::new(ty.clone());
@@ -266,4 +308,53 @@ fn i32_at(bytes: &[u8], offset: usize) -> Result<i32, DataError> {
 
 fn u32_at(bytes: &[u8], offset: usize) -> Result<u32, DataError> {
     Ok(i32_at(bytes, offset)? as u32)
+}
+
+#[cfg(test)]
+mod buffer_seam_tests {
+    use super::*;
+    use alloc::boxed::Box;
+
+    fn heat_ty() -> LpsType {
+        LpsType::Array {
+            element: Box::new(LpsType::Float),
+            len: 3,
+        }
+    }
+
+    /// The globals seam is where packed buffers are minted: both float
+    /// modes decode a buffer-legal array global to ONE `Buffer` value,
+    /// f32 lanes carried as bits.
+    #[test]
+    fn global_scalar_arrays_decode_as_buffers_in_both_modes() {
+        // F32 mode: bytes are f32 bit patterns already.
+        let f32_bytes: Vec<u8> = [1.5f32, -2.0, 0.25]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let LpsValueF32::Buffer(buffer) =
+            decode_global_read(&heat_ty(), &f32_bytes, FloatMode::F32).expect("decode")
+        else {
+            panic!("expected buffer");
+        };
+        assert_eq!(
+            buffer.words(),
+            &[1.5f32.to_bits(), (-2.0f32).to_bits(), 0.25f32.to_bits()]
+        );
+
+        // Q32 mode: bytes are Q16.16 words, transcoded to f32 bits.
+        let q32_bytes: Vec<u8> = [1.5f32, -2.0, 0.25]
+            .iter()
+            .flat_map(|v| lps_q32::q32_encode::q32_encode(*v).to_le_bytes())
+            .collect();
+        let LpsValueF32::Buffer(buffer) =
+            decode_global_read(&heat_ty(), &q32_bytes, FloatMode::Q32).expect("decode")
+        else {
+            panic!("expected buffer");
+        };
+        assert_eq!(
+            buffer.words(),
+            &[1.5f32.to_bits(), (-2.0f32).to_bits(), 0.25f32.to_bits()]
+        );
+    }
 }

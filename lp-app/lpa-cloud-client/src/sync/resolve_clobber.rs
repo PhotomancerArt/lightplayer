@@ -105,7 +105,7 @@ mod tests {
     use crate::sync::publish::publish;
     use crate::sync::pull::pull;
     use crate::test_support::{TestWorld, sidecar};
-    use lpc_cloud_api::Visibility;
+    use lpc_cloud_api::Access;
     use lpc_history::SyncRelation;
 
     /// Keep mine: the service ends up with one head, and the loser is still
@@ -263,7 +263,7 @@ mod tests {
         block_on(publish(
             &owner,
             &ours,
-            Visibility::Link,
+            Access::View,
             "dome",
             &sidecar("Dome"),
         ))

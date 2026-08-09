@@ -1644,7 +1644,7 @@ fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
 /// the way in (D4, the test above), and the wizard never heard.
 ///
 /// The repro end to end: open the wizard, click Open in sim on a project
-/// card (`HomeOp::OpenPackage` — the op `#/sim/<slug>` rides), then go
+/// card (`HomeOp::OpenPackage` — the op `/p/<slug>-<uid>` rides), then go
 /// back to the gallery and look at what the wizard is asking for.
 #[test]
 fn an_open_in_sim_stands_the_sims_board_picker_down() {
@@ -2513,11 +2513,11 @@ fn device_route_attaches_the_existing_session_by_uid() {
     );
 }
 
-/// M5/D37 (`#/sim/<key>` reuse-vs-open): re-opening the project the sim
+/// M5/D37 (`/p/<slug>-<uid>` reuse-vs-open): re-opening the project the sim
 /// ALREADY runs re-attaches the lens to the running session — the acked
 /// overlay edit survives — instead of pushing the head again (which would
 /// reset it). D19's head push stays for everything else; the emitted view
-/// binds the sim lens with the loaded project's key (the URL's evidence).
+/// binds the sim lens with the loaded project's uid (the URL's evidence).
 #[test]
 fn open_package_reattaches_when_the_sim_already_runs_it() {
     use super::studio_edit_e2e_tests::clock_transport_block;
@@ -2547,18 +2547,18 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     )))
     .expect("lens detach succeeds");
 
-    let (sign_uid, sign_slug) = {
+    let sign_uid = {
         let pool = studio.runtime_pool_for_test();
-        let loaded = pool
-            .sim_session()
+        pool.sim_session()
             .expect("sim session survives detach")
             .sim_loaded_project()
-            .expect("the sim remembers its loaded project");
-        (loaded.uid.clone(), loaded.name.clone())
+            .expect("the sim remembers its loaded project")
+            .uid
+            .clone()
     };
 
-    // the `#/sim/<key>` navigation (and the project-card click that rides
-    // it): the same key the sim already runs
+    // the `/p/<slug>-<uid>` navigation (and the project-card click that
+    // rides it): the same project the sim already runs
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
@@ -2582,9 +2582,9 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     assert_eq!(
         view.lens,
         Some(UiLensRuntime::Sim {
-            project_key: Some(sign_slug),
+            project_uid: Some(sign_uid),
         }),
-        "the view binds the sim lens with the loaded project's key"
+        "the view binds the sim lens with the loaded project's uid"
     );
 }
 

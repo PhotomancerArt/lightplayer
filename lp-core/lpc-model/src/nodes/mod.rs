@@ -45,11 +45,12 @@ pub use playlist::{
 pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
-    ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderDef,
-    ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView,
-    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace,
-    ShaderState, ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2,
-    generate_compute_shader_header, glsl_type_for_lp_type, shader_panel_step,
+    ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderBudget,
+    ShaderBudgetError, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
+    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
+    ShaderSlotMappingKind, ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef,
+    SpaceAnswer1, SpaceAnswer2, generate_compute_shader_header, glsl_type_for_lp_type,
+    shader_panel_step, slot_bytes_estimate, validate_shader_slot_budget,
 };
 pub use starter::{
     NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_ref,

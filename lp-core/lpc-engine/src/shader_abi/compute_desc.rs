@@ -41,6 +41,20 @@ pub fn compute_desc_from_model_def<'a>(
         },
     );
 
+    // Same valve as header generation, at the compile seam: a descriptor
+    // whose declared slots exceed the budget must not reach VMContext
+    // sizing (`lps-shared/src/sig.rs`).
+    lpc_model::validate_shader_slot_budget(
+        def.consumed_slots
+            .entries
+            .iter()
+            .chain(def.produced_slots.entries.iter())
+            .map(|(name, slot)| (name.as_str(), slot)),
+        registry,
+        &lpc_model::ShaderBudget::default(),
+    )
+    .map_err(|e| ComputeDescError::Unsupported(alloc::format!("{e}")))?;
+
     for (name, slot) in &def.consumed_slots.entries {
         // A palette declares a sampler, which is not an `LpsType` the value
         // lookup can answer — so that lookup must not run for it.
@@ -77,6 +91,18 @@ pub fn compute_desc_from_model_def<'a>(
                     }
                 }
             }
+            // A consumed buffer is the same bounded uniform array a sentinel
+            // map builds; only the host-side marshal differs.
+            ShaderSlotKind::Buffer => {
+                let len = buffer_len(name, slot)?;
+                desc = desc.with_consumed(
+                    name.clone(),
+                    LpsType::Array {
+                        element: alloc::boxed::Box::new(ty),
+                        len,
+                    },
+                );
+            }
         }
     }
 
@@ -110,6 +136,19 @@ pub fn compute_desc_from_model_def<'a>(
                         );
                     }
                 }
+            }
+            // A produced buffer is a plain array global: no key field to
+            // validate, so the plain value ABI already says everything
+            // there is to say about it.
+            ShaderSlotKind::Buffer => {
+                let len = buffer_len(name, slot)?;
+                desc = desc.with_produced(
+                    name.clone(),
+                    LpsType::Array {
+                        element: alloc::boxed::Box::new(ty),
+                        len,
+                    },
+                );
             }
         }
     }
@@ -162,6 +201,12 @@ fn lps_type_for_slot_value(
             value_ref.as_str(),
         )))
     }
+}
+
+fn buffer_len(name: &str, slot: &ShaderSlotDef) -> Result<u32, ComputeDescError> {
+    slot.buffer_len().ok_or_else(|| {
+        ComputeDescError::Unsupported(format!("shader buffer slot {name:?} is missing len"))
+    })
 }
 
 fn ensure_u32_map_key(slot: &ShaderSlotDef) -> Result<(), ComputeDescError> {
@@ -294,6 +339,7 @@ void tick() {{
                 max: lpc_model::OptionSlot::none(),
                 step: lpc_model::OptionSlot::none(),
                 mapping: lpc_model::OptionSlot::none(),
+                len: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
                 unit: lpc_model::OptionSlot::none(),
@@ -338,6 +384,98 @@ void tick() {{
                 .expect("phase")
                 .approx_eq_default(&LpsValueF32::F32(16.0))
         );
+    }
+
+    /// The fire2012 shape: per-cell scalar state in buffer slots on both
+    /// sides, indexed at RUNTIME — a loop over the consumed buffer and a
+    /// uniform-derived index into the produced global. This is exactly what
+    /// sentinel struct arrays cannot do on `Frontend::Lp` (constant-index
+    /// -only), and the reason the buffer slot kind exists.
+    #[test]
+    fn compute_desc_executes_buffer_slots_with_runtime_indexing() {
+        let registry = SlotShapeRegistry::default();
+
+        let mut consumed = VecMap::new();
+        consumed.insert(
+            String::from("cursor"),
+            ShaderSlotDef::value_f32("Cursor", "", 0.0, None),
+        );
+        consumed.insert(
+            String::from("seed"),
+            ShaderSlotDef::buffer_builtin("f32", 4),
+        );
+
+        let mut produced = VecMap::new();
+        produced.insert(
+            String::from("heat"),
+            ShaderSlotDef::buffer_builtin("f32", 4),
+        );
+
+        let def = ComputeShaderDef {
+            source: lpc_model::AssetSlot::path("heat.glsl"),
+            bindings: BindingDefs::default(),
+            float_mode: lpc_model::OptionSlot::none(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        let header = generate_compute_shader_header(&def, &registry).expect("header");
+        assert!(header.contains("layout(binding = 1) uniform float seed[4];"));
+        assert!(header.contains("float heat[4];"));
+        let glsl = format!(
+            r#"{header}
+void tick() {{
+    for (int i = 0; i < 4; i++) {{
+        heat[i] = seed[i] * 2.0;
+    }}
+    int idx = int(cursor);
+    heat[idx] = heat[idx] + 100.0;
+}}
+"#
+        );
+
+        let desc =
+            compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
+                .expect("compute desc");
+        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let mut shader = graphics
+            .compile_compute_shader(desc)
+            .expect("compile compute");
+
+        let seed = lps_shared::LpsBuffer::from_words(
+            lps_shared::LpsBufferElem::F32,
+            Box::new([
+                f32::to_bits(1.0),
+                f32::to_bits(2.0),
+                f32::to_bits(3.0),
+                f32::to_bits(4.0),
+            ]),
+        )
+        .expect("seed buffer");
+        shader
+            .tick(&[
+                ("cursor", LpsValueF32::F32(2.0)),
+                ("seed", LpsValueF32::Buffer(seed)),
+            ])
+            .expect("tick");
+
+        // The produced global reads back as ONE packed buffer — the whole
+        // point of the slot kind: no boxed enum per cell anywhere between
+        // the guest memory and the slot value.
+        let heat = shader.get_output("heat").expect("heat");
+        let expected = LpsValueF32::Buffer(
+            lps_shared::LpsBuffer::from_words(
+                lps_shared::LpsBufferElem::F32,
+                Box::new([
+                    f32::to_bits(2.0),
+                    f32::to_bits(4.0),
+                    f32::to_bits(106.0),
+                    f32::to_bits(8.0),
+                ]),
+            )
+            .expect("expected buffer"),
+        );
+        assert!(heat.approx_eq_default(&expected), "heat: {heat:?}");
     }
 
     fn field<'a>(fields: &'a [(String, LpsValueF32)], name: &str) -> Option<&'a LpsValueF32> {

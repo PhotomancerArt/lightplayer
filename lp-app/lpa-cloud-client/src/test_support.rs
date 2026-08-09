@@ -10,8 +10,8 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_cloud_api::request::{AddMember, SetVisibility};
-use lpc_cloud_api::{SidecarMeta, Visibility};
+use lpc_cloud_api::request::{AddMember, SetAccess};
+use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 use lpfs::{FsError, LpFs, LpFsMemory, LpPath};
 
@@ -75,20 +75,15 @@ impl TestWorld {
         client
     }
 
-    pub fn set_visibility(
-        &self,
-        owner: &InProcessCloud,
-        project: PrefixedUid,
-        visibility: Visibility,
-    ) {
+    pub fn set_access(&self, owner: &InProcessCloud, project: PrefixedUid, access: Access) {
         block_on(call(
             owner,
-            SetVisibility {
+            SetAccess {
                 uid: project,
-                visibility,
+                access,
             },
         ))
-        .expect("set visibility");
+        .expect("set access");
     }
 
     /// Project slot `n` (1-based).

@@ -519,6 +519,8 @@ fn glsl_literal(v: &LpsValueF32) -> Result<String, String> {
             format!("{ctor}({})", join(inner))
         }
         LpsValueF32::Texture2D(_) => return Err("texture argument".to_string()),
+        // Buffers never appear as filetest directive literals.
+        LpsValueF32::Buffer(_) => return Err("buffer argument".to_string()),
     })
 }
 

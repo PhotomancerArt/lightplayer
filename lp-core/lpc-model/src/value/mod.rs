@@ -4,6 +4,7 @@
 /// shape metadata instead of adding new uses here.
 pub mod constraint;
 pub mod legacy_kind;
+pub mod lp_buffer;
 pub mod lp_type;
 pub mod lp_value;
 pub mod value_path;
@@ -17,6 +18,7 @@ pub mod kind {
 }
 
 pub use crate::sync::with_revision::WithRevision;
+pub use lp_buffer::{BufferElem, BufferScalar, LpBuffer, LpBufferError};
 pub use lp_type::{LpType, ModelEnumVariant, ModelStructMember};
 pub use lp_value::LpValue;
 pub use value_path::{PathParseError, Segment, ValuePath, parse_path};

@@ -1324,7 +1324,7 @@ impl StudioController {
             .with_lens(self.lens_runtime())
             .with_open_project(
                 self.project.active_library_uid(),
-                self.project.active_library_slug(),
+                self.project.active_library_display_name(),
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
@@ -1482,9 +1482,9 @@ impl StudioController {
                 // binding) is the key: it survives detach, so re-attach
                 // flows address the same document
                 crate::UiLensRuntime::Sim {
-                    project_key: session
+                    project_uid: session
                         .sim_loaded_project()
-                        .map(|project| project.name.clone()),
+                        .map(|project| project.uid.clone()),
                 }
             } else {
                 let uid = session.device_uid().or_else(|| {
@@ -5145,8 +5145,8 @@ impl StudioController {
         if let Some(sim) = self.pool.sim_session() {
             let sim_id = sim.id();
             let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
-            // D37/M5 (`#/sim/<key>` — and the project-card click that now
-            // rides it): when the sim ALREADY runs the requested project,
+            // D37/M5 (`/p/<slug>-<uid>` — and the project-card click that
+            // now rides it): when the sim ALREADY runs the requested project,
             // re-attach the lens instead of pushing the head again — the
             // running session with its server-side overlay IS the document
             // (SDI); a fresh push would discard applied-but-unsaved edits.
@@ -5273,6 +5273,7 @@ impl StudioController {
                 self.open_docs_example(&example_id, updates).await
             }
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
+            ProjectOp::ReloadActiveProject => self.reload_active_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
             ProjectOp::OpenDeviceProject { uid } => self.open_device_project(uid, updates).await,
@@ -6538,6 +6539,41 @@ impl StudioController {
             "Project refreshed",
             "Project refresh needs attention",
         )))
+    }
+
+    /// The P6 pull loop's apply step: re-push the active library project's
+    /// on-disk content (already fast-forwarded by the platform edge) to the
+    /// running runtime, so the open editor shows what the library now
+    /// holds. Quiet on success — the edge raises its own "Updated to the
+    /// latest version" toast; a second notice here would double-speak.
+    async fn reload_active_project(&mut self, updates: UxUpdateSink) -> UiResult {
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Updating project",
+            "Updating",
+            "Reloading the project from its library copy",
+        );
+        let result = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.reload_active_from_library(server).await
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                self.note_sim_loaded_project();
+                updates.emit(UxUpdate::View(self.view()));
+                Ok(UiNotices::new())
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    format!("project reload failed: {error}"),
+                ));
+                Err(error)
+            }
+        }
     }
 
     async fn sync_project_after_attach(

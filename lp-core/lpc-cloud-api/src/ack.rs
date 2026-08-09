@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Answers a request whose only job is a side effect with nothing further
 /// to report — currently just [`crate::request::RevokeSession`].
 ///
-/// The crate's existing mutating requests (`SetVisibility`, `AddMember`,
+/// The crate's existing mutating requests (`SetAccess`, `AddMember`,
 /// `RemoveMember`, ...) all answer with the resulting
 /// [`crate::response::ProjectInfo`] instead of a bare acknowledgement, so
 /// there is no acked-project shape to reuse here — a revoked session has no

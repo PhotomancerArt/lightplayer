@@ -1,7 +1,9 @@
 //! Human-friendly slugs — THE user-facing project identifier.
 //!
 //! The slug names the package directory, titles the gallery card and the
-//! editor, rides the URL (`#/sim/<slug>`), and names exports. The
+//! editor, decorates the project's URL (`/p/<slug>-<uid>` — cosmetic
+//! there; the uid is what that address is actually made of), and names
+//! exports. The
 //! `prj…` uid stays the true identity underneath (history, device
 //! associations, renames all key off it) — a rename changes the slug and
 //! moves the directory without touching identity.

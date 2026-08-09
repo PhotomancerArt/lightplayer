@@ -20,7 +20,7 @@ use axum::{Json, Router};
 use edge_harness::{Session, TestServer};
 use lpc_cloud_api::request::{AddMember, PublishProject};
 use lpc_cloud_api::response::{ProjectList, UserInfo};
-use lpc_cloud_api::{Actor, CloudRequest, CloudResponse, Visibility};
+use lpc_cloud_api::{Access, Actor, CloudRequest, CloudResponse};
 use lpc_history::{PrefixedUid, UidPrefix};
 
 /// The happy path, from the button to a session: the redirect pins a state,
@@ -156,7 +156,7 @@ async fn an_invitation_becomes_access_at_first_sign_in() {
         .call(
             CloudRequest::PublishProject(PublishProject {
                 uid: project,
-                visibility: Visibility::Private,
+                access: Access::None,
                 slug: "zook-dome".into(),
             }),
             Some(&owner),

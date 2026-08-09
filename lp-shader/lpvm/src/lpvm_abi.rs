@@ -273,6 +273,32 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
 
         (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
 
+        // A packed buffer emits std430-STRIDED words here (pad lanes zero),
+        // because every consumer of this flattening compares the byte count
+        // against `type_size(.., Std430)`. This is deliberately more honest
+        // than the boxed Array arm above, which packs and therefore cannot
+        // carry a vec3 element.
+        (LpsType::Array { element, len }, LpsValueQ32::Buffer { elem, words }) => {
+            if lps_shared::LpsBufferElem::from_lps_type(element) != Some(*elem)
+                || words.len() != (*len as usize) * elem.word_stride() as usize
+            {
+                return Err(CallError::TypeMismatch(format!(
+                    "buffer shape mismatch for array argument: expected {:?}",
+                    param.ty
+                )));
+            }
+            let packed = elem.word_stride() as usize;
+            let strided = lps_shared::array_stride(element, lps_shared::LayoutRules::Std430) / 4;
+            if packed == strided {
+                return Ok(words.to_vec());
+            }
+            let mut out = alloc::vec![0i32; (*len as usize) * strided];
+            for (i, chunk) in words.chunks_exact(packed).enumerate() {
+                out[i * strided..i * strided + packed].copy_from_slice(chunk);
+            }
+            Ok(out)
+        }
+
         (LpsType::Texture2D, LpsValueQ32::Texture2D(v)) => {
             let d = v.descriptor;
             Ok(alloc::vec![
@@ -328,6 +354,7 @@ fn got_ty_name(v: &LpsValueQ32) -> &'static str {
         LpsValueQ32::Mat3x3(_) => "Mat3x3",
         LpsValueQ32::Mat4x4(_) => "Mat4x4",
         LpsValueQ32::Array(_) => "Array",
+        LpsValueQ32::Buffer { .. } => "Buffer",
         LpsValueQ32::Struct { .. } => "Struct",
         LpsValueQ32::Texture2D(_) => "Texture2D",
     }
