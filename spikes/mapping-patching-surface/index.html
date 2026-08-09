@@ -241,30 +241,32 @@
       overlap-red all live on the geometry you recognize. Patch where you look.</p>
   </div>
   <div class="ccol">
-    <h3>B — the wire bar</h3>
-    <div class="panel"><div class="phead"><b>out A</b><span class="kind">patch · abstract wire</span></div>
+    <h3>B — the port bar</h3>
+    <div class="panel"><div class="phead"><b>out A · port 1</b><span class="kind">one continuous output run</span></div>
       <div class="pbody">
         <svg id="ropeBshape" class="svgstage" viewBox="0 0 396 172"></svg>
         <div class="wirebar" id="wirebar"></div>
         <div class="statusline" id="statusB"></div>
       </div></div>
-    <p class="why">The output's wire as a 1D bar (WLED-segment-like). Precise for channel math; the shape
-      above stays passive context. Fragments and gaps are unambiguous rectangles.</p>
+    <p class="why">One <b>port</b> as a 1D bar (nomenclature flagged: universe/port/channel — "port" =
+      one continuous output run). Precise for channel math; fragments and gaps are unambiguous
+      rectangles. This bar is the row primitive the patch bay (C) stacks.</p>
   </div>
   <div class="ccol">
-    <h3>C — universe rail (lp2014)</h3>
-    <div class="panel"><div class="phead"><b>out A</b><span class="kind">patch · table</span></div>
-      <div class="pbody">
-        <table class="rail" id="railtable"></table>
-        <div class="statusline" id="statusC"></div>
-      </div></div>
-    <p class="why">The proven grammar (lp2014 shipped this): rows per range, keyboard-friendly
-      (<code>r</code> reverse, <code>;/'</code> nudge). Dense, exact — but you patch a spreadsheet, not a peach.</p>
+    <h3>C — the patch bay, both sides</h3>
+    <div class="panel"><div class="phead"><b>patch bay</b><span class="kind">output-side · output → port</span></div>
+      <div class="pbody" id="bayout"></div></div>
+    <div class="panel" style="margin-top:10px"><div class="phead"><b>patch bay</b><span class="kind">fixture-side · fixture → range</span></div>
+      <div class="pbody" id="bayfix"></div>
+      <div class="statusline" id="statusC" style="padding:0 12px 10px"></div></div>
+    <p class="why">The two sides of the interface: <b>output-side</b> = every output, each <b>port</b>
+      (one continuous output run) a row of segments; <b>fixture-side</b> = each fixture's ranges and
+      where they land. Both hierarchies are real; the port bar from B is the row primitive.</p>
   </div>
 </div>
-<div class="leannote"><b>Lean:</b> A as the primary surface with C's row list docked beside it at real scale
-  (the mapping editor already has a rail) — B's bar folds into A as the fragment ticks. The overlap
-  affordance must exist in whichever wins: red on the lamps, click → counterpart, plain-language fix hint.</div>
+<div class="leannote"><b>Lean:</b> A as the canvas surface, C as the docked bay — B's single-port bar is
+  the row primitive C is built from. (lp2014's universe-rail table was cut at this gate: "don't really
+  get it.") Overlap affordance everywhere: red on the lamps, click → counterpart, plain-language fix hint.</div>
 
 <!-- ================================================================ -->
 <h2>3 · rope vs plane — same shape, both declarations</h2>
@@ -359,6 +361,12 @@
       <span class="kind">project canvas · drag fixtures · click to select</span></div>
       <div class="pbody"><svg id="canvasstage" class="svgstage" viewBox="0 0 760 340" style="touch-action:none"></svg></div></div>
   </div>
+  <div style="width:186px">
+    <div class="panel"><div class="phead"><b id="sbtitle">fixtures</b><span class="kind" id="sbkind"></span></div>
+      <div class="pbody" id="sidebar" style="font-size:11.5px; line-height:1.9; padding:8px 12px"></div></div>
+    <p class="why">The sidebar's hierarchy follows the tab: <b>map</b> = fixture → object,
+      <b>patch</b> = output → port.</p>
+  </div>
   <div style="width:250px">
     <div class="panel" id="propspanel"></div>
     <p class="why">Object properties = the #399 dimensionality section, per fixture. "Show visual"
@@ -382,30 +390,30 @@
 </div>
 
 <!-- ================================================================ -->
-<h2>5 · mini-dome — instance-grain patching (slice 2 forward look)</h2>
+<h2>5 · zook-mini — the real dome mapping: one path, 5-way symmetry</h2>
 <p class="thesis">
-  20 panels, 2 outputs. <b>Click a panel</b> to cycle its output (A → B → unpatched); the fragment
-  readout regenerates by anchor-and-reflow. This is the "plugged into random jacks, fix it in software"
-  dome workflow at toy scale — panel = repeat instance, the UI grain over object-relative storage (D6).
+  Zook's dome as actually mapped: a <b>repeat with 5-way symmetry</b> — one serpentine strut path per
+  sector, each sector one <b>port</b>. The as-built plugging is the real story: sector k landed on port
+  <code>(1,5,4,3,2)[k]</code>, fixed in software — a patch file trying to be born. <b>Click a sector</b>
+  to cycle its port; two sectors on one port = contested channels, red in the readout. Also a good
+  1D-vs-2D archetype: the same path samples as five 1D runs or as positions on the dome.
 </p>
 <div class="row">
   <div class="ccol wide">
-    <div class="panel"><div class="phead"><b>zook-mini</b><span class="kind">patch · instance grain</span>
-      <span class="sp"></span>
-      <span class="chip"><span class="dot" style="background:var(--fx-leaf)"></span>out A</span>
-      <span class="chip"><span class="dot" style="background:var(--fx-body)"></span>out B</span>
-      <span class="chip"><span class="dot" style="background:var(--gap)"></span>unpatched</span></div>
+    <div class="panel"><div class="phead"><b>zook-mini</b><span class="kind">patch · sector = repeat instance</span>
+      <span class="sp"></span><span id="portchips"></span></div>
       <div class="pbody">
         <svg id="domestage" class="svgstage" viewBox="0 0 620 380"></svg>
-        <div class="statusline" id="domestatus">click a panel to re-patch it · selected panel gets ⟳ rotate (offset by edge stride) and ◀ reverse</div>
+        <div class="statusline" id="domestatus">click a sector to select · click again to cycle its port · selected sector gets ⟳ rotate (offset by strut stride) and ◀ reverse</div>
       </div></div>
   </div>
   <div class="ccol">
-    <h3>fragment readout</h3>
-    <div class="panel"><div class="phead"><b>outputs</b><span class="kind">derived fragments</span></div>
+    <h3>port readout</h3>
+    <div class="panel"><div class="phead"><b>out A</b><span class="kind">5 ports · derived fragments</span></div>
       <div class="pbody" id="domefrags" style="font: 11px var(--mono); color: var(--muted); line-height: 1.8;"></div></div>
-    <p class="why">No-gaps fragments (D8) regenerate on every click — anchors + reflow, never hand-kept
-      math. Unpatched panels render dark on the dome and absent here: honest, visible, fixable.</p>
+    <p class="why">Fragments regenerate on every click — anchors + reflow, never hand-kept math.
+      The permutation is data, not folklore: today it lives hand-coded in the zook example's
+      channel order.</p>
   </div>
 </div>
 
@@ -629,24 +637,48 @@ function buildWirebar(){
     }
   }
 }
-function buildRail(){
-  const tbl = document.getElementById("railtable");
+function miniBar(ranges, total, extraClash){
+  const colors = { body: "var(--fx-body)", leaf: "var(--fx-leaf)", matrix: "var(--fx-matrix)", strip: "var(--fx-strip)" };
+  const px = c => (c/total*100).toFixed(2) + "%";
+  let html = `<div class="wirebar" style="height:26px; margin:2px 0 6px">`;
+  for (const r of ranges)
+    html += `<div class="blk${r.rev?" rev":""}" style="left:${px(r.ws)}; width:${px(r.len)}; top:5px; height:14px; background:${colors[r.fix]}"></div>`;
+  for (const z of extraClash||[])
+    html += `<div class="clashzone" style="left:${px(z[0])}; width:${px(z[1]-z[0])}; top:2px; height:20px"></div>`;
+  return html + `</div>`;
+}
+function buildPatchBay(){
   const owners = wireInfo(patchState);
-  const rows = STATES[patchState].map(r=>{
-    let clash = false;
-    for (let k=r.ws;k<r.ws+r.len;k++) if (owners[k].length>1) clash = true;
-    return `<tr class="${clash?"clash":""}">
-      <td class="fx"><span class="chip"><span class="dot" style="background:var(--fx-${r.fix})"></span>${r.fix}</span></td>
-      <td>${r.fs}–${r.fs+r.len-1}</td><td>u0</td><td>ch ${r.ws}</td>
-      <td>${r.rev?"◀ rev":"▶"}</td>
-      <td class="mini">${clash?"⚠ overlap":"live"}</td></tr>`;
-  }).join("");
-  tbl.innerHTML = `<tr><th>fixture</th><th>fix-ch</th><th>uni</th><th>anchor</th><th>dir</th><th></th></tr>` + rows;
+  const zones = [];
+  let z0 = -1;
+  for (let k=0;k<=N_WIRE;k++){
+    const c = k<N_WIRE && owners[k].length>1;
+    if (c && z0<0) z0=k;
+    if (!c && z0>=0){ zones.push([z0,k]); z0=-1; }
+  }
+  const lab = t => `<div style="font:9.5px var(--mono); color:var(--subtle); margin-top:6px">${t}</div>`;
+  /* output-side: output → port rows (out A live from state; out B static mock = the wider project) */
+  document.getElementById("bayout").innerHTML =
+    `<div style="font-size:11px; color:var(--muted); font-weight:700">out A</div>` +
+    lab("port 1 · 56/170") + miniBar(STATES[patchState], 60, zones) +
+    `<div style="font-size:11px; color:var(--muted); font-weight:700; margin-top:8px">out B</div>` +
+    lab("port 1 · 60/170") + miniBar([{fix:"matrix", ws:0, len:60}], 60) +
+    lab("port 2 · 24/170") + miniBar([{fix:"strip", ws:0, len:24}], 60);
+  /* fixture-side: fixture → ranges and where they land */
+  const dest = r => `A·p1 ch${r.ws}${r.rev?" ◀":" ▶"}`;
+  const clashy = r => zones.some(z => r.ws < z[1] && r.ws+r.len > z[0]);
+  const row = (fix, ranges) =>
+    `<div style="margin:4px 0"><span class="chip"><span class="dot" style="background:var(--fx-${fix})"></span>${fix}</span> ` +
+    ranges.map(r => `<span class="chip${clashy(r)?" err":""}" style="margin-left:4px">${r.fs}–${r.fs+r.len-1} → ${dest(r)}</span>`).join("") + `</div>`;
+  const st = STATES[patchState];
+  document.getElementById("bayfix").innerHTML =
+    row("body", st.filter(r=>r.fix==="body")) + row("leaf", st.filter(r=>r.fix==="leaf")) +
+    `<div style="margin:4px 0; opacity:.55"><span class="chip"><span class="dot" style="background:var(--fx-matrix)"></span>matrix</span> <span class="chip" style="margin-left:4px">0–59 → B·p1 ch0 ▶</span></div>`;
 }
 function setState(s){
   patchState = s;
   document.querySelectorAll(".stbtn").forEach(b=>b.classList.toggle("on", b.dataset.st===s));
-  buildRopeA(); buildWirebar(); buildRail();
+  buildRopeA(); buildWirebar(); buildPatchBay();
   const [cls, txt] = STATUS_TEXT[s];
   for (const id of ["statusA","statusB","statusC"]){
     const n = document.getElementById(id);
@@ -690,11 +722,30 @@ function buildN3Panel(id, lamps, kind, opts){
                    "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, vis);
     el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
                  stroke: "var(--border-strong)", "stroke-width": 1 }, vis);
-  } else {
+  } else if (!opts.src) {
     for (let k=0;k<lamps.length-1;k++)
       el("line", { x1: lamps[k][0], y1: lamps[k][1], x2: lamps[k+1][0], y2: lamps[k+1][1],
-                   "stroke-width": 8.5, "stroke-linecap": opts.src ? "butt" : "round", class: "n3rope",
-                   "data-w": q1((k+.5)/(lamps.length-1)), opacity: .85 }, vis);
+                   "stroke-width": 8.5, "stroke-linecap": "round", class: "n3rope",
+                   "data-w": (k+.5)/(lamps.length-1), opacity: .85 }, vis);
+  } else {
+    /* discrete 1D: segments split exactly at cell boundaries, colors centered on cells,
+       dark border dot between segments */
+    const n = lamps.length, cellOf = w => Math.floor(Math.min(w,.999)*opts.src);
+    const marks = [];
+    for (let k=0;k<n-1;k++){
+      const wA = k/(n-1), wB = (k+1)/(n-1), cA = cellOf(wA), cB = cellOf(wB);
+      const seg = (p0, p1, c) => el("line", { x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1],
+        "stroke-width": 8.5, "stroke-linecap": "butt", class: "n3rope",
+        "data-w": (c+.5)/opts.src, opacity: .85 }, vis);
+      if (cA === cB) seg(lamps[k], lamps[k+1], cA);
+      else {
+        const t = (cB/opts.src - wA) / (wB - wA);
+        const P = [lerp(lamps[k][0], lamps[k+1][0], t), lerp(lamps[k][1], lamps[k+1][1], t)];
+        seg(lamps[k], P, cA); seg(P, lamps[k+1], cB); marks.push(P);
+      }
+    }
+    marks.forEach(P => el("circle", { cx: P[0], cy: P[1], r: 3, fill: "var(--terminal)",
+      stroke: "var(--border-strong)", "stroke-width": 1 }, vis));
   }
   const lampG = el("g", {}, svg);
   lamps.forEach((p,k)=>{
@@ -720,7 +771,7 @@ function buildN3(){
   buildN3Panel("n3-c1", n3Lamps_peach(), "1D", { art: true,
     caption: "continuous · float [0,1] — smooth along the wire" });
   buildN3Panel("n3-d1", n3Lamps_peach(), "1D", { art: true, src: 12,
-    caption: "discrete · int [0,12) — line segments; lamps snap" });
+    caption: "discrete · int [0,12) — segments centered on cells · integer scaling" });
   buildN3Panel("n3-c2", n3Lamps_matrix(), "2D", {
     caption: "continuous · vec2 — smooth plane at screen res" });
   buildN3Panel("n3-d2", n3Lamps_matrix(), "2D", { src: [6,4],
@@ -932,7 +983,36 @@ function setMode(m){
   mode = m;
   document.querySelectorAll("#modeseg button").forEach(b=>b.classList.toggle("on", b.dataset.m===m));
   document.getElementById("modehint").textContent = MODE_HINT[m];
-  buildCanvas();
+  buildCanvas(); buildSidebar();
+}
+function buildSidebar(){
+  const sb = document.getElementById("sidebar");
+  const ttl = document.getElementById("sbtitle"), knd = document.getElementById("sbkind");
+  const dot = c => `<span class="dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--fx-${c});margin-right:6px"></span>`;
+  const sel = n => n===CV.sel ? "color:var(--strong)" : "color:var(--subtle)";
+  const pick = n => `onclick="CV.sel='${n}';buildCanvas();buildProps();buildSidebar()" style="cursor:pointer"`;
+  if (mode === "map"){
+    ttl.textContent = "fixtures"; knd.textContent = "fixture → object";
+    sb.innerHTML =
+      `<div ${pick("peach")}><span style="${sel('peach')}">${dot("body")}peach</span></div>` +
+      (CV.sel==="peach" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 body-1 · 22<br>02 leaves · 12<br>03 body-2 · 22</div>` : "") +
+      `<div ${pick("matrix")}><span style="${sel('matrix')}">${dot("matrix")}matrix</span></div>` +
+      (CV.sel==="matrix" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 grid 10×6</div>` : "") +
+      `<div ${pick("strip")}><span style="${sel('strip')}">${dot("strip")}shelf strip</span></div>` +
+      (CV.sel==="strip" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 path · 24</div>` : "");
+  } else if (mode === "patch"){
+    ttl.textContent = "outputs"; knd.textContent = "output → port";
+    sb.innerHTML =
+      `<div style="color:var(--muted); font-weight:700">out A</div>` +
+      `<div style="padding-left:12px; font-family:var(--mono); font-size:10px; color:var(--dim)">port 1 · ${dot("body")}peach + ${dot("strip")}shelf</div>` +
+      `<div style="color:var(--muted); font-weight:700">out B</div>` +
+      `<div style="padding-left:12px; font-family:var(--mono); font-size:10px; color:var(--dim)">port 1 · ${dot("matrix")}matrix</div>` +
+      `<div style="margin-top:6px; font-size:10px; color:var(--good-text)">domain wall-rig · valid ✓</div>`;
+  } else {
+    ttl.textContent = "fixtures"; knd.textContent = "arrange";
+    sb.innerHTML = ["peach","matrix","strip"].map(n =>
+      `<div ${pick(n)}><span style="${sel(n)}">${dot(n==="peach"?"body":n)}${n==="strip"?"shelf strip":n}</span></div>`).join("");
+  }
 }
 
 /* live shape-cards */
@@ -967,78 +1047,70 @@ function buildCards(){
   });
 }
 
-/* ================= §5 mini-dome ================= */
-const DOME = { panels: [], sel: -1 };
-(function domeInit(){
-  const cx=310, cy=196;
-  for (let i=0;i<5;i++){ // inner ring of 5
-    const a0 = -90 + i*72, a1 = a0+72, r0 = 0, r1 = 74;
-    DOME.panels.push({ ring: 0, a0, a1, out: i<3 ? "A" : "B" });
+/* ================= §5 zook-mini: one path, 5-way symmetry ================= */
+const ZOOK = { sectors: [1,5,4,3,2].map(p => ({ port: p })), sel: -1 };  // as-built plugging
+const PORT_COLORS = ["#7be0b2", "#f0b97a", "#9cc8ee", "#f0dc7a", "#e88fb0"];
+function zookSectorPts(k){
+  const cx=310, cy=200, sy=.8, rows=5, cols=6, out=[];
+  for (let r=0;r<rows;r++){
+    const rad = 42 + r*27;
+    for (let c=0;c<cols;c++){
+      const cc = r%2 ? cols-1-c : c;
+      const a = (-90 + k*72 - 26 + 52*(cc+.5)/cols) * Math.PI/180;
+      out.push([cx + rad*Math.cos(a), cy + rad*sy*Math.sin(a)]);
+    }
   }
-  for (let i=0;i<15;i++){ // outer ring of 15
-    const a0 = -90 + i*24, a1 = a0+24;
-    DOME.panels.push({ ring: 1, a0, a1, out: i%5===4 ? null : (i<8 ? "A" : "B") });
-  }
-})();
-function domePoly(p){
-  const cx=310, cy=196, sy=.78;
-  const r0 = p.ring===0 ? 6 : 84, r1 = p.ring===0 ? 74 : 158;
-  const A0 = p.a0*Math.PI/180, A1 = p.a1*Math.PI/180, Am = (A0+A1)/2;
-  const pt = (r,a)=>[cx + r*Math.cos(a), cy + r*sy*Math.sin(a)];
-  return p.ring===0
-    ? [pt(r0,Am), pt(r1,A0), pt(r1,A1)]
-    : [pt(r0,A0), pt(r0,A1), pt(r1,A1), pt(r1,A0)];
+  return out;
 }
 function buildDome(){
   const svg = document.getElementById("domestage");
   svg.innerHTML = "";
-  const fill = { A: "rgba(123,224,178,.16)", B: "rgba(240,185,122,.16)", null: "rgba(58,65,73,.25)" };
-  const edge = { A: "var(--fx-leaf)", B: "var(--fx-body)", null: "var(--gap)" };
-  // reflow: assign universes per output in panel order
-  const counters = { A: 0, B: 0 };
-  DOME.panels.forEach((p, i) => {
-    p.u = p.out ? Math.floor(counters[p.out] * 119 / 170) : null;
-    p.chan = p.out ? (counters[p.out]*119) % 170 : null;
-    if (p.out) counters[p.out]++;
-    const pts = domePoly(p);
-    const poly = el("polygon", { points: pts.map(q=>q.map(v=>v.toFixed(1)).join(",")).join(" "),
-      fill: fill[p.out], class: "panelp" + (DOME.sel===i ? " selp" : ""), "data-i": i }, svg);
-    poly.style.stroke = DOME.sel===i ? "var(--sel-border)" : edge[p.out];
-    const c = pts.reduce((a,q)=>[a[0]+q[0]/pts.length, a[1]+q[1]/pts.length], [0,0]);
-    const t = el("text", { x: c[0], y: c[1]+3, "text-anchor": "middle", "font-size": 8.5,
-      fill: p.out ? "var(--muted)" : "var(--dim)" }, svg);
-    t.textContent = p.out ? `${p.out}·u${p.u}` : "—";
-    t.style.pointerEvents = "none";
-    // lamp dots along panel edge, lit by output hue
-    if (p.out){
-      for (let k=0;k<6;k++){
-        const q0 = pts[k%pts.length], q1 = pts[(k+1)%pts.length];
-        el("circle", { cx: lerp(q0[0], q1[0], .5), cy: lerp(q0[1], q1[1], .5), r: 1.6,
-          class: "domelamp", "data-out": p.out, "data-ph": (i*.13)%1 }, svg);
-      }
-    }
-  });
+  document.getElementById("portchips").innerHTML = PORT_COLORS.map((c,i)=>
+    `<span class="chip" style="margin-left:4px"><span class="dot" style="background:${c}"></span>p${i+1}</span>`).join("");
+  for (let k=0;k<5;k++){
+    const s = ZOOK.sectors[k], pts = zookSectorPts(k), col = PORT_COLORS[s.port-1];
+    const g = el("g", { "data-i": k, style: "cursor:pointer" }, svg);
+    // sector hit wedge
+    const wp = [];
+    const a0=(-90+k*72-30)*Math.PI/180, a1=(-90+k*72+30)*Math.PI/180, sy=.8, cx=310, cy=200;
+    wp.push([cx+26*Math.cos(a0), cy+26*sy*Math.sin(a0)], [cx+186*Math.cos(a0), cy+186*sy*Math.sin(a0)],
+            [cx+186*Math.cos(a1), cy+186*sy*Math.sin(a1)], [cx+26*Math.cos(a1), cy+26*sy*Math.sin(a1)]);
+    el("polygon", { points: wp.map(q=>q.map(v=>v.toFixed(1)).join(",")).join(" "),
+      fill: ZOOK.sel===k ? "rgba(214,218,224,.05)" : "transparent",
+      stroke: ZOOK.sel===k ? "var(--sel-border)" : "var(--border-muted)",
+      "stroke-width": ZOOK.sel===k ? 1.4 : 1, "stroke-dasharray": "3 4", "data-i": k }, g);
+    // the strut path, in port color
+    for (let i=0;i<pts.length-1;i++)
+      el("line", { x1: pts[i][0], y1: pts[i][1], x2: pts[i+1][0], y2: pts[i+1][1],
+        stroke: col, "stroke-width": 2, opacity: .55, "data-i": k, class: "zwire" }, g);
+    pts.forEach((p,i)=> el("circle", { cx: p[0], cy: p[1], r: 2.3, class: "zooklamp",
+      "data-u": i/(pts.length-1), "data-s": k, "data-i": k }, g));
+    const la = (-90+k*72)*Math.PI/180;
+    const lt = el("text", { x: 310+196*Math.cos(la), y: 200+196*.8*Math.sin(la)+3,
+      "text-anchor": "middle", "font-size": 9.5, fill: col }, g);
+    lt.textContent = `S${k+1} → p${s.port}`;
+    lt.style.pointerEvents = "none";
+  }
   svg.onclick = ev => {
     const i = ev.target.getAttribute("data-i");
     if (i === null) return;
-    const p = DOME.panels[+i];
-    if (DOME.sel === +i){ p.out = p.out === "A" ? "B" : p.out === "B" ? null : "A"; }
-    DOME.sel = +i;
+    const s = ZOOK.sectors[+i];
+    if (ZOOK.sel === +i) s.port = s.port % 5 + 1;
+    ZOOK.sel = +i;
     buildDome();
-    const st = document.getElementById("domestatus");
-    st.textContent = p.out
-      ? `panel ${i}: → out ${p.out} · u${p.u} ch${p.chan} · 119 lamps · click again to cycle · ⟳ rotate = offset by 40 (edge stride) · ◀ reverse`
-      : `panel ${i}: unpatched — renders dark on the dome, missing from fragments. Click again to cycle.`;
+    document.getElementById("domestatus").textContent =
+      `sector S${+i+1} → port ${s.port} · 30 lamps · ch 0–29 on that port · click again to cycle · ⟳ rotate = offset by 6 (strut stride) · ◀ reverse`;
   };
-  // fragment readout
-  const frag = document.getElementById("domefrags");
-  const byOut = { A: [], B: [] };
-  DOME.panels.forEach((p,i)=>{ if (p.out) byOut[p.out].push(i); });
-  const unp = DOME.panels.filter(p=>!p.out).length;
-  frag.innerHTML =
-    `<span style="color:var(--fx-leaf)">out A</span> · ${byOut.A.length} panels · ${byOut.A.length*119} lamps · u0–u${Math.ceil(byOut.A.length*119/170)-1} <br>` +
-    `<span style="color:var(--fx-body)">out B</span> · ${byOut.B.length} panels · ${byOut.B.length*119} lamps · u0–u${Math.max(0,Math.ceil(byOut.B.length*119/170)-1)}<br>` +
-    (unp ? `<span style="color:var(--err-text)">⚠ ${unp} panel${unp>1?"s":""} unpatched</span> — ${unp*119} lamps dark` : `<span style="color:var(--good-text)">all panels patched ✓</span>`);
+  // port readout — anchor-and-reflow per port; 2 sectors on one port = contested channels
+  const byPort = [[],[],[],[],[]];
+  ZOOK.sectors.forEach((s,k)=> byPort[s.port-1].push(k));
+  document.getElementById("domefrags").innerHTML = byPort.map((list,pi)=>{
+    const c = PORT_COLORS[pi];
+    if (!list.length) return `<span style="color:${c}">p${pi+1}</span> · <span style="color:var(--dim)">empty — 30 lamps dark on the wall</span>`;
+    if (list.length === 1) return `<span style="color:${c}">p${pi+1}</span> · S${list[0]+1} · 30 lamps · ch 0–29`;
+    return `<span style="color:${c}">p${pi+1}</span> · <span style="color:var(--err-text)">⚠ ${list.map(k=>"S"+(k+1)).join(" + ")} — ch 0–29 contested</span>`;
+  }).join("<br>") +
+  `<br><span style="color:var(--dim)">as-built: sector k → port (1,5,4,3,2)[k]</span>`;
 }
 
 /* ================= animation loop ================= */
@@ -1126,17 +1198,16 @@ function frame(now){
     n.setAttribute("fill", heatColor(.35+.6*Math.abs(Math.sin(t*.9 + (+n.getAttribute("data-u"))*5))));
   });
 
-  // §5 dome lamps
-  document.querySelectorAll(".domelamp").forEach(n=>{
-    const out = n.getAttribute("data-out"), ph = +n.getAttribute("data-ph");
-    n.setAttribute("fill", out==="A" ? leafCol(ph, t) : bodyCol(ph, t));
+  // §5 zook lamps — one pattern, five sectors, phase-shifted per port
+  document.querySelectorAll(".zooklamp").forEach(n=>{
+    n.setAttribute("fill", auroraCol(+n.getAttribute("data-u"), t + (+n.getAttribute("data-s"))*.37));
   });
 
   requestAnimationFrame(frame);
 }
 
 /* ---------- boot ---------- */
-buildRopeA(); buildRopeBshape(); buildWirebar(); buildRail();
+buildRopeA(); buildRopeBshape(); buildWirebar(); buildPatchBay();
 setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
 buildN3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
 requestAnimationFrame(frame);
