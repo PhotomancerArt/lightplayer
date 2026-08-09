@@ -684,7 +684,7 @@ fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> 
             {
                 "Radial" => CellProjection::Radial,
                 "Angular" => CellProjection::Angular,
-                "Mirror" => CellProjection::Mirror(try_read_def_direction(
+                "Mirror" => CellProjection::Mirror(try_read_def_mirror_direction(
                     ctx,
                     "consume.Policy.from_1d.Mirror.direction",
                 )),
@@ -720,6 +720,21 @@ fn try_read_def_direction(
         Some("Down") => ProjectionDirection::Down,
         Some("Up") => ProjectionDirection::Up,
         _ => ProjectionDirection::Right,
+    }
+}
+
+/// The authored fold payload of a mirror `from_1d` cell. Unresolvable
+/// reads as the default `OutwardX` (the additive contract).
+fn try_read_def_mirror_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::MirrorDirection {
+    use crate::products::visual::MirrorDirection;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("InwardX") => MirrorDirection::InwardX,
+        Some("InwardY") => MirrorDirection::InwardY,
+        Some("OutwardY") => MirrorDirection::OutwardY,
+        _ => MirrorDirection::OutwardX,
     }
 }
 
@@ -4253,7 +4268,8 @@ mod space_negotiation {
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
     use crate::products::visual::{
-        ProductSpaceInfo, ProjectionDirection, VisualSampleBufferRequest, VisualSampleTarget,
+        MirrorDirection, ProductSpaceInfo, ProjectionDirection, VisualSampleBufferRequest,
+        VisualSampleTarget,
     };
     use alloc::boxed::Box;
     use alloc::string::String;
@@ -4567,7 +4583,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
+            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
             force: false,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
@@ -4604,11 +4620,11 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
-    /// A directional consumer policy (G1b ruling 4): `Mirror ↓` folds the
-    /// strip along the ROWS — the strip coordinate is `y`, then the
-    /// existing mirror math folds it at the centre.
+    /// A directional consumer policy (mirror-direction ruling): the
+    /// `↑↓` outward-y fold runs the strip from the centre ROW toward top
+    /// and bottom — the fold coordinate is `y`, same `|2s−1|` core.
     #[test]
-    fn a_mirror_down_policy_folds_along_the_rows() {
+    fn a_mirror_outward_y_policy_folds_along_the_rows() {
         const COUNT: usize = 8;
         let mut producer = ShaderProducer::new(
             ShaderSpace::OneD {
@@ -4618,7 +4634,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
         let product = producer.product();
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Down),
+            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardY),
             force: false,
         };
         let mut fixture = ring_fixture(COUNT, false, policy, product);
@@ -4626,7 +4642,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
 
         for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
             let expected = crate::products::visual::mirror(point[1], point[0]);
-            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror ↓"));
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror ↑↓"));
         }
     }
 

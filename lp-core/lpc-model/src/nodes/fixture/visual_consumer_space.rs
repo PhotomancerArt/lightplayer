@@ -1,4 +1,4 @@
-use crate::{EnumSlot, ProjectionDirection, Slotted, ValueSlot};
+use crate::{EnumSlot, MirrorDirection, ProjectionDirection, Slotted, ValueSlot};
 
 /// A fixture's consumer-side space policy — the answer side of the
 /// two-sided space declaration (vision D14), mirroring the shader
@@ -45,8 +45,9 @@ pub enum ConsumerCell2 {
     Radial,
     Angular,
     Mirror {
-        /// Which way the folded strip runs across the surface.
-        direction: EnumSlot<ProjectionDirection>,
+        /// Which way the fold runs — mirror's own vocabulary (fold sense
+        /// × axis).
+        direction: EnumSlot<MirrorDirection>,
     },
 }
 

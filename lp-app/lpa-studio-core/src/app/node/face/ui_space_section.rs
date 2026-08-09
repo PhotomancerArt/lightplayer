@@ -107,17 +107,22 @@ pub struct UiSpaceCell {
     pub direction: Option<UiSpaceDirection>,
 }
 
-/// The direction row under a directional projection cell (G1b ruling 4):
-/// a 4-way choice over the shared `ProjectionDirection` vocabulary.
+/// The direction row under a directional projection cell (G1b ruling 4
+/// + the mirror-direction ruling): a segmented choice over whatever
+/// direction vocabulary the ACTIVE shape declares — extrude's
+/// `ProjectionDirection` (`Right`…`Up`), mirror's `MirrorDirection`
+/// fold (`InwardX`…`OutwardY`).
 ///
-/// The four variants are static (`Right`/`Left`/`Down`/`Up` — one enum,
-/// no per-shape extras), so this carries only the ACTIVE ident plus the
-/// flattened direction row's address: a pick dispatches `EnsurePresent`
-/// at `address.child_field(<D>)`, the generic enum-row gesture.
+/// `variants` is read from the flattened enum row itself (declaration
+/// order), never hardcoded, so the web renders whichever vocabulary the
+/// model declares per shape. A pick dispatches `EnsurePresent` at
+/// `address.child_field(<variant>)`, the generic enum-row gesture.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSpaceDirection {
-    /// Active `ProjectionDirection` variant ident (`Right`…`Up`).
+    /// Active direction variant ident.
     pub active: String,
+    /// Every declared variant ident, in declaration order.
+    pub variants: Vec<String>,
     /// The flattened direction enum row's address
     /// (`<cell>.<Shape>.direction`). `None` renders inert.
     pub address: Option<ProjectSlotAddress>,

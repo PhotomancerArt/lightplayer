@@ -28,9 +28,23 @@ pub enum WireProjectionDirection {
     Up,
 }
 
+/// Wire mirror of `lpc_engine::products::visual::MirrorDirection` — a
+/// mirror fold's sense × axis (mirror-direction ruling: a fold is
+/// symmetric in run direction, so mirror gets its own vocabulary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireMirrorDirection {
+    InwardX,
+    /// Today's behavior (the runtime-side default).
+    OutwardX,
+    InwardY,
+    OutwardY,
+}
+
 /// Wire mirror of `lpc_engine::products::visual::CellProjection` — one cell
-/// of the 1D→2D projection matrix. Extrude/mirror carry their direction;
-/// radial/angular are direction-free by construction.
+/// of the 1D→2D projection matrix. Extrude carries its run direction,
+/// mirror its fold; radial/angular are direction-free by construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -38,7 +52,7 @@ pub enum WireCellProjection {
     Extrude(WireProjectionDirection),
     Radial,
     Angular,
-    Mirror(WireProjectionDirection),
+    Mirror(WireMirrorDirection),
 }
 
 /// Wire mirror of `lpc_engine::products::visual::ProjectionOrigin` — which
@@ -309,7 +323,7 @@ mod tests {
             format: WireTextureFormat::Rgba16,
             space: Some(WireVisualSpace::OneD),
             policy: Some(WireConsumerPolicy {
-                default_1d_to_2d: WireCellProjection::Mirror(WireProjectionDirection::Down),
+                default_1d_to_2d: WireCellProjection::Mirror(WireMirrorDirection::InwardY),
                 force: true,
             }),
         };

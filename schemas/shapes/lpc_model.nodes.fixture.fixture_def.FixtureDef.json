@@ -362,7 +362,7 @@
                                             "meta": {},
                                             "variants": [
                                               {
-                                                "name": "Right",
+                                                "name": "InwardX",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -370,7 +370,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Left",
+                                                "name": "OutwardX",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -378,7 +378,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Down",
+                                                "name": "InwardY",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}
@@ -386,7 +386,7 @@
                                                 }
                                               },
                                               {
-                                                "name": "Up",
+                                                "name": "OutwardY",
                                                 "shape": {
                                                   "unit": {
                                                     "meta": {}

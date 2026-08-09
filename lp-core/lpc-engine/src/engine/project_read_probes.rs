@@ -15,8 +15,8 @@ use lpc_wire::{
     RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
     WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
-    WirePhasorOrigin, WirePhasorRow, WireProjectionDirection, WireProjectionOrigin,
-    WireVisualSpace,
+    WireMirrorDirection, WirePhasorOrigin, WirePhasorRow, WireProjectionDirection,
+    WireProjectionOrigin, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -32,8 +32,8 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSamp
 
 use super::Engine;
 use crate::products::visual::{
-    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionDirection, ProjectionOrigin,
-    VisualSpace, resolve_1d_to_2d_with_origin,
+    CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo, ProjectionDirection,
+    ProjectionOrigin, VisualSpace, resolve_1d_to_2d_with_origin,
 };
 
 /// One output node found by the published-frame tree walk, snapshotted so the
@@ -622,7 +622,7 @@ fn wire_cell_projection(cell: CellProjection) -> WireCellProjection {
         CellProjection::Radial => WireCellProjection::Radial,
         CellProjection::Angular => WireCellProjection::Angular,
         CellProjection::Mirror(direction) => {
-            WireCellProjection::Mirror(wire_projection_direction(direction))
+            WireCellProjection::Mirror(wire_mirror_direction(direction))
         }
     }
 }
@@ -635,7 +635,7 @@ fn engine_cell_projection(cell: WireCellProjection) -> CellProjection {
         WireCellProjection::Radial => CellProjection::Radial,
         WireCellProjection::Angular => CellProjection::Angular,
         WireCellProjection::Mirror(direction) => {
-            CellProjection::Mirror(engine_projection_direction(direction))
+            CellProjection::Mirror(engine_mirror_direction(direction))
         }
     }
 }
@@ -655,6 +655,24 @@ fn engine_projection_direction(direction: WireProjectionDirection) -> Projection
         WireProjectionDirection::Left => ProjectionDirection::Left,
         WireProjectionDirection::Down => ProjectionDirection::Down,
         WireProjectionDirection::Up => ProjectionDirection::Up,
+    }
+}
+
+fn wire_mirror_direction(direction: MirrorDirection) -> WireMirrorDirection {
+    match direction {
+        MirrorDirection::InwardX => WireMirrorDirection::InwardX,
+        MirrorDirection::OutwardX => WireMirrorDirection::OutwardX,
+        MirrorDirection::InwardY => WireMirrorDirection::InwardY,
+        MirrorDirection::OutwardY => WireMirrorDirection::OutwardY,
+    }
+}
+
+fn engine_mirror_direction(direction: WireMirrorDirection) -> MirrorDirection {
+    match direction {
+        WireMirrorDirection::InwardX => MirrorDirection::InwardX,
+        WireMirrorDirection::OutwardX => MirrorDirection::OutwardX,
+        WireMirrorDirection::InwardY => MirrorDirection::InwardY,
+        WireMirrorDirection::OutwardY => MirrorDirection::OutwardY,
     }
 }
 

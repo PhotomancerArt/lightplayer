@@ -108,6 +108,26 @@ pub fn directed_coord(
     }
 }
 
+/// The strip coordinate a mirror FOLD produces from a normalized
+/// `(u, v)` (mirror-direction ruling): outward runs the strip from the
+/// centre line toward both edges (`|2s−1|` — the pre-direction mirror,
+/// verbatim, for `OutwardX`), inward from both edges toward the centre
+/// (`1 − |2s−1|`); the axis picks `x` or `y` as the folded coordinate.
+#[must_use]
+pub fn mirror_fold_coord(
+    direction: crate::products::visual::MirrorDirection,
+    u: f32,
+    v: f32,
+) -> f32 {
+    use crate::products::visual::MirrorDirection;
+    match direction {
+        MirrorDirection::OutwardX => mirror(u, v),
+        MirrorDirection::InwardX => 1.0 - mirror(u, v),
+        MirrorDirection::OutwardY => mirror(v, u),
+        MirrorDirection::InwardY => 1.0 - mirror(v, u),
+    }
+}
+
 /// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
 /// normalized target→source map.
 #[must_use]
@@ -117,7 +137,7 @@ pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v
         CellProjection::Extrude(direction) => extrude(directed_coord(direction, u, v), v),
         CellProjection::Radial => radial(u, v),
         CellProjection::Angular => angular(u, v),
-        CellProjection::Mirror(direction) => mirror(directed_coord(direction, u, v), v),
+        CellProjection::Mirror(direction) => mirror_fold_coord(direction, u, v),
     }
 }
 
@@ -244,7 +264,7 @@ mod tests {
 
     #[test]
     fn the_cell_dispatcher_matches_the_named_maps() {
-        use crate::products::visual::{CellProjection, ProjectionDirection};
+        use crate::products::visual::{CellProjection, MirrorDirection, ProjectionDirection};
         for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
             assert_close(
                 project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Right), u, v),
@@ -262,9 +282,9 @@ mod tests {
                 "angular",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Mirror(ProjectionDirection::Right), u, v),
+                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::OutwardX), u, v),
                 mirror(u, v),
-                "mirror",
+                "mirror (outward-x IS the pre-direction behavior)",
             );
         }
     }
@@ -287,11 +307,11 @@ mod tests {
     }
 
     /// The directional dispatcher arms compose direction with the existing
-    /// shape math — extrude-left is the reversed ramp, mirror-down folds
-    /// along the rows.
+    /// shape math — extrude-left is the reversed ramp; each mirror fold is
+    /// its sense × axis over the same `|2s−1|` core.
     #[test]
     fn directional_arms_compose_direction_with_the_shape_math() {
-        use crate::products::visual::{CellProjection, ProjectionDirection};
+        use crate::products::visual::{CellProjection, MirrorDirection, ProjectionDirection};
         for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
             assert_close(
                 project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Left), u, v),
@@ -299,14 +319,24 @@ mod tests {
                 "extrude ←",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Mirror(ProjectionDirection::Down), u, v),
-                mirror(v, u),
-                "mirror ↓",
-            );
-            assert_close(
                 project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Up), u, v),
                 extrude(1.0 - v, u),
                 "extrude ↑",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::InwardX), u, v),
+                1.0 - mirror(u, v),
+                "mirror →← (inward-x)",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::OutwardY), u, v),
+                mirror(v, u),
+                "mirror ↑↓ (outward-y)",
+            );
+            assert_close(
+                project_2d_to_1d(CellProjection::Mirror(MirrorDirection::InwardY), u, v),
+                1.0 - mirror(v, u),
+                "mirror ↓↑ (inward-y)",
             );
         }
     }

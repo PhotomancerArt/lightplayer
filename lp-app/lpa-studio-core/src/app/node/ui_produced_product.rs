@@ -270,15 +270,56 @@ impl UiProjectionDirection {
     }
 }
 
+/// UI mirror of `lpc_wire::WireMirrorDirection` — a mirror fold's sense
+/// × axis (mirror-direction ruling: a fold is symmetric in run
+/// direction, so mirror carries its own vocabulary, not
+/// [`UiProjectionDirection`]). `OutwardX` is today's behavior and the
+/// default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UiMirrorDirection {
+    InwardX,
+    #[default]
+    OutwardX,
+    InwardY,
+    OutwardY,
+}
+
+impl UiMirrorDirection {
+    /// The paired-arrow glyph captions and the direction row spell this
+    /// fold with (`mirror →←`).
+    #[must_use]
+    pub const fn arrows(self) -> &'static str {
+        match self {
+            Self::InwardX => "→←",
+            Self::OutwardX => "←→",
+            Self::InwardY => "↓↑",
+            Self::OutwardY => "↑↓",
+        }
+    }
+
+    /// Parse a RAW model variant ident; unknown idents read as the
+    /// default `OutwardX` (the additive contract).
+    #[must_use]
+    pub fn from_variant(variant: &str) -> Self {
+        match variant {
+            "InwardX" => Self::InwardX,
+            "InwardY" => Self::InwardY,
+            "OutwardY" => Self::OutwardY,
+            _ => Self::OutwardX,
+        }
+    }
+}
+
 /// UI mirror of `lpc_wire::WireCellProjection` — one cell of the 1D→2D
-/// projection matrix. Extrude/mirror carry their direction (G1b ruling
-/// 4); radial/angular are direction-free by construction.
+/// projection matrix. Extrude carries its run direction (G1b ruling 4),
+/// mirror its own fold; radial/angular are direction-free by
+/// construction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiCellProjection {
     Extrude(UiProjectionDirection),
     Radial,
     Angular,
-    Mirror(UiProjectionDirection),
+    Mirror(UiMirrorDirection),
 }
 
 /// UI mirror of `lpc_wire::WireProjectionOrigin` — which precedence arm

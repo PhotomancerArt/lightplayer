@@ -58,9 +58,9 @@ pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
     UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat,
-    UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductSpaceView, UiProductTrackingState, UiProjectionDirection, UiProjectionOrigin,
-    UiVisualProductSpace, UiVisualSpace,
+    UiMirrorDirection, UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame,
+    UiProductRef, UiProductSpaceView, UiProductTrackingState, UiProjectionDirection,
+    UiProjectionOrigin, UiVisualProductSpace, UiVisualSpace,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_shader_uniform::UiShaderUniform;

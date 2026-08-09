@@ -90,14 +90,50 @@ impl ProjectionDirection {
     }
 }
 
+/// Which way a mirror FOLD runs — the runtime mirror of
+/// `lpc_model::MirrorDirection` (mirror-direction ruling, 2026-08-09).
+/// Mirror gets its own vocabulary because a fold is symmetric in run
+/// direction (`mirror(x) ≡ mirror(1−x)`): the real choices are fold
+/// sense × axis. `OutwardX` (`u′ = |2x−1|`) is the default and IS the
+/// pre-direction mirror behavior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MirrorDirection {
+    /// `→←` — from both edges toward the centre column
+    /// (`u′ = 1 − |2x−1|`).
+    InwardX,
+    /// `←→` — from the centre column toward both edges
+    /// (`u′ = |2x−1|`, today's behavior).
+    #[default]
+    OutwardX,
+    /// `↓↑` — from top/bottom edges toward the centre row.
+    InwardY,
+    /// `↑↓` — from the centre row toward top/bottom edges.
+    OutwardY,
+}
+
+impl MirrorDirection {
+    /// The paired-arrow glyph captions spell this fold with
+    /// (`mirror →←`).
+    #[must_use]
+    pub const fn arrows(self) -> &'static str {
+        match self {
+            Self::InwardX => "→←",
+            Self::OutwardX => "←→",
+            Self::InwardY => "↓↑",
+            Self::OutwardY => "↑↓",
+        }
+    }
+}
+
 /// One cell of the projection matrix: the coordinate map that fills a 2D
 /// sampling space from a 1D source.
 ///
 /// The runtime mirror of `lpc_model::SpaceAnswer2` (producer opinion) and
 /// `lpc_model::ConsumerCell2` (consumer default) — they are the same four
 /// maps seen from the two sides of the negotiation. The math lives in
-/// [`super::coordinates`]. Extrude/mirror carry a [`ProjectionDirection`]
-/// (G1b ruling 4); radial/angular are direction-free by construction.
+/// [`super::coordinates`]. Extrude carries a [`ProjectionDirection`]
+/// (G1b ruling 4), mirror its own [`MirrorDirection`] fold; radial and
+/// angular are direction-free by construction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CellProjection {
     /// `t = u` along the direction — the system default (`Right`): the
@@ -107,9 +143,8 @@ pub enum CellProjection {
     Radial,
     /// `t = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`.
     Angular,
-    /// `t = |2u − 1|` along the direction — the strip runs out from the
-    /// centre line both ways.
-    Mirror(ProjectionDirection),
+    /// The strip folded along the fold's axis, running in its sense.
+    Mirror(MirrorDirection),
 }
 
 impl Default for CellProjection {
@@ -130,16 +165,6 @@ impl CellProjection {
             Self::Radial => "radial",
             Self::Angular => "angular",
             Self::Mirror(_) => "mirror",
-        }
-    }
-
-    /// The direction a directional shape runs in; `None` for the
-    /// direction-free shapes.
-    #[must_use]
-    pub const fn direction(self) -> Option<ProjectionDirection> {
-        match self {
-            Self::Extrude(direction) | Self::Mirror(direction) => Some(direction),
-            Self::Radial | Self::Angular => None,
         }
     }
 }
@@ -267,7 +292,7 @@ mod tests {
     fn an_authored_opinion_beats_the_consumer_default() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
+            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
             force: false,
         };
         assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Radial);
@@ -300,7 +325,7 @@ mod tests {
     fn origin_reports_declared_for_an_authored_opinion() {
         let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Mirror(ProjectionDirection::Right),
+            default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
             force: false,
         };
         assert_eq!(
@@ -347,7 +372,7 @@ mod tests {
         assert_eq!(CellProjection::Radial.label(), "radial");
         assert_eq!(CellProjection::Angular.label(), "angular");
         assert_eq!(
-            CellProjection::Mirror(ProjectionDirection::Down).label(),
+            CellProjection::Mirror(MirrorDirection::InwardY).label(),
             "mirror"
         );
     }
