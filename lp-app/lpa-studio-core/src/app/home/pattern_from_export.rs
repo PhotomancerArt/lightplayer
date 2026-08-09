@@ -16,9 +16,12 @@
 //!   source export's, so the template's root `module.json` (which
 //!   references `./effect/module.json`) needs no rewriting and the
 //!   manifest's `exports` stays `["effect"]`;
-//! - the rig is always the 1D one. Choosing 1D vs 2D from the export's own
-//!   content is T2 (shader space) territory, and guessing it here would be
-//!   a guess the author cannot see, let alone correct.
+//! - the rig is always the 1D one — and it carries BOTH shapes (strand +
+//!   panel), so a 2D export is still judged on the surface it wants.
+//!   Deriving the rig from the export's declared `ShaderSpace` is now
+//!   *possible* (the declaration exists since format v8) but stays future
+//!   work: an export folder can hold more than one shader, so the pick
+//!   would be a guess the author cannot see, let alone correct.
 //!
 //! Everything else — the relative-refs-survive-re-rooting property, the
 //! R14 provenance stamp — is the import path's, reused verbatim from
