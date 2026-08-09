@@ -80,6 +80,24 @@ automatically). `render_2d(vec2 pos)` returns the color at `pos`, called for eve
 position each frame. Inputs arrive as `layout(binding = N) uniform`
 declarations. No `main()`, no varyings, no version pragma.
 
+**Dimensionality is declared, not guessed.** The shader card's
+`dimensionality` drawer — between `code` and `advanced` — is where you
+say which entry point this shader writes, and the two never disagree
+silently: mismatch is an error on the card. A 1D shader also says what a
+2D fixture should do with it: pick a shape (extrude across x or y,
+radial, angular) and flip or mirror it. That is the whole vocabulary,
+and each choice draws what it does to a strip, so you pick by looking.
+Nothing extra appears in your graph — the projection happens where the
+fixture samples the shader.
+
+Fixtures have the mirror image of that control, one row of the same
+tiles: *along the wire* (run the pattern in wire order and ignore the
+map — what a WLED-style strip does, with a forward/reversed choice),
+*follow the source* (take whatever the shader declared), or an explicit
+shape that overrides the shader. `examples/palette-waves` is the whole
+idea in one project: a strip effect declaring `radial`, landing on a
+disc fixture as rings.
+
 **Knobs are declared, not built.** The shader's sidecar (`shader.json`)
 lists what it consumes: a plain value (`scale`, with min/max/default)
 or a phasor (a cycle position the clock advances). Anything bound to a
