@@ -1470,6 +1470,92 @@ mod tests {
         );
     }
 
+    /// The other direction, and the one output fragments create: a buffer
+    /// LONGER than the authored counts add up to, because a second producer
+    /// was merged onto the same output. The wire split is a second coordinate
+    /// system over the same buffer and it is authored, not derived — so
+    /// fully-counted wires carry exactly what they authored and the extra
+    /// samples simply go nowhere, silently. A tail nobody claimed is not a
+    /// defect to warn about; the OUTPUT is where an unclaimed range is
+    /// reported (`OutputNode::runtime_status`).
+    #[test]
+    fn a_fragment_grown_buffer_leaves_fully_counted_wires_alone() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        // Eight lamps for a project that authored 2 + 3: a second fixture's
+        // fragment grew the buffer past what the wires ask for.
+        let buffer_id = ramp_buffer(&mut buffers, 8, Revision::new(1));
+        let config = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+            ),
+            (
+                1,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
+            ),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("a long buffer must not fail the frame");
+
+        assert_eq!(provider.open_channel_count(), 2);
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D9"),
+            ramp(6, 9),
+            "each wire carries exactly its authored count; the tail is unclaimed"
+        );
+    }
+
+    /// …and a remainder channel GROWS with the buffer, which is what makes
+    /// "add a second strand to this output" work with no re-authoring at all:
+    /// the last wire simply carries more lamps.
+    #[test]
+    fn a_fragment_grown_buffer_extends_the_remainder_wire() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let four_lamps = ramp_buffer(&mut buffers, 4, Revision::new(1));
+        let config = OutputDef::new(endpoint("ws281x:local:D10"));
+        services.register_output_sink(four_lamps, node(1), &config);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("first flush");
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 12));
+
+        // A second producer merges in; the buffer doubles under the same
+        // authored output.
+        let mut buffers = RuntimeBufferStore::new();
+        let eight_lamps = ramp_buffer(&mut buffers, 8, Revision::new(2));
+        services.unregister_output_sink(four_lamps);
+        services.register_output_sink(eight_lamps, node(1), &config);
+        services
+            .flush_dirty_output_sinks(Revision::new(2), &buffers)
+            .expect("second flush");
+
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D10"),
+            ramp(0, 24),
+            "the remainder wire takes the whole grown buffer"
+        );
+    }
+
     /// Every provider refuses a write shorter than the channel it opened, so a
     /// wire whose slice shrank must give the channel back and take a
     /// right-sized one. Without the reopen this fails every frame, forever.

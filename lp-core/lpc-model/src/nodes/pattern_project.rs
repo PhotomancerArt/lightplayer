@@ -35,8 +35,13 @@
 //!
 //! Each rig fixture gets its **own** control channel (`control.strip_300`,
 //! `control.matrix_32x16`) and its own output, the `examples/plasma-duo`
-//! idiom: two fixtures writing one `control.out` would be a contention the
-//! author never asked for.
+//! idiom. Two fixtures writing one `control.out` is no longer the *ambiguity*
+//! it once was — an output consumes its control input with
+//! `merge = "fragments"`, so several producers on one channel concatenate
+//! into one wire in provider order (output fragments, D8/D17v). It is still
+//! the wrong shape here: these rigs are two physically separate strands on
+//! two pins, and a shared channel would put both of them, end to end, on
+//! *each* output's wire.
 //!
 //! The two templates differ in **declared space**, not just in rig: the 1D
 //! template's shader is a true `vec4 render_1d(float pos)` declaring
@@ -745,15 +750,34 @@ mod tests {
         }
     }
 
-    /// Each rig owns its own control channel and its own wire: two
-    /// fixtures on one `control.out` would be a contention the author
-    /// never asked for, and two outputs on one pin would be a lie.
+    /// Each rig owns its own control channel and its own wire.
+    ///
+    /// The reason changed with output fragments (D8/D17v) and the assertion
+    /// got sharper because of it: sharing `control.out` is now *defined* —
+    /// the two fixtures would concatenate into one fragment set — so the
+    /// templates are not avoiding an error, they are declaring that these are
+    /// two strands on two pins. What must hold is that neither rig names the
+    /// shared channel, since that is exactly the wiring that would put both
+    /// rigs' lamps on both wires. (Two outputs on one pin would still be a
+    /// lie, which the endpoint assertions below cover.)
     #[test]
     fn each_rig_drives_its_own_channel_and_wire() {
         let registry = registry();
         let files = pattern_project_files_1d("demo", &registry).expect("compose");
         assert!(text(&files, "strip_300.json").contains("bus:control.strip_300"));
         assert!(text(&files, "matrix_32x16.json").contains("bus:control.matrix_32x16"));
+        for file in [
+            "strip_300.json",
+            "matrix_32x16.json",
+            "strip_300_out.json",
+            "matrix_32x16_out.json",
+        ] {
+            assert!(
+                !text(&files, file).contains("bus:control.out"),
+                "{file} must not join the shared control channel: two rigs there \
+                 concatenate onto every output that reads it",
+            );
+        }
         assert!(text(&files, "strip_300_out.json").contains("bus:control.strip_300"));
         assert!(text(&files, "matrix_32x16_out.json").contains("bus:control.matrix_32x16"));
         assert!(text(&files, "strip_300_out.json").contains("ws281x:local:D10"));
