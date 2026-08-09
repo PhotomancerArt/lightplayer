@@ -19,6 +19,21 @@ pub fn generate_compute_shader_header(
     def: &ComputeShaderDef,
     registry: &SlotShapeRegistry,
 ) -> Result<String, ShaderHeaderGenError> {
+    // The budget valve sits here — the first place an authored `len` meets
+    // code — so `len: 1000000000` is a named authoring diagnostic, never a
+    // downstream allocation attempt. Fixed default for now
+    // (docs/debt/shader-budget-is-a-fixed-default.md).
+    crate::validate_shader_slot_budget(
+        def.consumed_slots
+            .entries
+            .iter()
+            .chain(def.produced_slots.entries.iter())
+            .map(|(name, slot)| (name.as_str(), slot)),
+        registry,
+        &crate::ShaderBudget::default(),
+    )
+    .map_err(ShaderHeaderGenError::BudgetExceeded)?;
+
     let mut out = String::new();
     let mut emitted_structs = Vec::new();
 
@@ -141,6 +156,7 @@ pub fn generate_compute_shader_header(
 pub enum ShaderHeaderGenError {
     MissingMapping,
     MissingBufferLen,
+    BudgetExceeded(crate::ShaderBudgetError),
     UnknownNativeShape(String),
     Unsupported(&'static str),
     UnsupportedType(String),
@@ -152,6 +168,7 @@ impl core::fmt::Display for ShaderHeaderGenError {
         match self {
             Self::MissingMapping => f.write_str("shader map slot is missing mapping"),
             Self::MissingBufferLen => f.write_str("shader buffer slot is missing len"),
+            Self::BudgetExceeded(err) => write!(f, "{err}"),
             Self::UnknownNativeShape(name) => write!(f, "unknown native shader shape {name:?}"),
             Self::Unsupported(message) => f.write_str(message),
             Self::UnsupportedType(ty) => write!(f, "unsupported shader value type {ty}"),
@@ -447,6 +464,37 @@ mod tests {
                 "buffer slots require builtin scalar/vector values"
             ))
         ));
+    }
+
+    /// The regression test for the hole that existed before the budget: an
+    /// authored sentinel len of a billion reached the engine's Vec resize
+    /// and the VMContext sizing unchecked.
+    #[test]
+    fn absurd_lens_fail_at_header_generation() {
+        for slot in [
+            ShaderSlotDef::map_u32_native(
+                "lp::fluid::Emitter",
+                ShaderSlotMappingDef::sentinel(1_000_000_000, "id", 0),
+            ),
+            ShaderSlotDef::buffer_builtin("f32", 1_000_000_000),
+        ] {
+            let mut produced = VecMap::new();
+            produced.insert(String::from("state"), slot);
+            let def = ComputeShaderDef {
+                source: AssetSlot::path("state.glsl"),
+                bindings: crate::BindingDefs::default(),
+                float_mode: crate::OptionSlot::none(),
+                consumed_slots: MapSlot::default(),
+                produced_slots: MapSlot::new(produced),
+            };
+
+            let err = generate_compute_shader_header(&def, &SlotShapeRegistry::default())
+                .expect_err("over budget");
+            assert!(
+                matches!(err, ShaderHeaderGenError::BudgetExceeded(ref e) if e.slot == "state"),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]

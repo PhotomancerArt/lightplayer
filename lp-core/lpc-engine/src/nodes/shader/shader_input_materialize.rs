@@ -20,6 +20,19 @@ pub fn materialize_shader_input(
     data: Option<&SlotData>,
     registry: &SlotShapeRegistry,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
+    // Defense in depth at the allocation site: the compile seams validate
+    // whole defs, but this function resizes a `Vec` straight off the
+    // authored `len`, and hosts that never compile (unit fakes, partial
+    // wiring) still reach it.
+    let bytes = lpc_model::slot_bytes_estimate(slot, registry);
+    let budget = lpc_model::ShaderBudget::default();
+    if bytes > u64::from(budget.max_slot_bytes) {
+        return Err(ShaderInputMaterializeError::OverBudget {
+            slot: String::from(slot_name),
+            bytes,
+            budget: budget.max_slot_bytes,
+        });
+    }
     match slot.kind.value() {
         // Timebase kinds never arrive here from the shader nodes (their
         // evaluator answers first); the f32 path is the honest fallback for
@@ -72,6 +85,11 @@ pub enum ShaderInputMaterializeError {
         expected: String,
         got: String,
     },
+    OverBudget {
+        slot: String,
+        bytes: u64,
+        budget: u32,
+    },
     Value(String),
 }
 
@@ -121,6 +139,14 @@ impl core::fmt::Display for ShaderInputMaterializeError {
             } => write!(
                 f,
                 "shader buffer input {slot:?} expected {expected}, got {got}"
+            ),
+            Self::OverBudget {
+                slot,
+                bytes,
+                budget,
+            } => write!(
+                f,
+                "shader input {slot:?} declares {bytes} bytes, over the {budget} byte budget"
             ),
             Self::Value(message) => f.write_str(message),
         }
@@ -517,6 +543,22 @@ mod tests {
         assert!(matches!(
             err,
             ShaderInputMaterializeError::BufferShapeMismatch { .. }
+        ));
+    }
+
+    /// The materialize-level valve fires BEFORE any allocation is sized
+    /// from the authored len — this test would OOM the process if it did
+    /// not.
+    #[test]
+    fn over_budget_input_errors_before_allocating() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::buffer_builtin("f32", 1_000_000_000);
+
+        let err = materialize_shader_input("heat", &slot, None, &registry).expect_err("budget");
+
+        assert!(matches!(
+            err,
+            ShaderInputMaterializeError::OverBudget { .. }
         ));
     }
 
