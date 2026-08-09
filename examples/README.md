@@ -36,9 +36,9 @@ authored binding to a bus channel
 | `plasma-duo` | `speed`, `scale`, `palette` | one shader and one palette channel feeding two fixtures (disc + grid) with separate outputs |
 | `zook-dome` | `speed` | a real 1500-LED dome across five output channels |
 | `meteor` | `decay` | a compute/render pair — `sim` integrates meteor heads into a persistent map, `render` draws their tails over a `node:` binding |
-| `comet` | `speed`, `tail`, `palette` | a true 1D shader: `vec4 render_1d(float)` against a 120-lamp strip, declaring `OneD { in_2d: Default }` so a 2D consumer picks the projection. Ported from WLED |
-| `palette-waves` | `speed`, `scale`, `depth`, `palette` | the declared-projection example: a 1D shader declaring `OneD { in_2d: Radial }`, so the strip it is written along arrives on the disc fixture as rings. Ported from WLED |
-| `fire2012` | `speed`, `reach`, `sparks`, `palette` | a fire climbing a 120-lamp strip, declaring `OneD { in_2d: Default }`. Ported from WLED — but *stateless*: the per-cell heat simulation is not ported, the closed form writes down what it settles into |
+| `comet` | `speed`, `tail`, `palette` | a true 1D shader: `vec4 render_1d(float)` against a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }` — the factored default projection. Ported from WLED |
+| `palette-waves` | `speed`, `scale`, `depth`, `palette` | the declared-projection example: a 1D shader declaring `OneD { in_2d: Project { radial } }`, so the strip it is written along arrives on the disc fixture as rings. Ported from WLED |
+| `fire2012` | `speed`, `reach`, `sparks`, `palette` | a fire climbing a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }`. Ported from WLED — but *stateless*: the per-cell heat simulation is not ported, the closed form writes down what it settles into |
 | `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
 | `button` | — | input nodes and playlist triggering |
 | `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |

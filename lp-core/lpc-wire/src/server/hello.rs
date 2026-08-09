@@ -33,6 +33,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 15: the projection factorization (post-G2 ruling, format v9) —
+///   `WireCellProjection` becomes the factored `{shape, mirror, flip}`
+///   RECORD over a new `WireProjectionShape` (extrude_x/extrude_y/radial/
+///   angular), replacing the per-shape direction payload enums, and
+///   `WireProjectionOrigin` loses `consumer_default` (the producer always
+///   declares; the fill rung is gone). Both are breaking shape changes on
+///   the render-product probe's policy and result metadata.
 /// - 14: radial/angular flips (post-G1b ruling) — `WireCellProjection`'s
 ///   `Radial`/`Angular` variants grow their own direction payloads
 ///   (`WireRadialDirection` outward/inward, `WireAngularDirection`
@@ -113,7 +120,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 14;
+pub const WIRE_PROTO_VERSION: u32 = 15;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

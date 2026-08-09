@@ -29,10 +29,10 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    LpValue, ProjectSlotAddress, UiAction, UiAngularDirection, UiCellProjection, UiMirrorDirection,
-    UiNodeFace, UiProjectionDirection, UiProjectionOrigin, UiRadialDirection, UiSpaceCell,
-    UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiVisualSpace,
+    LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiNodeFace, UiProjectionOrigin,
+    UiProjectionShape, UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
+    UiSpaceMismatch, UiSpaceModifiers, UiSpaceSection, UiSpaceSide, UiVisualSpace,
+    UiWireDirectionRow,
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_value_action};
@@ -58,17 +58,18 @@ const CONSUMER_PRIMARY_LABEL: &str = "show 1D sources by";
 /// differently per cell.
 const SPACE_ONE_D: &str = "1D";
 const SPACE_TWO_D: &str = "2D";
-/// Producer `Default` on the 2D answer: honest about what it resolves to.
-/// `Auto` ≡ `Policy { from_1d: Extrude, force: false }` on the consumer
-/// side, and the one dropdown's explicit picks always force — so a silent
-/// declaration lands on extrude in every UI-reachable state. G1 ruling:
-/// "there should always be a default… on the producer side"; "consumer
-/// decides" is gone.
-const PROJECTION_DEFAULT_EXTRUDE: &str = "extrude · default";
-const PROJECTION_EXTRUDE: &str = "extrude";
-const PROJECTION_RADIAL: &str = "radial";
-const PROJECTION_ANGULAR: &str = "angular";
-const PROJECTION_MIRROR: &str = "mirror";
+/// The factored shape vocabulary (THE FACTORIZATION): four base shapes,
+/// refined by the two modifier toggles beneath the tiles.
+const SHAPE_EXTRUDE_X: &str = "extrude-x";
+const SHAPE_EXTRUDE_Y: &str = "extrude-y";
+const SHAPE_RADIAL: &str = "radial";
+const SHAPE_ANGULAR: &str = "angular";
+/// The modifier words, as the toggles label themselves and as captions
+/// spell them (`extrude-x · mirrored · flipped`).
+const MODIFIER_MIRROR: &str = "mirror";
+const MODIFIER_FLIP: &str = "flip";
+const MODIFIER_MIRRORED: &str = "mirrored";
+const MODIFIER_FLIPPED: &str = "flipped";
 const PROJECTION_CENTRE_SCANLINE: &str = "centre scanline";
 /// The consumer dropdown's default entry.
 const CONSUMER_FOLLOW: &str = "follow the source";
@@ -81,42 +82,20 @@ const CONSUMER_ALONG_WIRE: &str = "along the wire";
 /// variant — the pick dispatches the bool `SetValue`, never an ensure).
 const ALONG_WIRE_VARIANT: &str = "AlongWire";
 
-/// The direction row under a directional shape (G1b ruling 4: "top
-/// section is general shape, below that is direction").
+/// The wire-direction row under the along-the-wire selection.
 const DIRECTION_ROW_LABEL: &str = "direction";
-
-/// One direction segment's glyph and tooltip, by RAW variant ident —
-/// per-shape vocabularies (mirror-direction ruling): single arrows for
-/// extrude's run direction, PAIRED arrows for mirror's fold, and the
-/// along-the-wire choice's forward/reversed pair.
-fn direction_segment_face(variant: &str) -> (&'static str, &'static str) {
-    match variant {
-        "Right" => ("→", "left → right"),
-        "Left" => ("←", "right → left"),
-        "Down" => ("↓", "top → bottom"),
-        "Up" => ("↑", "bottom → top"),
-        "InwardX" => ("→←", "from both edges toward the centre"),
-        "OutwardX" => ("←→", "from the centre toward both edges"),
-        "InwardY" => ("↓↑", "from top and bottom toward the centre"),
-        "OutwardY" => ("↑↓", "from the centre toward top and bottom"),
-        "Forward" => ("→", "wire order, as wired"),
-        "Reversed" => ("←", "wire order, reversed"),
-        "Outward" => ("outward", "centre → edge"),
-        "Inward" => ("inward", "edge → centre"),
-        "Clockwise" => ("↻", "swept clockwise"),
-        "CounterClockwise" => ("↺", "swept counter-clockwise"),
-        _ => ("·", "unknown direction"),
-    }
-}
+/// The modifier toggles' tooltips (the same uniform chain the engine
+/// runs: mirror folds first, flip reverses after).
+const MIRROR_TITLE: &str = "fold the strip around the middle — out and back";
+const FLIP_TITLE: &str = "reverse the strip";
 
 /// One line per choice in the picker's tiles.
-const HINT_DEFAULT_EXTRUDE: &str = "the standard projection, unless a fixture overrides";
 const HINT_FOLLOW: &str = "each source projects the way it declares";
 const HINT_ALONG_WIRE: &str = "run in wire order — the map doesn't apply";
-const HINT_EXTRUDE: &str = "the strip, stretched down";
+const HINT_EXTRUDE_X: &str = "the strip, stretched down";
+const HINT_EXTRUDE_Y: &str = "the strip, stretched across";
 const HINT_RADIAL: &str = "the strip, out from the centre";
 const HINT_ANGULAR: &str = "the strip, swept around";
-const HINT_MIRROR: &str = "the strip, folded at the centre";
 const HINT_CENTRE_SCANLINE: &str = "the texture's centre row, read as a strip";
 
 /// What this side is saying, in one line under the primary row.
@@ -153,7 +132,6 @@ pub(crate) const PREVIEW_SPACES_LAST_ON: &str = "one preview space has to stay o
 const CAPTION_NATIVE: &str = "native";
 const CAPTION_IN: &str = "in";
 const ORIGIN_DECLARED: &str = "declared";
-const ORIGIN_CONSUMER_DEFAULT: &str = "consumer default";
 const ORIGIN_FORCED: &str = "forced";
 
 // ---------------------------------------------------------------------------
@@ -262,9 +240,11 @@ fn SpaceSegments(
 /// inline `force` bit is gone (P4b): an explicit pick IS the override,
 /// dispatched as part of the choice.
 ///
-/// When the ACTIVE shape is directional the `direction` row renders
-/// beneath the tiles (G1b ruling 4's second section) — shape first,
-/// direction under it, never a flattened everything-grid.
+/// The factored form (THE FACTORIZATION): the two modifier toggles
+/// ("mirror", "flip") render beneath the tiles when a projection is
+/// active; the along-the-wire state gets the wire's [forward|reversed]
+/// row instead. Shape first, modifiers under it — never a flattened
+/// sixteen-tile grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceCellRow(
@@ -272,7 +252,8 @@ fn SpaceCellRow(
     side: UiSpaceSide,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let direction = cell.direction.clone();
+    let modifiers = cell.modifiers.clone();
+    let wire_direction = cell.wire_direction.clone();
     let choosable = cell.is_choosable() && on_action.is_some();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
@@ -296,81 +277,139 @@ fn SpaceCellRow(
                         ProjectionGlyph { kind: active_glyph(&cell) }
                     }
                     span { class: "tw:min-w-0 tw:truncate",
-                        "{active_variant_label(side, &cell)}{directional_suffix(&cell)}"
+                        "{active_variant_label(side, &cell)}{modifier_suffix(&cell)}"
                     }
                 }
             }
         }
-        if let Some(direction) = direction {
-            SpaceDirectionRow { direction, on_action }
+        if let Some(modifiers) = modifiers {
+            SpaceModifierToggles { modifiers, on_action }
+        }
+        if let Some(wire) = wire_direction {
+            WireDirectionRow { wire, on_action }
         }
     }
 }
 
-/// The direction row (G1b ruling 4): a segmented control drawing the
-/// arrows, in the same squared-blocks discrete language as the 2D|1D
-/// tabs. A pick dispatches whatever the row's backing slot already takes
-/// — `EnsurePresent <direction row>.<D>` for an enum payload row,
-/// `SetValue` for the along-the-wire bool — so the row stays a
-/// presentation of the same write path.
+/// The two modifier toggles under the shape tiles ("mirror", "flip") in
+/// the discrete checkbox style — each an ordinary bool `SetValue` at the
+/// flattened `Project` payload row it presents.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceDirectionRow(
-    direction: UiSpaceDirection,
+fn SpaceModifierToggles(
+    modifiers: UiSpaceModifiers,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let active = direction.active.clone();
-    let dispatch = direction.dispatch;
-    let wiring = field_wiring(&direction.state, &direction.address, on_action);
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-4",
+            ModifierCheckbox {
+                label: MODIFIER_MIRROR,
+                title: MIRROR_TITLE,
+                row: modifiers.mirror,
+                on_action,
+            }
+            ModifierCheckbox {
+                label: MODIFIER_FLIP,
+                title: FLIP_TITLE,
+                row: modifiers.flip,
+                on_action,
+            }
+        }
+    }
+}
+
+/// One modifier checkbox: a squared box plus its word, dispatching the
+/// ordinary `SetValue` a bool row dispatches.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModifierCheckbox(
+    label: &'static str,
+    title: &'static str,
+    row: UiSpaceBoolRow,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let value = row.value;
+    let Some((address, handler)) = field_wiring(&row.state, &row.address, on_action) else {
+        return rsx! {
+            span {
+                class: "tw:inline-flex tw:items-center tw:gap-1.5 tw:text-[11px] tw:text-dim-foreground",
+                title,
+                span { class: checkbox_box_class(value), aria_hidden: "true",
+                    if value {
+                        StudioIcon { name: StudioIconName::StepComplete, size: 10 }
+                    }
+                }
+                "{label}"
+            }
+        };
+    };
+
+    rsx! {
+        button {
+            class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-[11px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
+            r#type: "button",
+            title,
+            aria_pressed: "{value}",
+            onclick: move |event| {
+                event.stop_propagation();
+                handler.call(slot_set_value_action(address.clone(), LpValue::Bool(!value)));
+            },
+            span { class: checkbox_box_class(value), aria_hidden: "true",
+                if value {
+                    StudioIcon { name: StudioIconName::StepComplete, size: 10 }
+                }
+            }
+            "{label}"
+        }
+    }
+}
+
+/// The along-the-wire [forward|reversed] row: two arrow segments in the
+/// squared-blocks discrete language, over the fixture's `wire_reversed`
+/// bool — an ordinary `SetValue` behind each segment.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn WireDirectionRow(
+    wire: UiWireDirectionRow,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let reversed = wire.reversed;
+    let wiring = field_wiring(&wire.state, &wire.address, on_action);
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
             span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
             span { class: DIRECTION_GROUP_CLASS,
-                // The variant list comes from the backing row — each shape
-                // brings its OWN vocabulary (extrude's run directions,
-                // mirror's folds, the wire's forward/reversed), never a
-                // hardcoded 4-way.
-                for candidate in direction.variants.clone() {
+                for (candidate_reversed , glyph , title) in [
+                    (false, "→", "wire order, as wired"),
+                    (true, "←", "wire order, reversed"),
+                ] {
                     if let Some((address, handler)) = wiring.clone() {
                         button {
-                            key: "{candidate}",
-                            class: direction_segment_class(candidate == active),
+                            key: "{candidate_reversed}",
+                            class: direction_segment_class(candidate_reversed == reversed),
                             r#type: "button",
-                            title: direction_segment_face(&candidate).1,
-                            onclick: {
-                                let selected = candidate == active;
-                                let candidate = candidate.clone();
-                                move |event: MouseEvent| {
-                                    event.stop_propagation();
-                                    if selected {
-                                        return;
-                                    }
-                                    match dispatch {
-                                        lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant => {
-                                            if let Some(target) = address.child_field(&candidate) {
-                                                handler.call(slot_ensure_present_action(target));
-                                            }
-                                        }
-                                        lpa_studio_core::UiSpaceDirectionDispatch::ReversedBool => {
-                                            handler
-                                                .call(
-                                                    slot_set_value_action(
-                                                        address.clone(),
-                                                        LpValue::Bool(candidate == "Reversed"),
-                                                    ),
-                                                );
-                                        }
-                                    }
+                            title,
+                            onclick: move |event: MouseEvent| {
+                                event.stop_propagation();
+                                if candidate_reversed == reversed {
+                                    return;
                                 }
+                                handler
+                                    .call(
+                                        slot_set_value_action(
+                                            address.clone(),
+                                            LpValue::Bool(candidate_reversed),
+                                        ),
+                                    );
                             },
-                            "{direction_segment_face(&candidate).0}"
+                            "{glyph}"
                         }
                     } else {
                         span {
-                            key: "{candidate}",
-                            class: direction_segment_class(candidate == active),
-                            title: direction_segment_face(&candidate).1,
-                            "{direction_segment_face(&candidate).0}"
+                            key: "{candidate_reversed}",
+                            class: direction_segment_class(candidate_reversed == reversed),
+                            title,
+                            "{glyph}"
                         }
                     }
                 }
@@ -388,8 +427,9 @@ fn SpaceDirectionRow(
 ///   consume policy is untouched (the true bit gates it anyway);
 /// - `Auto` is `SetValue strip_order = false` + the plain
 ///   `EnsurePresent consume.Auto`;
-/// - a projection is `SetValue strip_order = false` →
-///   ensure-`Policy` → ensure-`from_1d.<V>` → set-`force = true`.
+/// - a shape is `SetValue strip_order = false` → ensure-`Policy` →
+///   ensure-`from_1d.Project.shape.<Shape>` (the factored cell's shape
+///   row) → set-`force = true`.
 ///
 /// Each op is exactly what the drawer's own rows would send (structural
 /// ensures order before assignments in the overlay), so the dropdown
@@ -425,7 +465,9 @@ fn choice_actions(
         actions.push(slot_ensure_present_action(policy.clone()));
         if let Some(target) = policy
             .child_field("from_1d")
-            .and_then(|field| field.child_field(variant))
+            .and_then(|field| field.child_field("Project"))
+            .and_then(|project| project.child_field("shape"))
+            .and_then(|shape| shape.child_field(variant))
         {
             actions.push(slot_ensure_present_action(target));
         }
@@ -439,12 +481,6 @@ fn choice_actions(
         .map(slot_ensure_present_action)
         .into_iter()
         .collect()
-}
-
-/// The glyph for a cell's active choice, oriented to its active
-/// direction.
-fn active_glyph(cell: &UiSpaceCell) -> SpaceGlyph {
-    glyph_with_active_direction(cell)
 }
 
 /// The shared choice-tiles control (the inline-tiles ruling): one
@@ -521,80 +557,76 @@ pub fn ChoiceTiles(
     }
 }
 
-/// What a tile or field glyph draws. Web-side vocabulary, deliberately
-/// wider than [`UiCellProjection`]: the DTO says what a choice FORCES in a
-/// probe; this says what the drawing shows — which lets the producer's
-/// `Default` wear the extrude it resolves to and the 2D→1D statement draw
-/// its centre scanline. The directional shapes carry their own direction
-/// vocabulary (G1b ruling 4 + the mirror-direction ruling): the ramp
-/// drawing follows it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// What a tile or field glyph draws. Web-side vocabulary, wider than
+/// [`UiCellProjection`]: the projection drawings run the SAME transform
+/// chain the engine runs (one drawing function — the factorization
+/// ruling), and the deferring choices keep their own schematics.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SpaceGlyph {
-    Extrude(UiProjectionDirection),
-    Radial(UiRadialDirection),
-    Angular(UiAngularDirection),
-    Mirror(UiMirrorDirection),
+    /// A factored projection cell: the drawing IS the chain, evaluated
+    /// over a grid (see [`chain_cells`]).
+    Projection(UiCellProjection),
     /// The 2D→1D answer: the texture's centre row, read as a strip.
     CentreScanline,
     /// The consumer dropdown's `Auto`: the answer lives on the source.
     FollowSource,
     /// The consumer dropdown's along-the-wire choice: the strip runs in
     /// wire order and the map does not apply — drawn as a serpentine wire
-    /// carrying the ramp. `true` = reversed (the ramp runs the wire
-    /// backwards).
+    /// carrying the ramp. `true` = reversed.
     AlongWire(bool),
 }
 
-/// The drawing for one choice, by role and RAW variant name — the picker's
-/// SHAPE tiles, which always wear each shape's DEFAULT direction (the
-/// picker stays a 4-shape grid; the direction row under the field refines
-/// it): extrude `Right`, mirror `OutwardX` — the folds a bare pick lands
-/// on.
+/// The drawing for one choice, by role and RAW variant name — the shape
+/// tiles wear the PLAIN shape (the modifier toggles refine the drawing
+/// on the active cell via [`active_glyph`]).
 fn glyph_for(role: UiSpaceCellRole, variant: &str) -> SpaceGlyph {
     match variant {
-        "Extrude" => SpaceGlyph::Extrude(UiProjectionDirection::Right),
-        "Radial" => SpaceGlyph::Radial(UiRadialDirection::Outward),
-        "Angular" => SpaceGlyph::Angular(UiAngularDirection::Clockwise),
-        "Mirror" => SpaceGlyph::Mirror(UiMirrorDirection::OutwardX),
+        "ExtrudeX" => SpaceGlyph::Projection(UiCellProjection::plain(UiProjectionShape::ExtrudeX)),
+        "ExtrudeY" => SpaceGlyph::Projection(UiCellProjection::plain(UiProjectionShape::ExtrudeY)),
+        "Radial" => SpaceGlyph::Projection(UiCellProjection::plain(UiProjectionShape::Radial)),
+        "Angular" => SpaceGlyph::Projection(UiCellProjection::plain(UiProjectionShape::Angular)),
         "Auto" => SpaceGlyph::FollowSource,
         ALONG_WIRE_VARIANT => SpaceGlyph::AlongWire(false),
-        "Default" => match role {
-            // A 2D shader's 1D answer IS the centre scanline.
-            UiSpaceCellRole::ProducerIn1d => SpaceGlyph::CentreScanline,
-            // A 1D shader's silent 2D answer resolves to extrude in every
-            // UI-reachable state (see PROJECTION_DEFAULT_EXTRUDE).
-            _ => SpaceGlyph::Extrude(UiProjectionDirection::Right),
-        },
+        // A 2D shader's 1D answer IS the centre scanline.
+        "Default" if role == UiSpaceCellRole::ProducerIn1d => SpaceGlyph::CentreScanline,
         _ => SpaceGlyph::FollowSource,
     }
 }
 
-/// The FIELD's active glyph: the shape's drawing, oriented by the
-/// direction row's active variant — each shape parses its OWN vocabulary
-/// (extrude a run direction, mirror a fold).
-fn glyph_with_active_direction(cell: &UiSpaceCell) -> SpaceGlyph {
-    let active_direction = cell.direction.as_ref().map(|row| row.active.as_str());
-    match (cell.active.as_str(), active_direction) {
-        ("Extrude", Some(ident)) => SpaceGlyph::Extrude(UiProjectionDirection::from_variant(ident)),
-        ("Radial", Some(ident)) => SpaceGlyph::Radial(UiRadialDirection::from_variant(ident)),
-        ("Angular", Some(ident)) => SpaceGlyph::Angular(UiAngularDirection::from_variant(ident)),
-        ("Mirror", Some(ident)) => SpaceGlyph::Mirror(UiMirrorDirection::from_variant(ident)),
-        (ALONG_WIRE_VARIANT, Some(ident)) => SpaceGlyph::AlongWire(ident == "Reversed"),
-        _ => glyph_for(cell.role, &cell.active),
+/// The FIELD's active glyph: the active shape composed with the LIVE
+/// modifier toggles (one chain, one drawing), or the wire drawing
+/// oriented by the wire row.
+fn active_glyph(cell: &UiSpaceCell) -> SpaceGlyph {
+    if cell.active == ALONG_WIRE_VARIANT {
+        return SpaceGlyph::AlongWire(
+            cell.wire_direction
+                .as_ref()
+                .is_some_and(|wire| wire.reversed),
+        );
+    }
+    match glyph_for(cell.role, &cell.active) {
+        SpaceGlyph::Projection(mut projection) => {
+            if let Some(modifiers) = &cell.modifiers {
+                projection.mirror = modifiers.mirror.value;
+                projection.flip = modifiers.flip.value;
+            }
+            SpaceGlyph::Projection(projection)
+        }
+        other => other,
     }
 }
 
 /// A schematic drawing of what one choice does to a 1D source.
 ///
-/// **Not a live probe (plan A2, resolved; G1 ratified glyphs).** A live
-/// tile means rendering THIS product through a forced policy, and nothing
-/// in `lpa-studio-web` can issue a probe of its own — the tiles draw the
-/// SHAPE of each answer instead.
+/// **The projection drawings are the chain itself** (the factorization
+/// ruling: one drawing function, not N): [`chain_cells`] evaluates the
+/// same shape → mirror → flip composition the engine runs over a coarse
+/// grid, and the ramp opacity IS the strip coordinate. Every reachable
+/// cell — including angular + mirror, which no hand drawing existed for
+/// — renders itself.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
-    // One vocabulary across the set: the source strip is a light-to-dark
-    // ramp, and the glyph shows where that ramp goes.
     rsx! {
         svg {
             class: "tw:block tw:h-full tw:w-full tw:text-soft-foreground",
@@ -602,12 +634,8 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
             preserve_aspect_ratio: "none",
             role: "img",
             match kind {
-                // The directional pair: the ramp's bands run along the
-                // direction — `Right` is the original left→right drawing,
-                // the other three are the same ramp re-laid (G1b ruling 4
-                // retired the story-only Y-twin drawings for this).
-                SpaceGlyph::Extrude(direction) => rsx! {
-                    for (index , (x , y , width , height , opacity)) in ramp_bands(&RAMP, direction)
+                SpaceGlyph::Projection(projection) => rsx! {
+                    for (index , (x , y , width , height , opacity)) in chain_cells(projection)
                         .into_iter()
                         .enumerate()
                     {
@@ -617,50 +645,6 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
                             y: "{y}",
                             width: "{width}",
                             height: "{height}",
-                            fill: "currentColor",
-                            fill_opacity: "{opacity}",
-                        }
-                    }
-                },
-                SpaceGlyph::Mirror(direction) => rsx! {
-                    for (index , (x , y , width , height , opacity)) in mirror_bands(direction)
-                        .into_iter()
-                        .enumerate()
-                    {
-                        rect {
-                            key: "{index}",
-                            x: "{x}",
-                            y: "{y}",
-                            width: "{width}",
-                            height: "{height}",
-                            fill: "currentColor",
-                            fill_opacity: "{opacity}",
-                        }
-                    }
-                },
-                SpaceGlyph::Radial(direction) => rsx! {
-                    for (index , (radius , opacity)) in radial_rings(direction)
-                        .into_iter()
-                        .enumerate()
-                    {
-                        circle {
-                            key: "{index}",
-                            cx: "32",
-                            cy: "20",
-                            r: "{radius}",
-                            fill: "currentColor",
-                            fill_opacity: "{opacity}",
-                        }
-                    }
-                },
-                // The strip swept around the centre: adjacent pie sectors
-                // whose opacity ramps with angle — a conic sweep. (G1: the
-                // old ray spokes read as an asterisk.)
-                SpaceGlyph::Angular(direction) => rsx! {
-                    for (index , (path , opacity)) in angular_sectors(direction).into_iter().enumerate() {
-                        path {
-                            key: "{index}",
-                            d: "{path}",
                             fill: "currentColor",
                             fill_opacity: "{opacity}",
                         }
@@ -729,48 +713,56 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
     }
 }
 
-/// The strip's ramp across eight bands (the source, left to right).
+/// The strip's ramp across eight bands (the centre-scanline drawing).
 const RAMP: [f32; 8] = [0.14, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84, 0.96];
-/// The ramp folded INWARD: the strip runs from both edges toward the
-/// centre, so its bright end lands in the middle.
-const MIRROR_INWARD_RAMP: [f32; 8] = [0.14, 0.36, 0.6, 0.96, 0.96, 0.6, 0.36, 0.14];
-/// The ramp folded OUTWARD (today's mirror behavior, `|2s−1|`): the strip
-/// runs from the centre toward both edges, bright ends outside.
-const MIRROR_OUTWARD_RAMP: [f32; 8] = [0.96, 0.6, 0.36, 0.14, 0.14, 0.36, 0.6, 0.96];
 
-/// The eight ramp bands laid along a direction, as `(x, y, width, height,
-/// opacity)` rects in the glyph's 64×40 box: `Right` is the original
-/// left→right columns, `Left` reverses them, `Down`/`Up` run the rows.
-fn ramp_bands(ramp: &[f32; 8], direction: UiProjectionDirection) -> Vec<(u32, u32, u32, u32, f32)> {
-    (0..8u32)
-        .map(|index| {
-            let opacity = ramp[index as usize];
-            match direction {
-                UiProjectionDirection::Right => (index * 8, 0, 8, 40, opacity),
-                UiProjectionDirection::Left => ((7 - index) * 8, 0, 8, 40, opacity),
-                UiProjectionDirection::Down => (0, index * 5, 64, 5, opacity),
-                UiProjectionDirection::Up => (0, (7 - index) * 5, 64, 5, opacity),
+/// THE drawing function (the factorization ruling): the projection
+/// chain — shape coordinate, then mirror's fold, then flip's reversal,
+/// exactly `lpc-engine`'s `project_2d_to_1d` — evaluated at each cell of
+/// a 16×10 grid over the glyph's 64×40 box, with the strip coordinate
+/// rendered as the ramp opacity. One function draws every reachable
+/// projection, composites included.
+fn chain_cells(projection: UiCellProjection) -> Vec<(f32, f32, f32, f32, f32)> {
+    const COLS: usize = 16;
+    const ROWS: usize = 10;
+    const CELL_W: f32 = 64.0 / COLS as f32;
+    const CELL_H: f32 = 40.0 / ROWS as f32;
+    let mut cells = Vec::with_capacity(COLS * ROWS);
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            let u = (col as f32 + 0.5) / COLS as f32;
+            let v = (row as f32 + 0.5) / ROWS as f32;
+            let mut t = match projection.shape {
+                UiProjectionShape::ExtrudeX => u,
+                UiProjectionShape::ExtrudeY => v,
+                UiProjectionShape::Radial => {
+                    let dx = u - 0.5;
+                    let dy = v - 0.5;
+                    ((dx * dx + dy * dy).sqrt() / core::f32::consts::FRAC_1_SQRT_2).min(1.0)
+                }
+                UiProjectionShape::Angular => {
+                    let turns = (v - 0.5).atan2(u - 0.5) / core::f32::consts::TAU;
+                    if turns < 0.0 { turns + 1.0 } else { turns }
+                }
+            };
+            if projection.mirror {
+                t = 1.0 - (2.0 * t - 1.0).abs();
             }
-        })
-        .collect()
-}
-
-/// A mirror fold's eight bands: the fold's SENSE picks which folded ramp
-/// (inward = bright centre, outward = bright edges — outward-x is the
-/// pre-direction drawing corrected to match the math), its AXIS whether
-/// the bands run the columns or the rows.
-fn mirror_bands(direction: UiMirrorDirection) -> Vec<(u32, u32, u32, u32, f32)> {
-    match direction {
-        UiMirrorDirection::InwardX => ramp_bands(&MIRROR_INWARD_RAMP, UiProjectionDirection::Right),
-        UiMirrorDirection::OutwardX => {
-            ramp_bands(&MIRROR_OUTWARD_RAMP, UiProjectionDirection::Right)
-        }
-        UiMirrorDirection::InwardY => ramp_bands(&MIRROR_INWARD_RAMP, UiProjectionDirection::Down),
-        UiMirrorDirection::OutwardY => {
-            ramp_bands(&MIRROR_OUTWARD_RAMP, UiProjectionDirection::Down)
+            if projection.flip {
+                t = 1.0 - t;
+            }
+            cells.push((
+                col as f32 * CELL_W,
+                row as f32 * CELL_H,
+                CELL_W,
+                CELL_H,
+                0.08 + 0.88 * t.clamp(0.0, 1.0),
+            ));
         }
     }
+    cells
 }
+
 /// The serpentine wire's segments: three horizontal runs (left→right,
 /// right→left, left→right) joined by end connectors, the ramp's opacity
 /// climbing along the WIRE path — which is the whole statement: position
@@ -809,59 +801,6 @@ fn serpentine_segments(reversed: bool) -> Vec<(u32, u32, u32, u32, f32)> {
             };
             let opacity = 0.14 + 0.82 * (step as f32) / ((BOXES.len() - 1) as f32);
             (x, y, width, height, opacity)
-        })
-        .collect()
-}
-
-/// Concentric rings, outermost first so the inner ones paint over — the
-/// ramp runs per the flip (outward = bright centre reaching dim edges is
-/// the DIM-outer drawing below; inward reverses the ring opacities).
-const RADIAL_RINGS: [(u32, f32); 4] = [(26, 0.18), (19, 0.38), (12, 0.62), (5, 0.95)];
-
-/// The rings with the ramp run per the radial flip: `Outward` is the
-/// ratified drawing (bright centre — strip start — fading outward),
-/// `Inward` reverses the opacities (bright edges, dim centre).
-fn radial_rings(direction: UiRadialDirection) -> Vec<(u32, f32)> {
-    match direction {
-        UiRadialDirection::Outward => RADIAL_RINGS.to_vec(),
-        UiRadialDirection::Inward => {
-            let mut rings = RADIAL_RINGS;
-            let opacities: Vec<f32> = rings.iter().rev().map(|(_, opacity)| *opacity).collect();
-            for (ring, opacity) in rings.iter_mut().zip(opacities) {
-                ring.1 = opacity;
-            }
-            rings.to_vec()
-        }
-    }
-}
-
-/// Twelve adjacent pie sectors around (32, 20), radius 30, opacity
-/// ramping with angle — the conic sweep the angular projection actually
-/// performs. Computed rather than tabulated: twelve hand-written arc
-/// paths would hide the one fact that matters (adjacent sectors, one
-/// ramp).
-fn angular_sectors(direction: UiAngularDirection) -> Vec<(String, f32)> {
-    const SECTORS: usize = 12;
-    const CX: f32 = 32.0;
-    const CY: f32 = 20.0;
-    const R: f32 = 30.0;
-    (0..SECTORS)
-        .map(|index| {
-            let start = (index as f32) / (SECTORS as f32) * core::f32::consts::TAU;
-            let end = ((index + 1) as f32) / (SECTORS as f32) * core::f32::consts::TAU;
-            let (x0, y0) = (CX + R * start.cos(), CY + R * start.sin());
-            let (x1, y1) = (CX + R * end.cos(), CY + R * end.sin());
-            let path = format!("M {CX} {CY} L {x0:.1} {y0:.1} A {R} {R} 0 0 1 {x1:.1} {y1:.1} Z");
-            // The sweep's flip reverses which way the ramp climbs around
-            // the circle — the same sectors, the opposite direction of
-            // travel (SVG y points down like texture space, so the
-            // ascending-index sweep IS the engine's clockwise).
-            let step = match direction {
-                UiAngularDirection::Clockwise => index,
-                UiAngularDirection::CounterClockwise => SECTORS - 1 - index,
-            };
-            let opacity = 0.14 + 0.82 * (step as f32) / ((SECTORS - 1) as f32);
-            (path, opacity)
         })
         .collect()
 }
@@ -920,101 +859,65 @@ pub(crate) fn visual_space_label(space: UiVisualSpace) -> &'static str {
     }
 }
 
-/// A projection's caption: the shape name, plus its direction glyph when
-/// a directional shape runs anywhere but its default (`extrude ←`,
-/// `mirror →←`). Each default stays bare because it IS the
-/// pre-directional behavior and the captions around it predate glyphs.
+/// A projection's caption (THE FACTORIZATION): the shape name plus its
+/// modifier words — `extrude-x · mirrored · flipped`. A plain cell stays
+/// bare.
 fn projection_label(projection: UiCellProjection) -> String {
-    match projection {
-        UiCellProjection::Extrude(direction) => {
-            if direction == UiProjectionDirection::Right {
-                PROJECTION_EXTRUDE.to_string()
-            } else {
-                format!("{PROJECTION_EXTRUDE} {}", direction.arrow())
-            }
-        }
-        UiCellProjection::Radial(direction) => {
-            if direction == UiRadialDirection::Outward {
-                PROJECTION_RADIAL.to_string()
-            } else {
-                format!("{PROJECTION_RADIAL} · {}", direction.word())
-            }
-        }
-        UiCellProjection::Angular(direction) => {
-            if direction == UiAngularDirection::Clockwise {
-                PROJECTION_ANGULAR.to_string()
-            } else {
-                format!("{PROJECTION_ANGULAR} {}", direction.arrow())
-            }
-        }
-        UiCellProjection::Mirror(direction) => {
-            if direction == UiMirrorDirection::OutwardX {
-                PROJECTION_MIRROR.to_string()
-            } else {
-                format!("{PROJECTION_MIRROR} {}", direction.arrows())
-            }
-        }
+    let mut label = shape_label(projection.shape).to_string();
+    if projection.mirror {
+        label.push_str(" · ");
+        label.push_str(MODIFIER_MIRRORED);
+    }
+    if projection.flip {
+        label.push_str(" · ");
+        label.push_str(MODIFIER_FLIPPED);
+    }
+    label
+}
+
+/// A shape's caption/tile word.
+const fn shape_label(shape: UiProjectionShape) -> &'static str {
+    match shape {
+        UiProjectionShape::ExtrudeX => SHAPE_EXTRUDE_X,
+        UiProjectionShape::ExtrudeY => SHAPE_EXTRUDE_Y,
+        UiProjectionShape::Radial => SHAPE_RADIAL,
+        UiProjectionShape::Angular => SHAPE_ANGULAR,
     }
 }
 
-/// The ` ↓` / ` →←` a cell's field face and drawer summary append when
-/// its active shape runs anywhere but its default — empty otherwise, so
-/// the defaults keep reading exactly as they did before directions
-/// existed.
-fn directional_suffix(cell: &UiSpaceCell) -> String {
-    let Some(row) = cell.direction.as_ref() else {
+/// The ` · mirrored` / ` · flipped` a cell's statement face and drawer
+/// summary append from the LIVE modifier toggles (or ` ←` from the wire
+/// row) — empty when everything sits at its default.
+fn modifier_suffix(cell: &UiSpaceCell) -> String {
+    if cell.active == ALONG_WIRE_VARIANT {
+        return if cell
+            .wire_direction
+            .as_ref()
+            .is_some_and(|wire| wire.reversed)
+        {
+            " ←".to_string()
+        } else {
+            String::new()
+        };
+    }
+    let Some(modifiers) = cell.modifiers.as_ref() else {
         return String::new();
     };
-    match cell.active.as_str() {
-        "Extrude" => {
-            let direction = UiProjectionDirection::from_variant(&row.active);
-            if direction == UiProjectionDirection::Right {
-                String::new()
-            } else {
-                format!(" {}", direction.arrow())
-            }
-        }
-        "Mirror" => {
-            let direction = UiMirrorDirection::from_variant(&row.active);
-            if direction == UiMirrorDirection::OutwardX {
-                String::new()
-            } else {
-                format!(" {}", direction.arrows())
-            }
-        }
-        "Radial" => {
-            let direction = UiRadialDirection::from_variant(&row.active);
-            if direction == UiRadialDirection::Outward {
-                String::new()
-            } else {
-                format!(" · {}", direction.word())
-            }
-        }
-        "Angular" => {
-            let direction = UiAngularDirection::from_variant(&row.active);
-            if direction == UiAngularDirection::Clockwise {
-                String::new()
-            } else {
-                format!(" {}", direction.arrow())
-            }
-        }
-        // The along-the-wire choice: a reversed wire wears the back
-        // arrow; forward (the default) stays bare like every default.
-        ALONG_WIRE_VARIANT => {
-            if row.active == "Reversed" {
-                " ←".to_string()
-            } else {
-                String::new()
-            }
-        }
-        _ => String::new(),
+    let mut suffix = String::new();
+    if modifiers.mirror.value {
+        suffix.push_str(" · ");
+        suffix.push_str(MODIFIER_MIRRORED);
     }
+    if modifiers.flip.value {
+        suffix.push_str(" · ");
+        suffix.push_str(MODIFIER_FLIPPED);
+    }
+    suffix
 }
 
 fn origin_label(origin: UiProjectionOrigin) -> &'static str {
     match origin {
         UiProjectionOrigin::Declared => ORIGIN_DECLARED,
-        UiProjectionOrigin::ConsumerDefault => ORIGIN_CONSUMER_DEFAULT,
         UiProjectionOrigin::Forced => ORIGIN_FORCED,
     }
 }
@@ -1087,11 +990,10 @@ fn known_variant_label(
             Some(CONSUMER_ALONG_WIRE)
         }
         (_, UiSpaceCellRole::ProducerIn1d, "Default") => Some(PROJECTION_CENTRE_SCANLINE),
-        (_, _, "Default") => Some(PROJECTION_DEFAULT_EXTRUDE),
-        (_, _, "Extrude") => Some(PROJECTION_EXTRUDE),
-        (_, _, "Radial") => Some(PROJECTION_RADIAL),
-        (_, _, "Angular") => Some(PROJECTION_ANGULAR),
-        (_, _, "Mirror") => Some(PROJECTION_MIRROR),
+        (_, _, "ExtrudeX") => Some(SHAPE_EXTRUDE_X),
+        (_, _, "ExtrudeY") => Some(SHAPE_EXTRUDE_Y),
+        (_, _, "Radial") => Some(SHAPE_RADIAL),
+        (_, _, "Angular") => Some(SHAPE_ANGULAR),
         _ => None,
     }
 }
@@ -1103,14 +1005,7 @@ fn active_variant_label(side: UiSpaceSide, cell: &UiSpaceCell) -> String {
         .iter()
         .find(|choice| choice.selected)
         .map(|choice| variant_label(side, cell.role, choice))
-        .or_else(|| {
-            // No selected choice — the Default-tile drop leaves an
-            // unauthored cell with `Default` active but not offered. This
-            // file's vocabulary still spells it honestly
-            // (`extrude · default`); anything unknown falls through to the
-            // DTO's own label.
-            known_variant_label(side, cell.role, &cell.active).map(str::to_string)
-        })
+        .or_else(|| known_variant_label(side, cell.role, &cell.active).map(str::to_string))
         .unwrap_or_else(|| cell.active_label.clone())
 }
 
@@ -1119,14 +1014,11 @@ fn choice_hint(role: UiSpaceCellRole, variant: &str) -> &'static str {
     match variant {
         "Auto" => HINT_FOLLOW,
         ALONG_WIRE_VARIANT => HINT_ALONG_WIRE,
-        "Default" => match role {
-            UiSpaceCellRole::ProducerIn1d => HINT_CENTRE_SCANLINE,
-            _ => HINT_DEFAULT_EXTRUDE,
-        },
-        "Extrude" => HINT_EXTRUDE,
+        "Default" if role == UiSpaceCellRole::ProducerIn1d => HINT_CENTRE_SCANLINE,
+        "ExtrudeX" => HINT_EXTRUDE_X,
+        "ExtrudeY" => HINT_EXTRUDE_Y,
         "Radial" => HINT_RADIAL,
         "Angular" => HINT_ANGULAR,
-        "Mirror" => HINT_MIRROR,
         _ => "",
     }
 }
@@ -1175,7 +1067,7 @@ pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
                 format!(
                     "{space} · in 2D: {}{}",
                     active_variant_label(section.side, cell),
-                    directional_suffix(cell)
+                    modifier_suffix(cell)
                 )
             } else if section.cell(UiSpaceCellRole::ProducerIn1d).is_some() {
                 format!("{space} · in 1D: {PROJECTION_CENTRE_SCANLINE}")
@@ -1185,17 +1077,14 @@ pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
         }
         UiSpaceSide::Consumer => {
             if section.primary.active == ALONG_WIRE_VARIANT {
-                format!(
-                    "{CONSUMER_ALONG_WIRE}{}",
-                    directional_suffix(&section.primary)
-                )
+                format!("{CONSUMER_ALONG_WIRE}{}", modifier_suffix(&section.primary))
             } else if section.primary.active == "Auto" {
                 CONSUMER_FOLLOW.to_string()
             } else {
                 format!(
                     "1D sources: {}{} (override)",
                     active_variant_label(section.side, &section.primary),
-                    directional_suffix(&section.primary)
+                    modifier_suffix(&section.primary)
                 )
             }
         }
@@ -1257,6 +1146,16 @@ fn segment_class(selected: bool) -> &'static str {
 const DIRECTION_GROUP_CLASS: &str =
     "tw:inline-flex tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle";
 
+/// The squared checkbox box the modifier toggles draw (no preflight: a
+/// `<button>`'s box is drawn here or not at all).
+fn checkbox_box_class(value: bool) -> &'static str {
+    if value {
+        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:text-strong-foreground"
+    } else {
+        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page"
+    }
+}
+
 /// One segment of the direction control: pressed reads as filled, the
 /// rest as quiet arrows (the same language as [`segment_class`], sized to
 /// its glyph).
@@ -1309,8 +1208,24 @@ mod tests {
                 .collect(),
             address: None,
             state: UiSlotFieldState::editable(),
-            direction: None,
+            modifiers: None,
+            wire_direction: None,
             strip_order: None,
+        }
+    }
+
+    fn bool_row(value: bool) -> lpa_studio_core::UiSpaceBoolRow {
+        lpa_studio_core::UiSpaceBoolRow {
+            value,
+            address: None,
+            state: UiSlotFieldState::editable(),
+        }
+    }
+
+    fn modifiers(mirror: bool, flip: bool) -> UiSpaceModifiers {
+        UiSpaceModifiers {
+            mirror: bool_row(mirror),
+            flip: bool_row(flip),
         }
     }
 
@@ -1328,8 +1243,8 @@ mod tests {
         }
     }
 
-    /// The unified consumer section: ONE dropdown whose first choice is
-    /// `along the wire` (the strip-order bit), then follow/projections.
+    /// The factored consumer section: ONE choice list whose first entry
+    /// is `along the wire`, then follow/shapes.
     fn consumer(active: &str) -> UiSpaceSection {
         UiSpaceSection {
             side: UiSpaceSide::Consumer,
@@ -1339,10 +1254,10 @@ mod tests {
                 &[
                     ALONG_WIRE_VARIANT,
                     "Auto",
-                    "Extrude",
+                    "ExtrudeX",
+                    "ExtrudeY",
                     "Radial",
                     "Angular",
-                    "Mirror",
                 ],
             ),
             declared_space: None,
@@ -1351,150 +1266,138 @@ mod tests {
         }
     }
 
-    /// `Default` is not one word: the same variant means "extrude ·
-    /// default" on a 1D shader's 2D answer (the projection silence
-    /// actually resolves to — "consumer decides" was killed at G1) and
-    /// "centre scanline" on a 2D shader's 1D one.
+    /// The shape cell of a 1D producer, in the factored form.
+    fn shape_cell(active: &str) -> UiSpaceCell {
+        cell(
+            UiSpaceCellRole::ProducerIn2d,
+            active,
+            &["ExtrudeX", "ExtrudeY", "Radial", "Angular"],
+        )
+    }
+
+    /// The caption rule (THE FACTORIZATION): shape word plus modifier
+    /// words, defaults bare — `extrude-x · mirrored · flipped`.
     #[test]
-    fn default_reads_differently_per_cell() {
+    fn captions_spell_the_shape_and_its_modifiers() {
         assert_eq!(
-            known_variant_label(
-                UiSpaceSide::Producer,
-                UiSpaceCellRole::ProducerIn2d,
-                "Default"
-            ),
-            Some(PROJECTION_DEFAULT_EXTRUDE)
+            projection_label(UiCellProjection::plain(UiProjectionShape::ExtrudeX)),
+            "extrude-x"
         );
         assert_eq!(
-            known_variant_label(
-                UiSpaceSide::Producer,
-                UiSpaceCellRole::ProducerIn1d,
-                "Default"
-            ),
-            Some(PROJECTION_CENTRE_SCANLINE)
+            projection_label(UiCellProjection {
+                shape: UiProjectionShape::ExtrudeX,
+                mirror: true,
+                flip: true,
+            }),
+            "extrude-x · mirrored · flipped"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection {
+                shape: UiProjectionShape::Angular,
+                mirror: true,
+                flip: false,
+            }),
+            "angular · mirrored",
+            "the up-and-back sweep — a state the old vocabulary could not spell"
+        );
+        assert_eq!(
+            projection_label(UiCellProjection {
+                shape: UiProjectionShape::Radial,
+                mirror: false,
+                flip: true,
+            }),
+            "radial · flipped"
         );
     }
 
-    /// The glyphs match the labels' honesty rules: producer `Default`
-    /// wears the extrude it resolves to, the 2D→1D statement draws its
-    /// scanline, and the consumer's `Auto` defers visually.
+    /// The statement face and drawer summaries wear the LIVE modifier
+    /// toggles; the along-the-wire state wears the wire arrow instead.
     #[test]
-    fn glyphs_follow_the_same_honesty_rules_as_labels() {
+    fn summaries_wear_the_live_modifiers() {
+        let mut answer = shape_cell("Radial");
+        answer.modifiers = Some(modifiers(false, true));
+        let shader = producer("OneD", vec![answer]);
         assert_eq!(
-            glyph_for(UiSpaceCellRole::ProducerIn2d, "Default"),
-            SpaceGlyph::Extrude(UiProjectionDirection::Right)
+            space_section_summary(&shader),
+            "1D · in 2D: radial · flipped"
         );
+
+        let mut fixture = consumer("Angular");
+        fixture.primary.modifiers = Some(modifiers(true, false));
         assert_eq!(
-            glyph_for(UiSpaceCellRole::ProducerIn1d, "Default"),
-            SpaceGlyph::CentreScanline
+            space_section_summary(&fixture),
+            "1D sources: angular · mirrored (override)"
+        );
+
+        let mut wire = consumer(ALONG_WIRE_VARIANT);
+        wire.primary.wire_direction = Some(UiWireDirectionRow {
+            reversed: true,
+            address: None,
+            state: UiSlotFieldState::editable(),
+        });
+        assert_eq!(space_section_summary(&wire), "along the wire ←");
+    }
+
+    /// The active glyph composes the shape with the LIVE toggles — one
+    /// chain, one drawing (the factorization ruling).
+    #[test]
+    fn the_active_glyph_composes_shape_and_modifiers() {
+        let mut answer = shape_cell("Angular");
+        answer.modifiers = Some(modifiers(true, false));
+        assert_eq!(
+            active_glyph(&answer),
+            SpaceGlyph::Projection(UiCellProjection {
+                shape: UiProjectionShape::Angular,
+                mirror: true,
+                flip: false,
+            })
+        );
+        // The TILES stay plain — the toggles refine the active cell only.
+        assert_eq!(
+            glyph_for(UiSpaceCellRole::ProducerIn2d, "ExtrudeY"),
+            SpaceGlyph::Projection(UiCellProjection::plain(UiProjectionShape::ExtrudeY))
         );
         assert_eq!(
             glyph_for(UiSpaceCellRole::Primary, "Auto"),
             SpaceGlyph::FollowSource
         );
         assert_eq!(
-            glyph_for(UiSpaceCellRole::Primary, "Mirror"),
-            SpaceGlyph::Mirror(UiMirrorDirection::OutwardX),
-            "the mirror tile wears the default fold — the one a bare pick lands on"
+            glyph_for(UiSpaceCellRole::ProducerIn1d, "Default"),
+            SpaceGlyph::CentreScanline
         );
     }
 
-    /// The caption rule (G1b ruling 4 + the mirror-direction ruling): a
-    /// directional shape at its DEFAULT reads bare (it IS the
-    /// pre-directional behavior); anywhere else it wears its own glyph —
-    /// single arrows for extrude, paired arrows for mirror's fold.
+    /// The chain drawing IS the engine chain: extrude-x ramps along the
+    /// columns; the mirror modifier folds it; the flip reverses it. Spot
+    /// checks over the grid cells the glyph rasterizes.
     #[test]
-    fn directional_captions_wear_their_glyph_except_at_the_default() {
-        assert_eq!(
-            projection_label(UiCellProjection::Extrude(UiProjectionDirection::Right)),
-            "extrude"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Extrude(UiProjectionDirection::Left)),
-            "extrude ←"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Mirror(UiMirrorDirection::OutwardX)),
-            "mirror",
-            "outward-x IS the pre-direction behavior, so it stays bare"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Mirror(UiMirrorDirection::InwardX)),
-            "mirror →←"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Mirror(UiMirrorDirection::OutwardY)),
-            "mirror ↑↓"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Radial(UiRadialDirection::Outward)),
-            "radial"
-        );
-        // The radial/angular flips (post-G1b): the default stays bare,
-        // the flip wears its word / rotation arrow.
-        assert_eq!(
-            projection_label(UiCellProjection::Radial(UiRadialDirection::Inward)),
-            "radial · inward"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Angular(UiAngularDirection::Clockwise)),
-            "angular"
-        );
-        assert_eq!(
-            projection_label(UiCellProjection::Angular(
-                UiAngularDirection::CounterClockwise
-            )),
-            "angular ↺"
-        );
-    }
-
-    /// The drawer summary and the active glyph follow the direction row —
-    /// each shape through its OWN vocabulary: `1D · in 2D: mirror ↓↑`,
-    /// glyph folded to match; a default row adds nothing.
-    #[test]
-    fn summaries_and_glyphs_follow_the_active_direction() {
-        let directed = |active: &str, variants: &[&str]| lpa_studio_core::UiSpaceDirection {
-            active: active.to_string(),
-            variants: variants.iter().map(|ident| ident.to_string()).collect(),
-            address: None,
-            state: UiSlotFieldState::editable(),
-            dispatch: lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant,
+    fn the_glyph_chain_matches_the_engine_chain() {
+        let opacity_at =
+            |projection: UiCellProjection, index: usize| chain_cells(projection)[index].4;
+        // First cell of the top row (u ≈ 0.03): plain extrude-x is dark,
+        // flipped is bright.
+        let plain = UiCellProjection::plain(UiProjectionShape::ExtrudeX);
+        let flipped = UiCellProjection {
+            flip: true,
+            ..plain
         };
-        const FOLDS: [&str; 4] = ["InwardX", "OutwardX", "InwardY", "OutwardY"];
-        let mut answer = cell(
-            UiSpaceCellRole::ProducerIn2d,
-            "Mirror",
-            &["Default", "Extrude", "Radial", "Angular", "Mirror"],
-        );
-        answer.direction = Some(directed("InwardY", &FOLDS));
-        assert_eq!(
-            active_glyph(&answer),
-            SpaceGlyph::Mirror(UiMirrorDirection::InwardY)
-        );
-        let shader = producer("OneD", vec![answer.clone()]);
-        assert_eq!(space_section_summary(&shader), "1D · in 2D: mirror ↓↑");
-
-        answer.direction = Some(directed("OutwardX", &FOLDS));
-        let shader = producer("OneD", vec![answer]);
-        assert_eq!(
-            space_section_summary(&shader),
-            "1D · in 2D: mirror",
-            "the default fold keeps the pre-directional reading"
-        );
-
-        let mut fixture = consumer("Extrude");
-        fixture.primary.direction = Some(directed("Left", &["Right", "Left", "Down", "Up"]));
-        assert_eq!(
-            space_section_summary(&fixture),
-            "1D sources: extrude ← (override)"
-        );
+        assert!(opacity_at(plain, 0) < 0.15);
+        assert!(opacity_at(flipped, 0) > 0.85);
+        // Mirrored extrude-x: both ends dark, centre bright.
+        let mirrored = UiCellProjection {
+            mirror: true,
+            ..plain
+        };
+        assert!(opacity_at(mirrored, 0) < 0.2);
+        assert!(opacity_at(mirrored, 15) < 0.2);
+        assert!(opacity_at(mirrored, 7) > 0.8);
     }
 
-    /// The consumer dropdown's dispatch (strip-order unification):
-    /// `along the wire` is the bool SetValue alone; `Auto` clears the bit
-    /// and ensures `consume.Auto`; a projection clears the bit and runs
-    /// the ensure-Policy → ensure-variant → force=true sequence (the pick
-    /// IS the override, and a set bit would gate it off).
+    /// The consumer choice list's dispatch (strip-order unification +
+    /// the factorization): `along the wire` is the bool SetValue alone;
+    /// `Auto` clears the bit and ensures `consume.Auto`; a shape clears
+    /// the bit and runs ensure-Policy →
+    /// ensure-`from_1d.Project.shape.<Shape>` → force=true.
     #[test]
     fn consumer_choices_dispatch_the_op_sequence() {
         use lpa_studio_core::{ProjectNodeAddress, ProjectSlotRoot};
@@ -1528,31 +1431,20 @@ mod tests {
         );
         assert_eq!(auto.len(), 2, "clear the bit, ensure consume.Auto");
 
-        let mirror = choice_actions(
+        let shape = choice_actions(
             UiSpaceSide::Consumer,
             UiSpaceCellRole::Primary,
             &address,
             Some(&strip),
-            "Mirror",
+            "ExtrudeY",
         );
         assert_eq!(
-            mirror.len(),
+            shape.len(),
             4,
-            "clear the bit, ensure Policy, ensure from_1d.Mirror, set force"
+            "clear the bit, ensure Policy, ensure from_1d.Project.shape.ExtrudeY, set force"
         );
 
-        // Without a strip row there is nothing to clear — the
-        // pre-unification sequences remain.
-        let auto = choice_actions(
-            UiSpaceSide::Consumer,
-            UiSpaceCellRole::Primary,
-            &address,
-            None,
-            "Auto",
-        );
-        assert_eq!(auto.len(), 1);
-
-        // Producer cells keep the single generic gesture.
+        // Producer cells keep the single generic gesture at the SHAPE row.
         let producer = choice_actions(
             UiSpaceSide::Producer,
             UiSpaceCellRole::ProducerIn2d,
@@ -1566,20 +1458,17 @@ mod tests {
     /// The collapsed drawer summaries say the declaration at a glance.
     #[test]
     fn summaries_state_the_declaration_at_a_glance() {
-        let shader = producer(
-            "OneD",
-            vec![cell(
-                UiSpaceCellRole::ProducerIn2d,
-                "Radial",
-                &["Default", "Extrude", "Radial", "Angular", "Mirror"],
-            )],
-        );
+        let shader = producer("OneD", vec![shape_cell("Radial")]);
         assert_eq!(space_section_summary(&shader), "1D · in 2D: radial");
         assert_eq!(space_section_summary(&producer("TwoD", Vec::new())), "2D");
         assert_eq!(space_section_summary(&consumer("Auto")), CONSUMER_FOLLOW);
         assert_eq!(
-            space_section_summary(&consumer("Mirror")),
-            "1D sources: mirror (override)"
+            space_section_summary(&consumer("ExtrudeY")),
+            "1D sources: extrude-y (override)"
+        );
+        assert_eq!(
+            space_section_summary(&consumer(ALONG_WIRE_VARIANT)),
+            CONSUMER_ALONG_WIRE
         );
     }
 
@@ -1600,7 +1489,7 @@ mod tests {
 
     /// The two sides keep their own vocabulary through the shared shapes
     /// (D13's mirror): the producer's tabs speak spaces, the consumer's
-    /// dropdown speaks follow-or-override.
+    /// choice list speaks wire/follow/override.
     #[test]
     fn the_two_sides_share_one_shape_and_two_vocabularies() {
         let shader = producer("OneD", Vec::new());
@@ -1619,6 +1508,10 @@ mod tests {
         );
         assert_eq!(primary_hint(&fixture), CONSUMER_HINT_FOLLOW);
         assert_eq!(primary_hint(&consumer("Radial")), CONSUMER_HINT_OVERRIDE);
+        assert_eq!(
+            primary_hint(&consumer(ALONG_WIRE_VARIANT)),
+            CONSUMER_HINT_ALONG_WIRE
+        );
     }
 
     /// The ladder states the one rung that can still surprise, and only
@@ -1627,18 +1520,15 @@ mod tests {
     fn the_ladder_names_the_rung_that_can_surprise() {
         assert_eq!(ladder_line(&producer("TwoD", Vec::new())), None);
         assert_eq!(
-            ladder_line(&producer(
-                "OneD",
-                vec![cell(UiSpaceCellRole::ProducerIn2d, "Radial", &["Radial"])]
-            )),
+            ladder_line(&producer("OneD", vec![shape_cell("Radial")])),
             Some(LADDER_PRODUCER)
         );
         assert_eq!(ladder_line(&consumer("Auto")), None);
-        assert_eq!(ladder_line(&consumer("Mirror")), None);
+        assert_eq!(ladder_line(&consumer("Radial")), None);
     }
 
-    /// D15's captions, including D11's honesty rule: a projection nobody
-    /// authored must never read like one somebody did.
+    /// D15's captions, including D11's honesty rule — post-v9 there are
+    /// two origins (the producer always declares).
     #[test]
     fn captions_name_the_space_the_projection_and_its_origin() {
         let native = UiVisualProductSpace {
@@ -1654,7 +1544,7 @@ mod tests {
 
         let declared = UiVisualProductSpace {
             space: UiVisualSpace::TwoD,
-            projection: Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
+            projection: Some(UiCellProjection::plain(UiProjectionShape::Radial)),
             origin: Some(UiProjectionOrigin::Declared),
             primary: UiVisualSpace::OneD,
         };
@@ -1663,23 +1553,18 @@ mod tests {
             "in 2D · radial (declared)"
         );
 
-        let filled = UiVisualProductSpace {
-            origin: Some(UiProjectionOrigin::ConsumerDefault),
-            projection: Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
+        let forced = UiVisualProductSpace {
+            origin: Some(UiProjectionOrigin::Forced),
+            projection: Some(UiCellProjection {
+                shape: UiProjectionShape::ExtrudeX,
+                mirror: true,
+                flip: false,
+            }),
             ..declared
         };
         assert_eq!(
-            preview_space_caption(UiVisualSpace::TwoD, Some(filled)),
-            "in 2D · extrude (consumer default)"
-        );
-
-        let forced = UiVisualProductSpace {
-            origin: Some(UiProjectionOrigin::Forced),
-            ..filled
-        };
-        assert_eq!(
             preview_space_caption(UiVisualSpace::TwoD, Some(forced)),
-            "in 2D · extrude (forced)"
+            "in 2D · extrude-x · mirrored (forced)"
         );
 
         // A 2D producer filling a 1D request: no cell to name, so the
@@ -1721,22 +1606,6 @@ mod tests {
     fn only_a_declared_space_earns_a_header_badge() {
         assert_eq!(space_badge(&producer("OneD", Vec::new())), Some("1D"));
         assert_eq!(space_badge(&producer("TwoD", Vec::new())), Some("2D"));
-        // A fixture states a POLICY, so `declared_space` is `None` by
-        // construction and the card wears no badge.
         assert_eq!(space_badge(&consumer("Auto")), None);
-
-        let mut shader = lpa_studio_core::UiShaderFace {
-            preview: lpa_studio_core::UiProducedProduct::visual("output"),
-            controls: Vec::new(),
-            agent: None,
-            code_drawer: None,
-            space: Some(producer("OneD", Vec::new())),
-        };
-        assert_eq!(
-            face_space_badge(&UiNodeFace::Shader(shader.clone())),
-            Some("1D")
-        );
-        shader.space = None;
-        assert_eq!(face_space_badge(&UiNodeFace::Shader(shader)), None);
     }
 }

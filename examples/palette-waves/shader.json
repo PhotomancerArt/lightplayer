@@ -73,7 +73,12 @@
   "space": {
     "kind": "OneD",
     "in_2d": {
-      "kind": "Radial"
+      "kind": "Project",
+      "shape": {
+        "kind": "Radial"
+      },
+      "mirror": false,
+      "flip": false
     }
   }
 }

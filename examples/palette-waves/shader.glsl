@@ -19,7 +19,7 @@
 // whole multiple wraps on a whole number of cycles, so the rewrite is exact
 // at the phasor's own wrap.
 //
-// This shader declares `OneD { in_2d: Radial }`: it is written along a
+// This shader declares `OneD` with a radial projection: it is written along a
 // strip, and when a 2D consumer asks for it the declared answer turns the
 // travelling ramp into rings.
 

@@ -15,66 +15,43 @@ pub enum WireVisualSpace {
     TwoD,
 }
 
-/// Wire mirror of `lpc_engine::products::visual::ProjectionDirection` —
-/// which way a directional projection runs the strip (G1b ruling 4).
+/// Wire mirror of `lpc_engine::products::visual::ProjectionShape` — the
+/// base coordinate map of a factored projection cell (THE FACTORIZATION,
+/// wire proto 15).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum WireProjectionDirection {
-    /// `u = x` (today's behavior — the default on the runtime side).
-    Right,
-    Left,
-    Down,
-    Up,
-}
-
-/// Wire mirror of `lpc_engine::products::visual::MirrorDirection` — a
-/// mirror fold's sense × axis (mirror-direction ruling: a fold is
-/// symmetric in run direction, so mirror gets its own vocabulary).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum WireMirrorDirection {
-    InwardX,
-    /// Today's behavior (the runtime-side default).
-    OutwardX,
-    InwardY,
-    OutwardY,
-}
-
-/// Wire mirror of `lpc_engine::products::visual::RadialDirection` — a
-/// radial projection's flip (radial/angular flip ruling).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum WireRadialDirection {
-    /// Today's behavior (the runtime-side default).
-    Outward,
-    Inward,
-}
-
-/// Wire mirror of `lpc_engine::products::visual::AngularDirection` — an
-/// angular projection's sweep (radial/angular flip ruling).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum WireAngularDirection {
-    /// Today's behavior (the runtime-side default).
-    Clockwise,
-    CounterClockwise,
+pub enum WireProjectionShape {
+    /// Today's extrude (the runtime-side default).
+    ExtrudeX,
+    ExtrudeY,
+    Radial,
+    Angular,
 }
 
 /// Wire mirror of `lpc_engine::products::visual::CellProjection` — one cell
-/// of the 1D→2D projection matrix. Every shape carries its own direction
-/// vocabulary (G1b ruling 4 + the mirror and radial/angular flip rulings).
+/// of the 1D→2D projection matrix, FACTORED (wire proto 15): a base shape
+/// plus the two boolean modifiers, replacing the per-shape direction
+/// payload enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum WireCellProjection {
-    Extrude(WireProjectionDirection),
-    Radial(WireRadialDirection),
-    Angular(WireAngularDirection),
-    Mirror(WireMirrorDirection),
+pub struct WireCellProjection {
+    pub shape: WireProjectionShape,
+    /// Fold the strip around the map's midpoint.
+    pub mirror: bool,
+    /// Reverse the strip, applied after the fold.
+    pub flip: bool,
+}
+
+impl WireCellProjection {
+    /// A plain shape — no mirror, no flip.
+    pub const fn plain(shape: WireProjectionShape) -> Self {
+        Self {
+            shape,
+            mirror: false,
+            flip: false,
+        }
+    }
 }
 
 /// Wire mirror of `lpc_engine::products::visual::ProjectionOrigin` — which
@@ -85,7 +62,6 @@ pub enum WireCellProjection {
 #[serde(rename_all = "snake_case")]
 pub enum WireProjectionOrigin {
     Declared,
-    ConsumerDefault,
     Forced,
 }
 
@@ -100,10 +76,10 @@ pub struct WireConsumerPolicy {
 }
 
 impl WireConsumerPolicy {
-    /// The defaults-only policy (`Extrude` right, never force) — what a
+    /// The defaults-only policy (plain extrude-x, never force) — what a
     /// caller that has never heard of spaces effectively sends.
     pub const AUTO: Self = Self {
-        default_1d_to_2d: WireCellProjection::Extrude(WireProjectionDirection::Right),
+        default_1d_to_2d: WireCellProjection::plain(WireProjectionShape::ExtrudeX),
         force: false,
     };
 }
@@ -301,7 +277,7 @@ mod tests {
             format: WireTextureFormat::Rgba16,
             bytes: alloc::vec![1, 2, 3, 4, 5, 6],
             space: WireVisualSpace::TwoD,
-            projection: Some(WireCellProjection::Radial(WireRadialDirection::Outward)),
+            projection: Some(WireCellProjection::plain(WireProjectionShape::Radial)),
             origin: Some(WireProjectionOrigin::Declared),
             primary: WireVisualSpace::OneD,
         };
@@ -345,7 +321,11 @@ mod tests {
             format: WireTextureFormat::Rgba16,
             space: Some(WireVisualSpace::OneD),
             policy: Some(WireConsumerPolicy {
-                default_1d_to_2d: WireCellProjection::Mirror(WireMirrorDirection::InwardY),
+                default_1d_to_2d: WireCellProjection {
+                    shape: WireProjectionShape::ExtrudeY,
+                    mirror: true,
+                    flip: false,
+                },
                 force: true,
             }),
         };

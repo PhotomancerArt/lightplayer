@@ -307,7 +307,7 @@ fn load(fs: LpFsMemory) -> Project {
 /// priority instead.
 fn clocked_fs(phasor: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 8 }\n");
+    write(&fs, "/project.json", "{ \"format\": 9 }\n");
     write(&fs, "/clocked.glsl", CLOCKED_GLSL);
     write(
         &fs,
@@ -338,7 +338,7 @@ fn clocked_fs(phasor: &str) -> LpFsMemory {
 /// statement about provenance, not about their authoring happening to agree.
 fn paired_fs(a_phasor: &str, b_phasor: &str, bind_config: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 8 }\n");
+    write(&fs, "/project.json", "{ \"format\": 9 }\n");
     write(&fs, "/plain.glsl", PLAIN_GLSL);
     let bindings = if bind_config {
         r#"{ "wave": { "source": "bus:wave_config" } }"#
@@ -872,7 +872,7 @@ fn timebase_uniforms_without_a_product_run_at_their_shaped_default_and_warn() {
 #[test]
 fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 8 }\n");
+    write(&fs, "/project.json", "{ \"format\": 9 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_time = time; }");
     write(
         &fs,
@@ -932,7 +932,7 @@ fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
 #[test]
 fn an_unbound_uniform_runs_quietly_on_its_authored_default() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 8 }\n");
+    write(&fs, "/project.json", "{ \"format\": 9 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_t = t; }");
     write(
         &fs,

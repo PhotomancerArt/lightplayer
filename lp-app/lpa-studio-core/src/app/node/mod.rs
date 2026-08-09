@@ -42,9 +42,9 @@ pub use face::{
     UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace,
     UiOutputPin, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit,
     UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading,
-    UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiShapePresets, UiSpaceCell, UiSpaceCellRole,
-    UiSpaceChoice, UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection,
-    UiSpaceSide, UiStripOrderRow, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiShapePresets, UiSpaceBoolRow, UiSpaceCell,
+    UiSpaceCellRole, UiSpaceChoice, UiSpaceMismatch, UiSpaceModifiers, UiSpaceSection, UiSpaceSide,
+    UiTimebaseState, UiWireDirectionRow, UiWireStatus, phasor_rate_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
@@ -57,11 +57,10 @@ pub use ui_node_section::UiNodeSection;
 pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
-    UiAngularDirection, UiCellProjection, UiConsumerPolicy, UiControlProductPreview,
-    UiControlSampleFormat, UiMirrorDirection, UiProducedProduct, UiProductKind, UiProductPreview,
-    UiProductPreviewFrame, UiProductRef, UiProductSpaceView, UiProductTrackingState,
-    UiProjectionDirection, UiProjectionOrigin, UiRadialDirection, UiVisualProductSpace,
-    UiVisualSpace,
+    UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat,
+    UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductSpaceView, UiProductTrackingState, UiProjectionOrigin, UiProjectionShape,
+    UiVisualProductSpace, UiVisualSpace,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_shader_uniform::UiShaderUniform;

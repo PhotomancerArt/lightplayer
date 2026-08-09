@@ -98,15 +98,18 @@ pub struct UiSpaceCell {
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,
-    /// The ACTIVE shape's direction row, when the active shape is
-    /// directional (extrude/mirror — G1b ruling 4's second section:
-    /// "top section is general shape, below that is direction"). Derived
-    /// from the flattened payload row (`…in_2d.Extrude.direction` /
-    /// `…from_1d.Mirror.direction`), so it carries a REAL address; absent
-    /// for radial/angular, for the deferring choices, and while a
-    /// consumer is still in `Auto` (no payload rows in the tree yet —
-    /// the row appears once a directional shape is picked).
-    pub direction: Option<UiSpaceDirection>,
+    /// The factored cell's two modifier rows (THE FACTORIZATION: mirror
+    /// folds the strip around the midpoint, flip reverses it), derived
+    /// from the flattened `Project` payload's bool rows
+    /// (`…in_2d.Project.mirror` / `…from_1d.Project.flip`) — real
+    /// addresses for the ordinary bool `SetValue`. Absent when the
+    /// payload rows are not in the tree (a consumer still in `Auto`, or
+    /// the along-the-wire state, where the projection is gated off).
+    pub modifiers: Option<UiSpaceModifiers>,
+    /// The along-the-wire choice's [forward|reversed] row over the
+    /// fixture's `wire_reversed` bool (the wire-reversed addendum) —
+    /// present only while along-the-wire is the active choice.
+    pub wire_direction: Option<UiWireDirectionRow>,
     /// The fixture's `strip_order_meaningful` bool row, carried by the
     /// consumer PRIMARY cell (strip-order unification ruling, post-G1b):
     /// the bit is no longer its own checkbox — "along the wire" is the
@@ -116,61 +119,47 @@ pub struct UiSpaceCell {
     /// `select_request_space` never reaches it). `None` on producer cells
     /// and when the backing row is absent (the along-the-wire choice is
     /// then not offered).
-    pub strip_order: Option<UiStripOrderRow>,
+    pub strip_order: Option<UiSpaceBoolRow>,
 }
 
-/// The consumer section's `strip_order_meaningful` row, absorbed into the
-/// one dropdown (see [`UiSpaceCell::strip_order`]). Same shape a bool slot
-/// row projects: value + address + state, nothing invented.
+/// A boolean slot row a space cell owns — the shared shape behind the
+/// strip-order row, the two projection modifiers, and the wire-direction
+/// row: value + address + state, dispatching the ordinary bool
+/// `SetValue`, nothing invented.
 #[derive(Clone, Debug, PartialEq)]
-pub struct UiStripOrderRow {
+pub struct UiSpaceBoolRow {
     /// Current value of the bit.
     pub value: bool,
-    /// The bool row's address: consumer picks dispatch `SetValue` here,
-    /// exactly as the generic value row does. `None` renders inert.
+    /// The bool row's address. `None` renders inert.
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,
 }
 
-/// The direction row under a directional projection cell (G1b ruling 4
-/// + the mirror-direction ruling): a segmented choice over whatever
-/// direction vocabulary the ACTIVE shape declares — extrude's
-/// `ProjectionDirection` (`Right`…`Up`), mirror's `MirrorDirection`
-/// fold (`InwardX`…`OutwardY`), or the along-the-wire choice's
-/// forward/reversed pair (`FixtureDef::wire_reversed`).
-///
-/// `variants` is read from the backing row (declaration order for enum
-/// payloads), never hardcoded, so the web renders whichever vocabulary
-/// the model declares per shape. How a pick dispatches is the row's
-/// [`UiSpaceDirectionDispatch`].
+/// The factored cell's two modifiers (THE FACTORIZATION): `mirror` folds
+/// the strip around the map's midpoint, `flip` reverses it — two
+/// checkbox toggles under the shape tiles, replacing the per-shape
+/// direction vocabularies outright.
 #[derive(Clone, Debug, PartialEq)]
-pub struct UiSpaceDirection {
-    /// Active direction variant ident.
-    pub active: String,
-    /// Every declared variant ident, in declaration order.
-    pub variants: Vec<String>,
-    /// The backing row's address (`<cell>.<Shape>.direction`, or the
-    /// fixture's `wire_reversed` bool row). `None` renders inert.
+pub struct UiSpaceModifiers {
+    /// `…Project.mirror`.
+    pub mirror: UiSpaceBoolRow,
+    /// `…Project.flip`.
+    pub flip: UiSpaceBoolRow,
+}
+
+/// The along-the-wire choice's [forward|reversed] segmented row over the
+/// fixture's `wire_reversed` bool. Its own type rather than a modifier:
+/// the wire option has no mirror, and its direction is sampling order,
+/// not a projection transform.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiWireDirectionRow {
+    /// Whether the wire currently reads reversed.
+    pub reversed: bool,
+    /// The `wire_reversed` bool row's address. `None` renders inert.
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,
-    /// The op a pick sends.
-    pub dispatch: UiSpaceDirectionDispatch,
-}
-
-/// The op a direction-row pick dispatches — both are ops the generic
-/// drawer rows already send, so the row stays a presentation of the same
-/// write path.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UiSpaceDirectionDispatch {
-    /// A flattened enum payload row: `EnsurePresent address.<variant>`.
-    EnumVariant,
-    /// A bool row presented as a two-segment direction
-    /// (`Forward`/`Reversed`): `SetValue address = (variant ==
-    /// "Reversed")` — the along-the-wire direction row over
-    /// `FixtureDef::wire_reversed`.
-    ReversedBool,
 }
 
 impl UiSpaceCell {
@@ -256,7 +245,8 @@ mod tests {
                 .collect(),
             address: None,
             state: UiSlotFieldState::editable(),
-            direction: None,
+            modifiers: None,
+            wire_direction: None,
             strip_order: None,
         }
     }
@@ -271,9 +261,7 @@ mod tests {
         single.choices.push(UiSpaceChoice {
             variant: "Extrude".to_string(),
             label: "extrude".to_string(),
-            projection: Some(UiCellProjection::Extrude(
-                crate::UiProjectionDirection::Right,
-            )),
+            projection: Some(UiCellProjection::plain(crate::UiProjectionShape::ExtrudeX)),
             selected: false,
         });
         assert!(

@@ -782,16 +782,20 @@ mod tests {
     fn shader_space_parses_authored_one_d_json_and_round_trips() {
         let registry = registry();
 
-        // Authored form: a Slotted enum's active variant is a tagged object
-        // even when the payload is itself a unit-only enum (cf.
-        // `MappingConfig::Unset` -> `{"kind":"Unset"}`), so the nested
-        // `in_2d` answer cell is `{ "kind": "Radial" }`, not a bare string.
+        // Authored form (v9, the factored record): a Slotted enum's active
+        // variant is a tagged object even when the payload is itself a
+        // unit-only enum (cf. `MappingConfig::Unset` -> `{"kind":"Unset"}`),
+        // so the answer cell is `{"kind":"Project", "shape": {...}}` with
+        // the modifiers omissible at their defaults.
         let shader = NodeDef::read_json(
             &registry,
             r#"{
   "kind": "Shader",
   "source": { "path": "main.glsl" },
-  "space": { "kind": "OneD", "in_2d": { "kind": "Radial" } }
+  "space": {
+    "kind": "OneD",
+    "in_2d": { "kind": "Project", "shape": { "kind": "Radial" }, "flip": true }
+  }
 }"#,
         )
         .expect("shader with authored space");
@@ -801,12 +805,12 @@ mod tests {
         let ShaderSpace::OneD { in_2d } = shader.space.value() else {
             panic!("expected OneD");
         };
-        // A bare "Radial" (pre-flip JSON) parses with the direction at
-        // its behavior-preserving default (additive — no format bump).
         assert_eq!(
             *in_2d.value(),
-            SpaceAnswer2::Radial {
-                direction: EnumSlot::default()
+            SpaceAnswer2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: crate::ValueSlot::new(false),
+                flip: crate::ValueSlot::new(true),
             }
         );
 
@@ -820,12 +824,12 @@ mod tests {
         let ShaderSpace::OneD { in_2d } = read.space.value() else {
             panic!("expected OneD after round trip");
         };
-        // A bare "Radial" (pre-flip JSON) parses with the direction at
-        // its behavior-preserving default (additive — no format bump).
         assert_eq!(
             *in_2d.value(),
-            SpaceAnswer2::Radial {
-                direction: EnumSlot::default()
+            SpaceAnswer2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: crate::ValueSlot::new(false),
+                flip: crate::ValueSlot::new(true),
             }
         );
     }
@@ -857,7 +861,7 @@ mod tests {
   "strip_order_meaningful": false,
   "consume": {
     "kind": "Policy",
-    "from_1d": { "kind": "Radial" },
+    "from_1d": { "kind": "Project", "shape": { "kind": "Radial" } },
     "force": true
   }
 }"#,
@@ -872,8 +876,10 @@ mod tests {
         };
         assert_eq!(
             *from_1d.value(),
-            ConsumerCell2::Radial {
-                direction: EnumSlot::default()
+            ConsumerCell2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: crate::ValueSlot::new(false),
+                flip: crate::ValueSlot::new(false),
             }
         );
         assert!(*force.value());
@@ -891,8 +897,10 @@ mod tests {
         };
         assert_eq!(
             *from_1d.value(),
-            ConsumerCell2::Radial {
-                direction: EnumSlot::default()
+            ConsumerCell2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: crate::ValueSlot::new(false),
+                flip: crate::ValueSlot::new(false),
             }
         );
         assert!(*force.value());

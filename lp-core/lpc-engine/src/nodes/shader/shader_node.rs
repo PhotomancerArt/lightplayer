@@ -1129,79 +1129,41 @@ fn entry_space_for(space: &lpc_model::ShaderSpace) -> ShaderEntrySpace {
 }
 
 /// The authored 2D answer cell of a `OneD` declaration, as the runtime
-/// projection vocabulary. `None` means the authored `Default` — no
-/// opinion — and a `TwoD` declaration has no such cell at all.
+/// projection vocabulary. `None` only for a `TwoD` declaration, which has
+/// no such cell — post-v9 every 1D declaration carries a `Project`
+/// record, so there is no "no opinion" state anymore.
 fn space_answer_2_for(space: &lpc_model::ShaderSpace) -> Option<CellProjection> {
     match space {
         lpc_model::ShaderSpace::TwoD { .. } => None,
-        lpc_model::ShaderSpace::OneD { in_2d } => cell_projection_for(in_2d.value()),
+        lpc_model::ShaderSpace::OneD { in_2d } => Some(cell_projection_for(in_2d.value())),
     }
 }
 
-/// The runtime map behind an authored [`lpc_model::SpaceAnswer2`] cell.
-fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjection> {
-    match answer {
-        lpc_model::SpaceAnswer2::Default => None,
-        lpc_model::SpaceAnswer2::Extrude { direction } => Some(CellProjection::Extrude(
-            runtime_projection_direction(*direction.value()),
-        )),
-        lpc_model::SpaceAnswer2::Radial { direction } => Some(CellProjection::Radial(
-            runtime_radial_direction(*direction.value()),
-        )),
-        lpc_model::SpaceAnswer2::Angular { direction } => Some(CellProjection::Angular(
-            runtime_angular_direction(*direction.value()),
-        )),
-        lpc_model::SpaceAnswer2::Mirror { direction } => Some(CellProjection::Mirror(
-            runtime_mirror_direction(*direction.value()),
-        )),
+/// The runtime map behind an authored [`lpc_model::SpaceAnswer2`] cell —
+/// the factored record, field for field.
+fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> CellProjection {
+    let lpc_model::SpaceAnswer2::Project {
+        shape,
+        mirror,
+        flip,
+    } = answer;
+    CellProjection {
+        shape: runtime_projection_shape(*shape.value()),
+        mirror: *mirror.value(),
+        flip: *flip.value(),
     }
 }
 
-/// The runtime twin of an authored [`lpc_model::ProjectionDirection`].
-fn runtime_projection_direction(
-    direction: lpc_model::ProjectionDirection,
-) -> crate::products::visual::ProjectionDirection {
-    use crate::products::visual::ProjectionDirection as Runtime;
-    match direction {
-        lpc_model::ProjectionDirection::Right => Runtime::Right,
-        lpc_model::ProjectionDirection::Left => Runtime::Left,
-        lpc_model::ProjectionDirection::Down => Runtime::Down,
-        lpc_model::ProjectionDirection::Up => Runtime::Up,
-    }
-}
-
-/// The runtime twin of an authored [`lpc_model::RadialDirection`].
-fn runtime_radial_direction(
-    direction: lpc_model::RadialDirection,
-) -> crate::products::visual::RadialDirection {
-    use crate::products::visual::RadialDirection as Runtime;
-    match direction {
-        lpc_model::RadialDirection::Outward => Runtime::Outward,
-        lpc_model::RadialDirection::Inward => Runtime::Inward,
-    }
-}
-
-/// The runtime twin of an authored [`lpc_model::AngularDirection`].
-fn runtime_angular_direction(
-    direction: lpc_model::AngularDirection,
-) -> crate::products::visual::AngularDirection {
-    use crate::products::visual::AngularDirection as Runtime;
-    match direction {
-        lpc_model::AngularDirection::Clockwise => Runtime::Clockwise,
-        lpc_model::AngularDirection::CounterClockwise => Runtime::CounterClockwise,
-    }
-}
-
-/// The runtime twin of an authored [`lpc_model::MirrorDirection`].
-fn runtime_mirror_direction(
-    direction: lpc_model::MirrorDirection,
-) -> crate::products::visual::MirrorDirection {
-    use crate::products::visual::MirrorDirection as Runtime;
-    match direction {
-        lpc_model::MirrorDirection::InwardX => Runtime::InwardX,
-        lpc_model::MirrorDirection::OutwardX => Runtime::OutwardX,
-        lpc_model::MirrorDirection::InwardY => Runtime::InwardY,
-        lpc_model::MirrorDirection::OutwardY => Runtime::OutwardY,
+/// The runtime twin of an authored [`lpc_model::ProjectionShape`].
+fn runtime_projection_shape(
+    shape: lpc_model::ProjectionShape,
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape as Runtime;
+    match shape {
+        lpc_model::ProjectionShape::ExtrudeX => Runtime::ExtrudeX,
+        lpc_model::ProjectionShape::ExtrudeY => Runtime::ExtrudeY,
+        lpc_model::ProjectionShape::Radial => Runtime::Radial,
+        lpc_model::ProjectionShape::Angular => Runtime::Angular,
     }
 }
 
@@ -1209,10 +1171,11 @@ fn runtime_mirror_direction(
 /// view as the space variant itself. The outer `None` means "the query did
 /// not resolve" (unit fakes, or a `TwoD` declaration whose inactive variant
 /// subtree is absent) and leaves the loaded answer standing; the inner
-/// `None` is the authored `Default`.
+/// value is always a full factored cell — an unresolvable payload field
+/// reads as its behavior-preserving default (plain extrude-x).
 fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<CellProjection>> {
-    // The variant name is copied out before the direction read: the
-    // resolved production borrows the context the direction read needs.
+    // The variant name is copied out before the payload reads: the
+    // resolved production borrows the context the other reads need.
     let variant = {
         let production = ctx
             .resolve(&QueryKey::ConsumedSlot {
@@ -1225,122 +1188,54 @@ fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<
         };
         alloc::string::String::from(answer.variant.as_str())
     };
-    Some(match variant.as_str() {
-        "Default" => None,
-        "Extrude" => Some(CellProjection::Extrude(try_read_authored_direction(
-            ctx,
-            "space.OneD.in_2d.Extrude.direction",
-        ))),
-        "Radial" => Some(CellProjection::Radial(try_read_authored_radial_direction(
-            ctx,
-            "space.OneD.in_2d.Radial.direction",
-        ))),
-        "Angular" => Some(CellProjection::Angular(
-            try_read_authored_angular_direction(ctx, "space.OneD.in_2d.Angular.direction"),
-        )),
-        "Mirror" => Some(CellProjection::Mirror(try_read_authored_mirror_direction(
-            ctx,
-            "space.OneD.in_2d.Mirror.direction",
-        ))),
-        _ => return None,
-    })
+    if variant != "Project" {
+        return None;
+    }
+    Some(Some(CellProjection {
+        shape: try_read_authored_shape(ctx, "space.OneD.in_2d.Project.shape"),
+        mirror: try_read_authored_bool(ctx, "space.OneD.in_2d.Project.mirror"),
+        flip: try_read_authored_bool(ctx, "space.OneD.in_2d.Project.flip"),
+    }))
 }
 
-/// The authored direction payload of a directional answer cell. A path
-/// that does not resolve (or is not an enum) reads as the default `Right`
-/// — the additive contract: a bare pre-directional `Extrude` means what
-/// it always meant.
-fn try_read_authored_direction(
+/// The authored shape payload of a `Project` cell. A path that does not
+/// resolve (or is not an enum) reads as the default `ExtrudeX` — the
+/// behavior-preserving default the whole vocabulary anchors on.
+fn try_read_authored_shape(
     ctx: &mut TickContext<'_>,
     path: &'static str,
-) -> crate::products::visual::ProjectionDirection {
-    use crate::products::visual::ProjectionDirection as Runtime;
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape as Runtime;
     let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: SlotPath::parse(path).expect("static path"),
     }) else {
-        return Runtime::Right;
+        return Runtime::ExtrudeX;
     };
-    let lpc_model::SlotData::Enum(direction) = production.data() else {
-        return Runtime::Right;
+    let lpc_model::SlotData::Enum(shape) = production.data() else {
+        return Runtime::ExtrudeX;
     };
-    match direction.variant.as_str() {
-        "Left" => Runtime::Left,
-        "Down" => Runtime::Down,
-        "Up" => Runtime::Up,
-        _ => Runtime::Right,
+    match shape.variant.as_str() {
+        "ExtrudeY" => Runtime::ExtrudeY,
+        "Radial" => Runtime::Radial,
+        "Angular" => Runtime::Angular,
+        _ => Runtime::ExtrudeX,
     }
 }
 
-/// The authored flip payload of a radial answer cell. Unresolvable (or
-/// unknown) reads as the default `Outward` — the additive contract: a
-/// bare pre-flip `Radial` means what it always meant.
-fn try_read_authored_radial_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::RadialDirection {
-    use crate::products::visual::RadialDirection as Runtime;
+/// An authored bool modifier of a `Project` cell (`mirror`/`flip`).
+/// Unresolvable reads as `false` — the behavior-preserving default.
+fn try_read_authored_bool(ctx: &mut TickContext<'_>, path: &'static str) -> bool {
     let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: SlotPath::parse(path).expect("static path"),
     }) else {
-        return Runtime::Outward;
+        return false;
     };
-    let lpc_model::SlotData::Enum(direction) = production.data() else {
-        return Runtime::Outward;
+    let lpc_model::SlotData::Value(value) = production.data() else {
+        return false;
     };
-    match direction.variant.as_str() {
-        "Inward" => Runtime::Inward,
-        _ => Runtime::Outward,
-    }
-}
-
-/// The authored sweep payload of an angular answer cell. Unresolvable (or
-/// unknown) reads as the default `Clockwise` — the additive contract: a
-/// bare pre-flip `Angular` means what it always meant.
-fn try_read_authored_angular_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::AngularDirection {
-    use crate::products::visual::AngularDirection as Runtime;
-    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: SlotPath::parse(path).expect("static path"),
-    }) else {
-        return Runtime::Clockwise;
-    };
-    let lpc_model::SlotData::Enum(direction) = production.data() else {
-        return Runtime::Clockwise;
-    };
-    match direction.variant.as_str() {
-        "CounterClockwise" => Runtime::CounterClockwise,
-        _ => Runtime::Clockwise,
-    }
-}
-
-/// The authored fold payload of a mirror answer cell. Unresolvable (or
-/// unknown) reads as the default `OutwardX` — the additive contract: a
-/// bare pre-directional `Mirror` means what it always meant.
-fn try_read_authored_mirror_direction(
-    ctx: &mut TickContext<'_>,
-    path: &'static str,
-) -> crate::products::visual::MirrorDirection {
-    use crate::products::visual::MirrorDirection as Runtime;
-    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: SlotPath::parse(path).expect("static path"),
-    }) else {
-        return Runtime::OutwardX;
-    };
-    let lpc_model::SlotData::Enum(direction) = production.data() else {
-        return Runtime::OutwardX;
-    };
-    match direction.variant.as_str() {
-        "InwardX" => Runtime::InwardX,
-        "InwardY" => Runtime::InwardY,
-        "OutwardY" => Runtime::OutwardY,
-        _ => Runtime::OutwardX,
-    }
+    matches!(value.get(), lpc_model::LpValue::Bool(true))
 }
 
 /// The authored `space` declaration's variant, read through the same

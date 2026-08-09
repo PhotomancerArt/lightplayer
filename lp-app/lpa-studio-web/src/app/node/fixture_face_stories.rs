@@ -328,7 +328,7 @@ fn space_policy() -> Element {
 }
 
 #[story(
-    description = "An authored OVERRIDE: the same dropdown now names `radial`, the hint flips to `This fixture overrides what 1D sources declare.`, and the collapsed summary would read `1D sources: radial (override)`. Under the hood the pick dispatched ensure-Policy → ensure-from_1d.Radial → force=true — the same ops the drawer rows send, batched into one gesture."
+    description = "An authored OVERRIDE: the same choice list now names `radial`, the hint flips to `This fixture overrides what 1D sources declare.`, and the collapsed summary reads `1D sources: radial (override)`. Under the hood the pick dispatched clear-the-wire-bit → ensure-Policy → ensure-from_1d.Project.shape.Radial → force=true — the same ops the drawer rows send, batched into one gesture. The modifier toggles beneath refine the factored cell (mirror/flip)."
 )]
 fn space_policy_forced() -> Element {
     rsx! {
@@ -343,7 +343,7 @@ fn space_policy_forced() -> Element {
 }
 
 #[story(
-    description = "The choice tiles INLINE on the CONSUMER side — one component, both sides of the binding (D16), no popover anywhere in the section (the inline-tiles ruling). Six always-visible tiles: `along the wire` (serpentine: wire order, the map doesn't apply), `follow the source` (dashed: the answer lives on the source), and the four projections. Selected = accent border + wash + check badge."
+    description = "The choice tiles INLINE on the CONSUMER side — one component, both sides of the binding (D16), no popover anywhere in the section (the inline-tiles ruling). Six always-visible tiles: `along the wire` (serpentine: wire order, the map doesn't apply), `follow the source` (dashed: the answer lives on the source), and the four factored shapes. Selected = accent border + wash + check badge."
 )]
 fn space_choices_inline() -> Element {
     rsx! {

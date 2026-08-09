@@ -1,7 +1,4 @@
-use crate::{
-    AngularDirection, EnumSlot, MirrorDirection, ProjectionDirection, RadialDirection, Slotted,
-    ValueSlot,
-};
+use crate::{EnumSlot, ProjectionShape, Slotted, ValueSlot};
 
 /// A fixture's consumer-side space policy — the answer side of the
 /// two-sided space declaration (vision D14), mirroring the shader
@@ -10,13 +7,10 @@ use crate::{
 /// Modeled directly on the `MappingConfig` precedent
 /// (`nodes/fixture/mapping.rs`): a `#[derive(Slotted)]` enum with a unit
 /// default variant and one struct-payload variant.
-///
-/// Model layer only: not yet read by the engine (that's P4 of the
-/// dimensionality-first-class plan).
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum VisualConsumerSpace {
     /// Policy: apply per-pair defaults only, never force. Equivalent to
-    /// `Policy { from_1d: Extrude, force: false }`.
+    /// `Policy { from_1d: default Project, force: false }`.
     #[default]
     Auto,
 
@@ -32,31 +26,20 @@ pub enum VisualConsumerSpace {
 
 /// Fixture-side default projection for a 1D source landing on a 2D-capable
 /// fixture (vision D14) — the consumer mirror of
-/// [`crate::nodes::shader::SpaceAnswer2`].
-///
-/// `Extrude`/`Mirror` carry the shared [`ProjectionDirection`] (G1b ruling
-/// 4), additive exactly as on the producer side: a bare persisted
-/// `"Extrude"` keeps parsing as `Right` — today's behavior, no format
-/// bump.
+/// [`crate::nodes::shader::SpaceAnswer2`], and deliberately the SAME
+/// factored `shape × mirror × flip` record (THE FACTORIZATION ruling,
+/// format v9): the two sides of the negotiation speak one vocabulary.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum ConsumerCell2 {
+    /// A declared projection: base shape and its two modifiers.
     #[default]
-    Extrude {
-        /// Which way the strip runs across the surface.
-        direction: EnumSlot<ProjectionDirection>,
-    },
-    Radial {
-        /// Which way the strip runs the rings (centre→edge or back).
-        direction: EnumSlot<RadialDirection>,
-    },
-    Angular {
-        /// Which way the strip sweeps around the centre.
-        direction: EnumSlot<AngularDirection>,
-    },
-    Mirror {
-        /// Which way the fold runs — mirror's own vocabulary (fold sense
-        /// × axis).
-        direction: EnumSlot<MirrorDirection>,
+    Project {
+        /// The base coordinate map.
+        shape: EnumSlot<ProjectionShape>,
+        /// Fold the strip around the map's midpoint (`u′ = 1 − |2u − 1|`).
+        mirror: ValueSlot<bool>,
+        /// Reverse the strip (`u′ = 1 − u`), applied after the fold.
+        flip: ValueSlot<bool>,
     },
 }
 
@@ -69,21 +52,27 @@ mod tests {
         assert_eq!(VisualConsumerSpace::default(), VisualConsumerSpace::Auto);
     }
 
-    /// The consumer cell's default is extrude RIGHT — the same additive
-    /// contract as the producer side: a bare persisted `"Extrude"` keeps
-    /// meaning what it always meant.
+    /// The consumer cell's default is plain extrude-x — the same factored
+    /// default as the producer side, and bit-identical to the
+    /// pre-factorization extrude.
     #[test]
-    fn default_cell_is_extrude_right() {
-        let ConsumerCell2::Extrude { direction } = ConsumerCell2::default() else {
-            panic!("expected Extrude");
-        };
-        assert_eq!(*direction.value(), ProjectionDirection::Right);
+    fn default_cell_is_plain_extrude_x() {
+        let ConsumerCell2::Project {
+            shape,
+            mirror,
+            flip,
+        } = ConsumerCell2::default();
+        assert_eq!(*shape.value(), crate::ProjectionShape::ExtrudeX);
+        assert!(!*mirror.value());
+        assert!(!*flip.value());
     }
 
     #[test]
     fn policy_carries_default_cell_and_force_bit() {
-        let radial = ConsumerCell2::Radial {
-            direction: EnumSlot::default(),
+        let radial = ConsumerCell2::Project {
+            shape: EnumSlot::new(crate::ProjectionShape::Radial),
+            mirror: ValueSlot::new(false),
+            flip: ValueSlot::new(true),
         };
         let policy = VisualConsumerSpace::Policy {
             from_1d: EnumSlot::new(radial.clone()),
@@ -94,25 +83,5 @@ mod tests {
         };
         assert_eq!(*from_1d.value(), radial);
         assert!(*force.value());
-    }
-
-    /// The additive-compat contract for the flip ruling: selecting the
-    /// bare variant name — exactly what parsing a pre-flip persisted
-    /// `"Radial"`/`"Angular"` does — lands on the behavior-preserving
-    /// defaults (`Outward` / `Clockwise`).
-    #[test]
-    fn bare_radial_and_angular_default_to_todays_behavior() {
-        use crate::{AngularDirection, RadialDirection, SlottedEnumMut};
-        let mut cell = ConsumerCell2::default();
-        cell.set_variant_default("Radial").expect("variant");
-        let ConsumerCell2::Radial { direction } = &cell else {
-            panic!("expected Radial");
-        };
-        assert_eq!(*direction.value(), RadialDirection::Outward);
-        cell.set_variant_default("Angular").expect("variant");
-        let ConsumerCell2::Angular { direction } = &cell else {
-            panic!("expected Angular");
-        };
-        assert_eq!(*direction.value(), AngularDirection::Clockwise);
     }
 }

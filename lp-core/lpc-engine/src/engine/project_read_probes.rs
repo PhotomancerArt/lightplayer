@@ -12,11 +12,10 @@ use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
     OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
-    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireAngularDirection,
-    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
-    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
-    WireEffectiveBinding, WireMirrorDirection, WirePhasorOrigin, WirePhasorRow,
-    WireProjectionDirection, WireProjectionOrigin, WireRadialDirection, WireVisualSpace,
+    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
+    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
+    WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin, WireProjectionShape, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -32,9 +31,8 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSamp
 
 use super::Engine;
 use crate::products::visual::{
-    AngularDirection, CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo,
-    ProjectionDirection, ProjectionOrigin, RadialDirection, VisualSpace,
-    resolve_1d_to_2d_with_origin,
+    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
+    VisualSpace, resolve_1d_to_2d_with_origin,
 };
 
 /// One output node found by the published-frame tree walk, snapshotted so the
@@ -616,107 +614,42 @@ fn engine_visual_space(space: WireVisualSpace) -> VisualSpace {
 }
 
 fn wire_cell_projection(cell: CellProjection) -> WireCellProjection {
-    match cell {
-        CellProjection::Extrude(direction) => {
-            WireCellProjection::Extrude(wire_projection_direction(direction))
-        }
-        CellProjection::Radial(direction) => {
-            WireCellProjection::Radial(wire_radial_direction(direction))
-        }
-        CellProjection::Angular(direction) => {
-            WireCellProjection::Angular(wire_angular_direction(direction))
-        }
-        CellProjection::Mirror(direction) => {
-            WireCellProjection::Mirror(wire_mirror_direction(direction))
-        }
+    WireCellProjection {
+        shape: wire_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
     }
 }
 
 fn engine_cell_projection(cell: WireCellProjection) -> CellProjection {
-    match cell {
-        WireCellProjection::Extrude(direction) => {
-            CellProjection::Extrude(engine_projection_direction(direction))
-        }
-        WireCellProjection::Radial(direction) => {
-            CellProjection::Radial(engine_radial_direction(direction))
-        }
-        WireCellProjection::Angular(direction) => {
-            CellProjection::Angular(engine_angular_direction(direction))
-        }
-        WireCellProjection::Mirror(direction) => {
-            CellProjection::Mirror(engine_mirror_direction(direction))
-        }
+    CellProjection {
+        shape: engine_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
     }
 }
 
-fn wire_projection_direction(direction: ProjectionDirection) -> WireProjectionDirection {
-    match direction {
-        ProjectionDirection::Right => WireProjectionDirection::Right,
-        ProjectionDirection::Left => WireProjectionDirection::Left,
-        ProjectionDirection::Down => WireProjectionDirection::Down,
-        ProjectionDirection::Up => WireProjectionDirection::Up,
+fn wire_projection_shape(shape: ProjectionShape) -> WireProjectionShape {
+    match shape {
+        ProjectionShape::ExtrudeX => WireProjectionShape::ExtrudeX,
+        ProjectionShape::ExtrudeY => WireProjectionShape::ExtrudeY,
+        ProjectionShape::Radial => WireProjectionShape::Radial,
+        ProjectionShape::Angular => WireProjectionShape::Angular,
     }
 }
 
-fn engine_projection_direction(direction: WireProjectionDirection) -> ProjectionDirection {
-    match direction {
-        WireProjectionDirection::Right => ProjectionDirection::Right,
-        WireProjectionDirection::Left => ProjectionDirection::Left,
-        WireProjectionDirection::Down => ProjectionDirection::Down,
-        WireProjectionDirection::Up => ProjectionDirection::Up,
-    }
-}
-
-fn wire_radial_direction(direction: RadialDirection) -> WireRadialDirection {
-    match direction {
-        RadialDirection::Outward => WireRadialDirection::Outward,
-        RadialDirection::Inward => WireRadialDirection::Inward,
-    }
-}
-
-fn engine_radial_direction(direction: WireRadialDirection) -> RadialDirection {
-    match direction {
-        WireRadialDirection::Outward => RadialDirection::Outward,
-        WireRadialDirection::Inward => RadialDirection::Inward,
-    }
-}
-
-fn wire_angular_direction(direction: AngularDirection) -> WireAngularDirection {
-    match direction {
-        AngularDirection::Clockwise => WireAngularDirection::Clockwise,
-        AngularDirection::CounterClockwise => WireAngularDirection::CounterClockwise,
-    }
-}
-
-fn engine_angular_direction(direction: WireAngularDirection) -> AngularDirection {
-    match direction {
-        WireAngularDirection::Clockwise => AngularDirection::Clockwise,
-        WireAngularDirection::CounterClockwise => AngularDirection::CounterClockwise,
-    }
-}
-
-fn wire_mirror_direction(direction: MirrorDirection) -> WireMirrorDirection {
-    match direction {
-        MirrorDirection::InwardX => WireMirrorDirection::InwardX,
-        MirrorDirection::OutwardX => WireMirrorDirection::OutwardX,
-        MirrorDirection::InwardY => WireMirrorDirection::InwardY,
-        MirrorDirection::OutwardY => WireMirrorDirection::OutwardY,
-    }
-}
-
-fn engine_mirror_direction(direction: WireMirrorDirection) -> MirrorDirection {
-    match direction {
-        WireMirrorDirection::InwardX => MirrorDirection::InwardX,
-        WireMirrorDirection::OutwardX => MirrorDirection::OutwardX,
-        WireMirrorDirection::InwardY => MirrorDirection::InwardY,
-        WireMirrorDirection::OutwardY => MirrorDirection::OutwardY,
+fn engine_projection_shape(shape: WireProjectionShape) -> ProjectionShape {
+    match shape {
+        WireProjectionShape::ExtrudeX => ProjectionShape::ExtrudeX,
+        WireProjectionShape::ExtrudeY => ProjectionShape::ExtrudeY,
+        WireProjectionShape::Radial => ProjectionShape::Radial,
+        WireProjectionShape::Angular => ProjectionShape::Angular,
     }
 }
 
 fn wire_projection_origin(origin: ProjectionOrigin) -> WireProjectionOrigin {
     match origin {
         ProjectionOrigin::Declared => WireProjectionOrigin::Declared,
-        ProjectionOrigin::ConsumerDefault => WireProjectionOrigin::ConsumerDefault,
         ProjectionOrigin::Forced => WireProjectionOrigin::Forced,
     }
 }

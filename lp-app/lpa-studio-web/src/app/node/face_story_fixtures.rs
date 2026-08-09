@@ -597,7 +597,8 @@ fn space_cell(
             .collect(),
         address: Some(story_slot_address(path)),
         state: UiSlotFieldState::editable(),
-        direction: None,
+        modifiers: None,
+        wire_direction: None,
         strip_order: None,
     }
 }
@@ -641,7 +642,7 @@ pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
         CONSUMER_DROPDOWN_CHOICES,
     );
     primary.strip_order = Some(consumer_strip_order_row(true));
-    primary.direction = Some(wire_direction_row(false));
+    primary.wire_direction = Some(wire_direction_row(false));
     UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary,
@@ -653,23 +654,38 @@ pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
 
 /// The `strip_order_meaningful` row the consumer cell carries — every
 /// dropdown pick includes its `SetValue`.
-fn consumer_strip_order_row(value: bool) -> lpa_studio_core::UiStripOrderRow {
-    lpa_studio_core::UiStripOrderRow {
+fn consumer_strip_order_row(value: bool) -> lpa_studio_core::UiSpaceBoolRow {
+    lpa_studio_core::UiSpaceBoolRow {
         value,
         address: Some(story_slot_address("strip_order_meaningful")),
         state: UiSlotFieldState::editable(),
     }
 }
 
-/// The along-the-wire direction row (the wire-reversed addendum): a bool
-/// row presented as forward/reversed segments.
-fn wire_direction_row(reversed: bool) -> lpa_studio_core::UiSpaceDirection {
-    lpa_studio_core::UiSpaceDirection {
-        active: if reversed { "Reversed" } else { "Forward" }.to_string(),
-        variants: vec!["Forward".to_string(), "Reversed".to_string()],
+/// The along-the-wire [forward|reversed] row (the wire-reversed
+/// addendum): a bool row presented as two arrow segments.
+fn wire_direction_row(reversed: bool) -> lpa_studio_core::UiWireDirectionRow {
+    lpa_studio_core::UiWireDirectionRow {
+        reversed,
         address: Some(story_slot_address("wire_reversed")),
         state: UiSlotFieldState::editable(),
-        dispatch: lpa_studio_core::UiSpaceDirectionDispatch::ReversedBool,
+    }
+}
+
+/// The factored cell's modifier toggles, addressed at the flattened
+/// `Project` payload rows.
+fn modifier_rows(prefix: &str, mirror: bool, flip: bool) -> lpa_studio_core::UiSpaceModifiers {
+    lpa_studio_core::UiSpaceModifiers {
+        mirror: lpa_studio_core::UiSpaceBoolRow {
+            value: mirror,
+            address: Some(story_slot_address(&format!("{prefix}.Project.mirror"))),
+            state: UiSlotFieldState::editable(),
+        },
+        flip: lpa_studio_core::UiSpaceBoolRow {
+            value: flip,
+            address: Some(story_slot_address(&format!("{prefix}.Project.flip"))),
+            state: UiSlotFieldState::editable(),
+        },
     }
 }
 
@@ -677,78 +693,76 @@ fn wire_direction_row(reversed: bool) -> lpa_studio_core::UiSpaceDirection {
 /// second segment active, the summary wearing the back arrow.
 pub(crate) fn fixture_space_section_wire_reversed() -> lpa_studio_core::UiSpaceSection {
     let mut section = fixture_space_section();
-    section.primary.direction = Some(wire_direction_row(true));
+    section.primary.wire_direction = Some(wire_direction_row(true));
     section
 }
 
-/// Every projection a 1D producer can answer 2D consumers with — the
-/// inline choice tiles. No `Default` entry (post-G1b Default-tile drop:
-/// it was behaviorally identical to authored extrude; an unauthored cell
-/// simply selects nothing).
+/// The four factored SHAPE tiles a 1D producer answers 2D consumers with
+/// (THE FACTORIZATION: modifiers ride beneath as toggles, never as
+/// tiles).
 const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
     (
-        "Extrude",
-        "extrude",
-        Some(lpa_studio_core::UiCellProjection::Extrude(
-            lpa_studio_core::UiProjectionDirection::Right,
+        "ExtrudeX",
+        "extrude-x",
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::ExtrudeX,
+        )),
+    ),
+    (
+        "ExtrudeY",
+        "extrude-y",
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::ExtrudeY,
         )),
     ),
     (
         "Radial",
         "radial",
-        Some(lpa_studio_core::UiCellProjection::Radial(
-            lpa_studio_core::UiRadialDirection::Outward,
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::Radial,
         )),
     ),
     (
         "Angular",
         "angular",
-        Some(lpa_studio_core::UiCellProjection::Angular(
-            lpa_studio_core::UiAngularDirection::Clockwise,
-        )),
-    ),
-    (
-        "Mirror",
-        "mirror",
-        Some(lpa_studio_core::UiCellProjection::Mirror(
-            lpa_studio_core::UiMirrorDirection::OutwardX,
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::Angular,
         )),
     ),
 ];
 
-/// The consumer's ONE dropdown (P4b + the strip-order unification):
-/// `along the wire` (the strip-order bit as the first choice) and `Auto`
-/// ("follow the source") plus the four projections an explicit pick
-/// would force.
+/// The consumer's choice list: `along the wire` (the strip-order bit as
+/// the first choice) and `Auto` ("follow the source") plus the four
+/// factored shapes an explicit pick would force.
 const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
     ("AlongWire", "along the wire", None),
     ("Auto", "follow the source", None),
     (
-        "Extrude",
-        "extrude",
-        Some(lpa_studio_core::UiCellProjection::Extrude(
-            lpa_studio_core::UiProjectionDirection::Right,
+        "ExtrudeX",
+        "extrude-x",
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::ExtrudeX,
+        )),
+    ),
+    (
+        "ExtrudeY",
+        "extrude-y",
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::ExtrudeY,
         )),
     ),
     (
         "Radial",
         "radial",
-        Some(lpa_studio_core::UiCellProjection::Radial(
-            lpa_studio_core::UiRadialDirection::Outward,
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::Radial,
         )),
     ),
     (
         "Angular",
         "angular",
-        Some(lpa_studio_core::UiCellProjection::Angular(
-            lpa_studio_core::UiAngularDirection::Clockwise,
-        )),
-    ),
-    (
-        "Mirror",
-        "mirror",
-        Some(lpa_studio_core::UiCellProjection::Mirror(
-            lpa_studio_core::UiMirrorDirection::OutwardX,
+        Some(lpa_studio_core::UiCellProjection::plain(
+            lpa_studio_core::UiProjectionShape::Angular,
         )),
     ),
 ];
@@ -768,45 +782,33 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
             &[("TwoD", "2D", None), ("OneD", "1D", None)],
         ),
         declared_space: Some(UiVisualSpace::OneD),
-        cells: vec![space_cell(
-            UiSpaceCellRole::ProducerIn2d,
-            "Default projection",
-            "space.OneD.in_2d",
-            answer,
-            PRODUCER_IN_2D_CHOICES,
-        )],
+        cells: vec![{
+            let mut cell = space_cell(
+                UiSpaceCellRole::ProducerIn2d,
+                "Projection",
+                "space.OneD.in_2d.Project.shape",
+                answer,
+                PRODUCER_IN_2D_CHOICES,
+            );
+            cell.modifiers = Some(modifier_rows("space.OneD.in_2d", false, false));
+            cell
+        }],
         mismatch: None,
     }
 }
 
-/// A 1D producer with a DIRECTIONAL answer (G1b ruling 4 + the
-/// mirror-direction ruling): the same section as
-/// [`shader_space_section_one_d`], with the active shape's `direction`
-/// row attached — the flattened payload row a real tree would carry
-/// (`space.OneD.in_2d.<Shape>.direction`), addressed so the story's
-/// segmented control is live and carrying the SHAPE's own vocabulary
-/// (extrude's run directions, mirror's folds).
-pub(crate) fn shader_space_section_one_d_directed(
+/// A 1D producer with MODIFIED projection (THE FACTORIZATION): the same
+/// section as [`shader_space_section_one_d`], with the modifier toggles
+/// set — the flattened `Project` payload's bool rows a real tree would
+/// carry, addressed so the story's checkboxes are live.
+pub(crate) fn shader_space_section_one_d_modified(
     answer: &str,
-    direction: &str,
+    mirror: bool,
+    flip: bool,
 ) -> lpa_studio_core::UiSpaceSection {
-    let variants: &[&str] = match answer {
-        "Mirror" => &["InwardX", "OutwardX", "InwardY", "OutwardY"],
-        "Radial" => &["Outward", "Inward"],
-        "Angular" => &["Clockwise", "CounterClockwise"],
-        _ => &["Right", "Left", "Down", "Up"],
-    };
     let mut section = shader_space_section_one_d(answer);
     if let Some(cell) = section.cells.first_mut() {
-        cell.direction = Some(lpa_studio_core::UiSpaceDirection {
-            active: direction.to_string(),
-            variants: variants.iter().map(|ident| ident.to_string()).collect(),
-            address: Some(story_slot_address(&format!(
-                "space.OneD.in_2d.{answer}.direction"
-            ))),
-            state: UiSlotFieldState::editable(),
-            dispatch: lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant,
-        });
+        cell.modifiers = Some(modifier_rows("space.OneD.in_2d", mirror, flip));
     }
     section
 }
@@ -815,7 +817,7 @@ pub(crate) fn shader_space_section_one_d_directed(
 /// refuses outright, and this is what the card does with that refusal.
 pub(crate) fn shader_space_section_mismatch() -> lpa_studio_core::UiSpaceSection {
     use lpa_studio_core::{UiSpaceMismatch, UiVisualSpace};
-    let mut section = shader_space_section_one_d("Default");
+    let mut section = shader_space_section_one_d("ExtrudeX");
     section.mismatch = Some(UiSpaceMismatch {
         declared: UiVisualSpace::OneD,
         entry: UiVisualSpace::TwoD,
