@@ -33,6 +33,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 16: output fragments — `SlotMerge` gains a `fragments` variant and
+///   `OutputDef::input` declares it, so every project read now ships a slot
+///   shape carrying `"merge": "fragments"`. `SlotSemantics.merge` rides the
+///   shape frames (`ProjectReadEvent`'s `SlotShapeEntry`), and an old peer
+///   deserializing that enum has no such variant — it cannot decode the
+///   output node's shape at all, which is what earns the bump. Additive
+///   though the model change reads.
 /// - 15: the projection factorization (post-G2 ruling, format v9) —
 ///   `WireCellProjection` becomes the factored `{shape, mirror, flip}`
 ///   RECORD over a new `WireProjectionShape` (extrude_x/extrude_y/radial/
@@ -120,7 +127,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 15;
+pub const WIRE_PROTO_VERSION: u32 = 16;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
