@@ -122,15 +122,19 @@ pub struct UiSpaceCell {
     pub strip_order: Option<UiSpaceBoolRow>,
 }
 
-/// A boolean slot row a space cell owns — the shared shape behind the
+/// A two-state slot row a space cell owns — the shared shape behind the
 /// strip-order row, the two projection modifiers, and the wire-direction
-/// row: value + address + state, dispatching the ordinary bool
-/// `SetValue`, nothing invented.
+/// row: on/off + address + state, nothing invented. How a flip
+/// dispatches follows the BACKING row: strip-order and wire-direction
+/// are bool rows (ordinary `SetValue`); the modifiers are two-variant
+/// MODE enums (`MirrorMode`/`FlipMode`, kept extensible), so their
+/// two-card rows dispatch the generic `EnsurePresent
+/// <row>.<Normal|Mirrored|Flipped>` enum gesture instead.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSpaceBoolRow {
-    /// Current value of the bit.
+    /// Whether the row reads on (the bit, or the mode's on-variant).
     pub value: bool,
-    /// The bool row's address. `None` renders inert.
+    /// The backing row's address. `None` renders inert.
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,

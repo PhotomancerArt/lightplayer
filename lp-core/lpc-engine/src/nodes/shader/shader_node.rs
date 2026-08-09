@@ -1149,8 +1149,8 @@ fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> CellProjection {
     } = answer;
     CellProjection {
         shape: runtime_projection_shape(*shape.value()),
-        mirror: *mirror.value(),
-        flip: *flip.value(),
+        mirror: mirror.value().is_on(),
+        flip: flip.value().is_on(),
     }
 }
 
@@ -1193,8 +1193,8 @@ fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<
     }
     Some(Some(CellProjection {
         shape: try_read_authored_shape(ctx, "space.OneD.in_2d.Project.shape"),
-        mirror: try_read_authored_bool(ctx, "space.OneD.in_2d.Project.mirror"),
-        flip: try_read_authored_bool(ctx, "space.OneD.in_2d.Project.flip"),
+        mirror: try_read_authored_mode(ctx, "space.OneD.in_2d.Project.mirror", "Mirrored"),
+        flip: try_read_authored_mode(ctx, "space.OneD.in_2d.Project.flip", "Flipped"),
     }))
 }
 
@@ -1223,19 +1223,25 @@ fn try_read_authored_shape(
     }
 }
 
-/// An authored bool modifier of a `Project` cell (`mirror`/`flip`).
-/// Unresolvable reads as `false` — the behavior-preserving default.
-fn try_read_authored_bool(ctx: &mut TickContext<'_>, path: &'static str) -> bool {
+/// An authored modifier of a `Project` cell (`mirror`/`flip`) — a
+/// two-variant mode enum whose `on_ident` variant means the modifier is
+/// on. Unresolvable (or `Normal`, or anything unknown) reads as off —
+/// the behavior-preserving default.
+fn try_read_authored_mode(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+    on_ident: &'static str,
+) -> bool {
     let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: SlotPath::parse(path).expect("static path"),
     }) else {
         return false;
     };
-    let lpc_model::SlotData::Value(value) = production.data() else {
+    let lpc_model::SlotData::Enum(mode) = production.data() else {
         return false;
     };
-    matches!(value.get(), lpc_model::LpValue::Bool(true))
+    mode.variant.as_str() == on_ident
 }
 
 /// The authored `space` declaration's variant, read through the same

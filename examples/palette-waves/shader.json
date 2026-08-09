@@ -77,8 +77,12 @@
       "shape": {
         "kind": "Radial"
       },
-      "mirror": false,
-      "flip": false
+      "mirror": {
+        "kind": "Normal"
+      },
+      "flip": {
+        "kind": "Normal"
+      }
     }
   }
 }

@@ -132,22 +132,25 @@ fn factor_cell(path: &str, slot: &str, cell: &mut JsonNode, report: &mut Upgrade
 }
 
 /// The canonical v9 spelling of a factored cell — explicit payload
-/// fields, matching the canonical slot writer byte for byte.
+/// fields, matching the canonical slot writer byte for byte. The
+/// modifiers are two-variant ENUMS (`MirrorMode`/`FlipMode` — kept
+/// extensible), so they serialize as tagged objects like every Slotted
+/// enum.
 fn factored_project(shape: &str, mirror: bool, flip: bool) -> JsonNode {
+    let mode = |on: bool, on_kind: &str| {
+        JsonNode::Object(vec![(
+            "kind".to_string(),
+            JsonNode::string(if on { on_kind } else { "Normal" }),
+        )])
+    };
     JsonNode::Object(vec![
         ("kind".to_string(), JsonNode::string("Project")),
         (
             "shape".to_string(),
             JsonNode::Object(vec![("kind".to_string(), JsonNode::string(shape))]),
         ),
-        (
-            "mirror".to_string(),
-            JsonNode::Scalar(if mirror { "true" } else { "false" }.to_string()),
-        ),
-        (
-            "flip".to_string(),
-            JsonNode::Scalar(if flip { "true" } else { "false" }.to_string()),
-        ),
+        ("mirror".to_string(), mode(mirror, "Mirrored")),
+        ("flip".to_string(), mode(flip, "Flipped")),
     ])
 }
 
@@ -260,8 +263,9 @@ mod tests {
             "shader.json",
             b"{\n  \"kind\": \"Shader\",\n  \"space\": {\n    \"kind\": \"OneD\",\n    \
               \"in_2d\": {\n      \"kind\": \"Project\",\n      \"shape\": {\n        \
-              \"kind\": \"Radial\"\n      },\n      \"mirror\": false,\n      \
-              \"flip\": false\n    }\n  }\n}"
+              \"kind\": \"Radial\"\n      },\n      \"mirror\": {\n        \"kind\": \
+              \"Normal\"\n      },\n      \"flip\": {\n        \"kind\": \"Normal\"\n      \
+              }\n    }\n  }\n}"
                 .to_vec(),
         )]
         .into_iter()

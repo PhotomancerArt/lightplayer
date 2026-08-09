@@ -348,6 +348,7 @@ fn SpaceModifierTiles(
                 modifier_row_projection(base, Modifier::Mirror, false),
                 modifier_row_projection(base, Modifier::Mirror, true),
             ],
+            on_variant: "Mirrored",
             row: modifiers.mirror,
             on_action,
         }
@@ -358,6 +359,7 @@ fn SpaceModifierTiles(
                 modifier_row_projection(base, Modifier::Flip, false),
                 modifier_row_projection(base, Modifier::Flip, true),
             ],
+            on_variant: "Flipped",
             row: modifiers.flip,
             on_action,
         }
@@ -382,14 +384,18 @@ fn modifier_row_projection(base: UiCellProjection, which: Modifier, on: bool) ->
 }
 
 /// One modifier's two-card row: row label, then [off | on] cards in the
-/// shared tile grid — selected = the card matching the bool, a pick =
-/// the ordinary `SetValue` at the bool row.
+/// shared tile grid — selected = the card matching the mode. A pick is
+/// the generic enum gesture: `EnsurePresent <mode row>.<Normal|on>`
+/// (the modifiers are two-variant mode enums, kept extensible — never a
+/// bool write).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ModifierRow(
     row_label: &'static str,
     cards: [(&'static str, &'static str); 2],
     projections: [UiCellProjection; 2],
+    /// The mode enum's on-variant ident (`Mirrored` / `Flipped`).
+    on_variant: &'static str,
     row: UiSpaceBoolRow,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -418,10 +424,10 @@ fn ModifierRow(
                                     return;
                                 }
                                 if let Some((address, handler)) = wiring.clone() {
-                                    handler
-                                        .call(
-                                            slot_set_value_action(address, LpValue::Bool(candidate)),
-                                        );
+                                    let ident = if candidate { on_variant } else { "Normal" };
+                                    if let Some(target) = address.child_field(ident) {
+                                        handler.call(slot_ensure_present_action(target));
+                                    }
                                 }
                             }
                         },

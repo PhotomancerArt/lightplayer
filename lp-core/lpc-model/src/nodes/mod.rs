@@ -43,7 +43,7 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
-pub use projection_shape::ProjectionShape;
+pub use projection_shape::{FlipMode, MirrorMode, ProjectionShape};
 pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{

@@ -614,7 +614,7 @@ pub(crate) fn shader_space_section() -> lpa_studio_core::UiSpaceSection {
             "Space",
             "space",
             "TwoD",
-            &[("TwoD", "2D", None), ("OneD", "1D", None)],
+            &[("OneD", "1D", None), ("TwoD", "2D", None)],
         ),
         declared_space: Some(UiVisualSpace::TwoD),
         cells: vec![space_cell(
@@ -779,7 +779,7 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
             "Space",
             "space",
             "OneD",
-            &[("TwoD", "2D", None), ("OneD", "1D", None)],
+            &[("OneD", "1D", None), ("TwoD", "2D", None)],
         ),
         declared_space: Some(UiVisualSpace::OneD),
         cells: vec![{

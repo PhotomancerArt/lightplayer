@@ -1,4 +1,4 @@
-use crate::{EnumSlot, ProjectionShape, Slotted, ValueSlot};
+use crate::{EnumSlot, FlipMode, MirrorMode, ProjectionShape, Slotted, ValueSlot};
 
 /// A fixture's consumer-side space policy — the answer side of the
 /// two-sided space declaration (vision D14), mirroring the shader
@@ -37,9 +37,11 @@ pub enum ConsumerCell2 {
         /// The base coordinate map.
         shape: EnumSlot<ProjectionShape>,
         /// Fold the strip around the map's midpoint (`u′ = 1 − |2u − 1|`).
-        mirror: ValueSlot<bool>,
+        /// A two-variant enum, not a bool, so future fold refinements are
+        /// additive (see [`crate::MirrorMode`]).
+        mirror: EnumSlot<MirrorMode>,
         /// Reverse the strip (`u′ = 1 − u`), applied after the fold.
-        flip: ValueSlot<bool>,
+        flip: EnumSlot<FlipMode>,
     },
 }
 
@@ -63,16 +65,16 @@ mod tests {
             flip,
         } = ConsumerCell2::default();
         assert_eq!(*shape.value(), crate::ProjectionShape::ExtrudeX);
-        assert!(!*mirror.value());
-        assert!(!*flip.value());
+        assert!(!mirror.value().is_on());
+        assert!(!flip.value().is_on());
     }
 
     #[test]
     fn policy_carries_default_cell_and_force_bit() {
         let radial = ConsumerCell2::Project {
             shape: EnumSlot::new(crate::ProjectionShape::Radial),
-            mirror: ValueSlot::new(false),
-            flip: ValueSlot::new(true),
+            mirror: EnumSlot::default(),
+            flip: EnumSlot::new(crate::FlipMode::Flipped),
         };
         let policy = VisualConsumerSpace::Policy {
             from_1d: EnumSlot::new(radial.clone()),

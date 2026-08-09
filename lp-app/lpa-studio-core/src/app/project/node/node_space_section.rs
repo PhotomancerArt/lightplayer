@@ -86,7 +86,14 @@ pub(in crate::app::project) fn shader_space_section(
         .iter()
         .copied()
         .find(|row| row.key == SHADER_SPACE_ROW)?;
-    let primary = enum_cell(row, UiSpaceCellRole::Primary, "Space", shader_space_label)?;
+    let mut primary = enum_cell(row, UiSpaceCellRole::Primary, "Space", shader_space_label)?;
+    // Presentation order: the tab pair reads `1D | 2D` (Yona's ruling) —
+    // the MODEL declares TwoD first (it is the default and the
+    // compat-anchor; never reorder it), so the derivation sorts the
+    // choices for display.
+    primary
+        .choices
+        .sort_by_key(|choice| choice.variant != "OneD");
     let declared_space = shader_declared_space(&primary.active);
     // The answer cell is whichever the ACTIVE variant declares: a 1D
     // shader answers 2D consumers, a 2D shader answers 1D ones. Only one
@@ -258,14 +265,31 @@ fn consumer_projection_cell(
     })
 }
 
-/// The factored `Project` payload's two modifier bool rows, read off a
+/// The factored `Project` payload's two modifier rows, read off a
 /// projection enum row's flattened record body (`…Project.mirror` /
-/// `…Project.flip`). `None` unless both rows exist — half a modifier
-/// pair would render a control that cannot say what it writes.
+/// `…Project.flip`). The modifiers are two-variant MODE enums
+/// (`MirrorMode`/`FlipMode` — kept extensible), projected here to the
+/// on/off the two-card row renders; a pick dispatches the generic
+/// `EnsurePresent <row>.<Normal|Mirrored|Flipped>` enum gesture at the
+/// row's address. `None` unless both rows exist — half a modifier pair
+/// would render a control that cannot say what it writes.
 fn modifier_rows(project_row: &UiConfigSlot) -> Option<UiSpaceModifiers> {
     Some(UiSpaceModifiers {
-        mirror: bool_row(payload_field(project_row, "mirror")?)?,
-        flip: bool_row(payload_field(project_row, "flip")?)?,
+        mirror: mode_row(payload_field(project_row, "mirror")?, "Mirrored")?,
+        flip: mode_row(payload_field(project_row, "flip")?, "Flipped")?,
+    })
+}
+
+/// A two-variant mode enum row as the shared on/off row shape: `value` =
+/// the on-variant is active.
+fn mode_row(row: &UiConfigSlot, on_ident: &str) -> Option<UiSpaceBoolRow> {
+    let Some(UiSlotComposite::Enum(composite)) = &row.composite else {
+        return None;
+    };
+    Some(UiSpaceBoolRow {
+        value: composite.active == on_ident,
+        address: row.address.clone(),
+        state: row.state.clone(),
     })
 }
 
@@ -503,7 +527,7 @@ mod tests {
     }
 
     /// A factored `Project` answer row (v9): the enum row whose flattened
-    /// payload carries the shape enum and the two modifier bools.
+    /// payload carries the shape enum and the two mode-enum modifiers.
     fn project_row(prefix: &str, shape: &str, mirror: bool, flip: bool) -> UiConfigSlot {
         enum_row(
             prefix,
@@ -516,8 +540,18 @@ mod tests {
                     &["ExtrudeX", "ExtrudeY", "Radial", "Angular"],
                     Vec::new(),
                 ),
-                bool_row(&format!("{prefix}.Project.mirror"), mirror),
-                bool_row(&format!("{prefix}.Project.flip"), flip),
+                enum_row(
+                    &format!("{prefix}.Project.mirror"),
+                    if mirror { "Mirrored" } else { "Normal" },
+                    &["Normal", "Mirrored"],
+                    Vec::new(),
+                ),
+                enum_row(
+                    &format!("{prefix}.Project.flip"),
+                    if flip { "Flipped" } else { "Normal" },
+                    &["Normal", "Flipped"],
+                    Vec::new(),
+                ),
             ],
         )
     }
