@@ -10,7 +10,8 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
     fixture_face_bound_output, fixture_face_limiting, fixture_face_override,
-    fixture_face_within_budget, fixture_node_view, fixture_node_view_with_face,
+    fixture_face_with_space, fixture_face_within_budget, fixture_node_view,
+    fixture_node_view_with_face, fixture_space_section, fixture_space_section_wire_reversed,
     fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
 };
 use crate::app::node::map_view::MapViewOptions;
@@ -204,7 +205,7 @@ fn mapping_edit_mode() -> Element {
 // -- the space section, consumer side (plan-B P4 / gate G1) ------------------
 
 #[story(
-    description = "The card's DEFAULT posture after the G1 rework (P4b): the dimensionality drawer rides below settings, collapsed to one summary row — `follow the source` — because consume policy is authoring, not day-to-day tuning. The G1 `Auto`/`policy` two-control shape is gone; expanding the drawer reveals ONE dropdown."
+    description = "The card's DEFAULT posture: the dimensionality drawer rides below settings, collapsed to one summary row — `along the wire`, because a fresh fixture's strip order means something (D3's scarf default) and that bit now IS the dropdown's first choice (strip-order unification). Expanding the drawer reveals ONE dropdown."
 )]
 fn space_auto() -> Element {
     rsx! {
@@ -218,7 +219,37 @@ fn space_auto() -> Element {
 }
 
 #[story(
-    description = "The drawer OPEN in its default state: one dropdown — `show 1D sources by: follow the source` — plus the one authored bit a shape cannot answer for itself (D3, reworded at G1: `1D patterns follow the wire`). No `force` checkbox anywhere: with one control, following is the default entry and an explicit pick IS the override."
+    description = "The drawer OPEN in its default state: one dropdown — `show 1D sources by: along the wire` — with the wire's forward/reversed direction row under it (the wire-reversed addendum). The old strip-order checkbox is GONE: it silently gated the dropdown (a set bit means the projection never fires), so its semantics became the first choice of the same control. This is the scarf case made visible."
+)]
+fn space_along_wire() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_with_space(fixture_space_section()),
+                space_initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Along the wire, REVERSED: the direction row's second segment flips `wire_reversed` — lamp k reads strip position N-1-k — and the collapsed summary wears the back arrow (`along the wire ←`). An ordinary bool SetValue behind a direction segment; the interim home until per-range reversed lands with the patching work."
+)]
+fn space_along_wire_reversed() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_with_space(fixture_space_section_wire_reversed()),
+                space_initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The dropdown on `follow the source`: strip order cleared, 1D sources project the way they declare. No `force` checkbox anywhere: with one control, following is an entry and an explicit projection pick IS the override."
 )]
 fn space_policy() -> Element {
     rsx! {
@@ -248,7 +279,7 @@ fn space_policy_forced() -> Element {
 }
 
 #[story(
-    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). Same tiles, glyphs, merged outline and select-and-close as the shader card; the difference is the leading `follow the source` tile (dashed: the answer lives on the source), which replaced G1's rejected `consumer decides` with deferral that is honest about its direction."
+    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). Same tiles, glyphs, merged outline and select-and-close as the shader card; the leading tiles are `along the wire` (serpentine: wire order, the map doesn't apply) and `follow the source` (dashed: the answer lives on the source)."
 )]
 fn space_projection_picker_open() -> Element {
     rsx! {

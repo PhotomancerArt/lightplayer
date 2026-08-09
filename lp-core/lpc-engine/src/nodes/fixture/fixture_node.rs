@@ -136,6 +136,10 @@ pub struct FixtureNode {
     /// authored coordinate set. Synced from the def each tick; an absent
     /// def leaves the loaded value standing.
     strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests (lamp `k`
+    /// reads strip position `N-1-k`). Synced from the def each tick; only
+    /// the 1D request paths ever read it.
+    wire_reversed: bool,
     /// The authored consumer policy for a 1D source landing on a 2D
     /// request, translated from `FixtureDef::consume`.
     consume_policy: ConsumerPolicy,
@@ -171,6 +175,7 @@ impl FixtureNode {
             power_estimate_ma: 0,
             power_last_time_seconds: None,
             strip_order_meaningful: true,
+            wire_reversed: false,
             consume_policy: ConsumerPolicy::AUTO,
         }
     }
@@ -225,6 +230,7 @@ impl FixtureNode {
             gamma_correction: true,
             power: FixturePower::default(),
             strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
             consume_policy: self.consume_policy,
         });
         self
@@ -364,6 +370,10 @@ struct FixtureSamplePoints {
     /// keeping it in the key means a policy edit can never be served from
     /// a buffer written under the old one.
     policy: ConsumerPolicy,
+    /// The wire direction the 1D coordinates were generated for. Unlike
+    /// `policy` this DOES change the numbers (the strip reads back to
+    /// front), so a flip must rewrite the buffer.
+    wire_reversed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,6 +429,9 @@ impl NodeRuntime for FixtureNode {
         // shader node's `space` read follows.
         if let Some(strip_order_meaningful) = try_read_def_value(ctx, "strip_order_meaningful")? {
             self.strip_order_meaningful = strip_order_meaningful;
+        }
+        if let Some(wire_reversed) = try_read_def_value(ctx, "wire_reversed")? {
+            self.wire_reversed = wire_reversed;
         }
         if let Some(policy) = try_read_consume_policy(ctx) {
             self.consume_policy = policy;
@@ -487,6 +500,7 @@ impl NodeRuntime for FixtureNode {
             gamma_correction,
             power,
             strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
             consume_policy: self.consume_policy,
         });
         self.state.output.set_with_version(
@@ -811,6 +825,8 @@ struct FixtureRenderSettings {
     power: FixturePower,
     /// Whether 1D is in this fixture's authored coordinate set.
     strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests.
+    wire_reversed: bool,
     /// This fixture's projection policy for a 1D source on a 2D request.
     consume_policy: ConsumerPolicy,
 }
@@ -997,7 +1013,11 @@ impl FixtureNode {
                 .as_ref()
                 .map(|(_, channels)| channels.as_slice())
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
-            let accumulators = accumulate_fixture_channels_from_strip(&texture_data, channels)?;
+            let accumulators = accumulate_fixture_channels_from_strip(
+                &texture_data,
+                channels,
+                settings.wire_reversed,
+            )?;
             return render_fixture_control_target(
                 request,
                 target,
@@ -1166,6 +1186,7 @@ fn ensure_fixture_sample_points<'a>(
     output_height: u32,
     space: VisualSpace,
     policy: ConsumerPolicy,
+    wire_reversed: bool,
     ctx: &ControlRenderContext<'_>,
 ) -> Result<&'a mut SamplePointsHandle, NodeError> {
     let current_matches = current.as_ref().is_some_and(|sp| {
@@ -1175,6 +1196,7 @@ fn ensure_fixture_sample_points<'a>(
             && sp.height == output_height
             && sp.space == space
             && sp.policy == policy
+            && sp.wire_reversed == wire_reversed
     });
     if current_matches {
         return Ok(&mut current.as_mut().expect("checked above").handle);
@@ -1210,7 +1232,7 @@ fn ensure_fixture_sample_points<'a>(
                 .map_err(err_ctx("fixture sample point write"))?;
         }
         VisualSpace::OneD => {
-            let coords = fixture_strip_point_coords(count);
+            let coords = fixture_strip_point_coords(count, wire_reversed);
             graphics
                 .write_sample_points_1d(&mut handle, &coords)
                 .map_err(err_ctx("fixture strip point write"))?;
@@ -1224,6 +1246,7 @@ fn ensure_fixture_sample_points<'a>(
         height: output_height,
         space,
         policy,
+        wire_reversed,
     });
     Ok(&mut current.as_mut().expect("just stored").handle)
 }
@@ -1266,9 +1289,16 @@ fn fixture_sample_point_coords(
 /// scarf, not around the ring). Pixel centres (`k + 0.5`) rather than
 /// `k`, so sampling the strip and rendering an `(N, 1)` texture of it
 /// land on the same points.
-fn fixture_strip_point_coords(count: u32) -> Vec<i32> {
+fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
     (0..count)
-        .map(|index| ((index as i32) << 16) + (crate::products::visual::coordinates::Q16_ONE / 2))
+        .map(|index| {
+            let index = if wire_reversed {
+                count - 1 - index
+            } else {
+                index
+            } as i32;
+            (index << 16) + (crate::products::visual::coordinates::Q16_ONE / 2)
+        })
         .collect()
 }
 
@@ -1279,6 +1309,7 @@ fn fixture_strip_point_coords(count: u32) -> Vec<i32> {
 fn accumulate_fixture_channels_from_strip(
     texture: &TextureData,
     channels: &[u32],
+    wire_reversed: bool,
 ) -> Result<ChannelAccumulators, NodeError> {
     if texture.format() != lps_shared::TextureStorageFormat::Rgba16Unorm {
         return Err(NodeError::msg(format!(
@@ -1304,7 +1335,14 @@ fn accumulate_fixture_channels_from_strip(
     };
     let bytes = texture.bytes();
     for (index, channel) in channels.iter().enumerate() {
-        let base = index * 8;
+        // The reversed wire reads the strip back to front: lamp `k` takes
+        // texel `N-1-k` (the along-the-wire direction option).
+        let texel_index = if wire_reversed {
+            channels.len() - 1 - index
+        } else {
+            index
+        };
+        let base = texel_index * 8;
         let Some(texel) = bytes.get(base..base + 8) else {
             break;
         };
@@ -1413,6 +1451,7 @@ fn render_direct_fixture_control(
         output_height,
         space,
         settings.consume_policy,
+        settings.wire_reversed,
         ctx,
     )?;
     let sample_buf = ensure_fixture_sample_target(sample_target, channels.len() as u32, ctx)?;
@@ -2368,6 +2407,7 @@ mod tests {
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("first ensure");
@@ -2392,6 +2432,7 @@ mod tests {
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("same-key ensure");
@@ -2411,6 +2452,7 @@ mod tests {
             8,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("resized ensure");
@@ -2433,6 +2475,7 @@ mod tests {
             8,
             VisualSpace::TwoD,
             ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("remapped ensure");
@@ -4527,6 +4570,49 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         }
     }
 
+    /// **The scarf, worn the other way.** `wire_reversed` (the
+    /// along-the-wire direction option) flips the wire-order 1D request:
+    /// lamp `k` samples strip position `1 − u` — the strip read back to
+    /// front. Nothing else changes; only the wire-order path reads the
+    /// bit.
+    #[test]
+    fn a_reversed_wire_request_samples_the_strip_back_to_front() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, true, ConsumerPolicy::AUTO, product);
+        fixture.wire_reversed = true;
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.wire_reversed = true;
+        }
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], reversed_position, "reversed strip ramp");
+        }
+    }
+
+    /// The reversed wire's strip coordinates are the forward ones read
+    /// back to front — texel centres either way, so forward and reversed
+    /// sample the same points in opposite orders.
+    #[test]
+    fn reversed_strip_point_coords_read_back_to_front() {
+        let forward = fixture_strip_point_coords(4, false);
+        let mut reversed = fixture_strip_point_coords(4, true);
+        reversed.reverse();
+        assert_eq!(forward, reversed);
+        assert_eq!(
+            fixture_strip_point_coords(4, true)[0] >> 16,
+            3,
+            "the reversed wire's first lamp sits on the last texel"
+        );
+    }
+
     /// The same scarf running a 2D effect samples the RING UVs — the map
     /// is exactly what a 2D effect is for.
     #[test]
@@ -4788,6 +4874,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             4,
             VisualSpace::TwoD,
             ConsumerPolicy::AUTO,
+            false,
             &ctx,
         )
         .expect("2D ensure");
@@ -4807,6 +4894,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             1,
             VisualSpace::OneD,
             ConsumerPolicy::AUTO,
+            false,
             &ctx,
         )
         .expect("1D ensure");
@@ -4832,6 +4920,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                 default_1d_to_2d: CellProjection::Radial,
                 force: true,
             },
+            false,
             &ctx,
         )
         .expect("policy ensure");
@@ -4863,7 +4952,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         let graphics = producer.graphics.clone();
 
         let mut points = graphics.create_sample_points(COUNT).expect("points");
-        let coords = fixture_strip_point_coords(COUNT);
+        let coords = fixture_strip_point_coords(COUNT, false);
         graphics
             .write_sample_points_1d(&mut points, &coords)
             .expect("write strip points");

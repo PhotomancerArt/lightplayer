@@ -25,8 +25,8 @@
 use crate::{
     UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiMirrorDirection, UiProjectionDirection,
     UiSlotComposite, UiSlotValueKind, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiVisualSpace,
+    UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
+    UiStripOrderRow, UiVisualSpace,
 };
 
 /// The shader def's producer-side declaration row.
@@ -35,6 +35,14 @@ pub(in crate::app::project) const SHADER_SPACE_ROW: &str = "space";
 pub(in crate::app::project) const FIXTURE_CONSUME_ROW: &str = "consume";
 /// The fixture def's "does strip order mean something?" row (vision D3).
 pub(in crate::app::project) const FIXTURE_STRIP_ORDER_ROW: &str = "strip_order_meaningful";
+/// The fixture def's along-the-wire direction row (the wire-reversed
+/// addendum).
+pub(in crate::app::project) const FIXTURE_WIRE_REVERSED_ROW: &str = "wire_reversed";
+
+/// The wire-direction row's variant idents (a bool row presented as a
+/// two-segment direction — see [`UiSpaceDirectionDispatch::ReversedBool`]).
+pub(crate) const WIRE_DIRECTION_FORWARD: &str = "Forward";
+pub(crate) const WIRE_DIRECTION_REVERSED: &str = "Reversed";
 
 /// The producer side's section: the shader's `space` declaration, its
 /// answer cell for the opposite dimension, and the D1 mismatch state.
@@ -76,13 +84,12 @@ pub(in crate::app::project) fn shader_space_section(
         primary,
         declared_space,
         cells,
-        flags: Vec::new(),
         mismatch: declared_space.and_then(|declared| space_mismatch(declared, status_detail)),
     })
 }
 
 /// The consumer side's section: ONE dropdown cell over the fixture's
-/// `consume` policy, plus the strip-order bit.
+/// `consume` policy AND its `strip_order_meaningful` bit.
 ///
 /// **G1 rework (plan-B P4b).** G1 ruled the `Auto`/`Policy` split
 /// backwards as a surface: "use the dropdown with the 'default' option…
@@ -91,14 +98,20 @@ pub(in crate::app::project) fn shader_space_section(
 /// [`ConsumerCell2`] projections. The projection variants are the model's
 /// static vocabulary rather than tree rows because under `Auto` the
 /// `from_1d` payload is not in the tree at all, and the dropdown must
-/// still offer them. The web dispatches per choice: `Auto` is the plain
-/// `EnsurePresent consume.Auto`; a projection is the
-/// `EnsurePresent consume.Policy` → `EnsurePresent
-/// consume.Policy.from_1d.<V>` → `SetValue consume.Policy.force = true`
-/// sequence — every op one the generic drawer rows already send, so this
-/// stays a presentation of the same write path. `force` is absorbed by
-/// that gesture (an explicit pick IS the override), so the flag is no
-/// longer emitted.
+/// still offer them. `force` is absorbed by the pick gesture (an explicit
+/// pick IS the override).
+///
+/// **Strip-order unification (post-G1b ruling).** The
+/// `strip_order_meaningful` checkbox GATED the dropdown (a true bit means
+/// `select_request_space` issues a wire-order 1D request and the
+/// projection never fires) — two sibling controls, one silently disabling
+/// the other. So the checkbox died and its semantics became the
+/// dropdown's FIRST choice, the synthetic `AlongWire` ("along the wire"):
+/// selected whenever the bit is true regardless of `consume`, and every
+/// consumer pick now includes the bit's `SetValue` (true for
+/// along-the-wire, false otherwise) alongside the existing consume ops.
+/// Same two slots, same write path — a pure re-presentation, compatible
+/// with D15 absorbing the bool later.
 pub(in crate::app::project) fn fixture_space_section(
     rows: &[&UiConfigSlot],
 ) -> Option<UiSpaceSection> {
@@ -106,22 +119,17 @@ pub(in crate::app::project) fn fixture_space_section(
         .iter()
         .copied()
         .find(|row| row.key == FIXTURE_CONSUME_ROW)?;
-    let primary = consumer_projection_cell(row)?;
-    let mut flags = Vec::new();
-    if let Some(strip) = rows
+    let strip = rows
         .iter()
         .copied()
         .find(|row| row.key == FIXTURE_STRIP_ORDER_ROW)
-        .and_then(|row| {
-            bool_flag(
-                row,
-                UiSpaceFlagRole::StripOrderMeaningful,
-                "Strip order means something",
-            )
-        })
-    {
-        flags.push(strip);
-    }
+        .and_then(strip_order_row);
+    let wire_direction = rows
+        .iter()
+        .copied()
+        .find(|row| row.key == FIXTURE_WIRE_REVERSED_ROW)
+        .and_then(wire_direction_row);
+    let primary = consumer_projection_cell(row, strip, wire_direction)?;
     Some(UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary,
@@ -129,7 +137,6 @@ pub(in crate::app::project) fn fixture_space_section(
         // comes from its mapping, not from this section.
         declared_space: None,
         cells: Vec::new(),
-        flags,
         mismatch: None,
     })
 }
@@ -140,14 +147,29 @@ pub(in crate::app::project) fn fixture_space_section(
 /// rows, and the dropdown offers the projections from either state.
 const CONSUMER_PROJECTION_VARIANTS: [&str; 4] = ["Extrude", "Radial", "Angular", "Mirror"];
 
-/// The one consumer cell: `Auto` ("follow the source") + the projections,
-/// selected from the active `from_1d` when a policy is authored.
-fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
+/// The synthetic ident of the consumer dropdown's along-the-wire choice.
+/// Not a model variant: it stands for `strip_order_meaningful = true`, so
+/// the web dispatches the bool `SetValue` for it rather than an enum
+/// ensure.
+pub(crate) const CONSUMER_ALONG_WIRE_VARIANT: &str = "AlongWire";
+
+/// The one consumer cell: `along the wire` (the strip-order bit) + `Auto`
+/// ("follow the source") + the projections, selected from the strip-order
+/// bit first — a true bit gates everything else — then the active
+/// `from_1d` when a policy is authored.
+fn consumer_projection_cell(
+    row: &UiConfigSlot,
+    strip: Option<UiStripOrderRow>,
+    wire_direction: Option<UiSpaceDirection>,
+) -> Option<UiSpaceCell> {
     let Some(UiSlotComposite::Enum(composite)) = &row.composite else {
         return None;
     };
     let from_1d = payload_field(row, "from_1d");
-    let active = if composite.active == "Auto" {
+    let along_wire = strip.as_ref().is_some_and(|strip| strip.value);
+    let active = if along_wire {
+        CONSUMER_ALONG_WIRE_VARIANT.to_string()
+    } else if composite.active == "Auto" {
         "Auto".to_string()
     } else {
         from_1d
@@ -157,7 +179,13 @@ fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
             })
             .unwrap_or_else(|| "Auto".to_string())
     };
-    let choices = std::iter::once("Auto")
+    // The along-the-wire choice is only offered when the bit's row exists
+    // to write; a section without it keeps the pre-unification dropdown.
+    let choices = strip
+        .as_ref()
+        .map(|_| CONSUMER_ALONG_WIRE_VARIANT)
+        .into_iter()
+        .chain(std::iter::once("Auto"))
         .chain(CONSUMER_PROJECTION_VARIANTS)
         .map(|variant| UiSpaceChoice {
             variant: variant.to_string(),
@@ -174,11 +202,63 @@ fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
         choices,
         address: row.address.clone(),
         state: row.state.clone(),
-        // The direction row lives under `consume.Policy.from_1d.<Shape>`
-        // (G1b ruling 4). While the fixture is still in `Auto` the payload
-        // rows are not in the tree, so there is no row to derive — it
-        // appears once a directional shape is picked, which is fine.
-        direction: from_1d.and_then(direction_cell),
+        // A projection's direction row lives under
+        // `consume.Policy.from_1d.<Shape>` (G1b ruling 4); while the
+        // fixture is in `Auto` the payload rows are not in the tree, so
+        // it appears once a directional shape is picked. The
+        // along-the-wire state gets ITS direction row instead — the
+        // forward/reversed pair over `wire_reversed` (the projection is
+        // gated off there, so a shape direction row would refine a
+        // projection that cannot fire).
+        direction: if along_wire {
+            wire_direction
+        } else {
+            from_1d.and_then(direction_cell)
+        },
+        strip_order: strip,
+    })
+}
+
+/// The fixture's `wire_reversed` bool row as the along-the-wire direction
+/// row: forward/reversed segments over the ordinary bool `SetValue`
+/// (the wire-reversed addendum). `None` when the row is not a boolean
+/// value row (a pre-field project tree).
+fn wire_direction_row(row: &UiConfigSlot) -> Option<UiSpaceDirection> {
+    let UiConfigSlotBody::Value(value) = &row.body else {
+        return None;
+    };
+    let UiSlotValueKind::Bool(reversed) = value.kind else {
+        return None;
+    };
+    Some(UiSpaceDirection {
+        active: if reversed {
+            WIRE_DIRECTION_REVERSED.to_string()
+        } else {
+            WIRE_DIRECTION_FORWARD.to_string()
+        },
+        variants: vec![
+            WIRE_DIRECTION_FORWARD.to_string(),
+            WIRE_DIRECTION_REVERSED.to_string(),
+        ],
+        address: row.address.clone(),
+        state: row.state.clone(),
+        dispatch: UiSpaceDirectionDispatch::ReversedBool,
+    })
+}
+
+/// Project the `strip_order_meaningful` bool row into the cell's
+/// strip-order payload. `None` when the row is not a boolean value row.
+fn strip_order_row(row: &UiConfigSlot) -> Option<UiStripOrderRow> {
+    let UiConfigSlotBody::Value(value) = &row.body else {
+        return None;
+    };
+    let UiSlotValueKind::Bool(value) = value.kind else {
+        return None;
+    };
+    Some(UiStripOrderRow {
+        value,
+        address: row.address.clone(),
+        state: row.state.clone(),
     })
 }
 
@@ -196,6 +276,7 @@ fn direction_cell(row: &UiConfigSlot) -> Option<UiSpaceDirection> {
         variants: composite.variants.clone(),
         address: direction_row.address.clone(),
         state: direction_row.state.clone(),
+        dispatch: UiSpaceDirectionDispatch::EnumVariant,
     })
 }
 
@@ -209,9 +290,11 @@ pub(in crate::app::project) fn claimed_config_rows(
 ) -> &'static [&'static str] {
     match face {
         crate::UiNodeFace::Shader(face) if face.space.is_some() => &[SHADER_SPACE_ROW],
-        crate::UiNodeFace::Fixture(face) if face.space.is_some() => {
-            &[FIXTURE_CONSUME_ROW, FIXTURE_STRIP_ORDER_ROW]
-        }
+        crate::UiNodeFace::Fixture(face) if face.space.is_some() => &[
+            FIXTURE_CONSUME_ROW,
+            FIXTURE_STRIP_ORDER_ROW,
+            FIXTURE_WIRE_REVERSED_ROW,
+        ],
         _ => &[],
     }
 }
@@ -266,24 +349,7 @@ fn enum_cell(
         address: row.address.clone(),
         state: row.state.clone(),
         direction: None,
-    })
-}
-
-/// Project a bool config row into a space flag. `None` when the row is not
-/// a boolean value row.
-fn bool_flag(row: &UiConfigSlot, role: UiSpaceFlagRole, label: &str) -> Option<UiSpaceFlag> {
-    let UiConfigSlotBody::Value(value) = &row.body else {
-        return None;
-    };
-    let UiSlotValueKind::Bool(value) = value.kind else {
-        return None;
-    };
-    Some(UiSpaceFlag {
-        role,
-        label: label.to_string(),
-        value,
-        address: row.address.clone(),
-        state: row.state.clone(),
+        strip_order: None,
     })
 }
 
@@ -305,10 +371,12 @@ fn shader_space_label(variant: &str) -> String {
     }
 }
 
-/// Display label for a consumer-dropdown choice: the synthetic `Auto`
-/// entry ("follow the source's own projection") plus the projections.
+/// Display label for a consumer-dropdown choice: the synthetic
+/// `AlongWire` (the strip-order bit) and `Auto` ("follow the source's own
+/// projection") entries plus the projections.
 fn consumer_choice_label(variant: &str) -> String {
     match variant {
+        CONSUMER_ALONG_WIRE_VARIANT => "along the wire".to_string(),
         "Auto" => "follow the source".to_string(),
         other => projection_label(other),
     }
@@ -462,7 +530,10 @@ mod tests {
             section.cell(UiSpaceCellRole::ProducerIn1d).is_none(),
             "the inactive variant's payload is not in the tree"
         );
-        assert!(section.flags.is_empty(), "flags are the consumer side's");
+        assert!(
+            section.primary.strip_order.is_none(),
+            "the strip-order row is the consumer side's"
+        );
     }
 
     /// A 2D shader's `in_1d` cell has exactly one declared variant today —
@@ -497,11 +568,12 @@ mod tests {
         );
     }
 
-    /// The consumer section is ONE dropdown (P4b): `Auto` renders as the
-    /// selected "follow the source" entry, with the four projections
-    /// offered even though `Auto` carries no payload rows in the tree.
+    /// A DEFAULT fixture (strip-order true, consume `Auto`) selects the
+    /// dropdown's along-the-wire entry: the true bit gates the projection
+    /// machinery entirely (`select_request_space`), so presenting anything
+    /// else as active would lie (strip-order unification ruling).
     #[test]
-    fn an_auto_fixture_is_one_dropdown_selecting_follow_the_source() {
+    fn a_default_fixture_selects_along_the_wire() {
         let rows = [
             bool_row("strip_order_meaningful", true),
             enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
@@ -511,17 +583,14 @@ mod tests {
 
         assert_eq!(section.side, UiSpaceSide::Consumer);
         assert_eq!(section.declared_space, None, "a fixture states a policy");
-        assert_eq!(section.primary.active, "Auto");
-        assert_eq!(section.primary.active_label, "follow the source");
+        assert_eq!(section.primary.active, CONSUMER_ALONG_WIRE_VARIANT);
+        assert_eq!(section.primary.active_label, "along the wire");
         assert_eq!(
             section.primary.choices.len(),
-            5,
-            "Auto plus the four static projections"
+            6,
+            "along the wire, Auto, and the four static projections"
         );
-        assert!(
-            section.primary.is_choosable(),
-            "the dropdown is live from the Auto state"
-        );
+        assert!(section.primary.is_choosable());
         assert_eq!(
             section
                 .primary
@@ -529,13 +598,9 @@ mod tests {
                 .as_ref()
                 .map(|address| address.path.to_string()),
             Some("consume".to_string()),
-            "dispatch targets the consume enum row"
+            "enum dispatch targets the consume row"
         );
-        assert!(section.cells.is_empty(), "the primary IS the only cell");
-        assert_eq!(section.flags.len(), 1);
-        let strip = section
-            .flag(UiSpaceFlagRole::StripOrderMeaningful)
-            .expect("the strip-order flag");
+        let strip = section.primary.strip_order.as_ref().expect("strip row");
         assert!(strip.value);
         assert_eq!(
             strip
@@ -543,12 +608,111 @@ mod tests {
                 .as_ref()
                 .map(|address| address.path.to_string()),
             Some("strip_order_meaningful".to_string()),
+            "bool dispatch targets the strip-order row"
+        );
+        assert!(section.cells.is_empty(), "the primary IS the only cell");
+    }
+
+    /// The along-the-wire state carries the forward/reversed direction
+    /// row over the fixture's `wire_reversed` bool (the wire-reversed
+    /// addendum) — a bool-dispatch row, never the shape-enum gesture.
+    #[test]
+    fn along_the_wire_carries_the_wire_direction_row() {
+        let rows = [
+            bool_row("strip_order_meaningful", true),
+            bool_row("wire_reversed", true),
+            enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
+        ];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        let direction = section
+            .primary
+            .direction
+            .as_ref()
+            .expect("the wire direction row");
+        assert_eq!(direction.active, WIRE_DIRECTION_REVERSED);
+        assert_eq!(
+            direction.variants,
+            vec![WIRE_DIRECTION_FORWARD, WIRE_DIRECTION_REVERSED]
+        );
+        assert_eq!(
+            direction.dispatch,
+            UiSpaceDirectionDispatch::ReversedBool,
+            "a pick is the bool SetValue, never an enum ensure"
+        );
+        assert_eq!(
+            direction
+                .address
+                .as_ref()
+                .map(|address| address.path.to_string()),
+            Some("wire_reversed".to_string()),
+        );
+
+        // A follow-the-source fixture shows no wire direction row: the
+        // wire order is not what it samples by.
+        let rows = [
+            bool_row("strip_order_meaningful", false),
+            bool_row("wire_reversed", false),
+            enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
+        ];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        assert!(section.primary.direction.is_none());
+    }
+
+    /// With the bit false, the dropdown falls back to the consume policy:
+    /// `Auto` reads "follow the source".
+    #[test]
+    fn a_strip_order_false_auto_fixture_selects_follow_the_source() {
+        let rows = [
+            bool_row("strip_order_meaningful", false),
+            enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
+        ];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        assert_eq!(section.primary.active, "Auto");
+        assert_eq!(section.primary.active_label, "follow the source");
+        assert_eq!(
+            section
+                .primary
+                .strip_order
+                .as_ref()
+                .map(|strip| strip.value),
+            Some(false)
         );
     }
 
-    /// An authored policy selects its `from_1d` in the same dropdown, and
-    /// the force bit is absorbed by the gesture rather than surfaced as a
-    /// flag (an explicit pick IS the override).
+    /// A true strip-order bit wins over an authored policy — the engine
+    /// never reaches the projection when the bit is true, and the dropdown
+    /// says so.
+    #[test]
+    fn along_the_wire_wins_over_an_authored_policy() {
+        let rows = [
+            bool_row("strip_order_meaningful", true),
+            enum_row(
+                "consume",
+                "Policy",
+                &["Auto", "Policy"],
+                vec![enum_row(
+                    "consume.Policy.from_1d",
+                    "Mirror",
+                    &["Extrude", "Radial", "Angular", "Mirror"],
+                    Vec::new(),
+                )],
+            ),
+        ];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        assert_eq!(section.primary.active, CONSUMER_ALONG_WIRE_VARIANT);
+        assert!(
+            section.primary.direction.is_none(),
+            "no direction row for a projection that cannot fire"
+        );
+    }
+
+    /// An authored policy (bit false) selects its `from_1d` in the same
+    /// dropdown, and the force bit is absorbed by the gesture (an explicit
+    /// pick IS the override).
     #[test]
     fn a_policy_fixture_selects_its_projection_in_the_one_dropdown() {
         let rows = [
@@ -575,12 +739,22 @@ mod tests {
         assert_eq!(section.primary.active_label, "mirror");
         assert!(section.primary.is_choosable());
         assert!(
-            section
-                .flag(UiSpaceFlagRole::StripOrderMeaningful)
-                .is_some(),
-            "the strip-order flag survives"
+            section.primary.strip_order.is_some(),
+            "the strip row rides the cell for the pick gestures"
         );
-        assert_eq!(section.flags.len(), 1, "no force flag — the pick forces");
+    }
+
+    /// Without a strip-order row there is nothing for the along-the-wire
+    /// choice to write, so it is not offered and the pre-unification
+    /// dropdown remains.
+    #[test]
+    fn a_missing_strip_row_drops_the_along_the_wire_choice() {
+        let rows = [enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new())];
+        let rows: Vec<&UiConfigSlot> = rows.iter().collect();
+        let section = fixture_space_section(&rows).expect("section");
+        assert_eq!(section.primary.choices.len(), 5);
+        assert_eq!(section.primary.active, "Auto");
+        assert!(section.primary.strip_order.is_none());
     }
 
     /// G1b ruling 4's second section: an ACTIVE directional shape's
@@ -760,10 +934,10 @@ mod tests {
                 address: None,
                 state: UiSlotFieldState::editable(),
                 direction: None,
+                strip_order: None,
             },
             declared_space: Some(UiVisualSpace::TwoD),
             cells: Vec::new(),
-            flags: Vec::new(),
             mismatch: None,
         });
         assert_eq!(

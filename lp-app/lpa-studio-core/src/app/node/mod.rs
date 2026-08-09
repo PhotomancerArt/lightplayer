@@ -43,8 +43,8 @@ pub use face::{
     UiOutputPin, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit,
     UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading,
     UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
+    UiStripOrderRow, UiTimebaseState, UiWireStatus, phasor_rate_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
