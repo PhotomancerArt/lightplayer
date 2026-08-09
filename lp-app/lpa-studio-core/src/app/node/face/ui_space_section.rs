@@ -42,17 +42,17 @@ pub enum UiSpaceSide {
 /// What a cell of a space section answers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiSpaceCellRole {
-    /// The section's leading enum: the shader's `space` (`TwoD`/`OneD`) or
-    /// the fixture's `consume` (`Auto`/`Policy`).
+    /// The section's leading cell: the shader's `space` enum
+    /// (`TwoD`/`OneD`), or — since the P4b rework — the fixture's whole
+    /// consume policy as ONE dropdown (`Auto` = "follow the source", a
+    /// projection = authored override; the web dispatches the op sequence
+    /// per choice).
     Primary,
     /// A 1D producer's answer for 2D consumers (`space.OneD.in_2d`).
     ProducerIn2d,
     /// A 2D producer's answer for 1D consumers (`space.TwoD.in_1d`) —
     /// centre scanline only today, so a single-choice read-only cell.
     ProducerIn1d,
-    /// A consumer's default projection for 1D sources
-    /// (`consume.Policy.from_1d`).
-    ConsumerFrom1d,
 }
 
 /// A boolean row a space section owns.
@@ -60,9 +60,6 @@ pub enum UiSpaceCellRole {
 pub enum UiSpaceFlagRole {
     /// The fixture's "does strip order mean something?" bit (vision D3).
     StripOrderMeaningful,
-    /// The consumer policy's `force` bit: prefer this fixture's default
-    /// over an authored producer opinion.
-    ForcePolicy,
 }
 
 /// One selectable answer inside a [`UiSpaceCell`].
@@ -245,8 +242,8 @@ mod tests {
             declared_space: Some(UiVisualSpace::TwoD),
             cells: vec![cell(UiSpaceCellRole::ProducerIn1d, 1)],
             flags: vec![UiSpaceFlag {
-                role: UiSpaceFlagRole::ForcePolicy,
-                label: "Force".to_string(),
+                role: UiSpaceFlagRole::StripOrderMeaningful,
+                label: "Strip order".to_string(),
                 value: true,
                 address: None,
                 state: UiSlotFieldState::editable(),
@@ -256,11 +253,10 @@ mod tests {
         assert_eq!(section.all_cells().count(), 2);
         assert!(section.cell(UiSpaceCellRole::Primary).is_some());
         assert!(section.cell(UiSpaceCellRole::ProducerIn2d).is_none());
-        assert!(section.flag(UiSpaceFlagRole::ForcePolicy).is_some());
         assert!(
             section
                 .flag(UiSpaceFlagRole::StripOrderMeaningful)
-                .is_none()
+                .is_some()
         );
     }
 }

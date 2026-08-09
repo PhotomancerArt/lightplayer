@@ -44,64 +44,63 @@ use crate::base::{
 };
 
 // ---------------------------------------------------------------------------
-// Wording (G1 rules on all of it — keep every user-facing string here)
+// Wording (G1 ruled 2026-08-08; G1b rules on this pass — keep every
+// user-facing string here)
 // ---------------------------------------------------------------------------
 
-/// The section's rail label, same rank as `output` and `settings` (D13).
-pub(crate) const SPACE_SECTION_LABEL: &str = "space";
+/// The section's rail label. G1 sent "space" back ("it should have a very
+/// clear 'Dimensionality'…"); G1b rules on this candidate.
+pub(crate) const SPACE_SECTION_LABEL: &str = "dimensionality";
 
-/// Producer side: what the leading enum is answering.
-const PRODUCER_PRIMARY_LABEL: &str = "renders in";
-/// Consumer side: same slot in the layout, the other voice.
-const CONSUMER_PRIMARY_LABEL: &str = "consumes";
+/// Per-other-dimension answer rows, in G1's "Show in 1d by:" shape.
+const PRODUCER_IN_2D_LABEL: &str = "show in 2D by";
+const PRODUCER_IN_1D_LABEL: &str = "show in 1D by";
+/// The consumer's ONE dropdown (P4b — "then we just have one control").
+const CONSUMER_PRIMARY_LABEL: &str = "show 1D sources by";
 
-/// A 1D producer's answer for 2D consumers (plan Q10 candidate).
-const PRODUCER_IN_2D_LABEL: &str = "default projection";
-/// A 2D producer's answer for 1D consumers — one variant today, so a
-/// statement rather than a picker.
-const PRODUCER_IN_1D_LABEL: &str = "to 1D consumers";
-/// A consumer's default for 1D sources (plan Q10 candidate).
-const CONSUMER_FROM_1D_LABEL: &str = "from 1D sources";
-
-/// The inline bit that makes a consumer policy win (spike §3).
-const FORCE_LABEL: &str = "force";
-const FORCE_TITLE: &str = "Use this fixture's default even when the source declares one";
-/// Vision D3's authored bit.
-const STRIP_ORDER_LABEL: &str = "strip order means something";
+/// Vision D3's authored bit. G1: "strip order means something" didn't
+/// land; this candidate says what the bit actually changes.
+const STRIP_ORDER_LABEL: &str = "1D patterns follow the wire";
 const STRIP_ORDER_TITLE: &str = "Yes: 1D effects run along the wire order (a strip worn in a shape). No: the map is the real \
      layout and wire order is plumbing.";
 
-/// Variant vocabulary. `Default` reads differently per cell, which is why
-/// these are keyed by role rather than by variant alone.
+/// Variant vocabulary, keyed by role where one variant name reads
+/// differently per cell.
 const SPACE_ONE_D: &str = "1D";
 const SPACE_TWO_D: &str = "2D";
-const CONSUME_AUTO: &str = "auto";
-const CONSUME_POLICY: &str = "policy";
-const PROJECTION_DEFER: &str = "consumer decides";
+/// Producer `Default` on the 2D answer: honest about what it resolves to.
+/// `Auto` ≡ `Policy { from_1d: Extrude, force: false }` on the consumer
+/// side, and the one dropdown's explicit picks always force — so a silent
+/// declaration lands on extrude in every UI-reachable state. G1 ruling:
+/// "there should always be a default… on the producer side"; "consumer
+/// decides" is gone.
+const PROJECTION_DEFAULT_EXTRUDE: &str = "extrude · default";
 const PROJECTION_EXTRUDE: &str = "extrude";
 const PROJECTION_RADIAL: &str = "radial";
 const PROJECTION_ANGULAR: &str = "angular";
 const PROJECTION_MIRROR: &str = "mirror";
 const PROJECTION_CENTRE_SCANLINE: &str = "centre scanline";
+/// The consumer dropdown's default entry.
+const CONSUMER_FOLLOW: &str = "follow the source";
 
-/// One line per projection in the picker's tiles.
-const HINT_DEFER: &str = "let the fixture decide";
+/// One line per choice in the picker's tiles.
+const HINT_DEFAULT_EXTRUDE: &str = "the standard projection, unless a fixture overrides";
+const HINT_FOLLOW: &str = "each source projects the way it declares";
 const HINT_EXTRUDE: &str = "the strip, stretched down";
 const HINT_RADIAL: &str = "the strip, out from the centre";
 const HINT_ANGULAR: &str = "the strip, swept around";
 const HINT_MIRROR: &str = "the strip, folded at the centre";
+const HINT_CENTRE_SCANLINE: &str = "the texture's centre row, read as a strip";
 
 /// What this side is saying, in one line under the primary row.
 const PRODUCER_HINT_ONE_D: &str = "This shader renders along a strip.";
 const PRODUCER_HINT_TWO_D: &str = "This shader renders in texture space.";
-const CONSUMER_HINT_AUTO: &str = "Follows whatever each source declares.";
-const CONSUMER_HINT_POLICY: &str = "Fills in when a source declares nothing.";
+const CONSUMER_HINT_FOLLOW: &str = "1D sources project the way they declare.";
+const CONSUMER_HINT_OVERRIDE: &str = "This fixture overrides what 1D sources declare.";
 
 /// The who-wins ladder (spike §3), compressed to the one rung that can
 /// still surprise the person reading this card.
-const LADDER_PRODUCER: &str = "A fixture that forces its own default wins over this.";
-const LADDER_CONSUMER_FILLS: &str = "A source's own declaration wins over this.";
-const LADDER_CONSUMER_FORCES: &str = "Forced: this wins over a source's own declaration.";
+const LADDER_PRODUCER: &str = "A fixture that overrides its 1D sources wins over this.";
 
 /// D1 — the declaration and the GLSL entry disagree.
 const MISMATCH_TITLE: &str = "This declaration doesn't match the code.";
@@ -154,27 +153,31 @@ pub fn SpaceSection(
 ) -> Element {
     let side = section.side;
     let mismatched = section.mismatch.is_some();
-    // The force bit rides the policy row it qualifies (spike §3's inline
-    // checkbox), so it is pulled out of the flag list here rather than
-    // stacking as a row of its own.
-    let force = section.flag(UiSpaceFlagRole::ForcePolicy).cloned();
-    let standalone_flags: Vec<UiSpaceFlag> = section
-        .flags
-        .iter()
-        .filter(|flag| flag.role != UiSpaceFlagRole::ForcePolicy)
-        .cloned()
-        .collect();
+    let flags = section.flags.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
-            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
-                span { class: ROW_LABEL_CLASS, "{primary_label(side)}" }
-                SpaceSegments {
-                    cell: section.primary.clone(),
-                    side,
-                    mismatched,
-                    on_action,
-                }
+            // Producer: the declaration leads as a tab-like segmented pair
+            // (G1: "almost like tabs") — the section header carries the
+            // word, so the control needs no row label of its own.
+            // Consumer (P4b): the primary IS the one projection dropdown.
+            match side {
+                UiSpaceSide::Producer => rsx! {
+                    SpaceSegments {
+                        cell: section.primary.clone(),
+                        side,
+                        mismatched,
+                        on_action,
+                    }
+                },
+                UiSpaceSide::Consumer => rsx! {
+                    SpaceCellRow {
+                        cell: section.primary.clone(),
+                        side,
+                        picker_initially_open: picker_open_cell == Some(UiSpaceCellRole::Primary),
+                        on_action,
+                    }
+                },
             }
             p { class: HINT_CLASS, "{primary_hint(&section)}" }
             for cell in section.cells.clone() {
@@ -182,12 +185,11 @@ pub fn SpaceSection(
                     key: "{cell.role:?}",
                     cell: cell.clone(),
                     side,
-                    force: force.clone().filter(|_| cell.role == UiSpaceCellRole::ConsumerFrom1d),
                     picker_initially_open: picker_open_cell == Some(cell.role),
                     on_action,
                 }
             }
-            for flag in standalone_flags {
+            for flag in flags {
                 SpaceFlagRow { key: "{flag.role:?}", flag, on_action }
             }
             if let Some(ladder) = ladder_line(&section) {
@@ -246,14 +248,14 @@ fn SpaceSegments(
     }
 }
 
-/// One answer cell: its label, the projection field (picker or statement),
-/// and — on the consumer's policy row — the inline `force` bit.
+/// One answer cell: its label and the projection field (picker or
+/// statement). The consumer's old inline `force` bit is gone (P4b): an
+/// explicit pick IS the override, dispatched as part of the choice.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceCellRow(
     cell: UiSpaceCell,
     side: UiSpaceSide,
-    #[props(default = None)] force: Option<UiSpaceFlag>,
     #[props(default = false)] picker_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -266,17 +268,52 @@ fn SpaceCellRow(
                 initially_open: picker_initially_open,
                 on_action,
             }
-            if let Some(force) = force {
-                SpaceFlagCheckbox { flag: force, title: FORCE_TITLE, on_action }
-            }
         }
     }
+}
+
+/// The op sequence one choice dispatches. Producer cells and the shader's
+/// primary stay the single `EnsurePresent <enum>.<Variant>` the generic
+/// variant field sends. The consumer's one dropdown (P4b) fans out:
+/// `Auto` is the plain ensure, and a projection is
+/// ensure-`Policy` → ensure-`from_1d.<V>` → set-`force = true` — each op
+/// exactly what the drawer's own rows would send (structural ensures
+/// order before assignments in the overlay), so the dropdown remains a
+/// presentation of the same write path, never a second writer.
+fn choice_actions(
+    side: UiSpaceSide,
+    role: UiSpaceCellRole,
+    address: &ProjectSlotAddress,
+    variant: &str,
+) -> Vec<UiAction> {
+    if side == UiSpaceSide::Consumer && role == UiSpaceCellRole::Primary && variant != "Auto" {
+        let Some(policy) = address.child_field("Policy") else {
+            return Vec::new();
+        };
+        let mut actions = vec![slot_ensure_present_action(policy.clone())];
+        if let Some(target) = policy
+            .child_field("from_1d")
+            .and_then(|field| field.child_field(variant))
+        {
+            actions.push(slot_ensure_present_action(target));
+        }
+        if let Some(force) = policy.child_field("force") {
+            actions.push(slot_set_value_action(force, LpValue::Bool(true)));
+        }
+        return actions;
+    }
+    address
+        .child_field(variant)
+        .map(slot_ensure_present_action)
+        .into_iter()
+        .collect()
 }
 
 /// The cell's control: an anchored tile picker when there is a real choice,
 /// a read-only statement when there is not (`UiSpaceCell::is_choosable` —
 /// the 2D→1D answer has one declared variant today, and a dropdown over one
-/// option invites a gesture with nothing to change).
+/// option invites a gesture with nothing to change). The statement still
+/// carries its glyph (G1: the text-only 2D→1D cell "feels odd").
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectionField(
@@ -288,8 +325,12 @@ fn ProjectionField(
     let active_label = active_variant_label(side, &cell);
     let reachable = cell.is_choosable() && on_action.is_some();
     if !reachable {
+        let kind = active_glyph(&cell);
         return rsx! {
             span { class: field_class(&cell.state),
+                span { class: "tw:inline-flex tw:h-4 tw:w-6 tw:flex-none tw:items-center", aria_hidden: "true",
+                    ProjectionGlyph { kind }
+                }
                 span { class: "tw:min-w-0 tw:truncate", "{active_label}" }
             }
         };
@@ -333,25 +374,26 @@ fn ProjectionField(
     }
 }
 
-/// The closed field's face: the active projection's own glyph, its name,
-/// and the caret that says a picker lives behind it. Rendered twice while
-/// the popover is open (in-flow placeholder + top-layer copy), so it stays
-/// a plain function of the cell.
+/// The closed field's face: the active choice's own glyph, its name, and
+/// the caret that says a picker lives behind it. Rendered twice while the
+/// popover is open (in-flow placeholder + top-layer copy), so it stays a
+/// plain function of the cell.
 fn projection_field_face(cell: &UiSpaceCell, active_label: &str) -> Element {
-    let projection = cell
-        .choices
-        .iter()
-        .find(|choice| choice.selected)
-        .and_then(|choice| choice.projection);
+    let kind = active_glyph(cell);
     rsx! {
         span { class: "tw:inline-flex tw:h-4 tw:w-6 tw:flex-none tw:items-center", aria_hidden: "true",
-            ProjectionGlyph { projection }
+            ProjectionGlyph { kind }
         }
         span { class: "tw:min-w-0 tw:grow tw:truncate", "{active_label}" }
         span { class: "tw:inline-flex tw:flex-none tw:text-subtle-foreground", aria_hidden: "true",
             StudioIcon { name: StudioIconName::Expanded, size: 12 }
         }
     }
+}
+
+/// The glyph for a cell's active choice.
+fn active_glyph(cell: &UiSpaceCell) -> SpaceGlyph {
+    glyph_for(cell.role, &cell.active)
 }
 
 /// The picker's content: one tile per declared variant, each drawing what
@@ -377,7 +419,7 @@ pub fn ProjectionTileGrid(
                     key: "{choice.variant}",
                     class: tile_class(choice.selected),
                     r#type: "button",
-                    title: "{projection_hint(choice.projection)}",
+                    title: "{choice_hint(role, &choice.variant)}",
                     onclick: {
                         let variant = choice.variant.clone();
                         let address = address.clone();
@@ -386,9 +428,10 @@ pub fn ProjectionTileGrid(
                             event.stop_propagation();
                             if !selected
                                 && let (Some(address), Some(handler)) = (address.clone(), on_action)
-                                && let Some(target) = address.child_field(&variant)
                             {
-                                handler.call(slot_ensure_present_action(target));
+                                for action in choice_actions(side, role, &address, &variant) {
+                                    handler.call(action);
+                                }
                             }
                             if let Some(mut close) = close {
                                 close.close();
@@ -396,13 +439,13 @@ pub fn ProjectionTileGrid(
                         }
                     },
                     span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
-                        ProjectionGlyph { projection: choice.projection }
+                        ProjectionGlyph { kind: glyph_for(role, &choice.variant) }
                     }
                     span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold",
                         "{variant_label(side, role, &choice)}"
                     }
                     span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                        "{projection_hint(choice.projection)}"
+                        "{choice_hint(role, &choice.variant)}"
                     }
                 }
             }
@@ -410,22 +453,58 @@ pub fn ProjectionTileGrid(
     }
 }
 
-/// A schematic drawing of what one projection does to a 1D source.
+/// What a tile or field glyph draws. Web-side vocabulary, deliberately
+/// wider than [`UiCellProjection`]: the DTO says what a choice FORCES in a
+/// probe; this says what the drawing shows — which lets the producer's
+/// `Default` wear the extrude it resolves to, the 2D→1D statement draw its
+/// centre scanline, and the G1b candidate tiles (`ExtrudeY`/`MirrorY`)
+/// exist as drawings before any model variant does.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SpaceGlyph {
+    Extrude,
+    Radial,
+    Angular,
+    Mirror,
+    /// G1b candidates — drawings only, no model variant behind them yet.
+    ExtrudeY,
+    MirrorY,
+    /// The 2D→1D answer: the texture's centre row, read as a strip.
+    CentreScanline,
+    /// The consumer dropdown's `Auto`: the answer lives on the source.
+    FollowSource,
+}
+
+/// The drawing for one choice, by role and RAW variant name.
+fn glyph_for(role: UiSpaceCellRole, variant: &str) -> SpaceGlyph {
+    match variant {
+        "Extrude" => SpaceGlyph::Extrude,
+        "Radial" => SpaceGlyph::Radial,
+        "Angular" => SpaceGlyph::Angular,
+        "Mirror" => SpaceGlyph::Mirror,
+        "ExtrudeY" => SpaceGlyph::ExtrudeY,
+        "MirrorY" => SpaceGlyph::MirrorY,
+        "Auto" => SpaceGlyph::FollowSource,
+        "Default" => match role {
+            // A 2D shader's 1D answer IS the centre scanline.
+            UiSpaceCellRole::ProducerIn1d => SpaceGlyph::CentreScanline,
+            // A 1D shader's silent 2D answer resolves to extrude in every
+            // UI-reachable state (see PROJECTION_DEFAULT_EXTRUDE).
+            _ => SpaceGlyph::Extrude,
+        },
+        _ => SpaceGlyph::FollowSource,
+    }
+}
+
+/// A schematic drawing of what one choice does to a 1D source.
 ///
-/// **Not a live probe (plan A2, resolved).** A live tile means rendering
-/// THIS product through a forced policy, and the only path to that is
-/// `ProjectSync`'s per-card `(product, space)` request table: it takes a
-/// space and a hero, not a per-projection policy, and nothing in
-/// `lpa-studio-web` can issue a probe of its own. Wiring one would be new
-/// core plumbing (a per-`(product, projection)` tile request, its result
-/// cache, and a DTO field to carry the bytes) — P4's brief explicitly
-/// excludes that, so the tiles draw the SHAPE of each answer instead. The
-/// glyphs read the same at 64×40 as a 32×32 probe would, and G1 rules on
-/// whether live tiles are worth the plumbing.
+/// **Not a live probe (plan A2, resolved; G1 ratified glyphs).** A live
+/// tile means rendering THIS product through a forced policy, and nothing
+/// in `lpa-studio-web` can issue a probe of its own — the tiles draw the
+/// SHAPE of each answer instead.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectionGlyph(#[props(default = None)] projection: Option<UiCellProjection>) -> Element {
-    // One vocabulary across all four: the source strip is a light-to-dark
+fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
+    // One vocabulary across the set: the source strip is a light-to-dark
     // ramp, and the glyph shows where that ramp goes.
     rsx! {
         svg {
@@ -433,8 +512,8 @@ fn ProjectionGlyph(#[props(default = None)] projection: Option<UiCellProjection>
             view_box: "0 0 64 40",
             preserve_aspect_ratio: "none",
             role: "img",
-            match projection {
-                Some(UiCellProjection::Extrude) => rsx! {
+            match kind {
+                SpaceGlyph::Extrude => rsx! {
                     for (index , opacity) in RAMP.iter().copied().enumerate() {
                         rect {
                             key: "{index}",
@@ -447,7 +526,7 @@ fn ProjectionGlyph(#[props(default = None)] projection: Option<UiCellProjection>
                         }
                     }
                 },
-                Some(UiCellProjection::Mirror) => rsx! {
+                SpaceGlyph::Mirror => rsx! {
                     for (index , opacity) in MIRROR_RAMP.iter().copied().enumerate() {
                         rect {
                             key: "{index}",
@@ -460,7 +539,35 @@ fn ProjectionGlyph(#[props(default = None)] projection: Option<UiCellProjection>
                         }
                     }
                 },
-                Some(UiCellProjection::Radial) => rsx! {
+                // The Y twins: the same ramp run down the rows instead of
+                // across the columns.
+                SpaceGlyph::ExtrudeY => rsx! {
+                    for (index , opacity) in RAMP.iter().copied().enumerate() {
+                        rect {
+                            key: "{index}",
+                            x: "0",
+                            y: "{index * 5}",
+                            width: "64",
+                            height: "5",
+                            fill: "currentColor",
+                            fill_opacity: "{opacity}",
+                        }
+                    }
+                },
+                SpaceGlyph::MirrorY => rsx! {
+                    for (index , opacity) in MIRROR_RAMP.iter().copied().enumerate() {
+                        rect {
+                            key: "{index}",
+                            x: "0",
+                            y: "{index * 5}",
+                            width: "64",
+                            height: "5",
+                            fill: "currentColor",
+                            fill_opacity: "{opacity}",
+                        }
+                    }
+                },
+                SpaceGlyph::Radial => rsx! {
                     for (index , (radius , opacity)) in RADIAL_RINGS.iter().copied().enumerate() {
                         circle {
                             key: "{index}",
@@ -472,24 +579,45 @@ fn ProjectionGlyph(#[props(default = None)] projection: Option<UiCellProjection>
                         }
                     }
                 },
-                Some(UiCellProjection::Angular) => rsx! {
-                    for (index , (x , y , opacity)) in ANGULAR_RAYS.iter().copied().enumerate() {
-                        line {
+                // The strip swept around the centre: adjacent pie sectors
+                // whose opacity ramps with angle — a conic sweep. (G1: the
+                // old ray spokes read as an asterisk.)
+                SpaceGlyph::Angular => rsx! {
+                    for (index , (path , opacity)) in angular_sectors().into_iter().enumerate() {
+                        path {
                             key: "{index}",
-                            x1: "32",
-                            y1: "20",
-                            x2: "{x}",
-                            y2: "{y}",
-                            stroke: "currentColor",
-                            stroke_opacity: "{opacity}",
-                            stroke_width: "7",
+                            d: "{path}",
+                            fill: "currentColor",
+                            fill_opacity: "{opacity}",
                         }
                     }
                 },
-                // "Consumer decides": nothing is drawn, because nothing is
-                // decided here — a dashed hollow says the answer lives on
-                // the other side of the binding.
-                None => rsx! {
+                // The texture's centre row read as a strip: the 2D field
+                // faint, the scanline bright and carrying the ramp.
+                SpaceGlyph::CentreScanline => rsx! {
+                    rect {
+                        x: "1",
+                        y: "1",
+                        width: "62",
+                        height: "38",
+                        fill: "currentColor",
+                        fill_opacity: "0.1",
+                    }
+                    for (index , opacity) in RAMP.iter().copied().enumerate() {
+                        rect {
+                            key: "{index}",
+                            x: "{index * 8}",
+                            y: "16",
+                            width: "8",
+                            height: "8",
+                            fill: "currentColor",
+                            fill_opacity: "{opacity}",
+                        }
+                    }
+                },
+                // "Follow the source": a dashed hollow — the answer lives
+                // on the other side of the binding.
+                SpaceGlyph::FollowSource => rsx! {
                     rect {
                         x: "3",
                         y: "3",
@@ -514,18 +642,29 @@ const RAMP: [f32; 8] = [0.14, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84, 0.96];
 const MIRROR_RAMP: [f32; 8] = [0.14, 0.36, 0.6, 0.96, 0.96, 0.6, 0.36, 0.14];
 /// Concentric rings, outermost first so the inner ones paint over.
 const RADIAL_RINGS: [(u32, f32); 4] = [(26, 0.18), (19, 0.38), (12, 0.62), (5, 0.95)];
-/// Eight rays at 45° steps, radius 26 from (32, 20) — the strip swept
-/// around the centre.
-const ANGULAR_RAYS: [(f32, f32, f32); 8] = [
-    (58.0, 20.0, 0.14),
-    (50.4, 38.4, 0.26),
-    (32.0, 46.0, 0.38),
-    (13.6, 38.4, 0.5),
-    (6.0, 20.0, 0.62),
-    (13.6, 1.6, 0.74),
-    (32.0, -6.0, 0.86),
-    (50.4, 1.6, 0.96),
-];
+
+/// Twelve adjacent pie sectors around (32, 20), radius 30, opacity
+/// ramping with angle — the conic sweep the angular projection actually
+/// performs. Computed rather than tabulated: twelve hand-written arc
+/// paths would hide the one fact that matters (adjacent sectors, one
+/// ramp).
+fn angular_sectors() -> Vec<(String, f32)> {
+    const SECTORS: usize = 12;
+    const CX: f32 = 32.0;
+    const CY: f32 = 20.0;
+    const R: f32 = 30.0;
+    (0..SECTORS)
+        .map(|index| {
+            let start = (index as f32) / (SECTORS as f32) * core::f32::consts::TAU;
+            let end = ((index + 1) as f32) / (SECTORS as f32) * core::f32::consts::TAU;
+            let (x0, y0) = (CX + R * start.cos(), CY + R * start.sin());
+            let (x1, y1) = (CX + R * end.cos(), CY + R * end.sin());
+            let path = format!("M {CX} {CY} L {x0:.1} {y0:.1} A {R} {R} 0 0 1 {x1:.1} {y1:.1} Z");
+            let opacity = 0.14 + 0.82 * (index as f32) / ((SECTORS - 1) as f32);
+            (path, opacity)
+        })
+        .collect()
+}
 
 /// A boolean the section owns, as its own row (`strip order means
 /// something` — vision D3's authored bit).
@@ -691,43 +830,35 @@ pub(crate) fn preview_space_caption(
     }
 }
 
-fn primary_label(side: UiSpaceSide) -> &'static str {
-    match side {
-        UiSpaceSide::Producer => PRODUCER_PRIMARY_LABEL,
-        UiSpaceSide::Consumer => CONSUMER_PRIMARY_LABEL,
-    }
-}
-
 fn cell_label(side: UiSpaceSide, role: UiSpaceCellRole) -> &'static str {
     match (side, role) {
         (_, UiSpaceCellRole::ProducerIn2d) => PRODUCER_IN_2D_LABEL,
         (_, UiSpaceCellRole::ProducerIn1d) => PRODUCER_IN_1D_LABEL,
-        (_, UiSpaceCellRole::ConsumerFrom1d) => CONSUMER_FROM_1D_LABEL,
-        (side, UiSpaceCellRole::Primary) => primary_label(side),
+        // The consumer's primary IS the one dropdown (P4b).
+        (_, UiSpaceCellRole::Primary) => CONSUMER_PRIMARY_LABEL,
     }
 }
 
 fn flag_label(role: UiSpaceFlagRole) -> &'static str {
     match role {
-        UiSpaceFlagRole::ForcePolicy => FORCE_LABEL,
         UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_LABEL,
     }
 }
 
 fn flag_title(role: UiSpaceFlagRole) -> &'static str {
     match role {
-        UiSpaceFlagRole::ForcePolicy => FORCE_TITLE,
         UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_TITLE,
     }
 }
 
 /// A variant's display name.
 ///
-/// Keyed by ROLE, not by variant alone: `Default` means "consumer decides"
-/// on a 1D shader's 2D answer and "centre scanline" on a 2D shader's 1D
-/// one, and one vocabulary for both would lie about one of them. Anything
-/// the vocabulary does not know falls back to the DTO's own label, so a
-/// variant added to the model still renders something honest.
+/// Keyed by ROLE, not by variant alone: `Default` means "extrude ·
+/// default" on a 1D shader's 2D answer (the projection silence resolves
+/// to) and "centre scanline" on a 2D shader's 1D one, and one vocabulary
+/// for both would lie about one of them. Anything the vocabulary does not
+/// know falls back to the DTO's own label, so a variant added to the
+/// model still renders something honest.
 fn variant_label(side: UiSpaceSide, role: UiSpaceCellRole, choice: &UiSpaceChoice) -> String {
     known_variant_label(side, role, &choice.variant)
         .map(str::to_string)
@@ -742,10 +873,9 @@ fn known_variant_label(
     match (side, role, variant) {
         (UiSpaceSide::Producer, UiSpaceCellRole::Primary, "OneD") => Some(SPACE_ONE_D),
         (UiSpaceSide::Producer, UiSpaceCellRole::Primary, "TwoD") => Some(SPACE_TWO_D),
-        (UiSpaceSide::Consumer, UiSpaceCellRole::Primary, "Auto") => Some(CONSUME_AUTO),
-        (UiSpaceSide::Consumer, UiSpaceCellRole::Primary, "Policy") => Some(CONSUME_POLICY),
+        (UiSpaceSide::Consumer, UiSpaceCellRole::Primary, "Auto") => Some(CONSUMER_FOLLOW),
         (_, UiSpaceCellRole::ProducerIn1d, "Default") => Some(PROJECTION_CENTRE_SCANLINE),
-        (_, _, "Default") => Some(PROJECTION_DEFER),
+        (_, _, "Default") => Some(PROJECTION_DEFAULT_EXTRUDE),
         (_, _, "Extrude") => Some(PROJECTION_EXTRUDE),
         (_, _, "Radial") => Some(PROJECTION_RADIAL),
         (_, _, "Angular") => Some(PROJECTION_ANGULAR),
@@ -764,13 +894,19 @@ fn active_variant_label(side: UiSpaceSide, cell: &UiSpaceCell) -> String {
         .unwrap_or_else(|| cell.active_label.clone())
 }
 
-fn projection_hint(projection: Option<UiCellProjection>) -> &'static str {
-    match projection {
-        None => HINT_DEFER,
-        Some(UiCellProjection::Extrude) => HINT_EXTRUDE,
-        Some(UiCellProjection::Radial) => HINT_RADIAL,
-        Some(UiCellProjection::Angular) => HINT_ANGULAR,
-        Some(UiCellProjection::Mirror) => HINT_MIRROR,
+/// One line per choice, by role and RAW variant name.
+fn choice_hint(role: UiSpaceCellRole, variant: &str) -> &'static str {
+    match variant {
+        "Auto" => HINT_FOLLOW,
+        "Default" => match role {
+            UiSpaceCellRole::ProducerIn1d => HINT_CENTRE_SCANLINE,
+            _ => HINT_DEFAULT_EXTRUDE,
+        },
+        "Extrude" => HINT_EXTRUDE,
+        "Radial" => HINT_RADIAL,
+        "Angular" => HINT_ANGULAR,
+        "Mirror" => HINT_MIRROR,
+        _ => "",
     }
 }
 
@@ -783,33 +919,55 @@ fn primary_hint(section: &UiSpaceSection) -> &'static str {
         },
         UiSpaceSide::Consumer => {
             if section.primary.active == "Auto" {
-                CONSUMER_HINT_AUTO
+                CONSUMER_HINT_FOLLOW
             } else {
-                CONSUMER_HINT_POLICY
+                CONSUMER_HINT_OVERRIDE
             }
         }
     }
 }
 
-/// The who-wins rung worth stating on this card. `None` where nothing can
-/// contend: a 2D shader declares no 1D→2D cell, and an `Auto` fixture has
-/// no opinion to lose with.
+/// The who-wins rung worth stating on this card. Only the producer still
+/// carries one: the consumer's hint line already says whether it follows
+/// or overrides, which was the whole of its ladder.
 fn ladder_line(section: &UiSpaceSection) -> Option<&'static str> {
     match section.side {
         UiSpaceSide::Producer => section
             .cell(UiSpaceCellRole::ProducerIn2d)
             .map(|_| LADDER_PRODUCER),
+        UiSpaceSide::Consumer => None,
+    }
+}
+
+/// The collapsed drawer row's summary (P4b: both sections are drawers
+/// below `settings` now) — the declaration at a glance.
+pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
+    match section.side {
+        UiSpaceSide::Producer => {
+            let space = section
+                .declared_space
+                .map(visual_space_label)
+                .unwrap_or_default();
+            if let Some(cell) = section.cell(UiSpaceCellRole::ProducerIn2d) {
+                format!(
+                    "{space} · in 2D: {}",
+                    active_variant_label(section.side, cell)
+                )
+            } else if section.cell(UiSpaceCellRole::ProducerIn1d).is_some() {
+                format!("{space} · in 1D: {PROJECTION_CENTRE_SCANLINE}")
+            } else {
+                space.to_string()
+            }
+        }
         UiSpaceSide::Consumer => {
-            let forced = section
-                .flag(UiSpaceFlagRole::ForcePolicy)
-                .is_some_and(|flag| flag.value);
-            section.cell(UiSpaceCellRole::ConsumerFrom1d).map(|_| {
-                if forced {
-                    LADDER_CONSUMER_FORCES
-                } else {
-                    LADDER_CONSUMER_FILLS
-                }
-            })
+            if section.primary.active == "Auto" {
+                CONSUMER_FOLLOW.to_string()
+            } else {
+                format!(
+                    "1D sources: {} (override)",
+                    active_variant_label(section.side, &section.primary)
+                )
+            }
         }
     }
 }
@@ -845,23 +1003,26 @@ const LADDER_CLASS: &str = "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-subtle
 /// visual, and the frame is the popover's outline anchor.
 const FIELD_TRIGGER_CLASS: &str = "tw:flex tw:min-h-7 tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:px-2 tw:py-1 tw:text-left tw:text-sm tw:font-medium tw:text-muted-foreground";
 
-/// The segmented group's frame. Mismatched declarations wear the error
-/// border: the segment row IS the thing the compiler is objecting to.
+/// The segmented group's frame — full-width since P4b (G1: "almost like
+/// tabs"; the declaration is the section's headline, not one row among
+/// many). Mismatched declarations wear the error border: the segment row
+/// IS the thing the compiler is objecting to.
 fn segment_group_class(mismatched: bool) -> &'static str {
     if mismatched {
-        "tw:inline-flex tw:overflow-hidden tw:rounded-xs tw:border tw:border-status-error-border"
+        "tw:flex tw:w-full tw:overflow-hidden tw:rounded-xs tw:border tw:border-status-error-border"
     } else {
-        "tw:inline-flex tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle"
+        "tw:flex tw:w-full tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle"
     }
 }
 
-/// One squared block of the segmented row — pressed reads as filled, the
-/// rest as quiet text (the discrete-control language, `docs/style/ui.md`).
+/// One tab of the segmented row — pressed reads as filled, the rest as
+/// quiet text (the discrete-control language, `docs/style/ui.md`), each
+/// taking an equal share of the row.
 fn segment_class(selected: bool) -> &'static str {
     if selected {
-        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-card-muted tw:px-2.5 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground"
+        "tw:flex-1 tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-card-muted tw:px-2.5 tw:py-1.5 tw:text-center tw:text-xs tw:font-bold tw:text-strong-foreground"
     } else {
-        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
+        "tw:flex-1 tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-center tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-soft-foreground"
     }
 }
 
@@ -929,30 +1090,26 @@ mod tests {
         }
     }
 
-    fn consumer(active: &str, cells: Vec<UiSpaceCell>, force: Option<bool>) -> UiSpaceSection {
+    /// The P4b consumer section: ONE dropdown, `Auto` = follow the source.
+    fn consumer(active: &str) -> UiSpaceSection {
         UiSpaceSection {
             side: UiSpaceSide::Consumer,
-            primary: cell(UiSpaceCellRole::Primary, active, &["Auto", "Policy"]),
+            primary: cell(
+                UiSpaceCellRole::Primary,
+                active,
+                &["Auto", "Extrude", "Radial", "Angular", "Mirror"],
+            ),
             declared_space: None,
-            cells,
-            flags: force
-                .map(|value| {
-                    vec![UiSpaceFlag {
-                        role: UiSpaceFlagRole::ForcePolicy,
-                        label: "Force".to_string(),
-                        value,
-                        address: None,
-                        state: UiSlotFieldState::editable(),
-                    }]
-                })
-                .unwrap_or_default(),
+            cells: Vec::new(),
+            flags: Vec::new(),
             mismatch: None,
         }
     }
 
-    /// `Default` is not one word: the same variant means "the consumer
-    /// decides" on a 1D shader's 2D answer and "centre scanline" on a 2D
-    /// shader's 1D one.
+    /// `Default` is not one word: the same variant means "extrude ·
+    /// default" on a 1D shader's 2D answer (the projection silence
+    /// actually resolves to — "consumer decides" was killed at G1) and
+    /// "centre scanline" on a 2D shader's 1D one.
     #[test]
     fn default_reads_differently_per_cell() {
         assert_eq!(
@@ -961,7 +1118,7 @@ mod tests {
                 UiSpaceCellRole::ProducerIn2d,
                 "Default"
             ),
-            Some(PROJECTION_DEFER)
+            Some(PROJECTION_DEFAULT_EXTRUDE)
         );
         assert_eq!(
             known_variant_label(
@@ -970,6 +1127,91 @@ mod tests {
                 "Default"
             ),
             Some(PROJECTION_CENTRE_SCANLINE)
+        );
+    }
+
+    /// The glyphs match the labels' honesty rules: producer `Default`
+    /// wears the extrude it resolves to, the 2D→1D statement draws its
+    /// scanline, and the consumer's `Auto` defers visually.
+    #[test]
+    fn glyphs_follow_the_same_honesty_rules_as_labels() {
+        assert_eq!(
+            glyph_for(UiSpaceCellRole::ProducerIn2d, "Default"),
+            SpaceGlyph::Extrude
+        );
+        assert_eq!(
+            glyph_for(UiSpaceCellRole::ProducerIn1d, "Default"),
+            SpaceGlyph::CentreScanline
+        );
+        assert_eq!(
+            glyph_for(UiSpaceCellRole::Primary, "Auto"),
+            SpaceGlyph::FollowSource
+        );
+        assert_eq!(
+            glyph_for(UiSpaceCellRole::Primary, "Mirror"),
+            SpaceGlyph::Mirror
+        );
+    }
+
+    /// The consumer dropdown's dispatch: `Auto` is one plain ensure, and
+    /// an explicit projection is the ensure-Policy → ensure-variant →
+    /// force=true sequence (the pick IS the override).
+    #[test]
+    fn consumer_choices_dispatch_the_op_sequence() {
+        use lpa_studio_core::{ProjectNodeAddress, ProjectSlotRoot};
+        let address = ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.module/panel.fixture").expect("address"),
+            ProjectSlotRoot::def(),
+            lpc_model::SlotPath::parse("consume").expect("path"),
+        );
+
+        let auto = choice_actions(
+            UiSpaceSide::Consumer,
+            UiSpaceCellRole::Primary,
+            &address,
+            "Auto",
+        );
+        assert_eq!(auto.len(), 1);
+
+        let mirror = choice_actions(
+            UiSpaceSide::Consumer,
+            UiSpaceCellRole::Primary,
+            &address,
+            "Mirror",
+        );
+        assert_eq!(
+            mirror.len(),
+            3,
+            "ensure Policy, ensure from_1d.Mirror, set force"
+        );
+
+        // Producer cells keep the single generic gesture.
+        let producer = choice_actions(
+            UiSpaceSide::Producer,
+            UiSpaceCellRole::ProducerIn2d,
+            &address,
+            "Radial",
+        );
+        assert_eq!(producer.len(), 1);
+    }
+
+    /// The collapsed drawer summaries say the declaration at a glance.
+    #[test]
+    fn summaries_state_the_declaration_at_a_glance() {
+        let shader = producer(
+            "OneD",
+            vec![cell(
+                UiSpaceCellRole::ProducerIn2d,
+                "Radial",
+                &["Default", "Extrude", "Radial", "Angular", "Mirror"],
+            )],
+        );
+        assert_eq!(space_section_summary(&shader), "1D · in 2D: radial");
+        assert_eq!(space_section_summary(&producer("TwoD", Vec::new())), "2D");
+        assert_eq!(space_section_summary(&consumer("Auto")), CONSUMER_FOLLOW);
+        assert_eq!(
+            space_section_summary(&consumer("Mirror")),
+            "1D sources: mirror (override)"
         );
     }
 
@@ -988,26 +1230,31 @@ mod tests {
         );
     }
 
-    /// The primary segments speak each side's own vocabulary from the same
-    /// component (D13's mirror).
+    /// The two sides keep their own vocabulary through the shared shapes
+    /// (D13's mirror): the producer's tabs speak spaces, the consumer's
+    /// dropdown speaks follow-or-override.
     #[test]
-    fn the_two_sides_share_one_row_shape_and_two_vocabularies() {
+    fn the_two_sides_share_one_shape_and_two_vocabularies() {
         let shader = producer("OneD", Vec::new());
-        let fixture = consumer("Policy", Vec::new(), Some(false));
-        assert_eq!(primary_label(shader.side), PRODUCER_PRIMARY_LABEL);
-        assert_eq!(primary_label(fixture.side), CONSUMER_PRIMARY_LABEL);
+        let fixture = consumer("Auto");
         assert_eq!(
             active_variant_label(shader.side, &shader.primary),
             SPACE_ONE_D
         );
         assert_eq!(
             active_variant_label(fixture.side, &fixture.primary),
-            CONSUME_POLICY
+            CONSUMER_FOLLOW
         );
+        assert_eq!(
+            cell_label(UiSpaceSide::Consumer, UiSpaceCellRole::Primary),
+            CONSUMER_PRIMARY_LABEL
+        );
+        assert_eq!(primary_hint(&fixture), CONSUMER_HINT_FOLLOW);
+        assert_eq!(primary_hint(&consumer("Radial")), CONSUMER_HINT_OVERRIDE);
     }
 
-    /// The ladder states the rung that can still surprise: nothing where
-    /// nothing contends, and the FORCED voice only when force is on.
+    /// The ladder states the one rung that can still surprise, and only
+    /// where something contends: the consumer's hint line covers its side.
     #[test]
     fn the_ladder_names_the_rung_that_can_surprise() {
         assert_eq!(ladder_line(&producer("TwoD", Vec::new())), None);
@@ -1018,16 +1265,8 @@ mod tests {
             )),
             Some(LADDER_PRODUCER)
         );
-        assert_eq!(ladder_line(&consumer("Auto", Vec::new(), None)), None);
-        let policy = vec![cell(UiSpaceCellRole::ConsumerFrom1d, "Mirror", &["Mirror"])];
-        assert_eq!(
-            ladder_line(&consumer("Policy", policy.clone(), Some(false))),
-            Some(LADDER_CONSUMER_FILLS)
-        );
-        assert_eq!(
-            ladder_line(&consumer("Policy", policy, Some(true))),
-            Some(LADDER_CONSUMER_FORCES)
-        );
+        assert_eq!(ladder_line(&consumer("Auto")), None);
+        assert_eq!(ladder_line(&consumer("Mirror")), None);
     }
 
     /// D15's captions, including D11's honesty rule: a projection nobody
@@ -1116,7 +1355,7 @@ mod tests {
         assert_eq!(space_badge(&producer("TwoD", Vec::new())), Some("2D"));
         // A fixture states a POLICY, so `declared_space` is `None` by
         // construction and the card wears no badge.
-        assert_eq!(space_badge(&consumer("Policy", Vec::new(), None)), None);
+        assert_eq!(space_badge(&consumer("Auto")), None);
 
         let mut shader = lpa_studio_core::UiShaderFace {
             preview: lpa_studio_core::UiProducedProduct::visual("output"),

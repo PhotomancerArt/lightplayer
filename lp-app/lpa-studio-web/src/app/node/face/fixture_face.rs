@@ -57,7 +57,7 @@ use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
 
-use super::space_section::{SPACE_SECTION_LABEL, SpaceSection};
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -84,8 +84,15 @@ pub fn FixtureFace(
     /// Open this space cell's tile picker on first render (stories).
     #[props(default = None)]
     space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
+    /// Open the dimensionality drawer on first render (stories — the
+    /// drawer defaults collapsed, P4b).
+    #[props(default = false)]
+    space_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The dimensionality drawer's open state (P4b: default collapsed,
+    // below settings; an open picker implies an open drawer).
+    let mut space_open = use_signal(move || space_initially_open || space_picker_open_cell.is_some());
     let preview = face.preview.clone();
     // One view state for both faces of the section: the same toggle bar
     // (and its state) survives the view ⇄ edit flip, and the toggles drive
@@ -207,18 +214,6 @@ pub fn FixtureFace(
                 }
             }
         }
-        // The consumer half of the mirror, in the same slot the shader card
-        // gives the producer half: between the output and the settings
-        // (D13). Same DTO, same component, opposite side.
-        if let Some(space) = face.space.clone() {
-            NodeCardSection { label: SPACE_SECTION_LABEL,
-                SpaceSection {
-                    section: space,
-                    picker_open_cell: space_picker_open_cell,
-                    on_action,
-                }
-            }
-        }
         NodeCardSection { label: "settings",
             div { class: "tw:px-4 tw:py-3",
                 PanelControl {
@@ -228,6 +223,26 @@ pub fn FixtureFace(
                 }
                 if let Some(power) = face.power {
                     PowerReadout { power, node, on_action }
+                }
+            }
+        }
+        // The consumer half of the mirror, in the same slot the shader
+        // card gives the producer half — below settings, as a
+        // default-collapsed drawer whose summary states the policy (G1
+        // rework, P4b). Same DTO, same component, opposite side.
+        if let Some(space) = face.space.clone() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                summary: Some(space_section_summary(&space)),
+                open: Some(space_open()),
+                on_toggle: move |()| {
+                    let open = space_open();
+                    space_open.set(!open);
+                },
+                SpaceSection {
+                    section: space,
+                    picker_open_cell: space_picker_open_cell,
+                    on_action,
                 }
             }
         }

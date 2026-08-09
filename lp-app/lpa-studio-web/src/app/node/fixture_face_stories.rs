@@ -9,7 +9,7 @@ use lpa_studio_core::UiSpaceCellRole;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_face_bound_output, fixture_face_limiting, fixture_face_policy,
+    fixture_face_bound_output, fixture_face_limiting, fixture_face_override,
     fixture_face_within_budget, fixture_node_view, fixture_node_view_with_face,
     fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
 };
@@ -204,7 +204,7 @@ fn mapping_edit_mode() -> Element {
 // -- the space section, consumer side (plan-B P4 / gate G1) ------------------
 
 #[story(
-    description = "The MIRROR (D13): the fixture's `space` section sits in the same slot the shader card gives its declaration — between output and settings, same rail, same row shape, rendered by the same component off the same DTO. What differs is the voice: a shader declares a space, a fixture states a policy, so this side reads `consumes: auto` and carries the one authored bit a shape cannot answer for itself — does strip order mean something (D3). `auto` expands into nothing else on purpose: a fixture with no opinion follows whatever each source declares, and the line under the primary says exactly that."
+    description = "The card's DEFAULT posture after the G1 rework (P4b): the dimensionality drawer rides below settings, collapsed to one summary row — `follow the source` — because consume policy is authoring, not day-to-day tuning. The G1 `Auto`/`policy` two-control shape is gone; expanding the drawer reveals ONE dropdown."
 )]
 fn space_auto() -> Element {
     rsx! {
@@ -218,13 +218,14 @@ fn space_auto() -> Element {
 }
 
 #[story(
-    description = "An authored policy: `consumes: policy` opens the `from 1D sources` cell — the same picker the shader's `default projection` cell opens, mirrored — with the `force` bit inline on the row it qualifies (spike §3). Unforced, this only fills a silence: a source that declares its own projection still wins, which is what the line beneath says."
+    description = "The drawer OPEN in its default state: one dropdown — `show 1D sources by: follow the source` — plus the one authored bit a shape cannot answer for itself (D3, reworded at G1: `1D patterns follow the wire`). No `force` checkbox anywhere: with one control, following is the default entry and an explicit pick IS the override."
 )]
 fn space_policy() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
-                face: fixture_face_policy(false),
+                face: fixture_face_override("Auto"),
+                space_initially_open: true,
                 on_action: move |_| {},
             }
         }
@@ -232,13 +233,14 @@ fn space_policy() -> Element {
 }
 
 #[story(
-    description = "The same policy FORCED: this fixture's default now wins over a source's own declaration, and the who-wins line flips to say so. The one line is the compact form of the spike's precedence ladder — the rung that can still surprise the person reading this card, stated where the gesture that changes it lives."
+    description = "An authored OVERRIDE: the same dropdown now names `radial`, the hint flips to `This fixture overrides what 1D sources declare.`, and the collapsed summary would read `1D sources: radial (override)`. Under the hood the pick dispatched ensure-Policy → ensure-from_1d.Radial → force=true — the same ops the drawer rows send, batched into one gesture."
 )]
 fn space_policy_forced() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
-                face: fixture_face_policy(true),
+                face: fixture_face_override("Radial"),
+                space_initially_open: true,
                 on_action: move |_| {},
             }
         }
@@ -246,14 +248,14 @@ fn space_policy_forced() -> Element {
 }
 
 #[story(
-    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). The tiles, the glyphs, the merged outline and the select-and-close are identical to the shader card's; only the cell it writes differs (`consume.Policy.from_1d`). Note the absent `consumer decides` tile: a fixture that has opened a policy has to name one, so the deferring choice does not exist on this side."
+    description = "The picker open on the CONSUMER side — one component, both sides of the binding (D16). Same tiles, glyphs, merged outline and select-and-close as the shader card; the difference is the leading `follow the source` tile (dashed: the answer lives on the source), which replaced G1's rejected `consumer decides` with deferral that is honest about its direction."
 )]
 fn space_projection_picker_open() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
-                face: fixture_face_policy(false),
-                space_picker_open_cell: UiSpaceCellRole::ConsumerFrom1d,
+                face: fixture_face_override("Auto"),
+                space_picker_open_cell: UiSpaceCellRole::Primary,
                 on_action: move |_| {},
             }
         }
