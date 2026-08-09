@@ -8,10 +8,10 @@ mod space;
 mod texture_product;
 
 pub use coordinates::{
-    RADIAL_CORNER_REACH, angular, centre_scanline, directed_coord, extrude, mirror,
-    mirror_fold_coord, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
-    pixel_q16_to_normalized_q16, project_2d_to_1d, radial, texel_center_to_uv_q16,
-    texture_uv_q16_to_texel,
+    RADIAL_CORNER_REACH, angular, angular_sweep_coord, centre_scanline, directed_coord, extrude,
+    mirror, mirror_fold_coord, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
+    pixel_q16_to_normalized_q16, project_2d_to_1d, radial, radial_flip_coord,
+    texel_center_to_uv_q16, texture_uv_q16_to_texel,
 };
 pub use lpc_model::VisualProduct;
 pub use render_texture_request::RenderTextureRequest;
@@ -20,8 +20,9 @@ pub use sample_request::{
 };
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
 pub use space::{
-    CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo, ProjectionDirection,
-    ProjectionOrigin, VisualSpace, resolve_1d_to_2d, resolve_1d_to_2d_with_origin,
+    AngularDirection, CellProjection, ConsumerPolicy, MirrorDirection, ProductSpaceInfo,
+    ProjectionDirection, ProjectionOrigin, RadialDirection, VisualSpace, resolve_1d_to_2d,
+    resolve_1d_to_2d_with_origin,
 };
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 #[cfg(test)]

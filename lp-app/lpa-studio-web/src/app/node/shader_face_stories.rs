@@ -7,8 +7,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    NodeCardUiState, UiAgentStatus, UiCellProjection, UiNodeFace, UiProjectionOrigin,
-    UiSpaceCellRole, UiVisualSpace,
+    NodeCardUiState, UiAgentStatus, UiCellProjection, UiNodeFace, UiProjectionOrigin, UiVisualSpace,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -38,7 +37,6 @@ fn ShaderCardCanvas(children: Element) -> Element {
 fn ShaderBodyCard(
     face: lpa_studio_core::UiShaderFace,
     #[props(default = false)] space_open: bool,
-    #[props(default = None)] space_picker_open_cell: Option<UiSpaceCellRole>,
 ) -> Element {
     let card_ui = NodeCardUiState {
         space_open,
@@ -51,7 +49,6 @@ fn ShaderBodyCard(
                 node: "/fyeah_sign.show/comet.shader".to_string(),
                 card_ui,
                 sections: shader_sections(),
-                space_picker_open_cell,
                 on_action: move |_| {},
             }
         }
@@ -258,15 +255,12 @@ fn space_one_d_answers() -> Element {
 }
 
 #[story(
-    description = "The projection picker OPEN (D16, tiles ratified at G1): one merged outline welds field and panel, each tile draws what that answer DOES to a strip. Two G1 fixes visible: the angular tile is now a conic sweep of pie sectors (the ray spokes read as an asterisk), and the leading tile is `extrude · default` rather than a deferring blank. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>` and closes — a selection is a completed gesture."
+    description = "The projection choices INLINE (the inline-tiles ruling: no popover, no dropdown — a drawer plus a dropdown was two nested expansions): every tile always visible in the section body, each drawing what that answer DOES to a strip. The Default tile is GONE (post-G1b: it was behaviorally identical to authored extrude); an unauthored cell still reads `extrude · default` in its summary, and any pick authors a real shape. The selected tile is unmistakable — accent border, accent wash, check badge. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>`."
 )]
-fn space_projection_picker_open() -> Element {
+fn space_choices_inline() -> Element {
     rsx! {
         ShaderCardCanvas {
-            ShaderBodyCard {
-                face: shader_face_one_d("Radial"),
-                space_picker_open_cell: UiSpaceCellRole::ProducerIn2d,
-            }
+            ShaderBodyCard { face: shader_face_one_d("Radial"), space_open: true }
         }
     }
 }
@@ -302,21 +296,22 @@ fn space_in_definition_variant() -> Element {
 /// story — the Y-twin drawings with no model behind them — retired with
 /// the ruling: the directional vocabulary is real now.)
 #[story(
-    description = "The direction row — RULING 4's two-section design (2026-08-09): the top section is the general SHAPE (the picker keeps its four tiles plus the default), and when the active shape is directional a `direction` row appears under the projection field — a segmented control in the same squared-blocks discrete language as the 2D|1D tabs, whose vocabulary comes from the SHAPE (mirror-direction ruling): single run-direction arrows for extrude (→ ← ↓ ↑), paired FOLD arrows for mirror (→← ←→ ↓↑ ↑↓ — a fold is symmetric in run direction, so mirror gets sense × axis instead). Left card: extrude ↓. Right card: mirror ↓↑ (inward-y) — field face, glyph, and collapsed summary all wear the shape's glyph. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>`, the generic enum-row gesture at the flattened payload row's real address. Radial/angular show no row."
+    description = "The direction rows — RULING 4's two-section design, now for ALL FOUR shapes (radial/angular flip ruling): the top section is the general SHAPE (inline tiles), and the active shape's `direction` row renders beneath, each shape with its OWN vocabulary: single run-direction arrows for extrude (→ ← ↓ ↑), paired FOLD arrows for mirror (→← ←→ ↓↑ ↑↓), outward/inward words for radial's flip, ↻/↺ for angular's sweep. Shown: extrude ↓, mirror ↓↑ (inward-y), radial · inward, angular ↺ — field summaries and captions wear the same vocabulary, with each shape's default staying bare. A pick dispatches `EnsurePresent <cell>.<Shape>.direction.<D>` at the flattened payload row's real address."
 )]
 fn space_direction_row() -> Element {
-    let mut extrude = shader_face_one_d("Extrude");
-    extrude.space = Some(
-        crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
-            "Extrude", "Down",
-        ),
-    );
-    let mut mirror = shader_face_one_d("Mirror");
-    mirror.space = Some(
-        crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
-            "Mirror", "InwardY",
-        ),
-    );
+    let directed = |answer: &str, direction: &str| {
+        let mut face = shader_face_one_d(answer);
+        face.space = Some(
+            crate::app::node::face_story_fixtures::shader_space_section_one_d_directed(
+                answer, direction,
+            ),
+        );
+        face
+    };
+    let extrude = directed("Extrude", "Down");
+    let mirror = directed("Mirror", "InwardY");
+    let radial = directed("Radial", "Inward");
+    let angular = directed("Angular", "CounterClockwise");
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
             div { class: "tw:w-full tw:max-w-md",
@@ -324,6 +319,12 @@ fn space_direction_row() -> Element {
             }
             div { class: "tw:w-full tw:max-w-md",
                 ShaderBodyCard { face: mirror, space_open: true }
+            }
+            div { class: "tw:w-full tw:max-w-md",
+                ShaderBodyCard { face: radial, space_open: true }
+            }
+            div { class: "tw:w-full tw:max-w-md",
+                ShaderBodyCard { face: angular, space_open: true }
             }
         }
     }
@@ -352,7 +353,7 @@ fn preview_spaces_stacked() -> Element {
         ShaderCardCanvas {
             ShaderFace {
                 face: shader_face_stacked_preview(
-                    UiCellProjection::Radial,
+                    UiCellProjection::Radial(lpa_studio_core::UiRadialDirection::Outward),
                     UiProjectionOrigin::Declared,
                 ),
                 node: "/fyeah_sign.show/comet.shader".to_string(),

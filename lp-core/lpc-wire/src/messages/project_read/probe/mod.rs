@@ -23,8 +23,8 @@ pub use output_frame_probe::{
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
 pub use render_product_probe::{
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
-    WireCellProjection, WireConsumerPolicy, WireMirrorDirection, WireProjectionDirection,
-    WireProjectionOrigin, WireVisualSpace,
+    WireAngularDirection, WireCellProjection, WireConsumerPolicy, WireMirrorDirection,
+    WireProjectionDirection, WireProjectionOrigin, WireRadialDirection, WireVisualSpace,
 };
 pub use timebase_probe::{
     TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,

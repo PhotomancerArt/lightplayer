@@ -57,10 +57,11 @@ pub use ui_node_section::UiNodeSection;
 pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
-    UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat,
-    UiMirrorDirection, UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame,
-    UiProductRef, UiProductSpaceView, UiProductTrackingState, UiProjectionDirection,
-    UiProjectionOrigin, UiVisualProductSpace, UiVisualSpace,
+    UiAngularDirection, UiCellProjection, UiConsumerPolicy, UiControlProductPreview,
+    UiControlSampleFormat, UiMirrorDirection, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiProductPreviewFrame, UiProductRef, UiProductSpaceView, UiProductTrackingState,
+    UiProjectionDirection, UiProjectionOrigin, UiRadialDirection, UiVisualProductSpace,
+    UiVisualSpace,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_shader_uniform::UiShaderUniform;

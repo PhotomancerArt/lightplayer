@@ -350,7 +350,35 @@
                               {
                                 "name": "Radial",
                                 "shape": {
-                                  "unit": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Outward",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Inward",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
                                     "meta": {}
                                   }
                                 }
@@ -358,7 +386,35 @@
                               {
                                 "name": "Angular",
                                 "shape": {
-                                  "unit": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Clockwise",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "CounterClockwise",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
                                     "meta": {}
                                   }
                                 }

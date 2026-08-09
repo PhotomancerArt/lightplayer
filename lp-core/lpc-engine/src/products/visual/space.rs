@@ -125,24 +125,74 @@ impl MirrorDirection {
     }
 }
 
+/// Which way a RADIAL projection runs the strip — the runtime mirror of
+/// `lpc_model::RadialDirection` (radial/angular flip ruling, post-G1b).
+/// `Outward` (`u = r`) is the default and IS the pre-flip radial.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RadialDirection {
+    /// Centre → edge (`u = r`, today's behavior).
+    #[default]
+    Outward,
+    /// Edge → centre (`u = 1 − r`).
+    Inward,
+}
+
+impl RadialDirection {
+    /// The word captions spell this flip with (`radial · inward`) —
+    /// radial has no honest arrow, so the caption speaks.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Outward => "outward",
+            Self::Inward => "inward",
+        }
+    }
+}
+
+/// Which way an ANGULAR projection sweeps the strip — the runtime mirror
+/// of `lpc_model::AngularDirection` (radial/angular flip ruling).
+/// `Clockwise` is the default and IS the pre-flip sweep (texture y points
+/// down, so the existing `atan2` sweep reads clockwise on screen).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AngularDirection {
+    /// `↻` — the existing sweep (today's behavior).
+    #[default]
+    Clockwise,
+    /// `↺` — the sweep negated (`u = 1 − a`).
+    CounterClockwise,
+}
+
+impl AngularDirection {
+    /// The rotation-arrow glyph captions spell this sweep with
+    /// (`angular ↺`).
+    #[must_use]
+    pub const fn arrow(self) -> &'static str {
+        match self {
+            Self::Clockwise => "↻",
+            Self::CounterClockwise => "↺",
+        }
+    }
+}
+
 /// One cell of the projection matrix: the coordinate map that fills a 2D
 /// sampling space from a 1D source.
 ///
 /// The runtime mirror of `lpc_model::SpaceAnswer2` (producer opinion) and
 /// `lpc_model::ConsumerCell2` (consumer default) — they are the same four
 /// maps seen from the two sides of the negotiation. The math lives in
-/// [`super::coordinates`]. Extrude carries a [`ProjectionDirection`]
-/// (G1b ruling 4), mirror its own [`MirrorDirection`] fold; radial and
-/// angular are direction-free by construction.
+/// [`super::coordinates`]. Every shape carries its OWN direction
+/// vocabulary (G1b ruling 4 + the mirror-direction and radial/angular
+/// flip rulings).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CellProjection {
     /// `t = u` along the direction — the system default (`Right`): the
     /// strip runs along x, every row alike.
     Extrude(ProjectionDirection),
-    /// `t = |uv − centre| / corner-reach`.
-    Radial,
-    /// `t = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`.
-    Angular,
+    /// `t = |uv − centre| / corner-reach`, run per the flip.
+    Radial(RadialDirection),
+    /// `t = atan2(v − 0.5, u − 0.5)` mapped to `[0, 1)`, swept per the
+    /// flip.
+    Angular(AngularDirection),
     /// The strip folded along the fold's axis, running in its sense.
     Mirror(MirrorDirection),
 }
@@ -162,8 +212,8 @@ impl CellProjection {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Extrude(_) => "extrude",
-            Self::Radial => "radial",
-            Self::Angular => "angular",
+            Self::Radial(_) => "radial",
+            Self::Angular(_) => "angular",
             Self::Mirror(_) => "mirror",
         }
     }
@@ -290,27 +340,35 @@ mod tests {
 
     #[test]
     fn an_authored_opinion_beats_the_consumer_default() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source =
+            ProductSpaceInfo::one_d(Some(CellProjection::Radial(RadialDirection::Outward)));
         let policy = ConsumerPolicy {
             default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
             force: false,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Radial);
+        assert_eq!(
+            resolve_1d_to_2d(source, policy),
+            CellProjection::Radial(RadialDirection::Outward)
+        );
     }
 
     #[test]
     fn a_silent_source_takes_the_consumer_default() {
         let source = ProductSpaceInfo::one_d(None);
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Angular,
+            default_1d_to_2d: CellProjection::Angular(AngularDirection::Clockwise),
             force: false,
         };
-        assert_eq!(resolve_1d_to_2d(source, policy), CellProjection::Angular);
+        assert_eq!(
+            resolve_1d_to_2d(source, policy),
+            CellProjection::Angular(AngularDirection::Clockwise)
+        );
     }
 
     #[test]
     fn force_beats_an_authored_opinion() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source =
+            ProductSpaceInfo::one_d(Some(CellProjection::Radial(RadialDirection::Outward)));
         let policy = ConsumerPolicy {
             default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
             force: true,
@@ -323,14 +381,18 @@ mod tests {
 
     #[test]
     fn origin_reports_declared_for_an_authored_opinion() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source =
+            ProductSpaceInfo::one_d(Some(CellProjection::Radial(RadialDirection::Outward)));
         let policy = ConsumerPolicy {
             default_1d_to_2d: CellProjection::Mirror(MirrorDirection::OutwardX),
             force: false,
         };
         assert_eq!(
             resolve_1d_to_2d_with_origin(source, policy),
-            (CellProjection::Radial, ProjectionOrigin::Declared)
+            (
+                CellProjection::Radial(RadialDirection::Outward),
+                ProjectionOrigin::Declared
+            )
         );
     }
 
@@ -338,18 +400,22 @@ mod tests {
     fn origin_reports_consumer_default_for_a_silent_source() {
         let source = ProductSpaceInfo::one_d(None);
         let policy = ConsumerPolicy {
-            default_1d_to_2d: CellProjection::Angular,
+            default_1d_to_2d: CellProjection::Angular(AngularDirection::Clockwise),
             force: false,
         };
         assert_eq!(
             resolve_1d_to_2d_with_origin(source, policy),
-            (CellProjection::Angular, ProjectionOrigin::ConsumerDefault)
+            (
+                CellProjection::Angular(AngularDirection::Clockwise),
+                ProjectionOrigin::ConsumerDefault
+            )
         );
     }
 
     #[test]
     fn origin_reports_forced_even_over_an_authored_opinion() {
-        let source = ProductSpaceInfo::one_d(Some(CellProjection::Radial));
+        let source =
+            ProductSpaceInfo::one_d(Some(CellProjection::Radial(RadialDirection::Outward)));
         let policy = ConsumerPolicy {
             default_1d_to_2d: CellProjection::Extrude(ProjectionDirection::Right),
             force: true,
@@ -369,8 +435,14 @@ mod tests {
             CellProjection::Extrude(ProjectionDirection::Right).label(),
             "extrude"
         );
-        assert_eq!(CellProjection::Radial.label(), "radial");
-        assert_eq!(CellProjection::Angular.label(), "angular");
+        assert_eq!(
+            CellProjection::Radial(RadialDirection::Outward).label(),
+            "radial"
+        );
+        assert_eq!(
+            CellProjection::Angular(AngularDirection::Clockwise).label(),
+            "angular"
+        );
         assert_eq!(
             CellProjection::Mirror(MirrorDirection::InwardY).label(),
             "mirror"

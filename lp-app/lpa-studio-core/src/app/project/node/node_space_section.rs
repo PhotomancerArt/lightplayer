@@ -23,10 +23,10 @@
 //! there is no intermediate variant row to descend through.
 
 use crate::{
-    UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiMirrorDirection, UiProjectionDirection,
-    UiSlotComposite, UiSlotValueKind, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiStripOrderRow, UiVisualSpace,
+    UiAngularDirection, UiCellProjection, UiConfigSlot, UiConfigSlotBody, UiMirrorDirection,
+    UiProjectionDirection, UiRadialDirection, UiSlotComposite, UiSlotValueKind, UiSpaceCell,
+    UiSpaceCellRole, UiSpaceChoice, UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch,
+    UiSpaceSection, UiSpaceSide, UiStripOrderRow, UiVisualSpace,
 };
 
 /// The shader def's producer-side declaration row.
@@ -71,6 +71,18 @@ pub(in crate::app::project) fn shader_space_section(
     .filter_map(|(role, field, label)| {
         let answer_row = payload_field(row, field)?;
         let mut cell = enum_cell(answer_row, role, label, projection_label)?;
+        // The Default tile is GONE from the offered choices (post-G1b
+        // ruling: it is behaviorally identical to authored Extrude in
+        // every UI-reachable state — "why are there two options?"). Only
+        // the multi-variant 2D answer drops it: the single-variant 1D
+        // answer IS its Default statement. A cell whose ACTIVE variant is
+        // still `Default` keeps rendering honestly (no choice selected;
+        // the web's label vocabulary spells `extrude · default`), and any
+        // pick authors a real shape. Retiring the MODEL variant is a
+        // format-breaking removal — filed as debt, not done here.
+        if role == UiSpaceCellRole::ProducerIn2d {
+            cell.choices.retain(|choice| choice.variant != "Default");
+        }
         // The two-section shape+direction design (G1b ruling 4): when the
         // ACTIVE shape is directional, its flattened `direction` payload
         // row (`…in_2d.Extrude.direction`) becomes the cell's direction
@@ -410,8 +422,8 @@ fn projection_label(variant: &str) -> String {
 fn variant_projection(variant: &str) -> Option<UiCellProjection> {
     match variant {
         "Extrude" => Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
-        "Radial" => Some(UiCellProjection::Radial),
-        "Angular" => Some(UiCellProjection::Angular),
+        "Radial" => Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
+        "Angular" => Some(UiCellProjection::Angular(UiAngularDirection::Clockwise)),
         "Mirror" => Some(UiCellProjection::Mirror(UiMirrorDirection::OutwardX)),
         _ => None,
     }
@@ -518,14 +530,15 @@ mod tests {
                 .map(|choice| choice.projection)
                 .collect::<Vec<_>>(),
             vec![
-                None,
                 Some(UiCellProjection::Extrude(UiProjectionDirection::Right)),
-                Some(UiCellProjection::Radial),
-                Some(UiCellProjection::Angular),
+                Some(UiCellProjection::Radial(UiRadialDirection::Outward)),
+                Some(UiCellProjection::Angular(UiAngularDirection::Clockwise)),
                 Some(UiCellProjection::Mirror(UiMirrorDirection::OutwardX)),
             ],
-            "every projecting choice names the cell a live tile forces"
+            "the Default tile is dropped (post-G1b ruling); every offered \
+             choice projects"
         );
+
         assert!(
             section.cell(UiSpaceCellRole::ProducerIn1d).is_none(),
             "the inactive variant's payload is not in the tree"
@@ -534,6 +547,33 @@ mod tests {
             section.primary.strip_order.is_none(),
             "the strip-order row is the consumer side's"
         );
+    }
+
+    /// An UNAUTHORED 1D shader (active `Default`) after the Default-tile
+    /// drop: no choice is offered for it and none reads selected — the
+    /// active variant stays `Default` so the web's vocabulary can spell
+    /// the honest `extrude · default` summary, and any pick authors a
+    /// real shape.
+    #[test]
+    fn an_unauthored_cell_offers_no_default_tile_and_selects_nothing() {
+        let row = enum_row(
+            "space",
+            "OneD",
+            &["TwoD", "OneD"],
+            vec![enum_row(
+                "space.OneD.in_2d",
+                "Default",
+                &["Default", "Extrude", "Radial", "Angular", "Mirror"],
+                Vec::new(),
+            )],
+        );
+        let section = shader_space_section(&[&row], None).expect("section");
+        let answer = section
+            .cell(UiSpaceCellRole::ProducerIn2d)
+            .expect("the 2D answer cell");
+        assert_eq!(answer.active, "Default");
+        assert_eq!(answer.choices.len(), 4, "no Default tile offered");
+        assert!(answer.choices.iter().all(|choice| !choice.selected));
     }
 
     /// A 2D shader's `in_1d` cell has exactly one declared variant today —

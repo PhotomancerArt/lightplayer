@@ -100,9 +100,9 @@ pub use face::{
     PlaylistFace, ShaderFace, TapeTransport,
 };
 // Story-only surface (the G1b definition-variant story composes it
-// directly); unused without the feature. (`ProjectionTileGrid`'s
-// candidates story retired with G1b ruling 4 — the directional vocabulary
-// is real now, so the grid is only reached through the picker.)
+// directly); unused without the feature. (The choice tiles render inline
+// in the section body since the inline-tiles ruling, so `ChoiceTiles`
+// itself needs no separate story export.)
 #[cfg(feature = "stories")]
 pub(crate) use face::SpaceSection;
 pub use node_children::NodeChildren;

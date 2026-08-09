@@ -25,7 +25,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     NodeCardDrawer, NodeUiOp, UiAction, UiAssetEditor as UiAssetEditorData, UiNodeSection,
-    UiPendingEdit, UiSpaceCellRole, UiSpaceSection,
+    UiPendingEdit, UiSpaceSection,
 };
 
 use crate::app::node::{AssetEditor, NodeDirtyTint, NodeSection};
@@ -56,13 +56,10 @@ pub fn NodeCardDrawers(
     #[props(default = false)]
     code_open: bool,
     /// Whether the dimensionality drawer is expanded (core-owned state,
-    /// `NodeCardUiState::space_open`). A D1 mismatch or an open picker
-    /// forces the drawer open regardless.
+    /// `NodeCardUiState::space_open`). A D1 mismatch forces the drawer
+    /// open regardless.
     #[props(default = false)]
     space_open: bool,
-    /// Open this space cell's tile picker on first render (stories).
-    #[props(default = None)]
-    space_picker_open_cell: Option<UiSpaceCellRole>,
     /// Whether the advanced drawer is expanded (core-owned state).
     #[props(default = false)]
     advanced_open: bool,
@@ -88,12 +85,11 @@ pub fn NodeCardDrawers(
     let section_node = Some(node.clone());
     let advanced_node = node;
     // The dimensionality drawer opens on its core-owned bit — and is FORCED
-    // open by a D1 mismatch (an error folded away is an error hidden) or an
-    // open tile picker (a popover anchored inside a closed lid is nothing).
+    // open by a D1 mismatch (an error folded away is an error hidden).
     let space_summary = space.as_ref().map(space_section_summary);
     let space_forced = space
         .as_ref()
-        .is_some_and(|section| section.mismatch.is_some() || space_picker_open_cell.is_some());
+        .is_some_and(|section| section.mismatch.is_some());
     let space_effective_open = space_open || space_forced;
 
     rsx! {
@@ -122,11 +118,7 @@ pub fn NodeCardDrawers(
                     NodeCardDrawer::Space,
                     !space_effective_open,
                 ),
-                SpaceSection {
-                    section,
-                    picker_open_cell: space_picker_open_cell,
-                    on_action,
-                }
+                SpaceSection { section, on_action }
             }
         }
         for section in debug_sections {

@@ -310,15 +310,79 @@ impl UiMirrorDirection {
     }
 }
 
+/// UI mirror of `lpc_wire::WireRadialDirection` — a radial projection's
+/// flip (radial/angular flip ruling). `Outward` is today's behavior and
+/// the default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UiRadialDirection {
+    #[default]
+    Outward,
+    Inward,
+}
+
+impl UiRadialDirection {
+    /// The word captions spell this flip with (`radial · inward`) —
+    /// radial has no honest arrow, so the caption speaks.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Outward => "outward",
+            Self::Inward => "inward",
+        }
+    }
+
+    /// Parse a RAW model variant ident; unknown idents read as the
+    /// default `Outward` (the additive contract).
+    #[must_use]
+    pub fn from_variant(variant: &str) -> Self {
+        match variant {
+            "Inward" => Self::Inward,
+            _ => Self::Outward,
+        }
+    }
+}
+
+/// UI mirror of `lpc_wire::WireAngularDirection` — an angular
+/// projection's sweep (radial/angular flip ruling). `Clockwise` is
+/// today's behavior and the default (texture y points down, so the
+/// engine's sweep reads clockwise on screen).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UiAngularDirection {
+    #[default]
+    Clockwise,
+    CounterClockwise,
+}
+
+impl UiAngularDirection {
+    /// The rotation-arrow glyph captions and the direction row spell
+    /// this sweep with (`angular ↺`).
+    #[must_use]
+    pub const fn arrow(self) -> &'static str {
+        match self {
+            Self::Clockwise => "↻",
+            Self::CounterClockwise => "↺",
+        }
+    }
+
+    /// Parse a RAW model variant ident; unknown idents read as the
+    /// default `Clockwise` (the additive contract).
+    #[must_use]
+    pub fn from_variant(variant: &str) -> Self {
+        match variant {
+            "CounterClockwise" => Self::CounterClockwise,
+            _ => Self::Clockwise,
+        }
+    }
+}
+
 /// UI mirror of `lpc_wire::WireCellProjection` — one cell of the 1D→2D
-/// projection matrix. Extrude carries its run direction (G1b ruling 4),
-/// mirror its own fold; radial/angular are direction-free by
-/// construction.
+/// projection matrix. Every shape carries its own direction vocabulary
+/// (G1b ruling 4 + the mirror and radial/angular flip rulings).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiCellProjection {
     Extrude(UiProjectionDirection),
-    Radial,
-    Angular,
+    Radial(UiRadialDirection),
+    Angular(UiAngularDirection),
     Mirror(UiMirrorDirection),
 }
 

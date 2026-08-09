@@ -128,6 +128,42 @@ pub fn mirror_fold_coord(
     }
 }
 
+/// The strip coordinate a radial FLIP produces (radial/angular flip
+/// ruling): `Outward` is the pre-flip radial verbatim (`u = r`), `Inward`
+/// runs the strip edge → centre (`u = 1 − r`).
+#[must_use]
+pub fn radial_flip_coord(
+    direction: crate::products::visual::RadialDirection,
+    u: f32,
+    v: f32,
+) -> f32 {
+    use crate::products::visual::RadialDirection;
+    match direction {
+        RadialDirection::Outward => radial(u, v),
+        RadialDirection::Inward => 1.0 - radial(u, v),
+    }
+}
+
+/// The strip coordinate an angular SWEEP produces (radial/angular flip
+/// ruling): `Clockwise` is the pre-flip sweep verbatim, `CounterClockwise`
+/// negates it (`u = 1 − a`, wrapped so the range stays half-open — the
+/// seam stays at the same angle, only the direction of travel flips).
+#[must_use]
+pub fn angular_sweep_coord(
+    direction: crate::products::visual::AngularDirection,
+    u: f32,
+    v: f32,
+) -> f32 {
+    use crate::products::visual::AngularDirection;
+    match direction {
+        AngularDirection::Clockwise => angular(u, v),
+        AngularDirection::CounterClockwise => {
+            let swept = 1.0 - angular(u, v);
+            if swept >= 1.0 { 0.0 } else { swept }
+        }
+    }
+}
+
 /// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
 /// normalized target→source map.
 #[must_use]
@@ -135,8 +171,8 @@ pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v
     use crate::products::visual::CellProjection;
     match cell {
         CellProjection::Extrude(direction) => extrude(directed_coord(direction, u, v), v),
-        CellProjection::Radial => radial(u, v),
-        CellProjection::Angular => angular(u, v),
+        CellProjection::Radial(direction) => radial_flip_coord(direction, u, v),
+        CellProjection::Angular(direction) => angular_sweep_coord(direction, u, v),
         CellProjection::Mirror(direction) => mirror_fold_coord(direction, u, v),
     }
 }
@@ -264,7 +300,9 @@ mod tests {
 
     #[test]
     fn the_cell_dispatcher_matches_the_named_maps() {
-        use crate::products::visual::{CellProjection, MirrorDirection, ProjectionDirection};
+        use crate::products::visual::{
+            AngularDirection, CellProjection, MirrorDirection, ProjectionDirection, RadialDirection,
+        };
         for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
             assert_close(
                 project_2d_to_1d(CellProjection::Extrude(ProjectionDirection::Right), u, v),
@@ -272,14 +310,14 @@ mod tests {
                 "extrude",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Radial, u, v),
+                project_2d_to_1d(CellProjection::Radial(RadialDirection::Outward), u, v),
                 radial(u, v),
-                "radial",
+                "radial (outward IS the pre-flip behavior)",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Angular, u, v),
+                project_2d_to_1d(CellProjection::Angular(AngularDirection::Clockwise), u, v),
                 angular(u, v),
-                "angular",
+                "angular (clockwise IS the pre-flip behavior)",
             );
             assert_close(
                 project_2d_to_1d(CellProjection::Mirror(MirrorDirection::OutwardX), u, v),
@@ -304,6 +342,54 @@ mod tests {
             0.3,
             "↑ is 1 − y",
         );
+    }
+
+    /// The radial flip runs the strip edge → centre: 1 at the centre,
+    /// 0 in the corners — `1 − r` everywhere.
+    #[test]
+    fn radial_inward_runs_the_strip_edge_to_centre() {
+        use crate::products::visual::{CellProjection, RadialDirection};
+        assert_close(
+            project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), 0.5, 0.5),
+            1.0,
+            "inward centre",
+        );
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            assert_close(
+                project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), u, v),
+                0.0,
+                "inward corner",
+            );
+        }
+        for (u, v) in [(0.3, 0.7), (0.9, 0.2)] {
+            assert_close(
+                project_2d_to_1d(CellProjection::Radial(RadialDirection::Inward), u, v),
+                1.0 - radial(u, v),
+                "inward is 1 − r",
+            );
+        }
+    }
+
+    /// The angular flip negates the sweep — `1 − a`, wrapped so the range
+    /// stays half-open (the seam stays put; only the travel flips).
+    #[test]
+    fn angular_counter_clockwise_negates_the_sweep() {
+        use crate::products::visual::{AngularDirection, CellProjection};
+        let ccw = |u, v| {
+            project_2d_to_1d(
+                CellProjection::Angular(AngularDirection::CounterClockwise),
+                u,
+                v,
+            )
+        };
+        assert_close(ccw(1.0, 0.5), 0.0, "+x stays the seam (wrapped)");
+        assert_close(ccw(0.5, 1.0), 0.75, "+y");
+        assert_close(ccw(0.0, 0.5), 0.5, "-x");
+        assert_close(ccw(0.5, 0.0), 0.25, "-y");
+        for (u, v) in [(0.0, 0.0), (1.0, 1.0), (0.25, 0.75)] {
+            let t = ccw(u, v);
+            assert!((0.0..1.0).contains(&t), "ccw stays in [0, 1): {t}");
+        }
     }
 
     /// The directional dispatcher arms compose direction with the existing

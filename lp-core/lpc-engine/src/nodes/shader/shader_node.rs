@@ -1145,8 +1145,12 @@ fn cell_projection_for(answer: &lpc_model::SpaceAnswer2) -> Option<CellProjectio
         lpc_model::SpaceAnswer2::Extrude { direction } => Some(CellProjection::Extrude(
             runtime_projection_direction(*direction.value()),
         )),
-        lpc_model::SpaceAnswer2::Radial => Some(CellProjection::Radial),
-        lpc_model::SpaceAnswer2::Angular => Some(CellProjection::Angular),
+        lpc_model::SpaceAnswer2::Radial { direction } => Some(CellProjection::Radial(
+            runtime_radial_direction(*direction.value()),
+        )),
+        lpc_model::SpaceAnswer2::Angular { direction } => Some(CellProjection::Angular(
+            runtime_angular_direction(*direction.value()),
+        )),
         lpc_model::SpaceAnswer2::Mirror { direction } => Some(CellProjection::Mirror(
             runtime_mirror_direction(*direction.value()),
         )),
@@ -1163,6 +1167,28 @@ fn runtime_projection_direction(
         lpc_model::ProjectionDirection::Left => Runtime::Left,
         lpc_model::ProjectionDirection::Down => Runtime::Down,
         lpc_model::ProjectionDirection::Up => Runtime::Up,
+    }
+}
+
+/// The runtime twin of an authored [`lpc_model::RadialDirection`].
+fn runtime_radial_direction(
+    direction: lpc_model::RadialDirection,
+) -> crate::products::visual::RadialDirection {
+    use crate::products::visual::RadialDirection as Runtime;
+    match direction {
+        lpc_model::RadialDirection::Outward => Runtime::Outward,
+        lpc_model::RadialDirection::Inward => Runtime::Inward,
+    }
+}
+
+/// The runtime twin of an authored [`lpc_model::AngularDirection`].
+fn runtime_angular_direction(
+    direction: lpc_model::AngularDirection,
+) -> crate::products::visual::AngularDirection {
+    use crate::products::visual::AngularDirection as Runtime;
+    match direction {
+        lpc_model::AngularDirection::Clockwise => Runtime::Clockwise,
+        lpc_model::AngularDirection::CounterClockwise => Runtime::CounterClockwise,
     }
 }
 
@@ -1205,8 +1231,13 @@ fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<
             ctx,
             "space.OneD.in_2d.Extrude.direction",
         ))),
-        "Radial" => Some(CellProjection::Radial),
-        "Angular" => Some(CellProjection::Angular),
+        "Radial" => Some(CellProjection::Radial(try_read_authored_radial_direction(
+            ctx,
+            "space.OneD.in_2d.Radial.direction",
+        ))),
+        "Angular" => Some(CellProjection::Angular(
+            try_read_authored_angular_direction(ctx, "space.OneD.in_2d.Angular.direction"),
+        )),
         "Mirror" => Some(CellProjection::Mirror(try_read_authored_mirror_direction(
             ctx,
             "space.OneD.in_2d.Mirror.direction",
@@ -1238,6 +1269,52 @@ fn try_read_authored_direction(
         "Down" => Runtime::Down,
         "Up" => Runtime::Up,
         _ => Runtime::Right,
+    }
+}
+
+/// The authored flip payload of a radial answer cell. Unresolvable (or
+/// unknown) reads as the default `Outward` — the additive contract: a
+/// bare pre-flip `Radial` means what it always meant.
+fn try_read_authored_radial_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::RadialDirection {
+    use crate::products::visual::RadialDirection as Runtime;
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return Runtime::Outward;
+    };
+    let lpc_model::SlotData::Enum(direction) = production.data() else {
+        return Runtime::Outward;
+    };
+    match direction.variant.as_str() {
+        "Inward" => Runtime::Inward,
+        _ => Runtime::Outward,
+    }
+}
+
+/// The authored sweep payload of an angular answer cell. Unresolvable (or
+/// unknown) reads as the default `Clockwise` — the additive contract: a
+/// bare pre-flip `Angular` means what it always meant.
+fn try_read_authored_angular_direction(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::AngularDirection {
+    use crate::products::visual::AngularDirection as Runtime;
+    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: SlotPath::parse(path).expect("static path"),
+    }) else {
+        return Runtime::Clockwise;
+    };
+    let lpc_model::SlotData::Enum(direction) = production.data() else {
+        return Runtime::Clockwise;
+    };
+    match direction.variant.as_str() {
+        "CounterClockwise" => Runtime::CounterClockwise,
+        _ => Runtime::Clockwise,
     }
 }
 
