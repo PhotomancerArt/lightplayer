@@ -220,8 +220,8 @@
 <!-- ================================================================ -->
 <h2>2 · the peach — patch mode, three treatments</h2>
 <p class="thesis">
-  One physical strip: bottom → up the right side (<b>body</b>, ch 0–21) → the <b>leaf</b> (ch 22–33) →
-  back down the left side (<b>body</b>, ch 34–55, <b>reversed</b>). Body and leaf are separate fixtures on one
+  One physical strip (wire runs from Yona's reference art): bottom → up one side (<b>body</b>, ch 0–21)
+  → across the <b>leaves</b> (ch 22–33) → back down the other (<b>body</b>, ch 34–55, <b>reversed</b>). Body and leaf are separate fixtures on one
   output. Use the <b>§2 patch state</b> buttons above: <i>auto-flow</i> shows why patching must exist
   (fixture-order flow puts the leaf pattern at the bottom of the down-leg), <i>no reverse</i> breaks the
   gradient symmetry, <i>overlap</i> shows guided diagnostics — contested lamps red, orphaned lamps dark.
@@ -267,24 +267,34 @@
   affordance must exist in whichever wins: red on the lamps, click → counterpart, plain-language fix hint.</div>
 
 <!-- ================================================================ -->
-<h2>3 · plane vs rope — the visual, shown in its native dimension</h2>
+<h2>3 · rope vs plane — same shape, both declarations</h2>
 <p class="thesis">
-  D26v, the teaching scene. Same project, two fixtures, "show visual" on (toggle in the strip above):
-  the <b>2D fixture</b> gets a plane below its sampled lamps; the <b>1D fixture</b> gets its visual as a
-  rope threading the LEDs. Nobody needs the 1D-vs-2D lecture after seeing this once.
+  D26v, the crux. The <b>same mapping shape</b>, flipped between declared-1D and declared-2D
+  ("show visual" toggle in the strip above): declared <b>1D</b> shows the visual as a rope
+  <b>snaking the wire</b>; declared <b>2D</b> shows it as a plane below the sampled lamps.
+  Presentation never changes — only the sampling dimension does. Nobody needs the lecture
+  after seeing this once.
 </p>
 <div class="row">
   <div class="ccol">
-    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">2D fixture · plasma (2D visual)</span></div>
-      <div class="pbody"><svg id="planefix" class="svgstage" viewBox="0 0 396 280"></svg></div></div>
-    <p class="why">Plane below the lamps = "you sample at positions." The plane is the visual product,
-      slightly inset so lamps read as sitting above it.</p>
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">declared 1D · aurora rope on the wire</span></div>
+      <div class="pbody"><svg id="n3-p1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
   </div>
   <div class="ccol">
-    <div class="panel"><div class="phead"><b>peach</b><span class="kind">1D fixture · aurora (1D visual)</span></div>
-      <div class="pbody"><svg id="ropefix" class="svgstage" viewBox="0 0 396 280"></svg></div></div>
-    <p class="why">Rope threading the LEDs = "you sample along the wire," the unfurl made visible —
-      even though the fixture is <i>drawn</i> as a 2D peach (presentation ≠ sampling, D22v).</p>
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">declared 2D · plasma plane under the lamps</span></div>
+      <div class="pbody"><svg id="n3-p2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+<div class="row" style="margin-top:14px">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">declared 1D · the snake</span></div>
+      <div class="pbody"><svg id="n3-m1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+    <p class="why">The serpentine rope IS the matrix's wire — a 1D pattern runs along it like any strip.</p>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">declared 2D · plane below the lamps</span></div>
+      <div class="pbody"><svg id="n3-m2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+    <p class="why">Same lamps, same wire — but declared 2D, they sample positions on the plane.</p>
   </div>
 </div>
 
@@ -307,6 +317,7 @@
 </span>
 <span class="grp" style="display:inline-flex; gap:10px; font-size:11.5px; color:var(--subtle)">
   <b style="font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)">layers</b>
+  <label style="cursor:pointer"><input type="checkbox" id="lyr-reference" checked onchange="setLayer('reference',this.checked)" style="accent-color:var(--accent)"> reference</label>
   <label style="cursor:pointer"><input type="checkbox" id="lyr-visual" checked onchange="setLayer('visual',this.checked)" style="accent-color:var(--accent)"> visual</label>
   <label style="cursor:pointer"><input type="checkbox" id="lyr-fixture" checked onchange="setLayer('fixture',this.checked)" style="accent-color:var(--accent)"> fixture</label>
   <label style="cursor:pointer"><input type="checkbox" id="lyr-output" onchange="setLayer('output',this.checked)" style="accent-color:var(--accent)"> output</label>
@@ -405,28 +416,48 @@ function plasmaCol(x,y,t){ /* 2D visual for §3, studio-friendly teal/blue/pink 
   return `rgb(${Math.round(40+140*p)},${Math.round(90+110*(1-Math.abs(p-.5)*2))},${Math.round(120+120*(1-p))})`;
 }
 
-/* ---------- peach geometry ---------- */
+/* ---------- peach geometry — sampled from Yona's reference art ----------
+   lp-example-peach.svg (Dropbox/…/Lightplayer): three authored wire segments
+   (01-seg-body-1 bottom→up one side · 02-seg-leaf across both leaves ·
+   03-seg-body-2 back down) + the reference artwork itself. */
+const ART = {
+  body:  "M389.4,310.9c-176.5-497.5-766.7,303.7-12.3,412.3,493.3-160.3,280.8-764.3-83.9-552.1",
+  leaf1: "M292.8,158.3c-22,6-47.7,5.2-68.6-1.6-13.8-4.5-25.6-11.1-36.6-20-18.2-14.8-33.2-31.6-45.5-52.9-7.8-13.7-13.9-28.1-18-43.6-1.4-5.6-2.7-11.3-3.3-17.9,0,0,.6-.8.6-.8,40.5-4.5,82.7,8.5,115.5,30.6,30.7,19.7,49.7,47.9,55.2,84.8.7,4.8,1.2,10.1,1.3,14.9,0,1.6,0,4,0,5.6,0,0-.6.8-.6.8h0Z",
+  leaf2: "M295.4,157.4c2.5-23.2,13-47.4,27.2-64.9,9.4-11.7,20.2-20.8,32.9-28.2,20.9-12.4,42.7-21,67.7-25.7,15.9-2.9,32.1-3.9,48.5-2.5,5.9.6,11.9,1.3,18.4,2.8l.5.9c-11,40.6-39.3,76.1-72.5,99.9-31.5,23.6-67.5,32.2-106.7,23.2-3.3-.7-6.8-1.7-10-2.7-1.5-.5-3.9-1.3-5.4-2,0,0-.5-.9-.5-.9h0Z",
+  stem:  "M290.3,170.5c.9-6.5.8-13.4.6-20.2-.8-21-3-41.5-2.9-62.9,0-31,5.6-69.2,36.9-84.4,17.2-7.9,29.5,16.2,12.9,25.5-.6.3-1.3.6-2,.8-4.4,1.5-8.4,3.9-12,7.7-7.9,8.3-12.3,20.5-15.1,32.1-4.8,19.8-6.1,40-7.6,60.6-1.2,14.1-1.6,28.2-5.3,42.1-.4,1.5-2,2.4-3.5,2-1.4-.4-2.3-1.8-2-3.2h0Z",
+  seg1:  "M376.2,713C-19.9,685.2-97.9,202.5,248.8,173.8",
+  segLeaf: "M223.3,136.9c-44.6-21-74.5-56.2-90.3-105,79.2,4.7,141.8,36.9,162.4,111.2,45.1-59.4,90.8-95.5,178.9-95.8-7,42.7-55.2,72.6-139.8,91.1",
+  seg2:  "M334.5,166.5c289.2-106.1,458,317.1,58.5,540.3",
+};
+const ART_C = [350, 390];   /* art-space center */
+const SVGNS = "http://www.w3.org/2000/svg";
+const _measure = document.createElementNS(SVGNS, "svg");
+_measure.setAttribute("width", 0); _measure.setAttribute("height", 0);
+_measure.style.position = "absolute";
+document.body.appendChild(_measure);
+function samplePath(d, n){
+  const p = document.createElementNS(SVGNS, "path");
+  p.setAttribute("d", d);
+  _measure.appendChild(p);
+  const L = p.getTotalLength(), out = [];
+  for (let k=0;k<n;k++){ const q = p.getPointAtLength(L*(k+.5)/n); out.push([q.x, q.y]); }
+  p.remove(); return out;
+}
+const RAW = { up: samplePath(ART.seg1, 22), leaf: samplePath(ART.segLeaf, 12), down: samplePath(ART.seg2, 22) };
 function peachPts(cx, cy, s){
-  const rx = .92*s, ry = s, pts = [];
-  const arc = (a0, a1, n, ex, ey, exr, eyr) => {
-    const out = [];
-    for (let i=0;i<n;i++){
-      const th = (a0 + (a1-a0)*i/(n-1)) * Math.PI/180;
-      out.push([ex + exr*Math.cos(th), ey + eyr*Math.sin(th)]);
-    }
-    return out;
-  };
-  const up   = arc(  88,  -72, 22, cx, cy, rx, ry);              // bottom → up right side
-  // leaf: tilted ellipse loop hanging off the top notch
-  const lcx = cx + .34*s, lcy = cy - ry - .34*s, la = -32*Math.PI/180;
-  const leaf = [];
-  for (let i=0;i<12;i++){
-    const th = (150 - 300*i/11) * Math.PI/180;
-    const ex = .46*s*Math.cos(th), ey = .2*s*Math.sin(th);
-    leaf.push([lcx + ex*Math.cos(la) - ey*Math.sin(la), lcy + ex*Math.sin(la) + ey*Math.cos(la)]);
-  }
-  const down = arc(-108, -268, 22, cx, cy, rx, ry);               // top left → down → bottom
+  const sc = s/280, tf = p => [cx + (p[0]-ART_C[0])*sc, cy + (p[1]-ART_C[1])*sc];
+  const up = RAW.up.map(tf), leaf = RAW.leaf.map(tf), down = RAW.down.map(tf);
   return { up, leaf, down, all: up.concat(leaf, down) };
+}
+function refArt(cx, cy, s, parent){
+  const sc = s/280;
+  const g = el("g", { class: "refart", opacity: .9,
+    transform: `translate(${cx},${cy}) scale(${sc}) translate(${-ART_C[0]},${-ART_C[1]})` }, parent);
+  el("path", { d: ART.body,  fill: "rgba(249,168,129,.05)", stroke: "#46362f", "stroke-width": 4 }, g);
+  el("path", { d: ART.leaf1, fill: "rgba(26,173,75,.06)",   stroke: "#31463a", "stroke-width": 2.8 }, g);
+  el("path", { d: ART.leaf2, fill: "rgba(26,173,75,.06)",   stroke: "#31463a", "stroke-width": 2.8 }, g);
+  el("path", { d: ART.stem,  fill: "rgba(135,69,30,.12)",   stroke: "#3b332d", "stroke-width": 2.8 }, g);
+  return g;
 }
 
 /* ---------- patch model (§2) ---------- */
@@ -489,18 +520,18 @@ function polyPath(pts){ return pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[
   el("text", { x: 12, y: 190, fill: "var(--dim)", "font-size": 9 }, s1).textContent = "essentially-1D mapping · auto-fit in texture space";
 
   const s2 = document.getElementById("todayshape");
-  const g = peachPts(198, 118, 62);
-  el("path", { d: polyPath(g.all)+"Z", fill: "rgba(255,255,255,.02)", stroke: "var(--border-strong)", "stroke-width":1, "stroke-dasharray":"2 3" }, s2);
+  const g = peachPts(198, 108, 60);
+  refArt(198, 108, 60, s2);
   g.all.forEach(p => el("circle", { cx: p[0], cy: p[1], r: 3.1, class: "l1shape" }, s2));
-  el("text", { x: 12, y: 190, fill: "var(--dim)", "font-size": 9 }, s2).textContent = "same fixture · presentation shape · same 1D sampling";
+  el("text", { x: 12, y: 190, fill: "var(--dim)", "font-size": 9 }, s2).textContent = "same fixture · presentation shape + reference art · same 1D sampling";
 })();
 
 /* ================= §2 peach concepts ================= */
-const PA = peachPts(190, 158, 84);
+const PA = peachPts(190, 150, 78);
 function buildRopeA(){
   const svg = document.getElementById("ropeA");
   svg.innerHTML = "";
-  el("path", { d: polyPath(PA.all)+"Z", fill: "rgba(255,255,255,.02)", stroke: "var(--border-strong)", "stroke-width": 1, "stroke-dasharray": "2 3" }, svg);
+  refArt(190, 150, 78, svg);
   const owners = wireInfo(patchState);
   // rope segments between consecutive lamps
   const segG = el("g", { id: "segA" }, svg);
@@ -534,8 +565,8 @@ function flashCounterpart(k){
 function buildRopeBshape(){
   const svg = document.getElementById("ropeBshape");
   svg.innerHTML = "";
-  const g = peachPts(190, 96, 52);
-  el("path", { d: polyPath(g.all)+"Z", fill: "rgba(255,255,255,.02)", stroke: "var(--border-strong)", "stroke-width":1, "stroke-dasharray":"2 3" }, svg);
+  const g = peachPts(190, 90, 48);
+  refArt(190, 90, 48, svg);
   g.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 2.6, class: "lamp", "data-k": k }, svg));
   svg.dataset.mini = "1";
 }
@@ -593,49 +624,65 @@ function setState(s){
   }
 }
 
-/* ================= §3 plane vs rope ================= */
-function buildPlane(){
-  const svg = document.getElementById("planefix");
-  svg.innerHTML = "";
-  const x0=58, y0=40, w=280, h=190, cols=12, rows=8;
-  const plane = el("g", { id: "planeg", opacity: showVis ? 1 : 0 }, svg);
-  const cw = w/cols, ch = h/rows;
+/* ================= §3 rope vs plane — same shape, both declarations ================= */
+const N3 = {};   /* panel configs: id → {lamps, kind, bbox} */
+function n3Lamps_peach(){ return peachPts(198, 138, 66).all; }
+function n3Lamps_matrix(){
+  const x0=70, y0=42, cols=12, rows=8, cw=22, ch=22, out=[];
   for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
-    el("rect", { x: x0+i*cw, y: y0+j*ch, width: cw+0.5, height: ch+0.5, class: "pcell", "data-i": i, "data-j": j }, plane);
-  el("rect", { x: x0, y: y0, width: w, height: h, fill: "none", stroke: "var(--border-strong)", "stroke-width": 1, opacity: showVis?1:0 , id:"planeframe"}, svg);
-  const lampG = el("g", {}, svg);
-  for (let j=0;j<rows;j++) for (let i=0;i<cols;i++){
-    el("circle", { cx: x0+cw*.5+i*cw, cy: y0+ch*.5+j*ch, r: 4.4, class: "mlamp", "data-i": i, "data-j": j,
-                   stroke: "rgba(0,0,0,.55)", "stroke-width": 1.5 }, lampG);
-  }
-  el("text", { x: x0, y: 262, fill: "var(--dim)", "font-size": 9.5 }, svg).textContent = "2D visual = a plane below the lamps · lamps sample positions";
+    out.push([x0 + (j%2 ? cols-1-i : i)*cw, y0 + j*ch]);   /* serpentine = the wire */
+  return out;
 }
-function buildRope3(){
-  const svg = document.getElementById("ropefix");
+function buildN3Panel(id, lamps, kind, opts){
+  const svg = document.getElementById(id);
   svg.innerHTML = "";
-  const g = peachPts(198, 148, 80);
-  el("path", { d: polyPath(g.all)+"Z", fill: "rgba(255,255,255,.02)", stroke: "var(--border-strong)", "stroke-width": 1, "stroke-dasharray": "2 3" }, svg);
-  const ropeG = el("g", { id: "rope3", opacity: showVis?1:0 }, svg);
-  for (let k=0;k<N_WIRE-1;k++)
-    el("line", { x1: g.all[k][0], y1: g.all[k][1], x2: g.all[k+1][0], y2: g.all[k+1][1],
-                 "stroke-width": 9, "stroke-linecap": "round", class: "rseg", "data-k": k, opacity: .85 }, ropeG);
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for (const p of lamps){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+  x0-=12; y0-=12; x1+=12; y1+=12;
+  if (opts.art) refArt(198, 138, 66, svg);
+  const vis = el("g", { class: "n3vis", opacity: showVis?1:0 }, svg);
+  if (kind === "2D"){
+    const cols=14, rows=Math.max(4, Math.round(14*(y1-y0)/(x1-x0)));
+    const cw=(x1-x0)/cols, ch=(y1-y0)/rows;
+    for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+      el("rect", { x: x0+i*cw, y: y0+j*ch, width: cw+.5, height: ch+.5, class: "n3cell", opacity: .85,
+                   "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, vis);
+    el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
+                 stroke: "var(--border-strong)", "stroke-width": 1 }, vis);
+  } else {
+    for (let k=0;k<lamps.length-1;k++)
+      el("line", { x1: lamps[k][0], y1: lamps[k][1], x2: lamps[k+1][0], y2: lamps[k+1][1],
+                   "stroke-width": 8.5, "stroke-linecap": "round", class: "n3rope",
+                   "data-w": (k+.5)/(lamps.length-1), opacity: .85 }, vis);
+  }
   const lampG = el("g", {}, svg);
-  g.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 3.4, class: "rlamp", "data-k": k,
+  lamps.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: kind==="2D"&&opts.grid ? 4.2 : 3.3,
+    class: "n3lamp", "data-panel": id,
+    "data-w": k/(lamps.length-1), "data-u": (p[0]-x0)/(x1-x0), "data-v": (p[1]-y0)/(y1-y0),
     stroke: "rgba(0,0,0,.55)", "stroke-width": 1.4 }, lampG));
-  el("text", { x: 40, y: 268, fill: "var(--dim)", "font-size": 9.5 }, svg).textContent = "1D visual = a rope threading the LEDs · presentation stays a peach";
+  el("text", { x: 14, y: 250, fill: "var(--dim)", "font-size": 9.5 }, svg).textContent = opts.caption;
+  N3[id] = { kind };
+}
+function buildN3(){
+  buildN3Panel("n3-p1", n3Lamps_peach(), "1D", { art: true,
+    caption: "declared 1D — the visual rides the wire · presentation stays a peach" });
+  buildN3Panel("n3-p2", n3Lamps_peach(), "2D", { art: true,
+    caption: "declared 2D — same lamps sample positions on a plane" });
+  buildN3Panel("n3-m1", n3Lamps_matrix(), "1D", {
+    caption: "declared 1D — the serpentine wire, visible: a snake" });
+  buildN3Panel("n3-m2", n3Lamps_matrix(), "2D", { grid: true,
+    caption: "declared 2D — plane below the lamps" });
 }
 function toggleVis(){
   showVis = !showVis;
   document.getElementById("visbtn").classList.toggle("on", showVis);
-  for (const id of ["planeg","planeframe","rope3"]){
-    const n = document.getElementById(id); if (n) n.setAttribute("opacity", showVis?1:0);
-  }
+  document.querySelectorAll(".n3vis").forEach(n=>n.setAttribute("opacity", showVis?1:0));
 }
 
 /* ================= §4 project canvas: three layers ================= */
 /* local geometry (fixture space, origin 0,0) + a translate transform per fixture */
 const CV = {
-  layers: { visual: true, fixture: true, output: false },
+  layers: { reference: true, visual: true, fixture: true, output: false },
   sel: "matrix",
   fx: {
     peach:  { x: 96,  y: 172, kind: "1D", proj: "radial",  showVis: true, out: "A", chans: "ch 0–55",
@@ -675,6 +722,9 @@ function buildCanvas(){
                         "data-fx": name, style: "cursor:" + (mode==="arrange"?"grab":"pointer") }, svg);
     const bb = fxBBox(f);
 
+    /* layer 0 · reference art (the pain point: show it in this view) */
+    if (CV.layers.reference && name === "peach") refArt(0, 0, 62, g);
+
     /* layer 1 · visual (native dimension, D26v) */
     if (CV.layers.visual && f.showVis){
       if (f.kind === "2D"){
@@ -700,9 +750,6 @@ function buildCanvas(){
 
     /* layer 2 · fixture (lamps + outline) */
     if (CV.layers.fixture){
-      if (f.pts && name === "peach")
-        el("path", { d: polyPath(f.pts)+"Z", fill: "rgba(255,255,255,.02)", stroke: "var(--border-strong)",
-                     "stroke-width": 1, "stroke-dasharray": "2 3" }, g);
       fxLamps(f).forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 2.9, class: "cvlamp",
         "data-fx": name, "data-w": k/(f.count-1),
         "data-u": (p[0]-bb.x0)/(bb.x1-bb.x0), "data-v": (p[1]-bb.y0)/(bb.y1-bb.y0),
@@ -845,7 +892,8 @@ function buildCards(){
     d.querySelector(".art").appendChild(svg); build(svg); host.appendChild(d);
   };
   mk("peach", "56 lamps", svg => {
-    const g = peachPts(70, 52, 26);
+    const g = peachPts(70, 46, 24);
+    refArt(70, 46, 24, svg);
     g.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 1.7, class: "card-peach", "data-k": k }, svg));
   });
   mk("dragon", "212 lamps", svg => {
@@ -985,18 +1033,18 @@ function frame(now){
     n.setAttribute("fill", lampColor(k, owners, t).col);
   });
 
-  // §3
-  document.querySelectorAll("#planefix .pcell").forEach(n=>{
-    n.setAttribute("fill", plasmaCol(+n.getAttribute("data-i")/12*3, +n.getAttribute("data-j")/8*3, t));
+  // §3 — 2×2: same shape, both declarations
+  document.querySelectorAll(".n3cell").forEach(n=>{
+    n.setAttribute("fill", plasmaCol(+n.getAttribute("data-u")*3, +n.getAttribute("data-v")*3, t));
   });
-  document.querySelectorAll("#planefix .mlamp").forEach(n=>{
-    n.setAttribute("fill", plasmaCol((+n.getAttribute("data-i")+.5)/12*3, (+n.getAttribute("data-j")+.5)/8*3, t));
+  document.querySelectorAll(".n3rope").forEach(n=>{
+    n.setAttribute("stroke", auroraCol(+n.getAttribute("data-w"), t));
   });
-  document.querySelectorAll("#ropefix .rseg").forEach(n=>{
-    n.setAttribute("stroke", auroraCol((+n.getAttribute("data-k")+.5)/(N_WIRE-1), t));
-  });
-  document.querySelectorAll("#ropefix .rlamp").forEach(n=>{
-    n.setAttribute("fill", auroraCol(+n.getAttribute("data-k")/(N_WIRE-1), t));
+  document.querySelectorAll(".n3lamp").forEach(n=>{
+    const kind = N3[n.getAttribute("data-panel")].kind;
+    n.setAttribute("fill", kind === "1D"
+      ? auroraCol(+n.getAttribute("data-w"), t)
+      : plasmaCol(+n.getAttribute("data-u")*3, +n.getAttribute("data-v")*3, t));
   });
 
   // §4 canvas: all fixtures consume the same 1D aurora bus
@@ -1037,7 +1085,7 @@ function frame(now){
 /* ---------- boot ---------- */
 buildRopeA(); buildRopeBshape(); buildWirebar(); buildRail();
 setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
-buildPlane(); buildRope3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
+buildN3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
 requestAnimationFrame(frame);
 window.addEventListener("resize", buildWirebar);
 </script>
