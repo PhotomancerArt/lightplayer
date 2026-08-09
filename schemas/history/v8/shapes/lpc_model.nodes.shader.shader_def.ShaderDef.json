@@ -1,0 +1,361 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "source",
+        "shape": {
+          "custom": {
+            "codec": 2355797192,
+            "meta": {},
+            "shape": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 177956922,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "render_order",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "step": 1.0
+                }
+              },
+              "id": 1231123999,
+              "meta": {},
+              "ty": "i32"
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "float_mode",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "dropdown": {
+                      "options": [
+                        {
+                          "label": "Float (f32)",
+                          "value": "float"
+                        },
+                        {
+                          "label": "Fixed (Q32)",
+                          "value": "fixed"
+                        }
+                      ]
+                    }
+                  },
+                  "id": 4255570002,
+                  "meta": {
+                    "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+                    "label": "Float mode"
+                  },
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "param_defs",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 3712581622
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "consumed",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 90603770
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "space",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "TwoD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_1d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Default",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "OneD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_2d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Default",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Extrude",
+                                "shape": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Right",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Left",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Down",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Up",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Radial",
+                                "shape": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Outward",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Inward",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Angular",
+                                "shape": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Clockwise",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "CounterClockwise",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "meta": {}
+                                  }
+                                }
+                              },
+                              {
+                                "name": "Mirror",
+                                "shape": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "direction",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "InwardX",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "OutwardX",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "InwardY",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "OutwardY",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

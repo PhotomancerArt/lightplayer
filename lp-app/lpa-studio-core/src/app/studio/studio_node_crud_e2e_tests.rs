@@ -141,6 +141,119 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
     }
 }
 
+/// P5's Shape declaration moment (D13): a created FIXTURE surfaces the
+/// guided card state; nothing else does; pasting decides by what the def
+/// carries. The trigger is card-UI state resolved when the created
+/// node's tree entry lands — the same overlay every drawer bit rides.
+#[test]
+fn the_shape_moment_follows_undeclared_fixture_births() {
+    let (_server, mut actor, handle) = connected_actor();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    let guided_of = |snapshot: &UiStudioView, suffix: &str| {
+        workspace_cards(snapshot)
+            .into_iter()
+            .find(|card| card.header.path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("card {suffix} present"))
+            .card_ui
+            .shape_guided
+    };
+
+    // A created fixture is born undeclared: guided.
+    handle.tx.send(create_action(
+        NodeKind::Fixture,
+        UiAttachTarget::ProjectRoot,
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create emits a snapshot");
+    assert!(
+        guided_of(&snapshot, "/fixture_2.fixture"),
+        "a created fixture surfaces the Shape moment"
+    );
+    // The pre-existing fixture is untouched: existing projects never see
+    // the guided state.
+    assert!(
+        !guided_of(&snapshot, "/pixels.fixture"),
+        "existing fixtures never see the guided state"
+    );
+
+    // A created shader gets nothing — the moment is the fixture's.
+    handle
+        .tx
+        .send(create_action(NodeKind::Shader, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create emits a snapshot");
+    assert!(!guided_of(&snapshot, "/shader.shader"));
+
+    // Paste of a DECLARED fixture — a 1-row render area is the declared
+    // strip idiom (`fixture_carries_2d_coords`): it carries its shape, so
+    // no moment.
+    let declared = crate::app::share::NodeEnvelope::encode(
+        "worn",
+        "./worn.json",
+        br#"{ "kind": "Fixture", "render_size": { "width": 64, "height": 1 } }"#,
+        &[],
+    )
+    .to_json()
+    .expect("encode the declared-strip envelope");
+    handle
+        .tx
+        .send(paste_action(&declared, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("paste emits a snapshot");
+    assert!(
+        !guided_of(&snapshot, "/worn.fixture"),
+        "a pasted fixture carries its declaration (a 1-row area is a \
+         declared strip)"
+    );
+
+    // Paste of a BARE fixture def (older clipboard content: no mapping,
+    // no 1-row area): no authored shape, so the moment fires.
+    let bare = crate::app::share::NodeEnvelope::encode(
+        "bare",
+        "./bare.json",
+        br#"{ "kind": "Fixture" }"#,
+        &[],
+    )
+    .to_json()
+    .expect("encode the bare fixture envelope");
+    handle
+        .tx
+        .send(paste_action(&bare, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("paste emits a snapshot");
+    assert!(
+        guided_of(&snapshot, "/bare.fixture"),
+        "an undeclared paste surfaces the Shape moment"
+    );
+
+    // The moment resolves through the ordinary card-UI reducer: the web's
+    // preset tiles and skip link dispatch exactly this op.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        crate::ProjectEditorTarget::node_tree().node_id(),
+        crate::ProjectEditorOp::NodeUi(crate::NodeUiOp::SetShapeGuided {
+            node: workspace_cards(&snapshot)
+                .into_iter()
+                .find(|card| card.header.path.ends_with("/bare.fixture"))
+                .expect("the pasted card")
+                .header
+                .path,
+            guided: false,
+        }),
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("dismiss emits a snapshot");
+    assert!(
+        !guided_of(&snapshot, "/bare.fixture"),
+        "a preset pick or dismiss clears the moment"
+    );
+}
+
 #[test]
 fn create_into_playlist_adds_entry_and_child() {
     let (server, mut actor, handle) = connected_actor();

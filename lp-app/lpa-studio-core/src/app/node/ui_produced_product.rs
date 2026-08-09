@@ -206,6 +206,156 @@ pub struct UiControlProductPreview {
     pub bytes: Rc<[u8]>,
 }
 
+/// UI mirror of `lpc_wire::WireVisualSpace` — which coordinate space a
+/// visual producer renders in, or a preview probe asked for.
+///
+/// Ordered (1D before 2D) because per-space caches key on
+/// `(product, space)` and the stacked preview renders in the same order.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum UiVisualSpace {
+    OneD,
+    TwoD,
+}
+
+/// UI mirror of `lpc_wire::WireProjectionShape` — the base coordinate
+/// map of a factored projection cell (THE FACTORIZATION, format v9).
+/// `ExtrudeX` is today's extrude and the default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UiProjectionShape {
+    #[default]
+    ExtrudeX,
+    ExtrudeY,
+    Radial,
+    Angular,
+}
+
+impl UiProjectionShape {
+    /// The caption/tile label.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExtrudeX => "extrude-x",
+            Self::ExtrudeY => "extrude-y",
+            Self::Radial => "radial",
+            Self::Angular => "angular",
+        }
+    }
+
+    /// The RAW model variant ident — what a shape tile's `EnsurePresent`
+    /// appends to the shape enum row's address.
+    #[must_use]
+    pub const fn variant(self) -> &'static str {
+        match self {
+            Self::ExtrudeX => "ExtrudeX",
+            Self::ExtrudeY => "ExtrudeY",
+            Self::Radial => "Radial",
+            Self::Angular => "Angular",
+        }
+    }
+
+    /// Parse a RAW model variant ident; unknown idents read as the
+    /// default `ExtrudeX` (the behavior-preserving anchor).
+    #[must_use]
+    pub fn from_variant(variant: &str) -> Self {
+        match variant {
+            "ExtrudeY" => Self::ExtrudeY,
+            "Radial" => Self::Radial,
+            "Angular" => Self::Angular,
+            _ => Self::ExtrudeX,
+        }
+    }
+}
+
+/// UI mirror of `lpc_wire::WireCellProjection` — one FACTORED cell of the
+/// 1D→2D projection matrix: a base shape plus the two boolean modifiers
+/// (mirror folds the strip around the midpoint, flip reverses it — the
+/// same uniform chain the engine runs).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UiCellProjection {
+    pub shape: UiProjectionShape,
+    pub mirror: bool,
+    pub flip: bool,
+}
+
+impl UiCellProjection {
+    /// A plain shape — no mirror, no flip.
+    #[must_use]
+    pub const fn plain(shape: UiProjectionShape) -> Self {
+        Self {
+            shape,
+            mirror: false,
+            flip: false,
+        }
+    }
+}
+
+/// UI mirror of `lpc_wire::WireProjectionOrigin` — which precedence arm
+/// decided a resolved [`UiCellProjection`] (plan D15 preview captions, e.g.
+/// `in 2D · radial (declared)`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// `ConsumerDefault` died with the v9 factorization: the producer always
+/// declares, so a projection is a declaration or a consumer force.
+pub enum UiProjectionOrigin {
+    Declared,
+    Forced,
+}
+
+/// UI mirror of `lpc_wire::WireConsumerPolicy` — the projection preference
+/// a probe requests with, and whether it overrides an authored producer
+/// opinion.
+///
+/// A forced-policy probe is exactly this with `force: true`: "show me
+/// what THIS cell would look like", regardless of what the producer
+/// declared. The section's choice tiles do NOT use it — they are
+/// schematic drawings of the transform chain (see `ProjectionGlyph`),
+/// because nothing web-side can issue an ad-hoc probe today.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiConsumerPolicy {
+    pub default_1d_to_2d: UiCellProjection,
+    pub force: bool,
+}
+
+impl UiConsumerPolicy {
+    /// The defaults-only policy (plain extrude-x, never force) — what a
+    /// caller that has never heard of spaces effectively sends.
+    pub const AUTO: Self = Self {
+        default_1d_to_2d: UiCellProjection::plain(UiProjectionShape::ExtrudeX),
+        force: false,
+    };
+
+    /// The policy a live tile for `projection` probes with: force it, so
+    /// the tile shows that cell and not the producer's declared answer.
+    #[must_use]
+    pub const fn forcing(projection: UiCellProjection) -> Self {
+        Self {
+            default_1d_to_2d: projection,
+            force: true,
+        }
+    }
+}
+
+/// Space metadata a render-product probe answered alongside its preview
+/// bytes.
+///
+/// Cached separately from [`UiProductPreview`] (mirroring how a clock's
+/// `UiTimebaseRead` rides beside the preview cache in `ProjectSync` rather
+/// than inside it) so a future per-card space request (P3) can read "what
+/// did the producer answer" without widening every
+/// [`UiProductPreview::VisualSrgb8`] construction site — most of which are
+/// hand-built story/test fixtures with no probe behind them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiVisualProductSpace {
+    /// The space this probe actually rendered in (the effective request
+    /// space).
+    pub space: UiVisualSpace,
+    /// The 1D→2D cell applied to fill this frame, when one applied.
+    pub projection: Option<UiCellProjection>,
+    /// Why `projection` was chosen. Present exactly when `projection` is.
+    pub origin: Option<UiProjectionOrigin>,
+    /// The producer's own native space, independent of what was requested.
+    pub primary: UiVisualSpace,
+}
+
 /// Small, serializable-enough preview state for a produced product.
 ///
 /// Browser-specific DOM/canvas state belongs in the web crate. This DTO only
@@ -252,6 +402,30 @@ impl UiProductPreview {
     }
 }
 
+/// One space's preview of a visual product — the unit the D15 preview
+/// checkboxes stack.
+///
+/// A card that checks both spaces gets two of these for one product: the
+/// same producer rendered along its strip and rendered into 2D texture
+/// space, each with the metadata its caption needs (`native · 1D`,
+/// `in 2D · radial (declared)`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiProductSpaceView {
+    /// The space this view was probed in.
+    pub space: UiVisualSpace,
+    /// Preview state for that probe, exactly like
+    /// [`UiProducedProduct::preview`].
+    pub preview: UiProductPreview,
+    /// Frame geometry the probe asked for (a 1D probe is `N × 1`).
+    pub frame: UiProductPreviewFrame,
+    /// What the producer answered: resolved space, projection, origin,
+    /// primary. `None` until a space-tagged result has landed.
+    pub meta: Option<UiVisualProductSpace>,
+    /// Whether this is the view [`UiProducedProduct::preview`] mirrors —
+    /// the card's hero, and the one every space-unaware surface renders.
+    pub hero: bool,
+}
+
 /// A produced output that deserves primary visual treatment in the node pane.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedProduct {
@@ -261,8 +435,16 @@ pub struct UiProducedProduct {
     pub kind: UiProductKind,
     /// Concrete product identity used by controllers to attach preview state.
     pub product: Option<UiProductRef>,
-    /// Current preview state for this product.
+    /// Current preview state for this product — the HERO space's, when the
+    /// card previews more than one (see [`Self::spaces`]).
     pub preview: UiProductPreview,
+    /// Per-space previews for a visual product, when the card's D15
+    /// checkboxes ask for them. **Empty is the ordinary state**: every
+    /// space-unaware surface (module heroes, playlist thumbs, story
+    /// fixtures) reads [`Self::preview`] and is unaffected. When populated
+    /// it always CONTAINS the hero view too, so the stacked renderer can
+    /// draw one uniform list.
+    pub spaces: Vec<UiProductSpaceView>,
     /// Whether Studio is watching this product now.
     pub tracking: UiProductTrackingState,
     /// Stable preview frame used even before bytes are available.
@@ -285,6 +467,7 @@ impl UiProducedProduct {
             kind,
             product: None,
             preview: UiProductPreview::for_kind(kind),
+            spaces: Vec::new(),
             tracking: UiProductTrackingState::Untracked,
             frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             detail: None,

@@ -87,17 +87,53 @@ pub fn centre_scanline(t: f32) -> (f32, f32) {
     (t.clamp(0.0, 1.0), 0.5)
 }
 
+/// The strip coordinate a base [`ProjectionShape`]
+/// (`crate::products::visual::ProjectionShape`) reads off a normalized
+/// `(u, v)` — the first link of THE uniform chain (the factorization
+/// ruling): `ExtrudeX` is `u` verbatim, `ExtrudeY` is `v`, and
+/// radial/angular are the existing centre maps.
+#[must_use]
+pub fn shape_coord(shape: crate::products::visual::ProjectionShape, u: f32, v: f32) -> f32 {
+    use crate::products::visual::ProjectionShape;
+    match shape {
+        ProjectionShape::ExtrudeX => extrude(u, v),
+        ProjectionShape::ExtrudeY => extrude(v, u),
+        ProjectionShape::Radial => radial(u, v),
+        ProjectionShape::Angular => angular(u, v),
+    }
+}
+
 /// Apply a [`CellProjection`](crate::products::visual::CellProjection) as a
-/// normalized target→source map.
+/// normalized target→source map — ONE uniform transform chain for every
+/// factored cell (the factorization ruling replaced the per-shape arms):
+///
+/// ```text
+/// t = shape_coord(shape, u, v);
+/// if mirror { t = 1 − |2t − 1| }   // fold around the midpoint
+/// if flip   { t = 1 − t }          // reverse the strip
+/// ```
+///
+/// A non-mirrored angular's output is CYCLIC with a discontinuous seam,
+/// so its range is kept half-open after the chain (a flipped seam value
+/// of exactly `1.0` wraps to `0.0`) — the seam stays at the same angle,
+/// only the direction of travel changes; bit-identical to the
+/// pre-factored counter-clockwise arm. A MIRRORED angular is continuous
+/// across the seam (the fold runs up and back), so `1.0` there is the
+/// fold's genuine far end and is never wrapped.
 #[must_use]
 pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v: f32) -> f32 {
-    use crate::products::visual::CellProjection;
-    match cell {
-        CellProjection::Extrude => extrude(u, v),
-        CellProjection::Radial => radial(u, v),
-        CellProjection::Angular => angular(u, v),
-        CellProjection::Mirror => mirror(u, v),
+    use crate::products::visual::ProjectionShape;
+    let mut t = shape_coord(cell.shape, u, v);
+    if cell.mirror {
+        t = 1.0 - libm::fabsf(2.0 * t - 1.0);
     }
+    if cell.flip {
+        t = 1.0 - t;
+    }
+    if cell.shape == ProjectionShape::Angular && !cell.mirror && t >= 1.0 {
+        t = 0.0;
+    }
+    t
 }
 
 #[must_use]
@@ -221,29 +257,156 @@ mod tests {
         }
     }
 
+    /// THE bit-identity table (factorization ruling): every pre-factored
+    /// vocabulary entry re-expressed as shape × mirror × flip must equal
+    /// the same named map it always ran. Extrude-Right = ExtrudeX plain;
+    /// Left = ExtrudeX + flip; Down/Up = ExtrudeY (± flip); the four
+    /// mirror folds = ExtrudeX|Y × mirror (× flip — outward is the
+    /// mirrored fold REVERSED, `|2s−1|`); radial inward = Radial + flip;
+    /// angular counter-clockwise = Angular + flip.
     #[test]
-    fn the_cell_dispatcher_matches_the_named_maps() {
-        use crate::products::visual::CellProjection;
-        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0)] {
+    fn the_factored_chain_is_bit_identical_to_the_named_maps() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
+        let cell = |shape, m, f| CellProjection {
+            shape,
+            mirror: m,
+            flip: f,
+        };
+        for (u, v) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0), (0.9, 0.2)] {
+            // extrude directions
             assert_close(
-                project_2d_to_1d(CellProjection::Extrude, u, v),
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, false, false), u, v),
                 extrude(u, v),
-                "extrude",
+                "extrude right = extrude-x",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Radial, u, v),
-                radial(u, v),
-                "radial",
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, false, true), u, v),
+                extrude(1.0 - u, v),
+                "extrude left = extrude-x + flip",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Angular, u, v),
-                angular(u, v),
-                "angular",
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, false, false), u, v),
+                extrude(v, u),
+                "extrude down = extrude-y",
             );
             assert_close(
-                project_2d_to_1d(CellProjection::Mirror, u, v),
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, false, true), u, v),
+                extrude(1.0 - v, u),
+                "extrude up = extrude-y + flip",
+            );
+            // mirror folds (outward = the pre-direction mirror |2s−1|)
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, true, true), u, v),
                 mirror(u, v),
-                "mirror",
+                "mirror outward-x = extrude-x + mirror + flip",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeX, true, false), u, v),
+                1.0 - mirror(u, v),
+                "mirror inward-x = extrude-x + mirror",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, true, true), u, v),
+                mirror(v, u),
+                "mirror outward-y = extrude-y + mirror + flip",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::ExtrudeY, true, false), u, v),
+                1.0 - mirror(v, u),
+                "mirror inward-y = extrude-y + mirror",
+            );
+            // radial flips
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Radial, false, false), u, v),
+                radial(u, v),
+                "radial outward = radial",
+            );
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Radial, false, true), u, v),
+                1.0 - radial(u, v),
+                "radial inward = radial + flip",
+            );
+            // angular sweep (the wrap case is asserted separately below)
+            assert_close(
+                project_2d_to_1d(cell(ProjectionShape::Angular, false, false), u, v),
+                angular(u, v),
+                "angular clockwise = angular",
+            );
+        }
+    }
+
+    /// The angular flip negates the sweep — `1 − a`, wrapped so the range
+    /// stays half-open (the seam stays put; only the travel flips) —
+    /// bit-identical to the pre-factored counter-clockwise arm.
+    #[test]
+    fn angular_flip_negates_the_sweep_and_stays_half_open() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
+        let ccw = |u, v| {
+            project_2d_to_1d(
+                CellProjection {
+                    shape: ProjectionShape::Angular,
+                    mirror: false,
+                    flip: true,
+                },
+                u,
+                v,
+            )
+        };
+        assert_close(ccw(1.0, 0.5), 0.0, "+x stays the seam (wrapped)");
+        assert_close(ccw(0.5, 1.0), 0.75, "+y");
+        assert_close(ccw(0.0, 0.5), 0.5, "-x");
+        assert_close(ccw(0.5, 0.0), 0.25, "-y");
+        for (u, v) in [(0.0, 0.0), (1.0, 1.0), (0.25, 0.75)] {
+            let t = ccw(u, v);
+            assert!((0.0..1.0).contains(&t), "ccw stays in [0, 1): {t}");
+        }
+    }
+
+    /// The NEW states the factorization makes reachable (Yona's ask):
+    /// angular + mirror is the up-and-back sweep — the strip runs half a
+    /// turn out and folds back over the other half — and radial + mirror
+    /// is a ring ramp that peaks mid-radius.
+    #[test]
+    fn the_new_mirror_composites_run_up_and_back() {
+        use crate::products::visual::{CellProjection, ProjectionShape};
+        let am = |u, v| {
+            project_2d_to_1d(
+                CellProjection {
+                    shape: ProjectionShape::Angular,
+                    mirror: true,
+                    flip: false,
+                },
+                u,
+                v,
+            )
+        };
+        // The sweep runs 0→1 over the first half turn and back 1→0 over
+        // the second: quarter turns land on the same value.
+        assert_close(am(1.0, 0.5), 0.0, "+x start");
+        assert_close(am(0.0, 0.5), 1.0, "-x is the far end of the fold");
+        assert_close(am(0.5, 1.0), 0.5, "+y quarter");
+        assert_close(am(0.5, 0.0), 0.5, "-y quarter matches +y — up and back");
+
+        let rm = |u, v| {
+            project_2d_to_1d(
+                CellProjection {
+                    shape: ProjectionShape::Radial,
+                    mirror: true,
+                    flip: false,
+                },
+                u,
+                v,
+            )
+        };
+        assert_close(rm(0.5, 0.5), 0.0, "centre = fold start");
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            assert_close(rm(u, v), 0.0, "corners fold back to 0");
+        }
+        for (u, v) in [(0.3, 0.7), (0.9, 0.2)] {
+            assert_close(
+                rm(u, v),
+                1.0 - libm::fabsf(2.0 * radial(u, v) - 1.0),
+                "mid fold",
             );
         }
     }
