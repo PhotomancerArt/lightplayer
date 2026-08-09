@@ -24,7 +24,7 @@ pub struct UiFixtureFace {
     /// there is nothing worth saying on the face.
     pub power: Option<UiFixturePower>,
     /// The consumer half of the two-sided space model (D13/D14): this
-    /// fixture's `consume` policy and its `strip_order_meaningful` bit.
+    /// fixture's `consume` policy.
     /// The SAME DTO the shader face carries, so the mirror is a data-level
     /// fact rather than two components that happen to look alike. `None`
     /// when the backing rows are absent.
