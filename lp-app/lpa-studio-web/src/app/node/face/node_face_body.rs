@@ -78,8 +78,13 @@ pub fn NodeFaceBody(
                     NodeCardDrawers {
                         node,
                         code: shader.code_drawer,
+                        // The dimensionality drawer rides the stack between
+                        // code and advanced (G1b ruling 1) — shader cards
+                        // only; the fixture face keeps its own placement.
+                        space: shader.space,
                         sections,
                         code_open: card_ui.code_open,
+                        space_open: card_ui.space_open,
                         advanced_open: card_ui.advanced_open,
                         debug_open: card_ui.debug_open,
                         platform,

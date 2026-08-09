@@ -30,11 +30,12 @@ mod ui_panel_widget;
 mod ui_playlist_entry;
 mod ui_playlist_face;
 mod ui_shader_face;
+mod ui_space_section;
 
 pub use ui_clock_face::{
     UiClockFace, UiClockTransport, UiPhasorReading, UiTimebaseState, phasor_rate_display,
 };
-pub use ui_fixture_face::UiFixtureFace;
+pub use ui_fixture_face::{UiFixtureFace, UiShapePresets};
 pub use ui_fixture_power::UiFixturePower;
 pub use ui_module_face::{UiExportsGroup, UiModuleExport, UiModuleFace};
 pub use ui_node_face::UiNodeFace;
@@ -50,3 +51,7 @@ pub use ui_panel_widget::UiPanelWidget;
 pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;
 pub use ui_shader_face::UiShaderFace;
+pub use ui_space_section::{
+    UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceMismatch, UiSpaceModifiers,
+    UiSpaceSection, UiSpaceSide, UiWireDirectionRow,
+};

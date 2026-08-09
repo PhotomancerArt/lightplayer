@@ -33,6 +33,25 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 15: the projection factorization (post-G2 ruling, format v9) —
+///   `WireCellProjection` becomes the factored `{shape, mirror, flip}`
+///   RECORD over a new `WireProjectionShape` (extrude_x/extrude_y/radial/
+///   angular), replacing the per-shape direction payload enums, and
+///   `WireProjectionOrigin` loses `consumer_default` (the producer always
+///   declares; the fill rung is gone). Both are breaking shape changes on
+///   the render-product probe's policy and result metadata.
+/// - 14: radial/angular flips (post-G1b ruling) — `WireCellProjection`'s
+///   `Radial`/`Angular` variants grow their own direction payloads
+///   (`WireRadialDirection` outward/inward, `WireAngularDirection`
+///   clockwise/counter_clockwise), changing their encoding from bare
+///   strings to tagged objects — the same breaking shape change v13 made
+///   to `Extrude`/`Mirror`, for the same reason.
+/// - 13: directional projections (G1b ruling 4) — `WireCellProjection`'s
+///   `Extrude`/`Mirror` variants grow a `WireProjectionDirection` payload
+///   (right/left/down/up), changing their encoding from bare strings to
+///   tagged objects on the render-product probe's policy and result
+///   metadata. An old peer cannot decode the new cell encoding, which is
+///   what earns the bump.
 /// - 12: the published output-frame probe —
 ///   `ProjectProbeRequest::OutputFrame` / `ProjectProbeResult::OutputFrame`
 ///   (`OutputFrameProbeRequest`, `OutputFrameProbeResult`,
@@ -101,7 +120,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 12;
+pub const WIRE_PROTO_VERSION: u32 = 15;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -342,6 +342,13 @@ struct PendingNodeFocus {
     /// Expected tree segment name of the created node (the `nodes` key, or
     /// the loader's `entry_<k>` fallback for unnamed playlist entries).
     name: String,
+    /// Whether the created node should surface the fixture Shape
+    /// declaration moment once its tree entry lands (D13, plan-B P5):
+    /// true for every "+ fixture" create and for a pasted fixture with
+    /// no authored shape. Resolved into the card-UI store at the same
+    /// moment focus resolves, because that is when the node's real
+    /// address exists.
+    shape_guided: bool,
 }
 
 /// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
@@ -2296,6 +2303,9 @@ impl ProjectController {
         // (D10) — it lands here, before the module pass, the same way the
         // output face's board facts do.
         self.apply_clock_faces(&mut nodes);
+        // Same shape, one card kind over: the shader face's per-space
+        // preview stack is probe state the section DTOs cannot carry.
+        self.apply_face_preview_spaces(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -3184,6 +3194,39 @@ impl ProjectController {
             };
             clock.timebase = state;
             clock.phasors = phasors;
+        }
+        fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
+            for child in children {
+                walk(controller, child.face.as_mut());
+                walk_children(controller, &mut child.children);
+            }
+        }
+        for node in nodes {
+            walk(self, node.face.as_mut());
+            walk_children(self, &mut node.children);
+        }
+    }
+
+    /// Attach each shader face's PER-SPACE previews (D15's checkboxes and
+    /// their origin captions).
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one:
+    /// the per-space frames live in the probe cache, which the face
+    /// builder (deriving from section DTOs alone) cannot see. The face's
+    /// `preview` keeps carrying the hero frame, so nothing that renders a
+    /// product without knowing about spaces changes at all.
+    fn apply_face_preview_spaces(&self, nodes: &mut [UiNodeView]) {
+        fn walk(controller: &ProjectController, face: Option<&mut crate::UiNodeFace>) {
+            let Some(crate::UiNodeFace::Shader(shader)) = face else {
+                return;
+            };
+            let Some(product) = shader.preview.product else {
+                return;
+            };
+            let Some(sync) = controller.sync.as_ref() else {
+                return;
+            };
+            shader.preview.spaces = sync.product_space_views(&product);
         }
         fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
             for child in children {
@@ -4253,9 +4296,68 @@ impl ProjectController {
     /// lens, and requests must always reflect the current one.
     fn sync_for_request(&mut self) -> Result<&mut ProjectSync, UiError> {
         let frame = self.visual_preview_frame();
+        let spaces = self.preview_space_requests();
         let sync = self.sync_mut()?;
         sync.set_visual_preview_frame(frame);
+        sync.set_preview_spaces(spaces);
         Ok(sync)
+    }
+
+    /// Which spaces each shader card wants its visual product previewed in
+    /// (D15), resolved from the card's checkbox state against the
+    /// producer's PRIMARY space.
+    ///
+    /// Shader cards only: they are the cards that grow the checkboxes, and
+    /// leaving every other product unregistered is what keeps playlist
+    /// thumbs, module heroes, and the always-live primary visual on
+    /// exactly today's single 2D probe.
+    ///
+    /// The primary space is a probe ANSWER, so the first read of a fresh
+    /// project resolves against the 2D default, learns the real primary
+    /// from the result, and asks for it on the next read — a one-cycle
+    /// convergence, stable thereafter (nothing here depends on the frame
+    /// it produced).
+    fn preview_space_requests(&self) -> BTreeMap<UiProductRef, crate::UiProductSpaceRequest> {
+        let mut requests = BTreeMap::new();
+        for node in &self.root_nodes {
+            self.collect_preview_space_requests(node, &mut requests);
+        }
+        requests
+    }
+
+    fn collect_preview_space_requests(
+        &self,
+        node: &NodeController,
+        requests: &mut BTreeMap<UiProductRef, crate::UiProductSpaceRequest>,
+    ) {
+        if node.kind().eq_ignore_ascii_case("shader") {
+            let state = self.node_card_ui.get(&node.address().to_string());
+            let mut products = Vec::new();
+            node.collect_produced_product_refs(&mut products);
+            for product in products {
+                if !matches!(product, UiProductRef::Visual { .. }) {
+                    continue;
+                }
+                let primary = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_space(&product))
+                    .map_or(crate::UiVisualSpace::TwoD, |space| space.primary);
+                let spaces = state
+                    .map(|state| state.preview_spaces_for(primary))
+                    .unwrap_or_else(|| crate::UiPreviewSpaces::only(primary));
+                requests.insert(
+                    product,
+                    crate::UiProductSpaceRequest {
+                        spaces,
+                        hero: primary,
+                    },
+                );
+            }
+        }
+        for child in node.children() {
+            self.collect_preview_space_requests(child, requests);
+        }
     }
 
     fn clear_loaded_project_state(&mut self) {
@@ -5270,7 +5372,10 @@ impl ProjectController {
             site,
         );
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        // Every "+ fixture" birth surfaces the Shape declaration moment
+        // (D13): the starter is a generic 8×8 grid, not a declared shape.
+        let shape_guided = kind == NodeKind::Fixture;
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
     }
 
@@ -5354,7 +5459,7 @@ impl ProjectController {
             site,
         );
 
-        self.run_create_request(server, request, parent, expected_name, key)
+        self.run_create_request(server, request, parent, expected_name, key, false)
             .await
     }
 
@@ -5372,6 +5477,7 @@ impl ProjectController {
         parent: ProjectNodeAddress,
         expected_name: String,
         name: String,
+        shape_guided: bool,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         let outcome = server.project_create_node(handle_id, request).await?;
@@ -5385,6 +5491,7 @@ impl ProjectController {
                 self.pending_focus = Some(PendingNodeFocus {
                     parent,
                     name: expected_name,
+                    shape_guided,
                 });
                 match self.refresh_project(server).await {
                     Ok(run) => logs.extend(run.logs),
@@ -5680,9 +5787,25 @@ impl ProjectController {
         let mut request = envelope
             .to_create_request(&format!("./{name}.json"), &asset_paths, site)
             .map_err(|error| UiError::Project(format!("cannot paste this node: {error}")))?;
+        // A pasted fixture carries its declaration; only one with no
+        // authored shape gets the guided moment (P5 item 4). "No authored
+        // shape" today means: no mapping AND no 1-row render area — the
+        // two present-day shape signals (a map IS a declared shape; a
+        // 1-row TextureArea is the declared-strip idiom). D15's declared
+        // fixture space replaces this heuristic when it lands.
+        let shape_guided = core::str::from_utf8(&body)
+            .ok()
+            .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
+            .is_some_and(|def| match def {
+                lpc_model::NodeDef::Fixture(fixture) => {
+                    matches!(fixture.mapping.value(), lpc_model::MappingConfig::Unset)
+                        && fixture.render_size.value().height != 1
+                }
+                _ => false,
+            });
         request.body = body;
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
     }
 
@@ -6041,7 +6164,7 @@ impl ProjectController {
     /// end of every applied project view; consumes [`Self::pending_focus`]
     /// when the expected child resolves under its parent.
     fn apply_pending_focus(&mut self) {
-        let target = {
+        let (target, guided_address) = {
             let Some(pending) = &self.pending_focus else {
                 return;
             };
@@ -6058,9 +6181,21 @@ impl ProjectController {
             }) else {
                 return;
             };
-            ProjectEditorTarget::addressed_node(created.target().clone())
+            (
+                ProjectEditorTarget::addressed_node(created.target().clone()),
+                pending.shape_guided.then(|| created.address().to_string()),
+            )
         };
         self.pending_focus = None;
+        // The Shape declaration moment (D13, plan-B P5): the created
+        // fixture's card renders its dimensionality section in guided
+        // clothing. Marked here — the first moment the node's REAL
+        // address exists — through the same reducer every card-UI
+        // mutation takes, so a preset pick or dismiss clears it the
+        // ordinary way.
+        if let Some(node) = guided_address {
+            self.apply_node_ui_op(NodeUiOp::SetShapeGuided { node, guided: true });
+        }
         self.focus_editor_target(&target);
         self.active_editor_target = Some(target);
     }
@@ -8030,7 +8165,8 @@ mod tests {
     use lpc_wire::{
         NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
         ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
-        RenderProductProbeRequest, RenderProductProbeResult, WireEntryState, WireTextureFormat,
+        RenderProductProbeRequest, RenderProductProbeResult, WireConsumerPolicy, WireEntryState,
+        WireTextureFormat, WireVisualSpace,
     };
 
     use crate::{
@@ -10058,6 +10194,10 @@ mod tests {
                             height: 2,
                             format: WireTextureFormat::Srgb8,
                             bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
                         },
                     )),
                 },
@@ -10901,6 +11041,8 @@ mod tests {
                     width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
+                    space: Some(WireVisualSpace::TwoD),
+                    policy: Some(WireConsumerPolicy::AUTO),
                 }),
                 // The binding-graph probe rides along on every
                 // loaded-project read — module faces cannot derive without it.
@@ -10926,6 +11068,10 @@ mod tests {
                             height: 2,
                             format: WireTextureFormat::Srgb8,
                             bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
                         },
                     )),
                 },

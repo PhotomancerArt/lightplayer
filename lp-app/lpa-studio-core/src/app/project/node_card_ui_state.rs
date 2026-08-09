@@ -35,6 +35,14 @@
 pub struct NodeCardUiState {
     /// Whether the code drawer (inline GLSL editor) is expanded.
     pub code_open: bool,
+    /// Whether the shader face's dimensionality drawer (the producer-side
+    /// space section) is expanded. Default `false` (P4b: the declaration is
+    /// authoring, not day-to-day tuning); G1b re-homed the drawer into the
+    /// stack between `code` and `advanced` (shader cards only — the fixture
+    /// face keeps its own below-settings drawer and face-local state, ruled
+    /// good as shipped). A D1 mismatch forces the rendered drawer open
+    /// regardless of this bit — an error folded away is an error hidden.
+    pub space_open: bool,
     /// Whether the advanced drawer (generic slot rows) is expanded.
     pub advanced_open: bool,
     /// Whether the module face's **wiring** drawer is expanded — the
@@ -57,21 +65,40 @@ pub struct NodeCardUiState {
     /// Which product the module face's hero leads with, when the module's
     /// scope resolves both. Default [`ModuleHeroProduct::Control`].
     pub hero_product: ModuleHeroProduct,
+    /// Which spaces this card's visual preview is showing (D15's 1D/2D
+    /// checkboxes). `None` — the default — means "whatever this producer's
+    /// PRIMARY space is, and only that": the honest default cannot be
+    /// spelled as a fixed pair here, because which space is primary is a
+    /// probe answer, not card state. Resolve it with
+    /// [`NodeCardUiState::preview_spaces_for`]; the first explicit toggle
+    /// materializes a concrete pair.
+    pub preview_spaces: Option<UiPreviewSpaces>,
     /// The composer draft as last mirrored by the web (write-on-collapse;
     /// see the module doc — this is the remount seed, not the live text).
     pub composer_draft: String,
+    /// Whether the fixture card's Shape declaration moment is showing
+    /// (D13, plan-B P5): a freshly created fixture renders its
+    /// dimensionality section in guided clothing — preset tiles — until a
+    /// preset is picked or the moment is dismissed. Default `false`, so
+    /// existing fixtures (and every card in an existing project) never
+    /// see the guided state; the controller sets it on the create/paste
+    /// paths that birth an undeclared fixture.
+    pub shape_guided: bool,
 }
 
 impl Default for NodeCardUiState {
     fn default() -> Self {
         Self {
             code_open: false,
+            space_open: false,
             advanced_open: false,
             wiring_open: false,
             debug_open: false,
             agent_collapsed: true,
             hero_product: ModuleHeroProduct::default(),
+            preview_spaces: None,
             composer_draft: String::new(),
+            shape_guided: false,
         }
     }
 }
@@ -83,6 +110,7 @@ impl NodeCardUiState {
         match op {
             NodeUiOp::SetDrawer { drawer, open, .. } => match drawer {
                 NodeCardDrawer::Code => self.code_open = *open,
+                NodeCardDrawer::Space => self.space_open = *open,
                 NodeCardDrawer::Advanced => self.advanced_open = *open,
                 NodeCardDrawer::Debug => self.debug_open = *open,
                 NodeCardDrawer::Wiring => self.wiring_open = *open,
@@ -96,7 +124,94 @@ impl NodeCardUiState {
             NodeUiOp::SetHeroProduct { product, .. } => {
                 self.hero_product = *product;
             }
+            // D15's "one must stay on": a preview showing nothing is not a
+            // state the checkboxes can reach, so an all-off write is
+            // dropped rather than applied. Enforced HERE, in the reducer,
+            // so no dispatcher — component, story, or e2e — can route
+            // around it.
+            NodeUiOp::SetPreviewSpaces { spaces, .. } => {
+                if spaces.any_checked() {
+                    self.preview_spaces = Some(*spaces);
+                }
+            }
+            NodeUiOp::SetShapeGuided { guided, .. } => {
+                self.shape_guided = *guided;
+            }
         }
+    }
+
+    /// The spaces this card's preview shows, resolved against the
+    /// producer's `primary` space: an untouched card shows its primary
+    /// space and nothing else (D15's default), and once toggled it shows
+    /// exactly what was asked for.
+    pub fn preview_spaces_for(&self, primary: crate::UiVisualSpace) -> UiPreviewSpaces {
+        self.preview_spaces
+            .unwrap_or_else(|| UiPreviewSpaces::only(primary))
+    }
+}
+
+/// Which spaces a card's visual preview is showing (D15).
+///
+/// Both on = the stacked view. Never both off — the invariant lives in
+/// [`NodeCardUiState::apply`] and in [`UiPreviewSpaces::toggled`], so the
+/// type can be constructed freely by tests without a fallible builder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiPreviewSpaces {
+    /// Show the producer rendered along a 1D strip.
+    pub one_d: bool,
+    /// Show the producer rendered into 2D texture space.
+    pub two_d: bool,
+}
+
+impl UiPreviewSpaces {
+    /// Exactly one space checked.
+    pub fn only(space: crate::UiVisualSpace) -> Self {
+        Self {
+            one_d: space == crate::UiVisualSpace::OneD,
+            two_d: space == crate::UiVisualSpace::TwoD,
+        }
+    }
+
+    /// Whether `space` is checked.
+    pub fn is_checked(self, space: crate::UiVisualSpace) -> bool {
+        match space {
+            crate::UiVisualSpace::OneD => self.one_d,
+            crate::UiVisualSpace::TwoD => self.two_d,
+        }
+    }
+
+    /// Whether anything is checked at all — the invariant's predicate.
+    pub fn any_checked(self) -> bool {
+        self.one_d || self.two_d
+    }
+
+    /// Every checked space, 1D first (the native reading order for a strip
+    /// producer, and a stable order for the stacked view).
+    pub fn checked(self) -> impl Iterator<Item = crate::UiVisualSpace> {
+        [
+            self.one_d.then_some(crate::UiVisualSpace::OneD),
+            self.two_d.then_some(crate::UiVisualSpace::TwoD),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// This set with `space` set to `checked`. `None` when that would turn
+    /// the last checkbox off — the caller then dispatches nothing, which
+    /// is what "one must stay on" looks like at the gesture.
+    #[must_use]
+    pub fn toggled(self, space: crate::UiVisualSpace, checked: bool) -> Option<Self> {
+        let next = match space {
+            crate::UiVisualSpace::OneD => Self {
+                one_d: checked,
+                ..self
+            },
+            crate::UiVisualSpace::TwoD => Self {
+                two_d: checked,
+                ..self
+            },
+        };
+        next.any_checked().then_some(next)
     }
 }
 
@@ -126,6 +241,9 @@ pub enum ModuleHeroProduct {
 pub enum NodeCardDrawer {
     /// The inline GLSL editor drawer (shader faces).
     Code,
+    /// The shader face's dimensionality drawer — the producer-side space
+    /// section, between `code` and `advanced` in the stack (G1b ruling 1).
+    Space,
     /// The generic slot-row drawer (every face).
     Advanced,
     /// The **Debug** section's rows (any node declaring a `SlotRole::Debug`
@@ -159,6 +277,18 @@ pub enum NodeUiOp {
         node: String,
         product: ModuleHeroProduct,
     },
+    /// Set which spaces the card's visual preview shows (D15's 1D/2D
+    /// checkboxes). An all-off payload is dropped by the reducer; build
+    /// the op with [`NodeUiOp::toggle_preview_space`] and the case never
+    /// arises.
+    SetPreviewSpaces {
+        node: String,
+        spaces: UiPreviewSpaces,
+    },
+    /// Show or clear the fixture card's guided Shape moment (P5): a
+    /// preset pick and the dismiss affordance both clear it; the
+    /// controller's create/paste paths set it.
+    SetShapeGuided { node: String, guided: bool },
 }
 
 impl NodeUiOp {
@@ -168,8 +298,36 @@ impl NodeUiOp {
             Self::SetDrawer { node, .. }
             | Self::SetAgentCollapsed { node, .. }
             | Self::SetDraft { node, .. }
-            | Self::SetHeroProduct { node, .. } => node,
+            | Self::SetHeroProduct { node, .. }
+            | Self::SetPreviewSpaces { node, .. }
+            | Self::SetShapeGuided { node, .. } => node,
         }
+    }
+
+    /// THE op sequence a preview-space checkbox dispatches (shared so the
+    /// face e2e drives exactly what the component does, like
+    /// [`Self::toggle_agent_section`]).
+    ///
+    /// `current` is the card's RESOLVED set
+    /// ([`NodeCardUiState::preview_spaces_for`]) — the checkbox is
+    /// toggling what it can see, not the unmaterialized `None`. Empty when
+    /// the gesture would uncheck the last space: nothing to dispatch, and
+    /// the box stays visibly checked (D15).
+    pub fn toggle_preview_space(
+        node: &str,
+        current: UiPreviewSpaces,
+        space: crate::UiVisualSpace,
+        checked: bool,
+    ) -> Vec<NodeUiOp> {
+        current
+            .toggled(space, checked)
+            .map(|spaces| {
+                vec![NodeUiOp::SetPreviewSpaces {
+                    node: node.to_string(),
+                    spaces,
+                }]
+            })
+            .unwrap_or_default()
     }
 
     /// The agent section's toggle choreography — THE op sequence the web's
@@ -221,11 +379,20 @@ mod tests {
             ModuleHeroProduct::Control,
             "a module face leads with its lamps, not the raster behind them"
         );
+        assert_eq!(
+            state.preview_spaces, None,
+            "an untouched card follows its producer's primary space"
+        );
         assert!(state.composer_draft.is_empty());
 
         state.apply(&NodeUiOp::SetDrawer {
             node: node.clone(),
             drawer: NodeCardDrawer::Code,
+            open: true,
+        });
+        state.apply(&NodeUiOp::SetDrawer {
+            node: node.clone(),
+            drawer: NodeCardDrawer::Space,
             open: true,
         });
         state.apply(&NodeUiOp::SetDrawer {
@@ -255,16 +422,29 @@ mod tests {
             node: node.clone(),
             product: ModuleHeroProduct::Visual,
         });
+        state.apply(&NodeUiOp::SetPreviewSpaces {
+            node: node.clone(),
+            spaces: UiPreviewSpaces {
+                one_d: true,
+                two_d: true,
+            },
+        });
         assert_eq!(
             state,
             NodeCardUiState {
                 code_open: true,
+                space_open: true,
                 advanced_open: true,
                 wiring_open: true,
                 debug_open: true,
                 agent_collapsed: true,
                 hero_product: ModuleHeroProduct::Visual,
+                preview_spaces: Some(UiPreviewSpaces {
+                    one_d: true,
+                    two_d: true,
+                }),
                 composer_draft: "make it pulse".to_string(),
+                shape_guided: false,
             }
         );
 
@@ -304,6 +484,14 @@ mod tests {
                 node: "/a.module/b.shader".into(),
                 product: ModuleHeroProduct::Visual,
             },
+            NodeUiOp::SetPreviewSpaces {
+                node: "/a.module/b.shader".into(),
+                spaces: UiPreviewSpaces::only(crate::UiVisualSpace::TwoD),
+            },
+            NodeUiOp::SetShapeGuided {
+                node: "/a.module/b.shader".into(),
+                guided: true,
+            },
         ];
         for op in &ops {
             assert_eq!(op.node(), "/a.module/b.shader");
@@ -329,6 +517,97 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// D15: an untouched card previews its producer's primary space, and
+    /// only that — including a 1D producer, which is the whole point of
+    /// the default being resolved rather than baked.
+    #[test]
+    fn preview_spaces_default_to_the_producers_primary_space() {
+        let state = NodeCardUiState::default();
+        assert_eq!(
+            state.preview_spaces_for(crate::UiVisualSpace::TwoD),
+            UiPreviewSpaces {
+                one_d: false,
+                two_d: true,
+            }
+        );
+        assert_eq!(
+            state.preview_spaces_for(crate::UiVisualSpace::OneD),
+            UiPreviewSpaces {
+                one_d: true,
+                two_d: false,
+            }
+        );
+        assert_eq!(
+            state
+                .preview_spaces_for(crate::UiVisualSpace::OneD)
+                .checked()
+                .collect::<Vec<_>>(),
+            vec![crate::UiVisualSpace::OneD],
+        );
+    }
+
+    /// The at-least-one-on invariant, at both enforcement points: the
+    /// gesture builder dispatches nothing, and the reducer would drop the
+    /// write even if something hand-rolled it.
+    #[test]
+    fn the_last_checked_space_cannot_be_turned_off() {
+        let node = "/a.module/b.shader";
+        let only_2d = UiPreviewSpaces::only(crate::UiVisualSpace::TwoD);
+
+        assert_eq!(
+            NodeUiOp::toggle_preview_space(node, only_2d, crate::UiVisualSpace::TwoD, false),
+            Vec::new(),
+            "unchecking the last box dispatches nothing"
+        );
+        assert_eq!(
+            NodeUiOp::toggle_preview_space(node, only_2d, crate::UiVisualSpace::OneD, true),
+            vec![NodeUiOp::SetPreviewSpaces {
+                node: node.to_string(),
+                spaces: UiPreviewSpaces {
+                    one_d: true,
+                    two_d: true,
+                },
+            }],
+            "checking the other box stacks the two"
+        );
+
+        let mut state = NodeCardUiState::default();
+        state.apply(&NodeUiOp::SetPreviewSpaces {
+            node: node.to_string(),
+            spaces: only_2d,
+        });
+        state.apply(&NodeUiOp::SetPreviewSpaces {
+            node: node.to_string(),
+            spaces: UiPreviewSpaces {
+                one_d: false,
+                two_d: false,
+            },
+        });
+        assert_eq!(
+            state.preview_spaces,
+            Some(only_2d),
+            "the reducer refuses a preview showing nothing"
+        );
+    }
+
+    /// P5's guided-moment bit: absent by default (existing fixtures never
+    /// see the guided state), set/cleared by the op.
+    #[test]
+    fn the_shape_guided_bit_round_trips_and_defaults_off() {
+        let mut state = NodeCardUiState::default();
+        assert!(!state.shape_guided);
+        state.apply(&NodeUiOp::SetShapeGuided {
+            node: "/a.module/halo.fixture".into(),
+            guided: true,
+        });
+        assert!(state.shape_guided);
+        state.apply(&NodeUiOp::SetShapeGuided {
+            node: "/a.module/halo.fixture".into(),
+            guided: false,
+        });
+        assert!(!state.shape_guided);
     }
 
     #[test]

@@ -422,6 +422,7 @@ impl FixtureBuilder {
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(self.mapping),
             strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),

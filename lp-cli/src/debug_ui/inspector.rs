@@ -221,6 +221,7 @@ fn render_visual_product_detail(
             height,
             format,
             bytes,
+            ..
         }) if *probe_product == product => {
             ui.label(format!("probe revision {}", revision.0));
             render_texture_payload_preview(

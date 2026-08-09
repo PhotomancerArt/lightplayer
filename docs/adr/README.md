@@ -173,6 +173,9 @@ holds the full context.
 | What a pinned `Fixed` means on an f32-native image (it aliases native on every shipping backend today) | `2026-08-08-float-semantics-per-target-representation` | An image exists where native is not Q32 |
 | Per-device preview representation selection in a multi-device Studio | `2026-08-08-float-semantics-per-target-representation` | Two attached devices disagree on native representation |
 | Gate the `float_mode` pin on the firmware manifest so it is not offered where one representation exists (the compile-error backstop stays regardless) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-reaches-the-device` | The manifest can report a board's representation set |
+| `declare_space` agent tool: the shader agent can stage a `render_1d` body but cannot write `ShaderDef::space`, and its prompt asserts the 2D entry unconditionally | `2026-08-09-dimensionality-authoring-surface` | Next shader-agent work; must reuse the dimensionality section's write path |
+| Fixture paste-guidedness is a heuristic (no mapping and height ≠ 1) for want of a model-level "declared" marker | `2026-08-09-dimensionality-authoring-surface` | The mapping/patching work's D15 declared fixture space lands |
+| `wire_reversed` is an interim fixture-level bit; the patching work's per-range `reversed` supersedes it, and D15 may absorb `strip_order_meaningful` entirely | `2026-08-09-dimensionality-authoring-surface` | Mapping/patching slice 1 |
 
 ## Relationship To Shared Planning
 
