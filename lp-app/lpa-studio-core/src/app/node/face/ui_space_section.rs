@@ -79,7 +79,8 @@ pub struct UiSpaceChoice {
     pub selected: bool,
 }
 
-/// One enum cell of a space section — the thing the tile picker opens on.
+/// One enum cell of a space section — one row of choice tiles, rendered
+/// inline in the section body (no popover, no dropdown).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSpaceCell {
     /// What this cell answers.

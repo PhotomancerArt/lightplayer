@@ -304,9 +304,11 @@ pub enum UiProjectionOrigin {
 /// a probe requests with, and whether it overrides an authored producer
 /// opinion.
 ///
-/// The tile picker's live tiles (P4) are exactly this with `force: true`:
-/// "show me what THIS cell would look like", regardless of what the
-/// producer declared.
+/// A forced-policy probe is exactly this with `force: true`: "show me
+/// what THIS cell would look like", regardless of what the producer
+/// declared. The section's choice tiles do NOT use it — they are
+/// schematic drawings of the transform chain (see `ProjectionGlyph`),
+/// because nothing web-side can issue an ad-hoc probe today.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UiConsumerPolicy {
     pub default_1d_to_2d: UiCellProjection,
