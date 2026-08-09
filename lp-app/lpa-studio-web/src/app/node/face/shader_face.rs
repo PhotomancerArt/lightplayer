@@ -1,16 +1,18 @@
-//! The shader card's permanent face: output hero → space → controls →
-//! agent chat.
+//! The shader card's permanent face: output hero → controls → agent chat.
 //!
 //! Top-down per the spike (perf line deliberately absent — separate run of
 //! work), recast in the flat section grammar (P2b item 1): the produced
 //! visual renders full-bleed as the `output` section, the panel controls
-//! sit directly on the card in the `controls` section, the two-sided space
-//! model's producer half is the `space` section between them (D13 — the
-//! fixture card grows its mirror), and the condensed
+//! sit directly on the card in the `controls` section, and the condensed
 //! agent chat is the `agent` section — labeled with the sparkles role icon
 //! and a plain-language subline so it reads as *an agent that edits this
 //! shader* (item 2). The code and advanced drawers render below via
-//! [`super::NodeCardDrawers`], never hiding the face.
+//! [`super::NodeCardDrawers`] — which since G1b ruling 1 also owns the
+//! producer-side `dimensionality` drawer (between `code` and `advanced`,
+//! core-owned open state): the declaration is authoring that belongs next
+//! to the code, so the face itself no longer renders the space section.
+//! The face still READS `face.space` for the header badge and the D15
+//! preview-space checkboxes.
 //!
 //! The hero carries a slim product header —
 //! [`ProductIdentity`](crate::app::node::ProductIdentity) plus the detail
@@ -44,7 +46,6 @@ use crate::base::StudioIconName;
 
 use super::node_ui_action;
 use super::preview_spaces::{PreviewSpaceToggles, SpacedProductPreview, preview_space_state};
-use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
 /// The agent section's plain-language role subline (item 2): active voice,
 /// no jargon.
@@ -73,27 +74,8 @@ pub fn ShaderFace(
     /// (stories).
     #[props(default = false)]
     output_detail_initially_open: bool,
-    /// Open this space cell's tile picker on first render (stories).
-    #[props(default = None)]
-    space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
-    /// Open the dimensionality drawer on first render (stories — the
-    /// drawer defaults collapsed, P4b).
-    #[props(default = false)]
-    space_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    // The dimensionality drawer's open state (P4b: default collapsed,
-    // below settings). Face-local like the picker's own open flag: this is
-    // presentation state, not project state. An open picker implies an
-    // open drawer — and a D1 mismatch forces one, because an error folded
-    // out of sight is an error hidden.
-    let space_mismatched = face
-        .space
-        .as_ref()
-        .is_some_and(|section| section.mismatch.is_some());
-    let mut space_open = use_signal(move || {
-        space_initially_open || space_picker_open_cell.is_some() || space_mismatched
-    });
     let preview = face.preview.clone();
     // D15's checkboxes: shown on a VISUAL hero only (they ask which
     // coordinate space to render a picture in, which is not a question a
@@ -176,27 +158,11 @@ pub fn ShaderFace(
                 }
             }
         }
-        // The declaration rides below settings as a default-collapsed
-        // drawer whose summary states it at a glance (G1 rework, P4b —
-        // "authoring, not day-to-day tuning"; the G1b decision matrix also
-        // shows the fold-into-code variant). Its rows are claimed out of
-        // the advanced drawer in core, so this is their only surface.
-        if let Some(space) = face.space.clone() {
-            NodeCardSection {
-                label: SPACE_SECTION_LABEL,
-                summary: Some(space_section_summary(&space)),
-                open: Some(space_open()),
-                on_toggle: move |()| {
-                    let open = space_open();
-                    space_open.set(!open);
-                },
-                SpaceSection {
-                    section: space,
-                    picker_open_cell: space_picker_open_cell,
-                    on_action,
-                }
-            }
-        }
+        // The dimensionality drawer no longer renders here: G1b ruling 1
+        // moved it into the drawer stack between `code` and `advanced`
+        // ([`super::NodeCardDrawers`]'s `space` slot) — its rows are still
+        // claimed out of the advanced drawer in core, so that drawer is
+        // their only surface.
         if let Some(agent) = face.agent.clone() {
             NodeCardSection {
                 label: "agent",
