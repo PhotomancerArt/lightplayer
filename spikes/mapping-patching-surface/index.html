@@ -228,45 +228,37 @@
   Click a red row/segment to flash its counterpart.
 </p>
 <div class="row">
-  <div class="ccol">
-    <h3>A — rope on the shape <span class="lean">◈ lean</span></h3>
-    <div class="panel"><div class="phead"><b>out A</b><span class="kind">patch · on presentation</span>
+  <div class="ccol wide">
+    <h3>A — fixture snakes on the shape <span class="lean">◈ + bay</span></h3>
+    <div class="panel"><div class="phead"><b>out A</b><span class="kind">patch · on presentation · one snake per fixture</span>
       <span class="sp"></span><span class="chip"><span class="dot" style="background:var(--fx-body)"></span>body</span>
       <span class="chip"><span class="dot" style="background:var(--fx-leaf)"></span>leaf</span></div>
       <div class="pbody">
         <svg id="ropeA" class="svgstage" viewBox="0 0 396 300"></svg>
         <div class="statusline" id="statusA"></div>
       </div></div>
-    <p class="why">The rope <b>is</b> the wire (D26v): direction arrows, fragment ticks, reversal and
-      overlap-red all live on the geometry you recognize. Patch where you look.</p>
+    <p class="why">Each fixture has its <b>own snake, in shader order</b> — body and leaf never share a
+      rope. Where the body's shader space jumps the physical gap (ch 21 → ch 22), the connector is
+      <b>uncolored</b>: those lamps are adjacent in shader space, not in output space — coloring the
+      jump would draw the wrong space. Bounding boxes group each fixture.</p>
   </div>
-  <div class="ccol">
-    <h3>B — the port bar</h3>
-    <div class="panel"><div class="phead"><b>out A · port 1</b><span class="kind">one continuous output run</span></div>
-      <div class="pbody">
-        <svg id="ropeBshape" class="svgstage" viewBox="0 0 396 172"></svg>
-        <div class="wirebar" id="wirebar"></div>
-        <div class="statusline" id="statusB"></div>
-      </div></div>
-    <p class="why">One <b>port</b> as a 1D bar (nomenclature flagged: universe/port/channel — "port" =
-      one continuous output run). Precise for channel math; fragments and gaps are unambiguous
-      rectangles. This bar is the row primitive the patch bay (C) stacks.</p>
-  </div>
-  <div class="ccol">
-    <h3>C — the patch bay, both sides</h3>
-    <div class="panel"><div class="phead"><b>patch bay</b><span class="kind">output-side · output → port</span></div>
+  <div class="ccol wide">
+    <h3>B — the patch bay, both sides · pixels</h3>
+    <div class="panel"><div class="phead"><b>patch bay</b><span class="kind">output-side · output → port · wire order</span></div>
       <div class="pbody" id="bayout"></div></div>
-    <div class="panel" style="margin-top:10px"><div class="phead"><b>patch bay</b><span class="kind">fixture-side · fixture → range</span></div>
+    <div class="panel" style="margin-top:10px"><div class="phead"><b>patch bay</b><span class="kind">fixture-side · fixture → range · shader order</span></div>
       <div class="pbody" id="bayfix"></div>
       <div class="statusline" id="statusC" style="padding:0 12px 10px"></div></div>
-    <p class="why">The two sides of the interface: <b>output-side</b> = every output, each <b>port</b>
-      (one continuous output run) a row of segments; <b>fixture-side</b> = each fixture's ranges and
-      where they land. Both hierarchies are real; the port bar from B is the row primitive.</p>
+    <p class="why">Same lamps, two orderings, live pixels: <b>output-side</b> rows are ports in wire
+      order (gaps dark, contested red); <b>fixture-side</b> rows are fixtures in shader order — the
+      body reads as one unbroken gradient here even though it's split on the wire. That difference IS
+      the patch.</p>
   </div>
 </div>
-<div class="leannote"><b>Lean:</b> A as the canvas surface, C as the docked bay — B's single-port bar is
-  the row primitive C is built from. (lp2014's universe-rail table was cut at this gate: "don't really
-  get it.") Overlap affordance everywhere: red on the lamps, click → counterpart, plain-language fix hint.</div>
+<div class="leannote"><b>Converged:</b> A (shape surface) and the two-sided bay are an "and", not an or —
+  the single-port bar folded into the bay as its row primitive. (lp2014's universe-rail table cut at
+  this gate: "don't really get it.") Overlap affordance everywhere: red on the lamps, click →
+  counterpart, plain-language fix hint.</div>
 
 <!-- ================================================================ -->
 <h2>3 · rope vs plane — same shape, both declarations</h2>
@@ -521,6 +513,15 @@ function wireInfo(state){
     for (let k=r.ws; k<r.ws+r.len && k<N_WIRE; k++) owners[k].push(r);
   return owners;
 }
+function fixtureWireIndex(state){   /* fixture channel → wire index, per fixture */
+  const map = { body: new Array(FIXLEN.body).fill(-1), leaf: new Array(FIXLEN.leaf).fill(-1) };
+  for (const r of STATES[state])
+    for (let i=0;i<r.len;i++){
+      const k = r.rev ? r.ws + r.len - 1 - i : r.ws + i;
+      if (k < N_WIRE) map[r.fix][r.fs + i] = k;
+    }
+  return map;
+}
 function lampColor(k, owners, t){
   const own = owners[k];
   if (own.length === 0) return { col: "#252b32", status: "gap" };
@@ -571,11 +572,35 @@ function buildRopeA(){
   svg.innerHTML = "";
   refArt(190, 150, 78, svg);
   const owners = wireInfo(patchState);
-  // rope segments between consecutive lamps
+  const fmap = fixtureWireIndex(patchState);
+  /* per-fixture bounding boxes (grouping) */
+  for (const fx of ["body","leaf"]){
+    const pos = fmap[fx].filter(k=>k>=0).map(k=>PA.all[k]);
+    if (!pos.length) continue;
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for (const p of pos){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    el("rect", { x: x0-8, y: y0-8, width: x1-x0+16, height: y1-y0+16, rx: 8, fill: "none",
+      stroke: `var(--fx-${fx})`, "stroke-width": 1, "stroke-dasharray": "5 5", opacity: .35 }, svg);
+    el("text", { x: x0-6, y: y0-12, fill: `var(--fx-${fx})`, "font-size": 8.5, opacity: .8 }, svg)
+      .textContent = fx;
+  }
+  /* one snake per fixture, in SHADER order; physically-distant shader neighbors get an
+     UNCOLORED jump (adjacent in shader space, not output space) */
   const segG = el("g", { id: "segA" }, svg);
-  for (let k=0;k<N_WIRE-1;k++){
-    el("line", { x1: PA.all[k][0], y1: PA.all[k][1], x2: PA.all[k+1][0], y2: PA.all[k+1][1],
-                 "stroke-width": 5, "stroke-linecap": "round", class: "seg", "data-k": k }, segG);
+  for (const fx of ["body","leaf"]){
+    const seq = fmap[fx];
+    for (let fc=0; fc<seq.length-1; fc++){
+      const kA = seq[fc], kB = seq[fc+1];
+      if (kA < 0 || kB < 0) continue;
+      const a = PA.all[kA], b = PA.all[kB];
+      if (Math.abs(kA-kB) === 1)
+        el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": 5,
+          "stroke-linecap": "round", class: "seg", "data-fx": fx, "data-fc": fc,
+          "data-ka": kA, "data-kb": kB }, segG);
+      else
+        el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "var(--border-strong)",
+          "stroke-width": 1.2, "stroke-dasharray": "4 5", opacity: .6 }, segG);
+    }
   }
   // fragment ticks + labels + direction arrows
   for (const r of STATES[patchState]){
@@ -600,87 +625,53 @@ function flashCounterpart(k){
   const owners = wireInfo(patchState);
   if (owners[k].length > 1){ flashRanges = owners[k]; flashUntil = performance.now()+1600; }
 }
-function buildRopeBshape(){
-  const svg = document.getElementById("ropeBshape");
-  svg.innerHTML = "";
-  const g = peachPts(190, 90, 48);
-  refArt(190, 90, 48, svg);
-  g.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 2.6, class: "lamp", "data-k": k }, svg));
-  svg.dataset.mini = "1";
-}
-function buildWirebar(){
-  const bar = document.getElementById("wirebar");
-  bar.innerHTML = "";
-  const W = bar.clientWidth || 392, px = c => 6 + c * (W-12) / 60; // show 0..60 of u0
-  const t0 = document.createElement("div"); t0.className = "utick"; t0.style.left = px(0)+"px";
-  t0.innerHTML = "<span>u0</span>"; bar.appendChild(t0);
-  const ranges = STATES[patchState];
-  const colors = { body: "var(--fx-body)", leaf: "var(--fx-leaf)" };
-  for (const r of ranges){
-    const d = document.createElement("div");
-    d.className = "blk" + (r.rev ? " rev" : "");
-    d.style.left = px(r.ws)+"px"; d.style.width = (px(r.ws+r.len)-px(r.ws))+"px";
-    d.style.background = colors[r.fix];
-    d.innerHTML = `<span class="lab">${r.fix} ch${r.ws}–${r.ws+r.len-1}</span>`;
-    bar.appendChild(d);
-  }
-  // clash zones
-  const owners = wireInfo(patchState);
-  let z0 = -1;
-  for (let k=0;k<=N_WIRE;k++){
-    const c = k<N_WIRE && owners[k].length>1;
-    if (c && z0<0) z0=k;
-    if (!c && z0>=0){
-      const d = document.createElement("div"); d.className = "clashzone";
-      d.style.left = px(z0)+"px"; d.style.width = (px(k)-px(z0))+"px";
-      bar.appendChild(d); z0=-1;
-    }
-  }
-}
-function miniBar(ranges, total, extraClash){
-  const colors = { body: "var(--fx-body)", leaf: "var(--fx-leaf)", matrix: "var(--fx-matrix)", strip: "var(--fx-strip)" };
-  const px = c => (c/total*100).toFixed(2) + "%";
-  let html = `<div class="wirebar" style="height:26px; margin:2px 0 6px">`;
-  for (const r of ranges)
-    html += `<div class="blk${r.rev?" rev":""}" style="left:${px(r.ws)}; width:${px(r.len)}; top:5px; height:14px; background:${colors[r.fix]}"></div>`;
-  for (const z of extraClash||[])
-    html += `<div class="clashzone" style="left:${px(z[0])}; width:${px(z[1]-z[0])}; top:2px; height:20px"></div>`;
-  return html + `</div>`;
-}
+/* the patch bay: live PIXEL rows. Output-side = wire order; fixture-side = shader order. */
 function buildPatchBay(){
-  const owners = wireInfo(patchState);
-  const zones = [];
-  let z0 = -1;
-  for (let k=0;k<=N_WIRE;k++){
-    const c = k<N_WIRE && owners[k].length>1;
-    if (c && z0<0) z0=k;
-    if (!c && z0>=0){ zones.push([z0,k]); z0=-1; }
-  }
-  const lab = t => `<div style="font:9.5px var(--mono); color:var(--subtle); margin-top:6px">${t}</div>`;
-  /* output-side: output → port rows (out A live from state; out B static mock = the wider project) */
+  const st = STATES[patchState];
+  const row = (id, slots, label, chips) =>
+    `<div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:6px">
+       <span style="font:9.5px var(--mono); color:var(--subtle)">${label}</span>
+       ${chips ? `<span style="font:9px var(--mono); color:var(--dim)">${chips}</span>` : ""}</div>
+     <canvas id="${id}" width="${slots}" height="1" style="width:100%; height:13px;
+       image-rendering:pixelated; border-radius:2px; border:1px solid var(--border-muted); display:block"></canvas>`;
   document.getElementById("bayout").innerHTML =
     `<div style="font-size:11px; color:var(--muted); font-weight:700">out A</div>` +
-    lab("port 1 · 56/170") + miniBar(STATES[patchState], 60, zones) +
+    row("bay-a1", 60, "port 1 · 56/170 · wire order") +
     `<div style="font-size:11px; color:var(--muted); font-weight:700; margin-top:8px">out B</div>` +
-    lab("port 1 · 60/170") + miniBar([{fix:"matrix", ws:0, len:60}], 60) +
-    lab("port 2 · 24/170") + miniBar([{fix:"strip", ws:0, len:24}], 60);
-  /* fixture-side: fixture → ranges and where they land */
-  const dest = r => `A·p1 ch${r.ws}${r.rev?" ◀":" ▶"}`;
-  const clashy = r => zones.some(z => r.ws < z[1] && r.ws+r.len > z[0]);
-  const row = (fix, ranges) =>
-    `<div style="margin:4px 0"><span class="chip"><span class="dot" style="background:var(--fx-${fix})"></span>${fix}</span> ` +
-    ranges.map(r => `<span class="chip${clashy(r)?" err":""}" style="margin-left:4px">${r.fs}–${r.fs+r.len-1} → ${dest(r)}</span>`).join("") + `</div>`;
-  const st = STATES[patchState];
+    row("bay-b1", 60, "port 1 · 60/170") +
+    row("bay-b2", 60, "port 2 · 24/170");
+  const dest = r => `${r.fs}–${r.fs+r.len-1}→A·p1 ch${r.ws}${r.rev?"◀":"▶"}`;
   document.getElementById("bayfix").innerHTML =
-    row("body", st.filter(r=>r.fix==="body")) + row("leaf", st.filter(r=>r.fix==="leaf")) +
-    `<div style="margin:4px 0; opacity:.55"><span class="chip"><span class="dot" style="background:var(--fx-matrix)"></span>matrix</span> <span class="chip" style="margin-left:4px">0–59 → B·p1 ch0 ▶</span></div>`;
+    row("bay-fbody", FIXLEN.body, "body · shader order", st.filter(r=>r.fix==="body").map(dest).join(" · ")) +
+    row("bay-fleaf", FIXLEN.leaf, "leaf · shader order", st.filter(r=>r.fix==="leaf").map(dest).join(" · ")) +
+    row("bay-fmatrix", 60, "matrix · shader order", "0–59→B·p1 ch0▶");
+}
+function bayFrame(t){
+  const owners = wireInfo(patchState), fmap = fixtureWireIndex(patchState);
+  const draw = (id, n, fn) => {
+    const c = document.getElementById(id); if (!c) return;
+    const g = c.getContext("2d");
+    for (let i=0;i<c.width;i++){ g.fillStyle = i<n ? fn(i) : "#14181d"; g.fillRect(i,0,1,1); }
+  };
+  draw("bay-a1", N_WIRE, k => lampColor(k, owners, t).col);
+  draw("bay-b1", 60, i => plasmaCol(i/59*3, .5, t));
+  draw("bay-b2", 24, i => auroraCol(i/23, t));
+  draw("bay-fbody", FIXLEN.body, fc => {
+    const k = fmap.body[fc];
+    return (k >= 0 && owners[k].length > 1) ? "#ef5350" : bodyCol(fc/(FIXLEN.body-1), t);
+  });
+  draw("bay-fleaf", FIXLEN.leaf, fc => {
+    const k = fmap.leaf[fc];
+    return (k >= 0 && owners[k].length > 1) ? "#ef5350" : leafCol(fc/(FIXLEN.leaf-1), t);
+  });
+  draw("bay-fmatrix", 60, i => plasmaCol(i/59*3, .5, t));
 }
 function setState(s){
   patchState = s;
   document.querySelectorAll(".stbtn").forEach(b=>b.classList.toggle("on", b.dataset.st===s));
-  buildRopeA(); buildWirebar(); buildPatchBay();
+  buildRopeA(); buildPatchBay();
   const [cls, txt] = STATUS_TEXT[s];
-  for (const id of ["statusA","statusB","statusC"]){
+  for (const id of ["statusA","statusC"]){
     const n = document.getElementById(id);
     n.className = "statusline " + cls; n.textContent = txt;
   }
@@ -1146,17 +1137,14 @@ function frame(now){
     n.setAttribute("r", c.status==="clash" ? 4.6+Math.sin(t*5)*0.8 : 3.4);
   });
   document.querySelectorAll("#ropeA .seg").forEach(n=>{
-    const k = +n.getAttribute("data-k");
-    const a = lampColor(k, owners, t), b = lampColor(k+1, owners, t);
-    n.setAttribute("stroke", a.status==="clash"||b.status==="clash" ? "#a03c3e"
-      : a.status==="gap"||b.status==="gap" ? "#20262c" : a.col);
-    n.setAttribute("opacity", a.status==="gap" ? .5 : .8);
+    const fx = n.getAttribute("data-fx"), fc = +n.getAttribute("data-fc");
+    const clash = owners[+n.getAttribute("data-ka")].length > 1
+               || owners[+n.getAttribute("data-kb")].length > 1;
+    const u = (fc+.5)/(FIXLEN[fx]-1);
+    n.setAttribute("stroke", clash ? "#a03c3e" : (fx === "body" ? bodyCol(u,t) : leafCol(u,t)));
+    n.setAttribute("opacity", .8);
   });
-  // §2 concept B mini shape
-  document.querySelectorAll('#ropeBshape .lamp').forEach(n=>{
-    const k = +n.getAttribute("data-k");
-    n.setAttribute("fill", lampColor(k, owners, t).col);
-  });
+  bayFrame(t);
 
   // §3 — 2×2: same shape, both declarations
   document.querySelectorAll(".n3cell").forEach(n=>{
@@ -1207,11 +1195,10 @@ function frame(now){
 }
 
 /* ---------- boot ---------- */
-buildRopeA(); buildRopeBshape(); buildWirebar(); buildPatchBay();
+buildRopeA(); buildPatchBay();
 setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
 buildN3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
 requestAnimationFrame(frame);
-window.addEventListener("resize", buildWirebar);
 </script>
 </body>
 </html>
