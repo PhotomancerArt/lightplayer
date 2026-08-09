@@ -203,6 +203,7 @@
     <button data-st="noreverse" class="stbtn" onclick="setState('noreverse')">patched, no reverse</button>
     <button data-st="patched" class="stbtn on" onclick="setState('patched')">patched ✓</button>
     <button data-st="overlap" class="stbtn" onclick="setState('overlap')">overlap error</button>
+    <button id="prodbtn" onclick="toggleProd()">2D products</button>
   </span>
   <span class="grp"><b>§3 visual</b>
     <button id="visbtn" class="on" onclick="toggleVis()">show visual product</button>
@@ -254,7 +255,10 @@
     <p class="why">Each fixture has its <b>own snake, in shader order</b> — body and leaf never share a
       rope. Where the body's shader space jumps the physical gap (ch 21 → ch 22), the connector is
       <b>uncolored</b>: those lamps are adjacent in shader space, not in output space — coloring the
-      jump would draw the wrong space. Bounding boxes group each fixture.</p>
+      jump would draw the wrong space. Bounding boxes group each fixture.
+      <b>2D products</b> (toggle in the strip): both fixtures flip to their own 2D visual — pink body,
+      green leaves, planes instead of snakes — and <b>the patch and its cells do not change</b> (D19v:
+      patching is dimension-agnostic).</p>
   </div>
   <div class="ccol wide">
     <h3>B — the patch bay, both sides · pixels</h3>
@@ -549,6 +553,42 @@ function lampColor(k, owners, t){
   const u = fc / (FIXLEN[r.fix]-1);
   return { col: r.fix === "body" ? bodyCol(u,t) : leafCol(u,t), status: "ok", fix: r.fix };
 }
+/* §2 product mode: same patch, 1D or 2D products per fixture (D19v) */
+let prodMode = "1d", LAMPUV = {};
+function body2dCol(u,v,t){   /* peachy pink 2D visual */
+  const p = (Math.sin(u*4+t*.9) + Math.sin(v*5-t*1.2) + Math.sin((u+v)*3+t*.5))/3*.5+.5;
+  return `rgb(${Math.round(210+45*p)},${Math.round(105+70*(1-Math.abs(p-.5)*2))},${Math.round(120+70*(1-p))})`;
+}
+function leaf2dCol(u,v,t){   /* green 2D visual */
+  const p = (Math.sin(u*5-t) + Math.sin(v*4+t*.8))/2*.5+.5;
+  return `rgb(${Math.round(40+70*p)},${Math.round(135+95*p)},${Math.round(80+60*(1-p))})`;
+}
+function computeLampUV(state){
+  const fmap = fixtureWireIndex(state), out = {};
+  for (const fx of ["body","leaf"]){
+    const ks = fmap[fx].filter(k=>k>=0);
+    if (!ks.length) continue;
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for (const k of ks){ const p=PA.all[k];
+      x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    out["bbox_"+fx] = [x0,y0,x1,y1];
+    for (const k of ks){ const p=PA.all[k];
+      out[k] = { fx, u:(p[0]-x0)/((x1-x0)||1), v:(p[1]-y0)/((y1-y0)||1) }; }
+  }
+  return out;
+}
+function colorForLamp(k, owners, t){
+  const c = lampColor(k, owners, t);
+  if (c.status !== "ok" || prodMode === "1d") return c;
+  const q = LAMPUV[k];
+  if (!q) return c;
+  return { col: q.fx === "body" ? body2dCol(q.u,q.v,t) : leaf2dCol(q.u,q.v,t), status: "ok", fix: q.fx };
+}
+function toggleProd(){
+  prodMode = prodMode === "1d" ? "2d" : "1d";
+  document.getElementById("prodbtn").classList.toggle("on", prodMode === "2d");
+  buildRopeA(); buildPatchBay();
+}
 const STATUS_TEXT = {
   auto:      ["", "auto-flow: body [0,44) then leaf [44,56) — fixture order is wire order. Wrong for this build: the leaf pattern lands on the lower left leg."],
   patched:   ["ok", "patched: body → ch 0–21 ▲ and ch 34–55 ▼ rev · leaf → ch 22–33. Two body fragments, no gaps."],
@@ -599,22 +639,41 @@ function buildRopeA(){
     el("text", { x: x0-6, y: y0-12, fill: `var(--fx-${fx})`, "font-size": 8.5, opacity: .8 }, svg)
       .textContent = fx;
   }
-  /* one snake per fixture, in SHADER order; physically-distant shader neighbors get an
-     UNCOLORED jump (adjacent in shader space, not output space) */
-  const segG = el("g", { id: "segA" }, svg);
-  for (const fx of ["body","leaf"]){
-    const seq = fmap[fx];
-    for (let fc=0; fc<seq.length-1; fc++){
-      const kA = seq[fc], kB = seq[fc+1];
-      if (kA < 0 || kB < 0) continue;
-      const a = PA.all[kA], b = PA.all[kB];
-      if (Math.abs(kA-kB) === 1)
-        el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": 5,
-          "stroke-linecap": "round", class: "seg", "data-fx": fx, "data-fc": fc,
-          "data-ka": kA, "data-kb": kB }, segG);
-      else
-        el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "var(--border-strong)",
-          "stroke-width": 1.2, "stroke-dasharray": "4 5", opacity: .6 }, segG);
+  LAMPUV = computeLampUV(patchState);
+  if (prodMode === "1d"){
+    /* one snake per fixture, in SHADER order; physically-distant shader neighbors get an
+       UNCOLORED jump (adjacent in shader space, not output space) */
+    const segG = el("g", { id: "segA" }, svg);
+    for (const fx of ["body","leaf"]){
+      const seq = fmap[fx];
+      for (let fc=0; fc<seq.length-1; fc++){
+        const kA = seq[fc], kB = seq[fc+1];
+        if (kA < 0 || kB < 0) continue;
+        const a = PA.all[kA], b = PA.all[kB];
+        if (Math.abs(kA-kB) === 1)
+          el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": 5,
+            "stroke-linecap": "round", class: "seg", "data-fx": fx, "data-fc": fc,
+            "data-ka": kA, "data-kb": kB }, segG);
+        else
+          el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "var(--border-strong)",
+            "stroke-width": 1.2, "stroke-dasharray": "4 5", opacity: .6 }, segG);
+      }
+    }
+  } else {
+    /* 2D products: each fixture shows its own plane over its bbox — pink body, green leaves.
+       No snakes: 2D input space has no 1D adjacency to draw. Patch cells unchanged. */
+    for (const fx of ["body","leaf"]){
+      const bb = LAMPUV["bbox_"+fx];
+      if (!bb) continue;
+      const [x0,y0,x1,y1] = [bb[0]-6, bb[1]-6, bb[2]+6, bb[3]+6];
+      const cols = 12, rows = Math.max(4, Math.round(12*(y1-y0)/((x1-x0)||1)));
+      const cw = (x1-x0)/cols, chh = (y1-y0)/rows;
+      const pg = el("g", { opacity: .8 }, svg);
+      for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+        el("rect", { x: x0+i*cw, y: y0+j*chh, width: cw+.5, height: chh+.5, class: "a2cell",
+                     "data-fx": fx, "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, pg);
+      el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
+                   stroke: `var(--fx-${fx})`, "stroke-width": 1, opacity: .5 }, svg);
     }
   }
   // fragment ticks + labels + direction arrows
@@ -695,12 +754,16 @@ function bayFrame(t){
     const r = BAYCELLS[cid]; if (!r) return;
     for (let j=0;j<r.len;j++){
       let col;
-      if (side === "o") col = lampColor(r.ws+j, owners, t).col;
+      if (side === "o") col = colorForLamp(r.ws+j, owners, t).col;
       else {
         const k = r.rev ? r.ws + r.len-1-j : r.ws + j;
-        const fc = r.fs + j, u = fc/(FIXLEN[r.fix]-1);
-        col = (k < N_WIRE && owners[k].length > 1) ? "#ef5350"
-            : (r.fix === "body" ? bodyCol(u,t) : leafCol(u,t));
+        if (k < N_WIRE && owners[k].length > 1) col = "#ef5350";
+        else if (prodMode === "2d" && LAMPUV[k])
+          col = (r.fix === "body" ? body2dCol : leaf2dCol)(LAMPUV[k].u, LAMPUV[k].v, t);
+        else {
+          const u = (r.fs + j)/(FIXLEN[r.fix]-1);
+          col = r.fix === "body" ? bodyCol(u,t) : leafCol(u,t);
+        }
       }
       g.fillStyle = col; g.fillRect(j,0,1,1);
     }
@@ -1168,9 +1231,14 @@ function frame(now){
   });
 
   // §2 concept A lamps + segments
+  document.querySelectorAll("#ropeA .a2cell").forEach(n=>{
+    const fx = n.getAttribute("data-fx");
+    n.setAttribute("fill", (fx === "body" ? body2dCol : leaf2dCol)(
+      +n.getAttribute("data-u"), +n.getAttribute("data-v"), t));
+  });
   document.querySelectorAll("#ropeA .lamp").forEach(n=>{
     const k = +n.getAttribute("data-k");
-    const c = lampColor(k, owners, t);
+    const c = colorForLamp(k, owners, t);
     let col = c.col;
     if (flash && flashRanges.some(r => k>=r.ws && k<r.ws+r.len)) col = "#fffaf0";
     n.setAttribute("fill", col);
@@ -1237,6 +1305,7 @@ function frame(now){
 /* ---------- boot ---------- */
 buildRopeA(); buildPatchBay();
 setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
+if (location.hash.includes("2d")) toggleProd();
 buildN3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
 requestAnimationFrame(frame);
 </script>
