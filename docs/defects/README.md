@@ -237,6 +237,18 @@ grow a second one. Worth watching: if a third lands, the argument stops being
 "register the target" and becomes "the frontend axis belongs in the default
 matrix".
 
+**2026-08-09 puts `backend-contract-divergence` at five, and the two open
+ones rhyme.** `q32-native-vs-wasmtime-last-bit` and
+`gpu-render-pass-floors-the-fragment-center` are both *tier-seam
+convention* divergences whose guard is a tolerance rather than a pin — a
+last-bit bound in one, a mean-divergence bound in the other — and in both
+the tolerance was calibrated while the divergence was present, so the
+suite enforces "no worse than the defect" rather than the convention
+itself. The pattern to watch: wherever two tiers implement one rendering
+contract, the exact conventions (coordinate handed to the entry, rounding
+of the final channel value) deserve identity tests with known expected
+values; statistical diffs are for the arithmetic in between.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
@@ -267,6 +279,7 @@ matrix".
 | config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
 | config-masked-defect | 2026-07-31 | [opt-z-missed-rmt-drain-deadline](2026-07-31-opt-z-missed-rmt-drain-deadline.md) | fixed | workspace release profile / fw-esp32s3 |
+| backend-contract-divergence | 2026-08-09 | [gpu-render-pass-floors-the-fragment-center](2026-08-09-gpu-render-pass-floors-the-fragment-center.md) | **open** | lp-gfx-wgpu assembly (generated fragment main) |
 | backend-contract-divergence | 2026-07-30 | [q32-native-vs-wasmtime-last-bit](2026-07-30-q32-native-vs-wasmtime-last-bit.md) | **open** | lpvm-native / lpvm-wasm (Q32 execution) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
