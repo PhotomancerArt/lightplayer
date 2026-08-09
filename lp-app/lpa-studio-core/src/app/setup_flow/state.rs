@@ -20,6 +20,25 @@ pub enum ConnectHint {
     NoPortsSeen,
     /// The port went away mid-flow.
     Disconnected,
+    /// A previously-authorized port was adopted (D7) and its connect came
+    /// back empty-handed. Any hint other than `None` also means the next
+    /// attempt goes through a picker rather than adopting silently again —
+    /// a failed adoption is exactly what makes the grant ambiguous.
+    GrantConnectFailed,
+}
+
+/// One serial port this origin was already granted (D7): what the in-app
+/// picker renders, and everything `getInfo()` can honestly say about it.
+/// Two identical bridge chips produce two identical labels — the picker
+/// says so rather than pretending to tell them apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupGrantedPort {
+    /// The provider endpoint minted for this grant, as
+    /// [`LinkEndpointId::as_str`](lpa_link::LinkEndpointId) — a string so
+    /// gestures stay `Eq` and components stay provider-blind.
+    pub endpoint_id: String,
+    /// The provider's label ("Serial device (1a86:7523)").
+    pub label: String,
 }
 
 /// How a flow ended.
@@ -103,14 +122,24 @@ pub enum SetupState {
         /// turns out to be compatible.
         chosen: Option<String>,
     },
+    /// A port is being asked for. `grants` empty = the browser's own
+    /// chooser is up (or the grant sweep is deciding, a beat earlier);
+    /// non-empty = the D7 in-app picker of already-granted ports, with
+    /// the chooser demoted to its "Another port…" row.
     PortPicking {
         preseeded_board: Option<String>,
+        grants: Vec<SetupGrantedPort>,
     },
     /// The chooser is done and the port is being opened, reset, and waited
     /// on. Its own state because it is the SEVERAL SECONDS the wizard used
     /// to spend claiming the browser was still asking (bench, 2026-08-08).
+    ///
+    /// `via_grant` names the previously-authorized port this connect
+    /// adopted (D7) — `Some` makes the card say which port, visibly and
+    /// reversibly ("Not this one?"), instead of adopting in silence.
     Connecting {
         preseeded_board: Option<String>,
+        via_grant: Option<String>,
     },
     Probing {
         preseeded_board: Option<String>,
@@ -401,9 +430,12 @@ mod tests {
         );
         assert!(
             !SetupState::PortPicking {
-                preseeded_board: None
+                preseeded_board: None,
+                grants: Vec::new(),
             }
-            .holds_port()
+            .holds_port(),
+            "no port is held while asking — the in-app grant list included: \
+             enumerating grants opens nothing"
         );
         assert!(
             SetupState::Probing {

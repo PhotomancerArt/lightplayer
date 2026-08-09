@@ -224,17 +224,19 @@ fn wizard_body(wizard: &UiSetupWizard, on_action: EventHandler<UiAction>) -> Ele
     match &wizard.state {
         SetupState::ConnectIntro { hint } => connect_intro(*hint, on_action),
         SetupState::BoardFirst { chosen } => board_first(chosen.clone(), on_action),
-        SetupState::PortPicking { .. } => spinner(
+        SetupState::PortPicking { grants, .. } if grants.is_empty() => spinner(
             "The browser is asking which port…",
             "Pick your board's port in the chooser.",
         ),
+        // The D7 in-app picker: several already-authorized ports, so
+        // never guess — the user (or a driving agent) picks a row, and
+        // the browser's chooser is demoted to the last one.
+        SetupState::PortPicking { grants, .. } => granted_port_list(grants.clone(), on_action),
         // From the port grant on, the link has things to SAY — so these
         // two wait with the terminal open, like every other operation.
-        SetupState::Connecting { .. } => working(
-            "Connecting to the board…",
-            "Opening the port, resetting, waiting for it to boot.",
-            &wizard.console_tail,
-        ),
+        SetupState::Connecting { via_grant, .. } => {
+            connecting(via_grant.clone(), &wizard.console_tail, on_action)
+        }
         SetupState::Probing { .. } => working(
             "Talking to the board…",
             "Reading the chip, and what is already on it.",
@@ -282,6 +284,12 @@ fn connect_intro(hint: ConnectHint, on_action: EventHandler<UiAction>) -> Elemen
         ConnectHint::Disconnected => Some((
             true,
             "The board disconnected. Plug it back in, then try again.".to_string(),
+        )),
+        ConnectHint::GrantConnectFailed => Some((
+            true,
+            "Couldn't connect through the port you'd authorized before. Try again to pick \
+             the port yourself — or replug the board first."
+                .to_string(),
         )),
     };
     rsx! {
@@ -723,6 +731,95 @@ fn recognition_line(wizard: &UiSetupWizard) -> Element {
     };
     rsx! {
         p { class: "tw:m-0 tw:text-xs tw:text-heading", "You know this board — it was \"{name}\"." }
+    }
+}
+
+/// PORT_PICKING with grants (D7): the in-app picker of already-authorized
+/// ports. Every row is a deliberate, synthetically-clickable choice; the
+/// browser's own chooser is the honest last row. `getInfo()` gives only
+/// VID:PID, so identical bridge chips get identical labels — the note
+/// says so instead of pretending to tell them apart.
+fn granted_port_list(
+    grants: Vec<lpa_studio_core::SetupGrantedPort>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let twins = {
+        let mut labels: Vec<&str> = grants.iter().map(|port| port.label.as_str()).collect();
+        labels.sort_unstable();
+        labels.windows(2).any(|pair| pair[0] == pair[1])
+    };
+    rsx! {
+        p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+            "Pick your board's port"
+        }
+        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-subtle-foreground",
+            "These ports are already authorized for Studio — picking one connects right away."
+        }
+        div { class: "tw:grid tw:gap-1.5",
+            for port in grants.iter().cloned() {
+                button {
+                    class: "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border-strong tw:bg-terminal tw:px-3 tw:py-2 tw:text-left tw:text-sm tw:font-semibold tw:text-strong-foreground tw:hover:border-accent",
+                    r#type: "button",
+                    onclick: move |_| {
+                        on_action
+                            .call(
+                                gesture(SetupGesture::GrantChosen {
+                                    endpoint_id: port.endpoint_id.clone(),
+                                }),
+                            );
+                    },
+                    span { class: "tw:font-mono tw:text-[0.7rem] tw:text-[var(--studio-status-good-text)]",
+                        "▸"
+                    }
+                    "{port.label}"
+                }
+            }
+        }
+        if twins {
+            p { class: "tw:m-0 tw:text-[0.7rem] tw:text-dim-foreground",
+                "Some of these are the same chip on different cables — they are identical \
+                 until connected. Pick one; \"Not this one?\" is a click away."
+            }
+        }
+        button {
+            class: secondary_cta_class(),
+            r#type: "button",
+            onclick: move |_| on_action.call(gesture(SetupGesture::PickDifferentPort)),
+            "Another port… (browser chooser)"
+        }
+    }
+}
+
+/// CONNECTING: the wait the link narrates — and, on a grant-adopted
+/// connect (D7), the visible-and-reversible line naming WHICH port was
+/// adopted, with the way back to the browser's chooser.
+fn connecting(
+    via_grant: Option<String>,
+    tail: &[UiLogEntry],
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        if let Some(label) = via_grant {
+            div { class: "tw:grid tw:gap-1 tw:rounded-lg tw:border tw:border-border tw:bg-surface-muted tw:p-2.5",
+                span { class: "tw:text-xs tw:text-subtle-foreground",
+                    "Using your previously-authorized port — "
+                    span { class: "tw:font-mono tw:font-semibold tw:text-strong-foreground",
+                        "{label}"
+                    }
+                }
+                button {
+                    class: "tw:cursor-pointer tw:justify-self-start tw:border-0 tw:bg-transparent tw:p-0 tw:text-[0.7rem] tw:font-bold tw:text-heading tw:hover:text-strong-foreground",
+                    r#type: "button",
+                    onclick: move |_| on_action.call(gesture(SetupGesture::PickDifferentPort)),
+                    "Not this one? Pick a different port"
+                }
+            }
+        }
+        {working(
+            "Connecting to the board…",
+            "Opening the port, resetting, waiting for it to boot.",
+            tail,
+        )}
     }
 }
 
