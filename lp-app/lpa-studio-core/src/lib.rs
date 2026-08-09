@@ -68,9 +68,9 @@ pub use app::node::{
     UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind,
     UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
     UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind, UiSpaceCell, UiSpaceCellRole,
-    UiSpaceChoice, UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection,
-    UiSpaceSide, UiTimebaseState, UiVisualProductSpace, UiVisualSpace, UiWireStatus,
-    phasor_rate_display,
+    UiSpaceChoice, UiSpaceDirection, UiSpaceDirectionDispatch, UiSpaceMismatch, UiSpaceSection,
+    UiSpaceSide, UiStripOrderRow, UiTimebaseState, UiVisualProductSpace, UiVisualSpace,
+    UiWireStatus, phasor_rate_display,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};

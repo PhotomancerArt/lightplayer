@@ -598,6 +598,7 @@ fn space_cell(
         address: Some(story_slot_address(path)),
         state: UiSlotFieldState::editable(),
         direction: None,
+        strip_order: None,
     }
 }
 
@@ -622,37 +623,62 @@ pub(crate) fn shader_space_section() -> lpa_studio_core::UiSpaceSection {
             "Default",
             &[("Default", "default", None)],
         )],
-        flags: Vec::new(),
         mismatch: None,
     }
 }
 
-/// The consumer mirror in its default state: the ONE dropdown (P4b)
-/// selecting "follow the source", plus the strip-order declaration (D3).
+/// The consumer mirror in its default state (strip-order unification):
+/// the ONE dropdown selecting "along the wire" — the default true bit,
+/// the scarf case — with the wire's forward/reversed direction row under
+/// it.
 pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
-    use lpa_studio_core::{
-        UiSpaceCellRole, UiSpaceFlag, UiSpaceFlagRole, UiSpaceSection, UiSpaceSide,
-    };
+    use lpa_studio_core::{UiSpaceCellRole, UiSpaceSection, UiSpaceSide};
+    let mut primary = space_cell(
+        UiSpaceCellRole::Primary,
+        "Show 1D sources by",
+        "consume",
+        "AlongWire",
+        CONSUMER_DROPDOWN_CHOICES,
+    );
+    primary.strip_order = Some(consumer_strip_order_row(true));
+    primary.direction = Some(wire_direction_row(false));
     UiSpaceSection {
         side: UiSpaceSide::Consumer,
-        primary: space_cell(
-            UiSpaceCellRole::Primary,
-            "Show 1D sources by",
-            "consume",
-            "Auto",
-            CONSUMER_DROPDOWN_CHOICES,
-        ),
+        primary,
         declared_space: None,
         cells: Vec::new(),
-        flags: vec![UiSpaceFlag {
-            role: UiSpaceFlagRole::StripOrderMeaningful,
-            label: "1D patterns follow the wire".to_string(),
-            value: true,
-            address: Some(story_slot_address("strip_order_meaningful")),
-            state: UiSlotFieldState::editable(),
-        }],
         mismatch: None,
     }
+}
+
+/// The `strip_order_meaningful` row the consumer cell carries — every
+/// dropdown pick includes its `SetValue`.
+fn consumer_strip_order_row(value: bool) -> lpa_studio_core::UiStripOrderRow {
+    lpa_studio_core::UiStripOrderRow {
+        value,
+        address: Some(story_slot_address("strip_order_meaningful")),
+        state: UiSlotFieldState::editable(),
+    }
+}
+
+/// The along-the-wire direction row (the wire-reversed addendum): a bool
+/// row presented as forward/reversed segments.
+fn wire_direction_row(reversed: bool) -> lpa_studio_core::UiSpaceDirection {
+    lpa_studio_core::UiSpaceDirection {
+        active: if reversed { "Reversed" } else { "Forward" }.to_string(),
+        variants: vec!["Forward".to_string(), "Reversed".to_string()],
+        address: Some(story_slot_address("wire_reversed")),
+        state: UiSlotFieldState::editable(),
+        dispatch: lpa_studio_core::UiSpaceDirectionDispatch::ReversedBool,
+    }
+}
+
+/// The same consumer section with the wire REVERSED — the direction row's
+/// second segment active, the summary wearing the back arrow.
+pub(crate) fn fixture_space_section_wire_reversed() -> lpa_studio_core::UiSpaceSection {
+    let mut section = fixture_space_section();
+    section.primary.direction = Some(wire_direction_row(true));
+    section
 }
 
 /// Every projection a 1D producer can answer 2D consumers with — the
@@ -685,9 +711,12 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
     ),
 ];
 
-/// The consumer's ONE dropdown (P4b): `Auto` ("follow the source") plus
-/// the four projections an explicit pick would force.
+/// The consumer's ONE dropdown (P4b + the strip-order unification):
+/// `along the wire` (the strip-order bit as the first choice) and `Auto`
+/// ("follow the source") plus the four projections an explicit pick
+/// would force.
 const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
+    ("AlongWire", "along the wire", None),
     ("Auto", "follow the source", None),
     (
         "Extrude",
@@ -737,7 +766,6 @@ pub(crate) fn shader_space_section_one_d(answer: &str) -> lpa_studio_core::UiSpa
             answer,
             PRODUCER_IN_2D_CHOICES,
         )],
-        flags: Vec::new(),
         mismatch: None,
     }
 }
@@ -766,6 +794,7 @@ pub(crate) fn shader_space_section_one_d_directed(
                 "space.OneD.in_2d.{answer}.direction"
             ))),
             state: UiSlotFieldState::editable(),
+            dispatch: lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant,
         });
     }
     section
@@ -799,6 +828,9 @@ pub(crate) fn fixture_space_section_override(active: &str) -> lpa_studio_core::U
         active,
         CONSUMER_DROPDOWN_CHOICES,
     );
+    // Anything but along-the-wire means the bit is false; the row still
+    // rides the cell so every pick can write it.
+    section.primary.strip_order = Some(consumer_strip_order_row(false));
     section
 }
 
@@ -933,6 +965,15 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
 pub(crate) fn fixture_face_override(active: &str) -> UiFixtureFace {
     UiFixtureFace {
         space: Some(fixture_space_section_override(active)),
+        ..fixture_face()
+    }
+}
+
+/// A fixture face wearing an arbitrary space section (the along-the-wire
+/// stories hand one in directly).
+pub(crate) fn fixture_face_with_space(section: lpa_studio_core::UiSpaceSection) -> UiFixtureFace {
+    UiFixtureFace {
+        space: Some(section),
         ..fixture_face()
     }
 }

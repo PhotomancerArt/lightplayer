@@ -16,11 +16,12 @@
 //! section IS those rows' surface now, so leaving them in the drawer would
 //! be two controls writing one slot.
 //!
-//! **No parallel write path.** Every cell and flag carries the slot
-//! address its gesture targets, and nothing else: a variant choice is the
+//! **No parallel write path.** Every cell carries the slot addresses its
+//! gestures target, and nothing else: a variant choice is the
 //! `EnsurePresent <enum>.<Variant>` the generic `EnumVariantField` already
-//! dispatches, a flag is the `SetValue` a bool row already dispatches.
-//! The tile picker (P4) is a different PRESENTATION of the same op.
+//! dispatches, and the consumer dropdown's strip-order writes are the
+//! `SetValue` the bool row already dispatches. The tile picker (P4) is a
+//! different PRESENTATION of the same ops.
 
 use crate::{ProjectSlotAddress, UiCellProjection, UiSlotFieldState, UiVisualSpace};
 
@@ -53,13 +54,6 @@ pub enum UiSpaceCellRole {
     /// A 2D producer's answer for 1D consumers (`space.TwoD.in_1d`) —
     /// centre scanline only today, so a single-choice read-only cell.
     ProducerIn1d,
-}
-
-/// A boolean row a space section owns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UiSpaceFlagRole {
-    /// The fixture's "does strip order mean something?" bit (vision D3).
-    StripOrderMeaningful,
 }
 
 /// One selectable answer inside a [`UiSpaceCell`].
@@ -113,29 +107,70 @@ pub struct UiSpaceCell {
     /// consumer is still in `Auto` (no payload rows in the tree yet —
     /// the row appears once a directional shape is picked).
     pub direction: Option<UiSpaceDirection>,
+    /// The fixture's `strip_order_meaningful` bool row, carried by the
+    /// consumer PRIMARY cell (strip-order unification ruling, post-G1b):
+    /// the bit is no longer its own checkbox — "along the wire" is the
+    /// dropdown's first choice, and every consumer pick includes a
+    /// `SetValue` here (`true` for along-the-wire, `false` for
+    /// follow/projection picks, because a true bit GATES the projection —
+    /// `select_request_space` never reaches it). `None` on producer cells
+    /// and when the backing row is absent (the along-the-wire choice is
+    /// then not offered).
+    pub strip_order: Option<UiStripOrderRow>,
+}
+
+/// The consumer section's `strip_order_meaningful` row, absorbed into the
+/// one dropdown (see [`UiSpaceCell::strip_order`]). Same shape a bool slot
+/// row projects: value + address + state, nothing invented.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiStripOrderRow {
+    /// Current value of the bit.
+    pub value: bool,
+    /// The bool row's address: consumer picks dispatch `SetValue` here,
+    /// exactly as the generic value row does. `None` renders inert.
+    pub address: Option<ProjectSlotAddress>,
+    /// The backing row's interaction/validation state.
+    pub state: UiSlotFieldState,
 }
 
 /// The direction row under a directional projection cell (G1b ruling 4
 /// + the mirror-direction ruling): a segmented choice over whatever
 /// direction vocabulary the ACTIVE shape declares — extrude's
 /// `ProjectionDirection` (`Right`…`Up`), mirror's `MirrorDirection`
-/// fold (`InwardX`…`OutwardY`).
+/// fold (`InwardX`…`OutwardY`), or the along-the-wire choice's
+/// forward/reversed pair (`FixtureDef::wire_reversed`).
 ///
-/// `variants` is read from the flattened enum row itself (declaration
-/// order), never hardcoded, so the web renders whichever vocabulary the
-/// model declares per shape. A pick dispatches `EnsurePresent` at
-/// `address.child_field(<variant>)`, the generic enum-row gesture.
+/// `variants` is read from the backing row (declaration order for enum
+/// payloads), never hardcoded, so the web renders whichever vocabulary
+/// the model declares per shape. How a pick dispatches is the row's
+/// [`UiSpaceDirectionDispatch`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSpaceDirection {
     /// Active direction variant ident.
     pub active: String,
     /// Every declared variant ident, in declaration order.
     pub variants: Vec<String>,
-    /// The flattened direction enum row's address
-    /// (`<cell>.<Shape>.direction`). `None` renders inert.
+    /// The backing row's address (`<cell>.<Shape>.direction`, or the
+    /// fixture's `wire_reversed` bool row). `None` renders inert.
     pub address: Option<ProjectSlotAddress>,
     /// The backing row's interaction/validation state.
     pub state: UiSlotFieldState,
+    /// The op a pick sends.
+    pub dispatch: UiSpaceDirectionDispatch,
+}
+
+/// The op a direction-row pick dispatches — both are ops the generic
+/// drawer rows already send, so the row stays a presentation of the same
+/// write path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiSpaceDirectionDispatch {
+    /// A flattened enum payload row: `EnsurePresent address.<variant>`.
+    EnumVariant,
+    /// A bool row presented as a two-segment direction
+    /// (`Forward`/`Reversed`): `SetValue address = (variant ==
+    /// "Reversed")` — the along-the-wire direction row over
+    /// `FixtureDef::wire_reversed`.
+    ReversedBool,
 }
 
 impl UiSpaceCell {
@@ -144,22 +179,6 @@ impl UiSpaceCell {
     pub fn is_choosable(&self) -> bool {
         self.address.is_some() && self.state.editable && self.choices.len() > 1
     }
-}
-
-/// One boolean row of a space section.
-#[derive(Clone, Debug, PartialEq)]
-pub struct UiSpaceFlag {
-    /// What this flag says.
-    pub role: UiSpaceFlagRole,
-    /// Row label, from the backing slot row.
-    pub label: String,
-    /// Current value.
-    pub value: bool,
-    /// The bool row's address: the checkbox dispatches `SetValue` here,
-    /// exactly as the generic value row does. `None` renders inert.
-    pub address: Option<ProjectSlotAddress>,
-    /// The backing row's interaction/validation state.
-    pub state: UiSlotFieldState,
 }
 
 /// The D1 failure made visible: the shader DECLARES one space and its GLSL
@@ -201,8 +220,6 @@ pub struct UiSpaceSection {
     pub declared_space: Option<UiVisualSpace>,
     /// The answer cells under the primary, in render order.
     pub cells: Vec<UiSpaceCell>,
-    /// The boolean rows this section owns.
-    pub flags: Vec<UiSpaceFlag>,
     /// The declared-vs-entry mismatch, when the node is in it (D1).
     pub mismatch: Option<UiSpaceMismatch>,
 }
@@ -216,11 +233,6 @@ impl UiSpaceSection {
     /// The cell in this section filling `role`.
     pub fn cell(&self, role: UiSpaceCellRole) -> Option<&UiSpaceCell> {
         self.all_cells().find(|cell| cell.role == role)
-    }
-
-    /// The flag in this section filling `role`.
-    pub fn flag(&self, role: UiSpaceFlagRole) -> Option<&UiSpaceFlag> {
-        self.flags.iter().find(|flag| flag.role == role)
     }
 }
 
@@ -245,6 +257,7 @@ mod tests {
             address: None,
             state: UiSlotFieldState::editable(),
             direction: None,
+            strip_order: None,
         }
     }
 
@@ -270,28 +283,16 @@ mod tests {
     }
 
     #[test]
-    fn cells_and_flags_are_addressable_by_role() {
+    fn cells_are_addressable_by_role() {
         let section = UiSpaceSection {
             side: UiSpaceSide::Producer,
             primary: cell(UiSpaceCellRole::Primary, 2),
             declared_space: Some(UiVisualSpace::TwoD),
             cells: vec![cell(UiSpaceCellRole::ProducerIn1d, 1)],
-            flags: vec![UiSpaceFlag {
-                role: UiSpaceFlagRole::StripOrderMeaningful,
-                label: "Strip order".to_string(),
-                value: true,
-                address: None,
-                state: UiSlotFieldState::editable(),
-            }],
             mismatch: None,
         };
         assert_eq!(section.all_cells().count(), 2);
         assert!(section.cell(UiSpaceCellRole::Primary).is_some());
         assert!(section.cell(UiSpaceCellRole::ProducerIn2d).is_none());
-        assert!(
-            section
-                .flag(UiSpaceFlagRole::StripOrderMeaningful)
-                .is_some()
-        );
     }
 }

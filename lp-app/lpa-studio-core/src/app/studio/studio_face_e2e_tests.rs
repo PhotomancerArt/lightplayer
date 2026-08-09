@@ -2845,7 +2845,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
 /// preview has to come back tagged with the space it rendered in.
 #[test]
 fn space_sections_derive_and_claim_their_rows_end_to_end() {
-    use crate::{UiSpaceCellRole, UiSpaceFlagRole, UiSpaceSide, UiVisualSpace};
+    use crate::{UiSpaceCellRole, UiSpaceSide, UiVisualSpace};
 
     let server = Rc::new(RefCell::new(face_e2e_server()));
     let io = InProcessServerIo {
@@ -2954,30 +2954,36 @@ fn space_sections_derive_and_claim_their_rows_end_to_end() {
         .expect("the fixture card's space section");
     assert_eq!(space.side, UiSpaceSide::Consumer);
     assert_eq!(space.declared_space, None, "a fixture states a policy");
-    assert_eq!(space.primary.active, "Auto");
+    assert_eq!(
+        space.primary.active, "AlongWire",
+        "the default true strip-order bit selects the dropdown's \
+         along-the-wire entry (strip-order unification)"
+    );
     assert!(
         space.cells.is_empty(),
-        "Auto is the unexpanded state — a unit variant has no payload rows"
+        "the consumer's primary IS its only cell"
     );
     let strip = space
-        .flag(UiSpaceFlagRole::StripOrderMeaningful)
-        .expect("the strip-order flag");
+        .primary
+        .strip_order
+        .as_ref()
+        .expect("the strip-order row rides the consumer cell");
     assert!(strip.value, "a bare strip is {{1D}} by default (D3)");
     assert_eq!(
         strip
             .address
             .as_ref()
-            .expect("the flag is addressed")
+            .expect("the row is addressed")
             .path
             .to_string(),
         "strip_order_meaningful",
     );
     let keys = config_row_keys(&fixture);
     assert!(
-        !keys
-            .iter()
-            .any(|key| key == "consume" || key == "strip_order_meaningful"),
-        "both consumer rows left the drawer: {keys:?}"
+        !keys.iter().any(|key| key == "consume"
+            || key == "strip_order_meaningful"
+            || key == "wire_reversed"),
+        "the consumer rows left the drawer: {keys:?}"
     );
     assert!(
         keys.iter().any(|key| key == "mapping"),

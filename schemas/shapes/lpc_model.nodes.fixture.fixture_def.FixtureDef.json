@@ -258,6 +258,19 @@
         }
       },
       {
+        "name": "wire_reversed",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
         "name": "consume",
         "shape": {
           "enum": {

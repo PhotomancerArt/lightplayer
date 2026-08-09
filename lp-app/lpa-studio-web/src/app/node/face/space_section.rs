@@ -33,8 +33,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     LpValue, ProjectSlotAddress, UiAction, UiCellProjection, UiMirrorDirection, UiNodeFace,
     UiProjectionDirection, UiProjectionOrigin, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
-    UiSpaceDirection, UiSpaceFlag, UiSpaceFlagRole, UiSpaceMismatch, UiSpaceSection, UiSpaceSide,
-    UiVisualSpace,
+    UiSpaceDirection, UiSpaceMismatch, UiSpaceSection, UiSpaceSide, UiVisualSpace,
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_value_action};
@@ -59,12 +58,6 @@ const PRODUCER_IN_1D_LABEL: &str = "show in 1D by";
 /// The consumer's ONE dropdown (P4b — "then we just have one control").
 const CONSUMER_PRIMARY_LABEL: &str = "show 1D sources by";
 
-/// Vision D3's authored bit. G1: "strip order means something" didn't
-/// land; this candidate says what the bit actually changes.
-const STRIP_ORDER_LABEL: &str = "1D patterns follow the wire";
-const STRIP_ORDER_TITLE: &str = "Yes: 1D effects run along the wire order (a strip worn in a shape). No: the map is the real \
-     layout and wire order is plumbing.";
-
 /// Variant vocabulary, keyed by role where one variant name reads
 /// differently per cell.
 const SPACE_ONE_D: &str = "1D";
@@ -83,6 +76,14 @@ const PROJECTION_MIRROR: &str = "mirror";
 const PROJECTION_CENTRE_SCANLINE: &str = "centre scanline";
 /// The consumer dropdown's default entry.
 const CONSUMER_FOLLOW: &str = "follow the source";
+/// The consumer dropdown's FIRST entry — the `strip_order_meaningful` bit
+/// absorbed into the one control (strip-order unification ruling: the
+/// checkbox GATED the dropdown, so it became a choice of it). Vision D3's
+/// scarf case, made pickable.
+const CONSUMER_ALONG_WIRE: &str = "along the wire";
+/// The synthetic variant ident the derivation emits for it (not a model
+/// variant — the pick dispatches the bool `SetValue`, never an ensure).
+const ALONG_WIRE_VARIANT: &str = "AlongWire";
 
 /// The direction row under a directional shape (G1b ruling 4: "top
 /// section is general shape, below that is direction").
@@ -90,7 +91,8 @@ const DIRECTION_ROW_LABEL: &str = "direction";
 
 /// One direction segment's glyph and tooltip, by RAW variant ident —
 /// per-shape vocabularies (mirror-direction ruling): single arrows for
-/// extrude's run direction, PAIRED arrows for mirror's fold.
+/// extrude's run direction, PAIRED arrows for mirror's fold, and the
+/// along-the-wire choice's forward/reversed pair.
 fn direction_segment_face(variant: &str) -> (&'static str, &'static str) {
     match variant {
         "Right" => ("→", "left → right"),
@@ -101,6 +103,8 @@ fn direction_segment_face(variant: &str) -> (&'static str, &'static str) {
         "OutwardX" => ("←→", "from the centre toward both edges"),
         "InwardY" => ("↓↑", "from top and bottom toward the centre"),
         "OutwardY" => ("↑↓", "from the centre toward top and bottom"),
+        "Forward" => ("→", "wire order, as wired"),
+        "Reversed" => ("←", "wire order, reversed"),
         _ => ("·", "unknown direction"),
     }
 }
@@ -108,6 +112,7 @@ fn direction_segment_face(variant: &str) -> (&'static str, &'static str) {
 /// One line per choice in the picker's tiles.
 const HINT_DEFAULT_EXTRUDE: &str = "the standard projection, unless a fixture overrides";
 const HINT_FOLLOW: &str = "each source projects the way it declares";
+const HINT_ALONG_WIRE: &str = "run in wire order — the map doesn't apply";
 const HINT_EXTRUDE: &str = "the strip, stretched down";
 const HINT_RADIAL: &str = "the strip, out from the centre";
 const HINT_ANGULAR: &str = "the strip, swept around";
@@ -119,6 +124,8 @@ const PRODUCER_HINT_ONE_D: &str = "This shader renders along a strip.";
 const PRODUCER_HINT_TWO_D: &str = "This shader renders in texture space.";
 const CONSUMER_HINT_FOLLOW: &str = "1D sources project the way they declare.";
 const CONSUMER_HINT_OVERRIDE: &str = "This fixture overrides what 1D sources declare.";
+const CONSUMER_HINT_ALONG_WIRE: &str =
+    "1D patterns run along the wire order — the map doesn't apply.";
 
 /// The who-wins ladder (spike §3), compressed to the one rung that can
 /// still surprise the person reading this card.
@@ -175,7 +182,6 @@ pub fn SpaceSection(
 ) -> Element {
     let side = section.side;
     let mismatched = section.mismatch.is_some();
-    let flags = section.flags.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
@@ -210,9 +216,6 @@ pub fn SpaceSection(
                     picker_initially_open: picker_open_cell == Some(cell.role),
                     on_action,
                 }
-            }
-            for flag in flags {
-                SpaceFlagRow { key: "{flag.role:?}", flag, on_action }
             }
             if let Some(ladder) = ladder_line(&section) {
                 p { class: LADDER_CLASS, "{ladder}" }
@@ -302,11 +305,12 @@ fn SpaceCellRow(
     }
 }
 
-/// The direction row (G1b ruling 4): a 4-way segmented control drawing
-/// the arrows, in the same squared-blocks discrete language as the 2D|1D
-/// tabs. A pick dispatches the generic enum-row gesture — `EnsurePresent`
-/// at `<direction row>.<D>` — so the row stays a presentation of the same
-/// write path.
+/// The direction row (G1b ruling 4): a segmented control drawing the
+/// arrows, in the same squared-blocks discrete language as the 2D|1D
+/// tabs. A pick dispatches whatever the row's backing slot already takes
+/// — `EnsurePresent <direction row>.<D>` for an enum payload row,
+/// `SetValue` for the along-the-wire bool — so the row stays a
+/// presentation of the same write path.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceDirectionRow(
@@ -314,14 +318,16 @@ fn SpaceDirectionRow(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let active = direction.active.clone();
+    let dispatch = direction.dispatch;
     let wiring = field_wiring(&direction.state, &direction.address, on_action);
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-2",
             span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
             span { class: DIRECTION_GROUP_CLASS,
-                // The variant list comes from the flattened enum row —
-                // each shape brings its OWN vocabulary (extrude's run
-                // directions, mirror's folds), never a hardcoded 4-way.
+                // The variant list comes from the backing row — each shape
+                // brings its OWN vocabulary (extrude's run directions,
+                // mirror's folds, the wire's forward/reversed), never a
+                // hardcoded 4-way.
                 for candidate in direction.variants.clone() {
                     if let Some((address, handler)) = wiring.clone() {
                         button {
@@ -337,8 +343,21 @@ fn SpaceDirectionRow(
                                     if selected {
                                         return;
                                     }
-                                    if let Some(target) = address.child_field(&candidate) {
-                                        handler.call(slot_ensure_present_action(target));
+                                    match dispatch {
+                                        lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant => {
+                                            if let Some(target) = address.child_field(&candidate) {
+                                                handler.call(slot_ensure_present_action(target));
+                                            }
+                                        }
+                                        lpa_studio_core::UiSpaceDirectionDispatch::ReversedBool => {
+                                            handler
+                                                .call(
+                                                    slot_set_value_action(
+                                                        address.clone(),
+                                                        LpValue::Bool(candidate == "Reversed"),
+                                                    ),
+                                                );
+                                        }
                                     }
                                 }
                             },
@@ -360,23 +379,48 @@ fn SpaceDirectionRow(
 
 /// The op sequence one choice dispatches. Producer cells and the shader's
 /// primary stay the single `EnsurePresent <enum>.<Variant>` the generic
-/// variant field sends. The consumer's one dropdown (P4b) fans out:
-/// `Auto` is the plain ensure, and a projection is
-/// ensure-`Policy` → ensure-`from_1d.<V>` → set-`force = true` — each op
-/// exactly what the drawer's own rows would send (structural ensures
-/// order before assignments in the overlay), so the dropdown remains a
-/// presentation of the same write path, never a second writer.
+/// variant field sends. The consumer's one dropdown (P4b + the
+/// strip-order unification) fans out:
+///
+/// - `AlongWire` is the bool row's `SetValue strip_order = true` — the
+///   consume policy is untouched (the true bit gates it anyway);
+/// - `Auto` is `SetValue strip_order = false` + the plain
+///   `EnsurePresent consume.Auto`;
+/// - a projection is `SetValue strip_order = false` →
+///   ensure-`Policy` → ensure-`from_1d.<V>` → set-`force = true`.
+///
+/// Each op is exactly what the drawer's own rows would send (structural
+/// ensures order before assignments in the overlay), so the dropdown
+/// remains a presentation of the same write path, never a second writer.
+/// A projection or follow pick clears the bit because a true bit makes
+/// the projection unreachable (`select_request_space`) — leaving it set
+/// would render the pick a no-op.
 fn choice_actions(
     side: UiSpaceSide,
     role: UiSpaceCellRole,
     address: &ProjectSlotAddress,
+    strip_order: Option<&ProjectSlotAddress>,
     variant: &str,
 ) -> Vec<UiAction> {
-    if side == UiSpaceSide::Consumer && role == UiSpaceCellRole::Primary && variant != "Auto" {
+    if side == UiSpaceSide::Consumer && role == UiSpaceCellRole::Primary {
+        if variant == ALONG_WIRE_VARIANT {
+            return strip_order
+                .map(|strip| slot_set_value_action(strip.clone(), LpValue::Bool(true)))
+                .into_iter()
+                .collect();
+        }
+        let mut actions: Vec<UiAction> = strip_order
+            .map(|strip| slot_set_value_action(strip.clone(), LpValue::Bool(false)))
+            .into_iter()
+            .collect();
+        if variant == "Auto" {
+            actions.extend(address.child_field("Auto").map(slot_ensure_present_action));
+            return actions;
+        }
         let Some(policy) = address.child_field("Policy") else {
-            return Vec::new();
+            return actions;
         };
-        let mut actions = vec![slot_ensure_present_action(policy.clone())];
+        actions.push(slot_ensure_present_action(policy.clone()));
         if let Some(target) = policy
             .child_field("from_1d")
             .and_then(|field| field.child_field(variant))
@@ -460,6 +504,7 @@ fn ProjectionField(
                     side,
                     role: cell.role,
                     address: cell.address.clone(),
+                    strip_order: cell.strip_order.as_ref().and_then(|strip| strip.address.clone()),
                     on_action,
                 }
             }
@@ -503,6 +548,10 @@ pub fn ProjectionTileGrid(
     side: UiSpaceSide,
     role: UiSpaceCellRole,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
+    /// The consumer cell's `strip_order_meaningful` row address — every
+    /// consumer pick includes its `SetValue` (see [`choice_actions`]).
+    #[props(default = None)]
+    strip_order: Option<ProjectSlotAddress>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
@@ -517,13 +566,20 @@ pub fn ProjectionTileGrid(
                     onclick: {
                         let variant = choice.variant.clone();
                         let address = address.clone();
+                        let strip_order = strip_order.clone();
                         let selected = choice.selected;
                         move |event: MouseEvent| {
                             event.stop_propagation();
                             if !selected
                                 && let (Some(address), Some(handler)) = (address.clone(), on_action)
                             {
-                                for action in choice_actions(side, role, &address, &variant) {
+                                for action in choice_actions(
+                                    side,
+                                    role,
+                                    &address,
+                                    strip_order.as_ref(),
+                                    &variant,
+                                ) {
                                     handler.call(action);
                                 }
                             }
@@ -564,6 +620,11 @@ pub(crate) enum SpaceGlyph {
     CentreScanline,
     /// The consumer dropdown's `Auto`: the answer lives on the source.
     FollowSource,
+    /// The consumer dropdown's along-the-wire choice: the strip runs in
+    /// wire order and the map does not apply — drawn as a serpentine wire
+    /// carrying the ramp. `true` = reversed (the ramp runs the wire
+    /// backwards).
+    AlongWire(bool),
 }
 
 /// The drawing for one choice, by role and RAW variant name — the picker's
@@ -578,6 +639,7 @@ fn glyph_for(role: UiSpaceCellRole, variant: &str) -> SpaceGlyph {
         "Angular" => SpaceGlyph::Angular,
         "Mirror" => SpaceGlyph::Mirror(UiMirrorDirection::OutwardX),
         "Auto" => SpaceGlyph::FollowSource,
+        ALONG_WIRE_VARIANT => SpaceGlyph::AlongWire(false),
         "Default" => match role {
             // A 2D shader's 1D answer IS the centre scanline.
             UiSpaceCellRole::ProducerIn1d => SpaceGlyph::CentreScanline,
@@ -597,6 +659,7 @@ fn glyph_with_active_direction(cell: &UiSpaceCell) -> SpaceGlyph {
     match (cell.active.as_str(), active_direction) {
         ("Extrude", Some(ident)) => SpaceGlyph::Extrude(UiProjectionDirection::from_variant(ident)),
         ("Mirror", Some(ident)) => SpaceGlyph::Mirror(UiMirrorDirection::from_variant(ident)),
+        (ALONG_WIRE_VARIANT, Some(ident)) => SpaceGlyph::AlongWire(ident == "Reversed"),
         _ => glyph_for(cell.role, &cell.active),
     }
 }
@@ -703,6 +766,25 @@ fn ProjectionGlyph(kind: SpaceGlyph) -> Element {
                         }
                     }
                 },
+                // Along the wire: a serpentine wire path carrying the
+                // ramp — the strip runs in wire order, folding back on
+                // itself, and the map never enters into it.
+                SpaceGlyph::AlongWire(reversed) => rsx! {
+                    for (index , (x , y , width , height , opacity)) in serpentine_segments(reversed)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        rect {
+                            key: "{index}",
+                            x: "{x}",
+                            y: "{y}",
+                            width: "{width}",
+                            height: "{height}",
+                            fill: "currentColor",
+                            fill_opacity: "{opacity}",
+                        }
+                    }
+                },
                 // "Follow the source": a dashed hollow — the answer lives
                 // on the other side of the binding.
                 SpaceGlyph::FollowSource => rsx! {
@@ -766,6 +848,48 @@ fn mirror_bands(direction: UiMirrorDirection) -> Vec<(u32, u32, u32, u32, f32)> 
         }
     }
 }
+/// The serpentine wire's segments: three horizontal runs (left→right,
+/// right→left, left→right) joined by end connectors, the ramp's opacity
+/// climbing along the WIRE path — which is the whole statement: position
+/// along the wire is the only coordinate this choice reads.
+fn serpentine_segments(reversed: bool) -> Vec<(u32, u32, u32, u32, f32)> {
+    // (x, y, w, h) boxes laid along the path; opacity ramps by index.
+    const BOXES: [(u32, u32, u32, u32); 14] = [
+        // run 1, left → right (y = 2)
+        (2, 2, 14, 8),
+        (16, 2, 14, 8),
+        (30, 2, 14, 8),
+        (44, 2, 14, 8),
+        // right connector down
+        (54, 10, 8, 6),
+        // run 2, right → left (y = 16)
+        (48, 16, 14, 8),
+        (34, 16, 14, 8),
+        (20, 16, 14, 8),
+        (6, 16, 14, 8),
+        // left connector down
+        (2, 24, 8, 6),
+        // run 3, left → right (y = 30)
+        (2, 30, 14, 8),
+        (16, 30, 14, 8),
+        (30, 30, 14, 8),
+        (44, 30, 14, 8),
+    ];
+    BOXES
+        .into_iter()
+        .enumerate()
+        .map(|(index, (x, y, width, height))| {
+            let step = if reversed {
+                BOXES.len() - 1 - index
+            } else {
+                index
+            };
+            let opacity = 0.14 + 0.82 * (step as f32) / ((BOXES.len() - 1) as f32);
+            (x, y, width, height, opacity)
+        })
+        .collect()
+}
+
 /// Concentric rings, outermost first so the inner ones paint over.
 const RADIAL_RINGS: [(u32, f32); 4] = [(26, 0.18), (19, 0.38), (12, 0.62), (5, 0.95)];
 
@@ -790,67 +914,6 @@ fn angular_sectors() -> Vec<(String, f32)> {
             (path, opacity)
         })
         .collect()
-}
-
-/// A boolean the section owns, as its own row (`strip order means
-/// something` — vision D3's authored bit).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceFlagRow(
-    flag: UiSpaceFlag,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    let title = flag_title(flag.role);
-    rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-            SpaceFlagCheckbox { flag, title, on_action }
-        }
-    }
-}
-
-/// The flag itself: a squared checkbox plus its label, dispatching the
-/// ordinary `SetValue` a bool row dispatches.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SpaceFlagCheckbox(
-    flag: UiSpaceFlag,
-    title: &'static str,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    let label = flag_label(flag.role);
-    let value = flag.value;
-    let Some((address, handler)) = field_wiring(&flag.state, &flag.address, on_action) else {
-        return rsx! {
-            span { class: "tw:inline-flex tw:items-center tw:gap-1.5 tw:text-[11px] tw:text-dim-foreground",
-                title,
-                span { class: checkbox_box_class(value), aria_hidden: "true",
-                    if value {
-                        StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                    }
-                }
-                "{label}"
-            }
-        };
-    };
-
-    rsx! {
-        button {
-            class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-[11px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
-            r#type: "button",
-            title,
-            aria_pressed: "{value}",
-            onclick: move |event| {
-                event.stop_propagation();
-                handler.call(slot_set_value_action(address.clone(), LpValue::Bool(!value)));
-            },
-            span { class: checkbox_box_class(value), aria_hidden: "true",
-                if value {
-                    StudioIcon { name: StudioIconName::StepComplete, size: 10 }
-                }
-            }
-            "{label}"
-        }
-    }
 }
 
 /// D1 made visible on the card instead of buried in a compile log: the two
@@ -957,6 +1020,15 @@ fn directional_suffix(cell: &UiSpaceCell) -> String {
                 format!(" {}", direction.arrows())
             }
         }
+        // The along-the-wire choice: a reversed wire wears the back
+        // arrow; forward (the default) stays bare like every default.
+        ALONG_WIRE_VARIANT => {
+            if row.active == "Reversed" {
+                " ←".to_string()
+            } else {
+                String::new()
+            }
+        }
         _ => String::new(),
     }
 }
@@ -1010,18 +1082,6 @@ fn cell_label(side: UiSpaceSide, role: UiSpaceCellRole) -> &'static str {
     }
 }
 
-fn flag_label(role: UiSpaceFlagRole) -> &'static str {
-    match role {
-        UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_LABEL,
-    }
-}
-
-fn flag_title(role: UiSpaceFlagRole) -> &'static str {
-    match role {
-        UiSpaceFlagRole::StripOrderMeaningful => STRIP_ORDER_TITLE,
-    }
-}
-
 /// A variant's display name.
 ///
 /// Keyed by ROLE, not by variant alone: `Default` means "extrude ·
@@ -1045,6 +1105,9 @@ fn known_variant_label(
         (UiSpaceSide::Producer, UiSpaceCellRole::Primary, "OneD") => Some(SPACE_ONE_D),
         (UiSpaceSide::Producer, UiSpaceCellRole::Primary, "TwoD") => Some(SPACE_TWO_D),
         (UiSpaceSide::Consumer, UiSpaceCellRole::Primary, "Auto") => Some(CONSUMER_FOLLOW),
+        (UiSpaceSide::Consumer, UiSpaceCellRole::Primary, ALONG_WIRE_VARIANT) => {
+            Some(CONSUMER_ALONG_WIRE)
+        }
         (_, UiSpaceCellRole::ProducerIn1d, "Default") => Some(PROJECTION_CENTRE_SCANLINE),
         (_, _, "Default") => Some(PROJECTION_DEFAULT_EXTRUDE),
         (_, _, "Extrude") => Some(PROJECTION_EXTRUDE),
@@ -1069,6 +1132,7 @@ fn active_variant_label(side: UiSpaceSide, cell: &UiSpaceCell) -> String {
 fn choice_hint(role: UiSpaceCellRole, variant: &str) -> &'static str {
     match variant {
         "Auto" => HINT_FOLLOW,
+        ALONG_WIRE_VARIANT => HINT_ALONG_WIRE,
         "Default" => match role {
             UiSpaceCellRole::ProducerIn1d => HINT_CENTRE_SCANLINE,
             _ => HINT_DEFAULT_EXTRUDE,
@@ -1089,7 +1153,9 @@ fn primary_hint(section: &UiSpaceSection) -> &'static str {
             _ => PRODUCER_HINT_TWO_D,
         },
         UiSpaceSide::Consumer => {
-            if section.primary.active == "Auto" {
+            if section.primary.active == ALONG_WIRE_VARIANT {
+                CONSUMER_HINT_ALONG_WIRE
+            } else if section.primary.active == "Auto" {
                 CONSUMER_HINT_FOLLOW
             } else {
                 CONSUMER_HINT_OVERRIDE
@@ -1132,7 +1198,12 @@ pub(crate) fn space_section_summary(section: &UiSpaceSection) -> String {
             }
         }
         UiSpaceSide::Consumer => {
-            if section.primary.active == "Auto" {
+            if section.primary.active == ALONG_WIRE_VARIANT {
+                format!(
+                    "{CONSUMER_ALONG_WIRE}{}",
+                    directional_suffix(&section.primary)
+                )
+            } else if section.primary.active == "Auto" {
                 CONSUMER_FOLLOW.to_string()
             } else {
                 format!(
@@ -1224,16 +1295,6 @@ fn tile_class(selected: bool) -> &'static str {
     }
 }
 
-/// The squared checkbox box (no preflight: a `<button>`'s box is drawn
-/// here or not at all).
-fn checkbox_box_class(value: bool) -> &'static str {
-    if value {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:text-strong-foreground"
-    } else {
-        "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{UiSlotFieldState, UiVisualProductSpace};
@@ -1262,6 +1323,7 @@ mod tests {
             address: None,
             state: UiSlotFieldState::editable(),
             direction: None,
+            strip_order: None,
         }
     }
 
@@ -1275,23 +1337,29 @@ mod tests {
                 UiVisualSpace::TwoD
             }),
             cells,
-            flags: Vec::new(),
             mismatch: None,
         }
     }
 
-    /// The P4b consumer section: ONE dropdown, `Auto` = follow the source.
+    /// The unified consumer section: ONE dropdown whose first choice is
+    /// `along the wire` (the strip-order bit), then follow/projections.
     fn consumer(active: &str) -> UiSpaceSection {
         UiSpaceSection {
             side: UiSpaceSide::Consumer,
             primary: cell(
                 UiSpaceCellRole::Primary,
                 active,
-                &["Auto", "Extrude", "Radial", "Angular", "Mirror"],
+                &[
+                    ALONG_WIRE_VARIANT,
+                    "Auto",
+                    "Extrude",
+                    "Radial",
+                    "Angular",
+                    "Mirror",
+                ],
             ),
             declared_space: None,
             cells: Vec::new(),
-            flags: Vec::new(),
             mismatch: None,
         }
     }
@@ -1384,6 +1452,7 @@ mod tests {
             variants: variants.iter().map(|ident| ident.to_string()).collect(),
             address: None,
             state: UiSlotFieldState::editable(),
+            dispatch: lpa_studio_core::UiSpaceDirectionDispatch::EnumVariant,
         };
         const FOLDS: [&str; 4] = ["InwardX", "OutwardX", "InwardY", "OutwardY"];
         let mut answer = cell(
@@ -1415,43 +1484,74 @@ mod tests {
         );
     }
 
-    /// The consumer dropdown's dispatch: `Auto` is one plain ensure, and
-    /// an explicit projection is the ensure-Policy → ensure-variant →
-    /// force=true sequence (the pick IS the override).
+    /// The consumer dropdown's dispatch (strip-order unification):
+    /// `along the wire` is the bool SetValue alone; `Auto` clears the bit
+    /// and ensures `consume.Auto`; a projection clears the bit and runs
+    /// the ensure-Policy → ensure-variant → force=true sequence (the pick
+    /// IS the override, and a set bit would gate it off).
     #[test]
     fn consumer_choices_dispatch_the_op_sequence() {
         use lpa_studio_core::{ProjectNodeAddress, ProjectSlotRoot};
+        let node = ProjectNodeAddress::parse("/demo.module/panel.fixture").expect("address");
         let address = ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.module/panel.fixture").expect("address"),
+            node.clone(),
             ProjectSlotRoot::def(),
             lpc_model::SlotPath::parse("consume").expect("path"),
         );
+        let strip = ProjectSlotAddress::new(
+            node,
+            ProjectSlotRoot::def(),
+            lpc_model::SlotPath::parse("strip_order_meaningful").expect("path"),
+        );
+
+        let along = choice_actions(
+            UiSpaceSide::Consumer,
+            UiSpaceCellRole::Primary,
+            &address,
+            Some(&strip),
+            ALONG_WIRE_VARIANT,
+        );
+        assert_eq!(along.len(), 1, "one SetValue — consume is untouched");
 
         let auto = choice_actions(
             UiSpaceSide::Consumer,
             UiSpaceCellRole::Primary,
             &address,
+            Some(&strip),
             "Auto",
         );
-        assert_eq!(auto.len(), 1);
+        assert_eq!(auto.len(), 2, "clear the bit, ensure consume.Auto");
 
         let mirror = choice_actions(
             UiSpaceSide::Consumer,
             UiSpaceCellRole::Primary,
             &address,
+            Some(&strip),
             "Mirror",
         );
         assert_eq!(
             mirror.len(),
-            3,
-            "ensure Policy, ensure from_1d.Mirror, set force"
+            4,
+            "clear the bit, ensure Policy, ensure from_1d.Mirror, set force"
         );
+
+        // Without a strip row there is nothing to clear — the
+        // pre-unification sequences remain.
+        let auto = choice_actions(
+            UiSpaceSide::Consumer,
+            UiSpaceCellRole::Primary,
+            &address,
+            None,
+            "Auto",
+        );
+        assert_eq!(auto.len(), 1);
 
         // Producer cells keep the single generic gesture.
         let producer = choice_actions(
             UiSpaceSide::Producer,
             UiSpaceCellRole::ProducerIn2d,
             &address,
+            None,
             "Radial",
         );
         assert_eq!(producer.len(), 1);
