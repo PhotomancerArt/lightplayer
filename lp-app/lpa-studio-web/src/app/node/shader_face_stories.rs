@@ -7,16 +7,17 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAgentStatus, UiCellProjection, UiProjectionOrigin, UiSpaceCellRole, UiVisualSpace,
+    NodeCardUiState, UiAgentStatus, UiCellProjection, UiNodeFace, UiProjectionOrigin,
+    UiSpaceCellRole, UiVisualSpace,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
     period_knob, shader_face, shader_face_bound_output, shader_face_one_d,
-    shader_face_stacked_preview, shader_node_view, shader_node_view_with_face,
+    shader_face_stacked_preview, shader_node_view, shader_node_view_with_face, shader_sections,
     shader_space_section_mismatch,
 };
-use crate::app::node::{NodePane, PanelControl, ShaderFace};
+use crate::app::node::{NodeFaceBody, NodePane, PanelControl, ShaderFace};
 use crate::base::Platform;
 
 #[component]
@@ -24,6 +25,36 @@ use crate::base::Platform;
 fn ShaderCardCanvas(children: Element) -> Element {
     rsx! {
         div { class: "tw:w-full tw:max-w-md", {children} }
+    }
+}
+
+/// A shader face WITH its drawer stack, card-framed — what the space
+/// stories mount now that the dimensionality drawer lives in
+/// [`NodeFaceBody`]'s drawer run (G1b ruling 1) rather than on
+/// [`ShaderFace`] itself. The padding re-adds what the body's full-bleed
+/// negative margins reclaim from the real pane.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ShaderBodyCard(
+    face: lpa_studio_core::UiShaderFace,
+    #[props(default = false)] space_open: bool,
+    #[props(default = None)] space_picker_open_cell: Option<UiSpaceCellRole>,
+) -> Element {
+    let card_ui = NodeCardUiState {
+        space_open,
+        ..NodeCardUiState::default()
+    };
+    rsx! {
+        div { class: "tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong tw:bg-card tw:px-4 tw:pb-4",
+            NodeFaceBody {
+                face: UiNodeFace::Shader(face),
+                node: "/fyeah_sign.show/comet.shader".to_string(),
+                card_ui,
+                sections: shader_sections(),
+                space_picker_open_cell,
+                on_action: move |_| {},
+            }
+        }
     }
 }
 
@@ -192,10 +223,11 @@ fn agent_collapsed() -> Element {
 
 // -- the space section (dimensionality plan-B P4 / gate G1) ------------------
 
-/// The whole card, so the drawer can be judged where it now lives: below
-/// settings, collapsed to its summary row.
+/// The whole card, so the drawer can be judged where it now lives: in the
+/// drawer stack between `code` and `advanced`, collapsed to its summary
+/// row.
 #[story(
-    description = "The card's DEFAULT posture after the G1 rework (P4b): the `dimensionality` drawer rides below settings, collapsed to a summary row — `2D · in 1D: centre scanline` — because the declaration is authoring, not day-to-day tuning. G1 ruled the always-open `space` section off the rail; the G1b matrix judges this against the fold-into-`definition` variant."
+    description = "The card's DEFAULT posture after G1b ruling 1: the `dimensionality` drawer rides the drawer stack BETWEEN `code` and `advanced` — the declaration is authoring that belongs next to the code — collapsed to a summary row (`2D · in 1D: centre scanline`). Its open state is core-owned (`NodeCardUiState.space_open`), like its sibling drawers."
 )]
 fn space_two_d() -> Element {
     rsx! {
@@ -211,19 +243,14 @@ fn space_two_d() -> Element {
 /// One story per answer: the projections are the design decision, and a
 /// single screenshot of "radial" cannot be read against the others.
 #[story(
-    description = "A 1D shader's drawer OPEN, one card per answer. The declaration leads as a full-width tab pair (G1: 'almost like tabs'), and the answer row reads `show in 2D by`. `consumer decides` is gone (G1): the silent state is `extrude · default` — the projection silence actually resolves to — and the other picks state an opinion a fixture can still override, which is what the line beneath says."
+    description = "A 1D shader's drawer OPEN in its new home between `code` and `advanced` (G1b ruling 1), one card per answer. The declaration leads as a full-width tab pair (G1: 'almost like tabs'), and the answer row reads `show in 2D by`. `consumer decides` is gone (G1): the silent state is `extrude · default` — the projection silence actually resolves to — and the other picks state an opinion a fixture can still override, which is what the line beneath says."
 )]
 fn space_one_d_answers() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-2 tw:lg:grid-cols-2",
             for answer in ["Default", "Extrude", "Radial", "Mirror"] {
                 div { key: "{answer}", class: "tw:w-full tw:max-w-md",
-                    ShaderFace {
-                        face: shader_face_one_d(answer),
-                        node: "/fyeah_sign.show/comet.shader".to_string(),
-                        space_initially_open: true,
-                        on_action: move |_| {},
-                    }
+                    ShaderBodyCard { face: shader_face_one_d(answer), space_open: true }
                 }
             }
         }
@@ -236,11 +263,9 @@ fn space_one_d_answers() -> Element {
 fn space_projection_picker_open() -> Element {
     rsx! {
         ShaderCardCanvas {
-            ShaderFace {
+            ShaderBodyCard {
                 face: shader_face_one_d("Radial"),
-                node: "/fyeah_sign.show/comet.shader".to_string(),
                 space_picker_open_cell: UiSpaceCellRole::ProducerIn2d,
-                on_action: move |_| {},
             }
         }
     }
@@ -312,11 +337,9 @@ fn space_mismatch() -> Element {
     face.space = Some(shader_space_section_mismatch());
     rsx! {
         ShaderCardCanvas {
-            ShaderFace {
-                face,
-                node: "/fyeah_sign.show/comet.shader".to_string(),
-                on_action: move |_| {},
-            }
+            // No `space_open`: the D1 mismatch itself forces the drawer
+            // open — an error folded away is an error hidden.
+            ShaderBodyCard { face }
         }
     }
 }

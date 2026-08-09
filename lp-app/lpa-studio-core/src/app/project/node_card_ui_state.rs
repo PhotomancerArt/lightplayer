@@ -35,6 +35,14 @@
 pub struct NodeCardUiState {
     /// Whether the code drawer (inline GLSL editor) is expanded.
     pub code_open: bool,
+    /// Whether the shader face's dimensionality drawer (the producer-side
+    /// space section) is expanded. Default `false` (P4b: the declaration is
+    /// authoring, not day-to-day tuning); G1b re-homed the drawer into the
+    /// stack between `code` and `advanced` (shader cards only — the fixture
+    /// face keeps its own below-settings drawer and face-local state, ruled
+    /// good as shipped). A D1 mismatch forces the rendered drawer open
+    /// regardless of this bit — an error folded away is an error hidden.
+    pub space_open: bool,
     /// Whether the advanced drawer (generic slot rows) is expanded.
     pub advanced_open: bool,
     /// Whether the module face's **wiring** drawer is expanded — the
@@ -74,6 +82,7 @@ impl Default for NodeCardUiState {
     fn default() -> Self {
         Self {
             code_open: false,
+            space_open: false,
             advanced_open: false,
             wiring_open: false,
             debug_open: false,
@@ -92,6 +101,7 @@ impl NodeCardUiState {
         match op {
             NodeUiOp::SetDrawer { drawer, open, .. } => match drawer {
                 NodeCardDrawer::Code => self.code_open = *open,
+                NodeCardDrawer::Space => self.space_open = *open,
                 NodeCardDrawer::Advanced => self.advanced_open = *open,
                 NodeCardDrawer::Debug => self.debug_open = *open,
                 NodeCardDrawer::Wiring => self.wiring_open = *open,
@@ -219,6 +229,9 @@ pub enum ModuleHeroProduct {
 pub enum NodeCardDrawer {
     /// The inline GLSL editor drawer (shader faces).
     Code,
+    /// The shader face's dimensionality drawer — the producer-side space
+    /// section, between `code` and `advanced` in the stack (G1b ruling 1).
+    Space,
     /// The generic slot-row drawer (every face).
     Advanced,
     /// The **Debug** section's rows (any node declaring a `SlotRole::Debug`
@@ -362,6 +375,11 @@ mod tests {
         });
         state.apply(&NodeUiOp::SetDrawer {
             node: node.clone(),
+            drawer: NodeCardDrawer::Space,
+            open: true,
+        });
+        state.apply(&NodeUiOp::SetDrawer {
+            node: node.clone(),
             drawer: NodeCardDrawer::Advanced,
             open: true,
         });
@@ -398,6 +416,7 @@ mod tests {
             state,
             NodeCardUiState {
                 code_open: true,
+                space_open: true,
                 advanced_open: true,
                 wiring_open: true,
                 debug_open: true,
