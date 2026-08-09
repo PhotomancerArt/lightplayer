@@ -4624,6 +4624,139 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         );
     }
 
+    /// **The map2d peach.** A tiny two-object `.map2d.json` document — a
+    /// ring (non-monotonic in x, so a value tracking strip position could
+    /// not have come from the map) plus a short path — resolved into the
+    /// SAME `FixtureMapping::Compact` carrier a real map2d-backed fixture
+    /// runs on (`P2 — 1D-along-the-wire verification`, rd 23). This is the
+    /// combination no gallery example exercises: a map2d presentation doc
+    /// consuming a 1D product with along-the-wire (`strip_order_meaningful`)
+    /// selected. It is expected to behave exactly like the hand-authored
+    /// `ring_fixture` scarf above, because `select_request_space` /
+    /// `fixture_strip_point_coords` never look at the mapping representation
+    /// — this test is what actually proves that for the compact carrier
+    /// instead of assuming the differential test implies it.
+    fn map2d_scarf_doc() -> lpc_mapping::Map2dDoc {
+        use lpc_mapping::{Map2dObject, Map2dShape, PathShape, RingDir, RingOrder, RingShape};
+        lpc_mapping::Map2dDoc {
+            format: lpc_mapping::MAP2D_FORMAT,
+            sample_diameter: 1.0,
+            canvas: None,
+            objects: alloc::vec![
+                Map2dObject {
+                    name: String::new(),
+                    shape: Map2dShape::Ring(RingShape {
+                        center: [0.5, 0.5],
+                        radius: 0.4,
+                        outer_count: 6,
+                        rings: 1,
+                        counts: Vec::new(),
+                        order: RingOrder::OuterFirst,
+                        start_angle_deg: -90.0,
+                        dir: RingDir::Cw,
+                    }),
+                },
+                Map2dObject {
+                    name: String::new(),
+                    shape: Map2dShape::Path(PathShape {
+                        points: alloc::vec![[0.0, 1.0], [1.0, 1.0]],
+                        count: 2,
+                        reversed: false,
+                        gaps: Vec::new(),
+                    }),
+                },
+            ],
+        }
+    }
+
+    /// Build a ticked-enough fixture whose mapping is a resolved map2d
+    /// document (`FixtureMapping::Compact`) rather than hand-authored
+    /// `PathPoints` slots — the `ring_fixture` builder above, but for the
+    /// document-sourced carrier.
+    fn map2d_fixture(
+        mapping: ResolvedMappingCompact,
+        strip_order_meaningful: bool,
+        policy: ConsumerPolicy,
+        product: VisualProduct,
+    ) -> FixtureNode {
+        let version = Revision::new(1);
+        let mut fixture = FixtureNode::new(
+            NodeId::new(2),
+            mapping,
+            FixtureSamplingConfig::Direct,
+            version,
+        )
+        .with_render_defaults(16, 16, ColorOrder::Rgb)
+        .with_space_declaration(strip_order_meaningful, policy);
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.gamma_correction = false;
+            settings.brightness = u8::MAX;
+            settings.power = FixturePower {
+                budget_ma: 0,
+                ..FixturePower::default()
+            };
+        }
+        fixture.ensure_direct_channels(version);
+        fixture.last_visual_product = Some(product);
+        fixture
+    }
+
+    #[test]
+    fn a_map2d_sourced_fixture_running_a_1d_effect_samples_wire_order() {
+        const COUNT: usize = 8;
+        let doc = map2d_scarf_doc();
+        let compact = mapping_from_map2d_doc(&doc, 16, 16).expect("resolve map2d doc");
+        assert_eq!(
+            compact.points.len(),
+            COUNT,
+            "doc must produce exactly COUNT lamps"
+        );
+
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = map2d_fixture(compact, true, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, lamp) in lamps.iter().enumerate() {
+            let strip_position = (index as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], strip_position, "map2d wire ramp");
+        }
+    }
+
+    /// Same map2d-sourced fixture, `wire_reversed = true`: the wire-order
+    /// path composes with the direction bit exactly like the hand-authored
+    /// scarf does (`a_reversed_wire_request_samples_the_strip_back_to_front`).
+    #[test]
+    fn a_map2d_sourced_fixture_with_wire_reversed_samples_back_to_front() {
+        const COUNT: usize = 8;
+        let doc = map2d_scarf_doc();
+        let compact = mapping_from_map2d_doc(&doc, 16, 16).expect("resolve map2d doc");
+        assert_eq!(compact.points.len(), COUNT);
+
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = map2d_fixture(compact, true, ConsumerPolicy::AUTO, product);
+        fixture.wire_reversed = true;
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.wire_reversed = true;
+        }
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], reversed_position, "map2d reversed wire ramp");
+        }
+    }
+
     /// The same scarf running a 2D effect samples the RING UVs — the map
     /// is exactly what a 2D effect is for.
     #[test]
