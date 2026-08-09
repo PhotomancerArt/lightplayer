@@ -82,11 +82,16 @@ const CONSUMER_ALONG_WIRE: &str = "along the wire";
 /// variant — the pick dispatches the bool `SetValue`, never an ensure).
 const ALONG_WIRE_VARIANT: &str = "AlongWire";
 
-/// The modifier tiles' hint lines (the same uniform chain the engine
-/// runs: mirror folds first, flip reverses after).
-const MIRROR_TITLE: &str = "fold at the middle — out and back";
-const FLIP_TITLE: &str = "reverse the strip";
-/// The along-the-wire direction tiles.
+/// The modifier ROWS (each a two-card single-select, exactly the shape
+/// row's treatment — the reflective-tiles amendment): row labels, card
+/// words, and hint lines. The chain runs mirror first, flip after.
+const MODIFIER_NORMAL: &str = "normal";
+const HINT_MIRROR_NORMAL: &str = "no fold";
+const HINT_MIRRORED: &str = "fold at the middle — out and back";
+const HINT_FLIP_NORMAL: &str = "as is";
+const HINT_FLIPPED: &str = "reverse the strip";
+/// The along-the-wire direction row — the same two-card shape.
+const DIRECTION_ROW_LABEL: &str = "direction";
 const WIRE_FORWARD: &str = "forward";
 const WIRE_REVERSED: &str = "reversed";
 const HINT_WIRE_FORWARD: &str = "wire order, as wired";
@@ -310,20 +315,20 @@ fn active_projection(cell: &UiSpaceCell) -> Option<UiCellProjection> {
     }
 }
 
-/// The two modifier TILES under the shape tiles ("mirror", "flip") —
-/// the modifier-tiles ruling: the checkboxes were "very small and
-/// non-visual compared to the projection", so the modifiers wear the
-/// same ChoiceTiles clothing, MUTUALLY REFLECTIVE with the shapes:
+/// The modifier ROWS under the shape tiles — the reflective-tiles
+/// AMENDMENT ("each should get a row with two cards… exactly the same
+/// treatment as the 'show in 2d by'"): NOT toggle tiles. Each modifier
+/// is its own two-card single-select row —
 ///
-/// - each modifier tile draws the CURRENT shape and other modifier with
-///   ITS OWN modifier forced ON — the tile always shows what pressing it
-///   produces; the selected treatment (accent border + wash + check),
-///   not the drawing, says whether it is active;
-/// - the shape tiles (in [`ChoiceTiles`]) draw with the current
-///   modifiers applied, closing the loop.
+/// - `mirror`: [normal | mirrored]
+/// - `flip`: [normal | flipped]
 ///
-/// All faces come from the one chain-derived drawing function, so
-/// reflectivity is free. A press is still the ordinary bool `SetValue`.
+/// — with the same selected treatment as a selected shape tile, and
+/// every card MUTUALLY REFLECTIVE: a row's two faces draw the current
+/// shape and OTHER modifier with its own modifier off vs on, so both
+/// cards are true what-ifs of pressing them (and the shape tiles above
+/// keep reflecting the live modifiers). Selecting a card is the
+/// ordinary bool `SetValue`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SpaceModifierTiles(
@@ -333,87 +338,112 @@ fn SpaceModifierTiles(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: TILE_GRID_CLASS,
-            ModifierTile {
-                label: MODIFIER_MIRROR,
-                hint: MIRROR_TITLE,
-                projection: modifier_tile_projection(base, Modifier::Mirror),
-                row: modifiers.mirror,
-                on_action,
-            }
-            ModifierTile {
-                label: MODIFIER_FLIP,
-                hint: FLIP_TITLE,
-                projection: modifier_tile_projection(base, Modifier::Flip),
-                row: modifiers.flip,
-                on_action,
-            }
+        ModifierRow {
+            row_label: MODIFIER_MIRROR,
+            cards: [
+                (MODIFIER_NORMAL, HINT_MIRROR_NORMAL),
+                (MODIFIER_MIRRORED, HINT_MIRRORED),
+            ],
+            projections: [
+                modifier_row_projection(base, Modifier::Mirror, false),
+                modifier_row_projection(base, Modifier::Mirror, true),
+            ],
+            row: modifiers.mirror,
+            on_action,
+        }
+        ModifierRow {
+            row_label: MODIFIER_FLIP,
+            cards: [(MODIFIER_NORMAL, HINT_FLIP_NORMAL), (MODIFIER_FLIPPED, HINT_FLIPPED)],
+            projections: [
+                modifier_row_projection(base, Modifier::Flip, false),
+                modifier_row_projection(base, Modifier::Flip, true),
+            ],
+            row: modifiers.flip,
+            on_action,
         }
     }
 }
 
-/// Which modifier a tile toggles.
+/// Which modifier a row selects.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Modifier {
     Mirror,
     Flip,
 }
 
-/// The what-if face a modifier tile draws: the current projection with
-/// THIS modifier forced on (the reflectivity rule — the tile shows what
-/// it produces, always).
-fn modifier_tile_projection(base: UiCellProjection, which: Modifier) -> UiCellProjection {
+/// One card's what-if face in a modifier row: the current projection
+/// with THIS modifier set to `on` (the reflectivity rule — each card
+/// shows exactly what selecting it produces).
+fn modifier_row_projection(base: UiCellProjection, which: Modifier, on: bool) -> UiCellProjection {
     match which {
-        Modifier::Mirror => UiCellProjection {
-            mirror: true,
-            ..base
-        },
-        Modifier::Flip => UiCellProjection { flip: true, ..base },
+        Modifier::Mirror => UiCellProjection { mirror: on, ..base },
+        Modifier::Flip => UiCellProjection { flip: on, ..base },
     }
 }
 
-/// One modifier tile: the what-if drawing, the word, and the selected
-/// treatment when the bool is ON. A press dispatches the ordinary bool
-/// `SetValue` (toggling), never a second write path.
+/// One modifier's two-card row: row label, then [off | on] cards in the
+/// shared tile grid — selected = the card matching the bool, a pick =
+/// the ordinary `SetValue` at the bool row.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ModifierTile(
-    label: &'static str,
-    hint: &'static str,
-    projection: UiCellProjection,
+fn ModifierRow(
+    row_label: &'static str,
+    cards: [(&'static str, &'static str); 2],
+    projections: [UiCellProjection; 2],
     row: UiSpaceBoolRow,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let value = row.value;
     let wiring = field_wiring(&row.state, &row.address, on_action);
     rsx! {
-        button {
-            class: tile_class(value),
-            r#type: "button",
-            title: hint,
-            aria_pressed: "{value}",
-            onclick: move |event: MouseEvent| {
-                event.stop_propagation();
-                if let Some((address, handler)) = wiring.clone() {
-                    handler.call(slot_set_value_action(address, LpValue::Bool(!value)));
+        div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
+            span { class: ROW_LABEL_CLASS, "{row_label}" }
+            div { class: TILE_GRID_CLASS,
+                for (index , ((label , hint) , projection)) in cards
+                    .into_iter()
+                    .zip(projections)
+                    .enumerate()
+                {
+                    button {
+                        key: "{index}",
+                        class: tile_class((index == 1) == value),
+                        r#type: "button",
+                        title: hint,
+                        onclick: {
+                            let wiring = wiring.clone();
+                            let candidate = index == 1;
+                            move |event: MouseEvent| {
+                                event.stop_propagation();
+                                if candidate == value {
+                                    return;
+                                }
+                                if let Some((address, handler)) = wiring.clone() {
+                                    handler
+                                        .call(
+                                            slot_set_value_action(address, LpValue::Bool(candidate)),
+                                        );
+                                }
+                            }
+                        },
+                        TileFace {
+                            kind: SpaceGlyph::Projection(projection),
+                            selected: (index == 1) == value,
+                            label: label.to_string(),
+                            hint: hint.to_string(),
+                        }
+                    }
                 }
-            },
-            TileFace {
-                kind: SpaceGlyph::Projection(projection),
-                selected: value,
-                label: label.to_string(),
-                hint: hint.to_string(),
             }
         }
     }
 }
 
-/// The along-the-wire direction as two TILES — adopted into the tile
-/// form with the modifiers (the modifier-tiles ruling's consistency
-/// note): "forward" draws the serpentine as wired, "reversed" draws it
-/// read back to front; the selected treatment marks the current
-/// direction. A press is the ordinary bool `SetValue` over
-/// `wire_reversed`.
+/// The along-the-wire direction as the SAME two-card row shape the
+/// modifier rows use (the reflective-tiles amendment): row label
+/// `direction`, then [forward | reversed] cards — "forward" draws the
+/// serpentine as wired, "reversed" draws it read back to front; the
+/// selected treatment marks the current direction. A pick is the
+/// ordinary bool `SetValue` over `wire_reversed`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn WireDirectionTiles(
@@ -423,33 +453,36 @@ fn WireDirectionTiles(
     let reversed = wire.reversed;
     let wiring = field_wiring(&wire.state, &wire.address, on_action);
     rsx! {
-        div { class: TILE_GRID_CLASS,
-            for (candidate , label , hint) in [
-                (false, WIRE_FORWARD, HINT_WIRE_FORWARD),
-                (true, WIRE_REVERSED, HINT_WIRE_REVERSED),
-            ] {
-                button {
-                    key: "{candidate}",
-                    class: tile_class(candidate == reversed),
-                    r#type: "button",
-                    title: hint,
-                    onclick: {
-                        let wiring = wiring.clone();
-                        move |event: MouseEvent| {
-                            event.stop_propagation();
-                            if candidate == reversed {
-                                return;
+            div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
+                span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
+                div { class: TILE_GRID_CLASS,
+                for (candidate , label , hint) in [
+                    (false, WIRE_FORWARD, HINT_WIRE_FORWARD),
+                    (true, WIRE_REVERSED, HINT_WIRE_REVERSED),
+                ] {
+                    button {
+                        key: "{candidate}",
+                        class: tile_class(candidate == reversed),
+                        r#type: "button",
+                        title: hint,
+                        onclick: {
+                            let wiring = wiring.clone();
+                            move |event: MouseEvent| {
+                                event.stop_propagation();
+                                if candidate == reversed {
+                                    return;
+                                }
+                                if let Some((address, handler)) = wiring.clone() {
+                                    handler.call(slot_set_value_action(address, LpValue::Bool(candidate)));
+                                }
                             }
-                            if let Some((address, handler)) = wiring.clone() {
-                                handler.call(slot_set_value_action(address, LpValue::Bool(candidate)));
-                            }
+                        },
+                        TileFace {
+                            kind: SpaceGlyph::AlongWire(candidate),
+                            selected: candidate == reversed,
+                            label: label.to_string(),
+                            hint: hint.to_string(),
                         }
-                    },
-                    TileFace {
-                        kind: SpaceGlyph::AlongWire(candidate),
-                        selected: candidate == reversed,
-                        label: label.to_string(),
-                        hint: hint.to_string(),
                     }
                 }
             }
@@ -1415,16 +1448,17 @@ mod tests {
             tile_glyph(UiSpaceCellRole::Primary, "Auto", Some((true, true))),
             SpaceGlyph::FollowSource
         );
-        // …and a modifier tile forces its own bit over the current cell
-        // (the drawing shows what pressing produces — selected state
-        // alone says whether it is already active).
+        // …and a modifier ROW's two cards draw the current shape and
+        // other modifier with its own modifier off vs on — both faces
+        // true what-ifs of selecting them (the amendment: two cards per
+        // row, exactly the shape row's treatment).
         let base = UiCellProjection {
             shape: UiProjectionShape::Angular,
             mirror: false,
             flip: true,
         };
         assert_eq!(
-            modifier_tile_projection(base, Modifier::Mirror),
+            modifier_row_projection(base, Modifier::Mirror, true),
             UiCellProjection {
                 shape: UiProjectionShape::Angular,
                 mirror: true,
@@ -1432,9 +1466,18 @@ mod tests {
             }
         );
         assert_eq!(
-            modifier_tile_projection(base, Modifier::Flip),
+            modifier_row_projection(base, Modifier::Mirror, false),
             base,
-            "flip already on: the tile shows the current state itself"
+            "the mirror row's `normal` card keeps flip as it stands"
+        );
+        assert_eq!(
+            modifier_row_projection(base, Modifier::Flip, false),
+            UiCellProjection {
+                shape: UiProjectionShape::Angular,
+                mirror: false,
+                flip: false,
+            },
+            "the flip row's `normal` card is the un-flipped what-if"
         );
     }
 
