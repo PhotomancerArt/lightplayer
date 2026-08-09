@@ -64,7 +64,7 @@ pub use app::node::{
     UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
     UiProductPreviewFrame, UiProductRef, UiProductSpaceView, UiProductTrackingState,
     UiProjectionDirection, UiProjectionOrigin, UiRadialDirection, UiShaderFace, UiShaderUniform,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
+    UiShapePresets, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
     UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
     UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
     UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind, UiSpaceCell, UiSpaceCellRole,

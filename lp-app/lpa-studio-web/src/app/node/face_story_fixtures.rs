@@ -968,6 +968,18 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
         // unstated budget falls back to the default guard.
         power: None,
         space: Some(fixture_space_section()),
+        shape_presets: Some(fixture_shape_presets()),
+    }
+}
+
+/// The Shape presets' slot targets, addressed like the real derivation
+/// (the same def rows the advanced drawer would dispatch at).
+pub(crate) fn fixture_shape_presets() -> lpa_studio_core::UiShapePresets {
+    lpa_studio_core::UiShapePresets {
+        mapping: Some(story_slot_address("mapping")),
+        render_size: Some(story_slot_address("render_size")),
+        strip_order: Some(story_slot_address("strip_order_meaningful")),
+        has_map2d: false,
     }
 }
 
@@ -1050,6 +1062,10 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
         ),
         power: None,
         space: Some(fixture_space_section()),
+        shape_presets: Some(lpa_studio_core::UiShapePresets {
+            has_map2d: true,
+            ..fixture_shape_presets()
+        }),
     }
 }
 

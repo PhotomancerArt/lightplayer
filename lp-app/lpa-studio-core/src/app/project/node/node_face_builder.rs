@@ -401,6 +401,7 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
         power: fixture_power(sections),
         space: node_space_section::fixture_space_section(&rows),
+        shape_presets: node_space_section::fixture_shape_presets(&rows),
     })
 }
 

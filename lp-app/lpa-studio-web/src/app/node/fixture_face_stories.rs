@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_face_bound_output, fixture_face_limiting, fixture_face_override,
+    fixture_face, fixture_face_bound_output, fixture_face_limiting, fixture_face_override,
     fixture_face_with_space, fixture_face_within_budget, fixture_node_view,
     fixture_node_view_with_face, fixture_space_section, fixture_space_section_wire_reversed,
     fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
@@ -195,6 +195,71 @@ fn mapping_edit_mode() -> Element {
             FixtureFace {
                 face: map2d_fixture_face_editing(&fyeah_presentable_doc()),
                 edit_initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+// -- the Shape declaration moment (plan-B P5 / gate G2) ----------------------
+
+#[story(
+    description = "The Shape declaration moment (D13): a FRESHLY CREATED fixture renders its dimensionality drawer in guided clothing — 'What shape is this fixture?' over four preset tiles (Strip / Matrix / Mapped shape / 3D-soon-disabled) and a skip link. The trigger is card-UI state set by the create/paste paths, so existing fixtures never see it. Each tile is a batch of the SAME slot ops the compact section and advanced drawer send (strip-order bit, mapping, render size) — no parallel write path; the Mapped tile opens the in-place mapping editor (the map IS the shape). No strip-order follow-up question: that bit is the dropdown's first choice, one state away."
+)]
+fn shape_moment_guided() -> Element {
+    let doc = fyeah_presentable_doc();
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: map2d_fixture_face_editing(&doc),
+                shape_guided: true,
+                node: Some("/fyeah_sign.show/halo.fixture".to_string()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The guided moment on a fixture with NO map2d document (an undeclared paste of older clipboard content): the Mapped-shape tile is honestly disabled — its tooltip points at the advanced drawer — while Strip and Matrix stay live. The moment never invents a mapping; it only writes the slots that exist."
+)]
+fn shape_moment_no_map() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face(),
+                shape_guided: true,
+                node: Some("/fyeah_sign.show/halo.fixture".to_string()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "What the STRIP preset leaves behind: the guided clothing gone, the dimensionality drawer back in compact form reading `along the wire` — the preset wrote strip_order=true, mapping=Unset, and a 1-row render area (the declared-strip idiom the engine's 2D-membership check reads), all through the ordinary slot ops. The same section, one declaration later."
+)]
+fn shape_moment_strip_result() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_with_space(fixture_space_section()),
+                space_initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "What the MATRIX preset leaves behind: strip_order=false (wire order is plumbing), mapping=Unset, a 16×16 render area — 2D membership from authored intent. The dropdown reads `follow the source`: 1D sources project the way they declare, exactly what a panel wants."
+)]
+fn shape_moment_matrix_result() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: fixture_face_override("Auto"),
+                space_initially_open: true,
                 on_action: move |_| {},
             }
         }

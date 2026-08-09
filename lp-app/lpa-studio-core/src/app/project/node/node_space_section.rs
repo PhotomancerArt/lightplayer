@@ -43,6 +43,39 @@ pub(in crate::app::project) const FIXTURE_WIRE_REVERSED_ROW: &str = "wire_revers
 /// two-segment direction — see [`UiSpaceDirectionDispatch::ReversedBool`]).
 pub(crate) const WIRE_DIRECTION_FORWARD: &str = "Forward";
 pub(crate) const WIRE_DIRECTION_REVERSED: &str = "Reversed";
+/// The fixture def's mapping row (a Shape-preset target; stays in the
+/// advanced drawer, never claimed).
+const FIXTURE_MAPPING_ROW: &str = "mapping";
+/// The fixture def's render-size row (a Shape-preset target).
+const FIXTURE_RENDER_SIZE_ROW: &str = "render_size";
+
+/// The Shape declaration moment's slot targets (D13, plan-B P5) — see
+/// [`crate::UiShapePresets`] for the seam contract. Every address is the
+/// SAME row the advanced drawer (or the dimensionality section) would
+/// dispatch at; this function only gathers them.
+pub(in crate::app::project) fn fixture_shape_presets(
+    rows: &[&UiConfigSlot],
+) -> Option<crate::UiShapePresets> {
+    let row = |key: &str| rows.iter().copied().find(|row| row.key == key);
+    let mapping = row(FIXTURE_MAPPING_ROW);
+    let render_size = row(FIXTURE_RENDER_SIZE_ROW);
+    let strip_order = row(FIXTURE_STRIP_ORDER_ROW);
+    // No backing rows at all — a hand-built face or a pre-slot def; the
+    // guided state renders nothing rather than inventing targets.
+    if mapping.is_none() && render_size.is_none() && strip_order.is_none() {
+        return None;
+    }
+    let has_map2d = mapping.is_some_and(|row| match &row.composite {
+        Some(UiSlotComposite::Enum(composite)) => composite.active == "Map2d",
+        _ => false,
+    });
+    Some(crate::UiShapePresets {
+        mapping: mapping.and_then(|row| row.address.clone()),
+        render_size: render_size.and_then(|row| row.address.clone()),
+        strip_order: strip_order.and_then(|row| row.address.clone()),
+        has_map2d,
+    })
+}
 
 /// The producer side's section: the shader's `space` declaration, its
 /// answer cell for the opposite dimension, and the D1 mismatch state.

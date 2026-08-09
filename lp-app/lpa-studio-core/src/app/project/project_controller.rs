@@ -342,6 +342,13 @@ struct PendingNodeFocus {
     /// Expected tree segment name of the created node (the `nodes` key, or
     /// the loader's `entry_<k>` fallback for unnamed playlist entries).
     name: String,
+    /// Whether the created node should surface the fixture Shape
+    /// declaration moment once its tree entry lands (D13, plan-B P5):
+    /// true for every "+ fixture" create and for a pasted fixture with
+    /// no authored shape. Resolved into the card-UI store at the same
+    /// moment focus resolves, because that is when the node's real
+    /// address exists.
+    shape_guided: bool,
 }
 
 /// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
@@ -5365,7 +5372,10 @@ impl ProjectController {
             site,
         );
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        // Every "+ fixture" birth surfaces the Shape declaration moment
+        // (D13): the starter is a generic 8×8 grid, not a declared shape.
+        let shape_guided = kind == NodeKind::Fixture;
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
     }
 
@@ -5449,7 +5459,7 @@ impl ProjectController {
             site,
         );
 
-        self.run_create_request(server, request, parent, expected_name, key)
+        self.run_create_request(server, request, parent, expected_name, key, false)
             .await
     }
 
@@ -5467,6 +5477,7 @@ impl ProjectController {
         parent: ProjectNodeAddress,
         expected_name: String,
         name: String,
+        shape_guided: bool,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         let outcome = server.project_create_node(handle_id, request).await?;
@@ -5480,6 +5491,7 @@ impl ProjectController {
                 self.pending_focus = Some(PendingNodeFocus {
                     parent,
                     name: expected_name,
+                    shape_guided,
                 });
                 match self.refresh_project(server).await {
                     Ok(run) => logs.extend(run.logs),
@@ -5775,9 +5787,25 @@ impl ProjectController {
         let mut request = envelope
             .to_create_request(&format!("./{name}.json"), &asset_paths, site)
             .map_err(|error| UiError::Project(format!("cannot paste this node: {error}")))?;
+        // A pasted fixture carries its declaration; only one with no
+        // authored shape gets the guided moment (P5 item 4). "No authored
+        // shape" today means: no mapping AND no 1-row render area — the
+        // two present-day shape signals (a map IS a declared shape; a
+        // 1-row TextureArea is the declared-strip idiom). D15's declared
+        // fixture space replaces this heuristic when it lands.
+        let shape_guided = core::str::from_utf8(&body)
+            .ok()
+            .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
+            .is_some_and(|def| match def {
+                lpc_model::NodeDef::Fixture(fixture) => {
+                    matches!(fixture.mapping.value(), lpc_model::MappingConfig::Unset)
+                        && fixture.render_size.value().height != 1
+                }
+                _ => false,
+            });
         request.body = body;
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
     }
 
@@ -6136,7 +6164,7 @@ impl ProjectController {
     /// end of every applied project view; consumes [`Self::pending_focus`]
     /// when the expected child resolves under its parent.
     fn apply_pending_focus(&mut self) {
-        let target = {
+        let (target, guided_address) = {
             let Some(pending) = &self.pending_focus else {
                 return;
             };
@@ -6153,9 +6181,21 @@ impl ProjectController {
             }) else {
                 return;
             };
-            ProjectEditorTarget::addressed_node(created.target().clone())
+            (
+                ProjectEditorTarget::addressed_node(created.target().clone()),
+                pending.shape_guided.then(|| created.address().to_string()),
+            )
         };
         self.pending_focus = None;
+        // The Shape declaration moment (D13, plan-B P5): the created
+        // fixture's card renders its dimensionality section in guided
+        // clothing. Marked here — the first moment the node's REAL
+        // address exists — through the same reducer every card-UI
+        // mutation takes, so a preset pick or dismiss clears it the
+        // ordinary way.
+        if let Some(node) = guided_address {
+            self.apply_node_ui_op(NodeUiOp::SetShapeGuided { node, guided: true });
+        }
         self.focus_editor_target(&target);
         self.active_editor_target = Some(target);
     }
