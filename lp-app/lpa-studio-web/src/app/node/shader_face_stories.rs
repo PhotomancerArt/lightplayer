@@ -192,10 +192,10 @@ fn agent_collapsed() -> Element {
 
 // -- the space section (dimensionality plan-B P4 / gate G1) ------------------
 
-/// The whole card, so the section can be judged at the rank it claims:
-/// between the product and the settings, with a rail label of its own.
+/// The whole card, so the drawer can be judged where it now lives: below
+/// settings, collapsed to its summary row.
 #[story(
-    description = "A 2D shader's `space` section at rest — the declaration lifted out of the advanced drawer and onto the card at the same rank as output and settings (D13). The primary reads as a segmented pair (a two-state choice is squared blocks, never a dropdown), the header carries the matching `2D` badge, and the one answer cell below it is a STATEMENT rather than a picker: a 2D producer filling a 1D request has exactly one answer today (the centre scanline), and a dropdown over one option invites a gesture with nothing to change."
+    description = "The card's DEFAULT posture after the G1 rework (P4b): the `dimensionality` drawer rides below settings, collapsed to a summary row — `2D · in 1D: centre scanline` — because the declaration is authoring, not day-to-day tuning. G1 ruled the always-open `space` section off the rail; the G1b matrix judges this against the fold-into-`definition` variant."
 )]
 fn space_two_d() -> Element {
     rsx! {
@@ -208,10 +208,10 @@ fn space_two_d() -> Element {
     }
 }
 
-/// One story per answer: the four projections are the design decision, and
-/// a single screenshot of "radial" cannot be read against the others.
+/// One story per answer: the projections are the design decision, and a
+/// single screenshot of "radial" cannot be read against the others.
 #[story(
-    description = "A 1D shader declaring how it fills 2D space, one card per answer. `consumer decides` defers (the fixture's own default applies); the other four state an opinion that a fixture has to FORCE to overrule — which is what the line under the cells says. Read left to right: the same card, the same row, four different answers, each with its projection's own glyph on the closed field."
+    description = "A 1D shader's drawer OPEN, one card per answer. The declaration leads as a full-width tab pair (G1: 'almost like tabs'), and the answer row reads `show in 2D by`. `consumer decides` is gone (G1): the silent state is `extrude · default` — the projection silence actually resolves to — and the other picks state an opinion a fixture can still override, which is what the line beneath says."
 )]
 fn space_one_d_answers() -> Element {
     rsx! {
@@ -221,6 +221,7 @@ fn space_one_d_answers() -> Element {
                     ShaderFace {
                         face: shader_face_one_d(answer),
                         node: "/fyeah_sign.show/comet.shader".to_string(),
+                        space_initially_open: true,
                         on_action: move |_| {},
                     }
                 }
@@ -230,7 +231,7 @@ fn space_one_d_answers() -> Element {
 }
 
 #[story(
-    description = "The projection picker OPEN (D16): opening the enum field opens a tile grid inside it — one merged outline welds field and panel, so it reads as diving into the control rather than a menu appearing near it. Each tile draws what that answer DOES to a strip (extrude stretches it down, radial pushes it out from the centre, angular sweeps it around, mirror folds it at the centre); the tiles are schematic rather than live probes, which is exactly the question G1 rules on. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>` and closes — a selection is a completed gesture."
+    description = "The projection picker OPEN (D16, tiles ratified at G1): one merged outline welds field and panel, each tile draws what that answer DOES to a strip. Two G1 fixes visible: the angular tile is now a conic sweep of pie sectors (the ray spokes read as an asterisk), and the leading tile is `extrude · default` rather than a deferring blank. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>` and closes — a selection is a completed gesture."
 )]
 fn space_projection_picker_open() -> Element {
     rsx! {
@@ -240,6 +241,64 @@ fn space_projection_picker_open() -> Element {
                 node: "/fyeah_sign.show/comet.shader".to_string(),
                 space_picker_open_cell: UiSpaceCellRole::ProducerIn2d,
                 on_action: move |_| {},
+            }
+        }
+    }
+}
+
+/// G1b decision-matrix candidate A: the space controls next to the code,
+/// inside one renamed authoring section.
+#[story(
+    description = "G1b CANDIDATE A — 'they feel like authoring that should go next to the code': the space controls folded into one `definition` section together with the GLSL, instead of a drawer of their own (candidate B, every other space story). Yona is explicitly not 100% sold either way; this story exists so the two homes can be judged side by side. The code block here is a mock — judging the placement needs the shape of code, not a live editor."
+)]
+fn space_in_definition_variant() -> Element {
+    let section = crate::app::node::face_story_fixtures::shader_space_section_one_d("Radial");
+    rsx! {
+        ShaderCardCanvas {
+            div { class: "tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong tw:bg-card",
+                crate::app::node::NodeCardSection { label: "definition", first: true,
+                    div { class: "tw:grid tw:min-w-0 tw:gap-0",
+                        pre { class: "tw:m-0 tw:overflow-x-auto tw:px-4 tw:py-3 tw:font-mono tw:text-[11px] tw:leading-snug tw:text-soft-foreground",
+                            "vec4 render_1d(float pos) {{\n    float w = phase(pos * reach);\n    return palette(w);\n}}"
+                        }
+                        div { class: "tw:border-t tw:border-border-strong",
+                            crate::app::node::SpaceSection { section, on_action: move |_| {} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// G1b decision-matrix: the candidate 1D→2D option set.
+#[story(
+    description = "G1b CANDIDATE TILES — G1 asked whether the option set wants extrude / mirror split per axis ('maybe that's too many?'). This grid renders the candidate vocabulary as drawings only — extrude and mirror in both axes plus radial and the conic angular — with NO model variants behind the Y twins yet. If the set is ratified, `SpaceAnswer2`/`ConsumerCell2` grow variants; if trimmed, this story shrinks back."
+)]
+fn space_projection_candidates() -> Element {
+    use lpa_studio_core::{UiSpaceChoice, UiSpaceSide};
+    let choices = [
+        ("Default", "extrude · default"),
+        ("ExtrudeY", "extrude ↓"),
+        ("Mirror", "mirror"),
+        ("MirrorY", "mirror ↓"),
+        ("Radial", "radial"),
+        ("Angular", "angular"),
+    ]
+    .into_iter()
+    .map(|(variant, label)| UiSpaceChoice {
+        variant: variant.to_string(),
+        label: label.to_string(),
+        projection: None,
+        selected: variant == "Default",
+    })
+    .collect::<Vec<_>>();
+    rsx! {
+        div { class: "tw:w-full tw:max-w-xs tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong tw:bg-card",
+            crate::app::node::ProjectionTileGrid {
+                choices,
+                side: UiSpaceSide::Producer,
+                role: UiSpaceCellRole::ProducerIn2d,
             }
         }
     }

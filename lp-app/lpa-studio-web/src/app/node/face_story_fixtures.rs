@@ -626,8 +626,8 @@ pub(crate) fn shader_space_section() -> lpa_studio_core::UiSpaceSection {
     }
 }
 
-/// The consumer mirror in its unexpanded state: `Auto`, plus the
-/// strip-order declaration (D3).
+/// The consumer mirror in its default state: the ONE dropdown (P4b)
+/// selecting "follow the source", plus the strip-order declaration (D3).
 pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
     use lpa_studio_core::{
         UiSpaceCellRole, UiSpaceFlag, UiSpaceFlagRole, UiSpaceSection, UiSpaceSide,
@@ -636,16 +636,16 @@ pub(crate) fn fixture_space_section() -> lpa_studio_core::UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary: space_cell(
             UiSpaceCellRole::Primary,
-            "Consume",
+            "Show 1D sources by",
             "consume",
             "Auto",
-            &[("Auto", "auto", None), ("Policy", "policy", None)],
+            CONSUMER_DROPDOWN_CHOICES,
         ),
         declared_space: None,
         cells: Vec::new(),
         flags: vec![UiSpaceFlag {
             role: UiSpaceFlagRole::StripOrderMeaningful,
-            label: "Strip order means something".to_string(),
+            label: "1D patterns follow the wire".to_string(),
             value: true,
             address: Some(story_slot_address("strip_order_meaningful")),
             state: UiSlotFieldState::editable(),
@@ -680,10 +680,10 @@ const PRODUCER_IN_2D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProje
     ),
 ];
 
-/// The consumer's own list: no `Default` here — a fixture that has opened a
-/// policy has to name one (`node_space_section`'s "no Default on the
-/// consumer side").
-const CONSUMER_FROM_1D_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
+/// The consumer's ONE dropdown (P4b): `Auto` ("follow the source") plus
+/// the four projections an explicit pick would force.
+const CONSUMER_DROPDOWN_CHOICES: &[(&str, &str, Option<lpa_studio_core::UiCellProjection>)] = &[
+    ("Auto", "follow the source", None),
     (
         "Extrude",
         "extrude",
@@ -748,32 +748,19 @@ pub(crate) fn shader_space_section_mismatch() -> lpa_studio_core::UiSpaceSection
     section
 }
 
-/// The consumer side with an authored policy: a default projection for 1D
-/// sources plus the inline `force` bit that decides who wins.
-pub(crate) fn fixture_space_section_policy(force: bool) -> lpa_studio_core::UiSpaceSection {
-    use lpa_studio_core::{UiSpaceCellRole, UiSpaceFlag, UiSpaceFlagRole};
+/// The consumer side with an authored override: the same one dropdown,
+/// now selecting a projection (an explicit pick IS the override — P4b
+/// absorbed the force bit into the gesture).
+pub(crate) fn fixture_space_section_override(active: &str) -> lpa_studio_core::UiSpaceSection {
+    use lpa_studio_core::UiSpaceCellRole;
     let mut section = fixture_space_section();
     section.primary = space_cell(
         UiSpaceCellRole::Primary,
-        "Consume",
+        "Show 1D sources by",
         "consume",
-        "Policy",
-        &[("Auto", "auto", None), ("Policy", "policy", None)],
+        active,
+        CONSUMER_DROPDOWN_CHOICES,
     );
-    section.cells = vec![space_cell(
-        UiSpaceCellRole::ConsumerFrom1d,
-        "From 1D sources",
-        "consume.Policy.from_1d",
-        "Radial",
-        CONSUMER_FROM_1D_CHOICES,
-    )];
-    section.flags.push(UiSpaceFlag {
-        role: UiSpaceFlagRole::ForcePolicy,
-        label: "Force".to_string(),
-        value: force,
-        address: Some(story_slot_address("consume.Policy.force")),
-        state: UiSlotFieldState::editable(),
-    });
     section
 }
 
@@ -905,9 +892,9 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
 
 /// The consumer mirror with a real policy on it: what a fixture that has
 /// opinions about 1D sources looks like at rest.
-pub(crate) fn fixture_face_policy(force: bool) -> UiFixtureFace {
+pub(crate) fn fixture_face_override(active: &str) -> UiFixtureFace {
     UiFixtureFace {
-        space: Some(fixture_space_section_policy(force)),
+        space: Some(fixture_space_section_override(active)),
         ..fixture_face()
     }
 }

@@ -73,13 +73,24 @@ pub(in crate::app::project) fn shader_space_section(
     })
 }
 
-/// The consumer side's section: the fixture's `consume` policy (with
-/// `Auto` as the unexpanded state — a unit variant contributes no payload
-/// rows at all) plus the strip-order bit.
+/// The consumer side's section: ONE dropdown cell over the fixture's
+/// `consume` policy, plus the strip-order bit.
 ///
-/// Derives as soon as EITHER row is present: the strip-order question is a
-/// section-worthy declaration on its own (D3), and a fixture whose
-/// `consume` row has not landed should still be able to answer it.
+/// **G1 rework (plan-B P4b).** G1 ruled the `Auto`/`Policy` split
+/// backwards as a surface: "use the dropdown with the 'default' option…
+/// then we just have one control." So the primary cell IS the projection
+/// choice — a synthetic `Auto` entry ("follow the source") plus the four
+/// [`ConsumerCell2`] projections. The projection variants are the model's
+/// static vocabulary rather than tree rows because under `Auto` the
+/// `from_1d` payload is not in the tree at all, and the dropdown must
+/// still offer them. The web dispatches per choice: `Auto` is the plain
+/// `EnsurePresent consume.Auto`; a projection is the
+/// `EnsurePresent consume.Policy` → `EnsurePresent
+/// consume.Policy.from_1d.<V>` → `SetValue consume.Policy.force = true`
+/// sequence — every op one the generic drawer rows already send, so this
+/// stays a presentation of the same write path. `force` is absorbed by
+/// that gesture (an explicit pick IS the override), so the flag is no
+/// longer emitted.
 pub(in crate::app::project) fn fixture_space_section(
     rows: &[&UiConfigSlot],
 ) -> Option<UiSpaceSection> {
@@ -87,23 +98,7 @@ pub(in crate::app::project) fn fixture_space_section(
         .iter()
         .copied()
         .find(|row| row.key == FIXTURE_CONSUME_ROW)?;
-    let primary = enum_cell(
-        row,
-        UiSpaceCellRole::Primary,
-        "Consume",
-        consumer_space_label,
-    )?;
-    let cells = payload_field(row, "from_1d")
-        .and_then(|field| {
-            enum_cell(
-                field,
-                UiSpaceCellRole::ConsumerFrom1d,
-                "From 1D sources",
-                projection_label,
-            )
-        })
-        .into_iter()
-        .collect();
+    let primary = consumer_projection_cell(row)?;
     let mut flags = Vec::new();
     if let Some(strip) = rows
         .iter()
@@ -119,20 +114,57 @@ pub(in crate::app::project) fn fixture_space_section(
     {
         flags.push(strip);
     }
-    if let Some(force) = payload_field(row, "force")
-        .and_then(|field| bool_flag(field, UiSpaceFlagRole::ForcePolicy, "Force"))
-    {
-        flags.push(force);
-    }
     Some(UiSpaceSection {
         side: UiSpaceSide::Consumer,
         primary,
         // A fixture states a policy, never a space: its own dimensionality
         // comes from its mapping, not from this section.
         declared_space: None,
-        cells,
+        cells: Vec::new(),
         flags,
         mismatch: None,
+    })
+}
+
+/// The consumer dropdown's variants when the fixture has authored a
+/// policy: the model's static [`ConsumerCell2`] vocabulary. Static rather
+/// than read from the tree because the `Auto` state carries no payload
+/// rows, and the dropdown offers the projections from either state.
+const CONSUMER_PROJECTION_VARIANTS: [&str; 4] = ["Extrude", "Radial", "Angular", "Mirror"];
+
+/// The one consumer cell: `Auto` ("follow the source") + the projections,
+/// selected from the active `from_1d` when a policy is authored.
+fn consumer_projection_cell(row: &UiConfigSlot) -> Option<UiSpaceCell> {
+    let Some(UiSlotComposite::Enum(composite)) = &row.composite else {
+        return None;
+    };
+    let active = if composite.active == "Auto" {
+        "Auto".to_string()
+    } else {
+        payload_field(row, "from_1d")
+            .and_then(|field| match &field.composite {
+                Some(UiSlotComposite::Enum(from)) => Some(from.active.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "Auto".to_string())
+    };
+    let choices = std::iter::once("Auto")
+        .chain(CONSUMER_PROJECTION_VARIANTS)
+        .map(|variant| UiSpaceChoice {
+            variant: variant.to_string(),
+            label: consumer_choice_label(variant),
+            projection: variant_projection(variant),
+            selected: variant == active,
+        })
+        .collect();
+    Some(UiSpaceCell {
+        role: UiSpaceCellRole::Primary,
+        label: "Show 1D sources by".to_string(),
+        active: active.clone(),
+        active_label: consumer_choice_label(&active),
+        choices,
+        address: row.address.clone(),
+        state: row.state.clone(),
     })
 }
 
@@ -241,12 +273,12 @@ fn shader_space_label(variant: &str) -> String {
     }
 }
 
-/// Display label for a `VisualConsumerSpace` variant.
-fn consumer_space_label(variant: &str) -> String {
+/// Display label for a consumer-dropdown choice: the synthetic `Auto`
+/// entry ("follow the source's own projection") plus the projections.
+fn consumer_choice_label(variant: &str) -> String {
     match variant {
-        "Auto" => "auto".to_string(),
-        "Policy" => "policy".to_string(),
-        other => other.to_string(),
+        "Auto" => "follow the source".to_string(),
+        other => projection_label(other),
     }
 }
 
@@ -431,11 +463,11 @@ mod tests {
         );
     }
 
-    /// `Auto` is the unexpanded consumer state: a unit variant carries no
-    /// payload rows, so the section is the primary cell plus the
-    /// strip-order flag and nothing else.
+    /// The consumer section is ONE dropdown (P4b): `Auto` renders as the
+    /// selected "follow the source" entry, with the four projections
+    /// offered even though `Auto` carries no payload rows in the tree.
     #[test]
-    fn an_auto_fixture_section_is_the_primary_cell_and_the_strip_order_flag() {
+    fn an_auto_fixture_is_one_dropdown_selecting_follow_the_source() {
         let rows = [
             bool_row("strip_order_meaningful", true),
             enum_row("consume", "Auto", &["Auto", "Policy"], Vec::new()),
@@ -445,8 +477,27 @@ mod tests {
 
         assert_eq!(section.side, UiSpaceSide::Consumer);
         assert_eq!(section.declared_space, None, "a fixture states a policy");
-        assert_eq!(section.primary.active_label, "auto");
-        assert!(section.cells.is_empty());
+        assert_eq!(section.primary.active, "Auto");
+        assert_eq!(section.primary.active_label, "follow the source");
+        assert_eq!(
+            section.primary.choices.len(),
+            5,
+            "Auto plus the four static projections"
+        );
+        assert!(
+            section.primary.is_choosable(),
+            "the dropdown is live from the Auto state"
+        );
+        assert_eq!(
+            section
+                .primary
+                .address
+                .as_ref()
+                .map(|address| address.path.to_string()),
+            Some("consume".to_string()),
+            "dispatch targets the consume enum row"
+        );
+        assert!(section.cells.is_empty(), "the primary IS the only cell");
         assert_eq!(section.flags.len(), 1);
         let strip = section
             .flag(UiSpaceFlagRole::StripOrderMeaningful)
@@ -461,10 +512,11 @@ mod tests {
         );
     }
 
-    /// An authored policy expands into its default-projection cell and the
-    /// inline force bit.
+    /// An authored policy selects its `from_1d` in the same dropdown, and
+    /// the force bit is absorbed by the gesture rather than surfaced as a
+    /// flag (an explicit pick IS the override).
     #[test]
-    fn a_policy_fixture_expands_into_its_cell_and_force_flag() {
+    fn a_policy_fixture_selects_its_projection_in_the_one_dropdown() {
         let rows = [
             bool_row("strip_order_meaningful", false),
             enum_row(
@@ -485,22 +537,14 @@ mod tests {
         let rows: Vec<&UiConfigSlot> = rows.iter().collect();
         let section = fixture_space_section(&rows).expect("section");
 
-        let cell = section
-            .cell(UiSpaceCellRole::ConsumerFrom1d)
-            .expect("the from-1D cell");
-        assert_eq!(cell.active_label, "mirror");
-        assert_eq!(cell.choices.len(), 4, "no Default on the consumer side");
-        assert!(cell.is_choosable());
-        let force = section
-            .flag(UiSpaceFlagRole::ForcePolicy)
-            .expect("the force flag");
-        assert!(force.value);
+        assert_eq!(section.primary.active, "Mirror");
+        assert_eq!(section.primary.active_label, "mirror");
+        assert!(section.primary.is_choosable());
         assert!(
-            !section
-                .flag(UiSpaceFlagRole::StripOrderMeaningful)
-                .expect("the strip-order flag")
-                .value
+            section.flag(UiSpaceFlagRole::StripOrderMeaningful).is_some(),
+            "the strip-order flag survives"
         );
+        assert_eq!(section.flags.len(), 1, "no force flag — the pick forces");
     }
 
     /// D1: the compiler's mismatch message becomes a structured pair. The

@@ -99,6 +99,7 @@ pub use face::{
     ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
     PlaylistFace, ShaderFace, TapeTransport,
 };
+pub(crate) use face::{ProjectionTileGrid, SpaceSection};
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};

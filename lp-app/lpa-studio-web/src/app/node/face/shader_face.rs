@@ -44,7 +44,7 @@ use crate::base::StudioIconName;
 
 use super::node_ui_action;
 use super::preview_spaces::{PreviewSpaceToggles, SpacedProductPreview, preview_space_state};
-use super::space_section::{SPACE_SECTION_LABEL, SpaceSection};
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
 /// The agent section's plain-language role subline (item 2): active voice,
 /// no jargon.
@@ -76,8 +76,24 @@ pub fn ShaderFace(
     /// Open this space cell's tile picker on first render (stories).
     #[props(default = None)]
     space_picker_open_cell: Option<lpa_studio_core::UiSpaceCellRole>,
+    /// Open the dimensionality drawer on first render (stories — the
+    /// drawer defaults collapsed, P4b).
+    #[props(default = false)]
+    space_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The dimensionality drawer's open state (P4b: default collapsed,
+    // below settings). Face-local like the picker's own open flag: this is
+    // presentation state, not project state. An open picker implies an
+    // open drawer — and a D1 mismatch forces one, because an error folded
+    // out of sight is an error hidden.
+    let space_mismatched = face
+        .space
+        .as_ref()
+        .is_some_and(|section| section.mismatch.is_some());
+    let mut space_open = use_signal(move || {
+        space_initially_open || space_picker_open_cell.is_some() || space_mismatched
+    });
     let preview = face.preview.clone();
     // D15's checkboxes: shown on a VISUAL hero only (they ask which
     // coordinate space to render a picture in, which is not a question a
@@ -146,19 +162,6 @@ pub fn ShaderFace(
             }
             SpacedProductPreview { product: preview.clone(), on_action }
         }
-        // The declaration sits between what this shader PRODUCES and how it
-        // is tuned — identity before settings, and the same rank as both
-        // (D13). Its rows are claimed out of the advanced drawer in core, so
-        // this is their only surface.
-        if let Some(space) = face.space.clone() {
-            NodeCardSection { label: SPACE_SECTION_LABEL,
-                SpaceSection {
-                    section: space,
-                    picker_open_cell: space_picker_open_cell,
-                    on_action,
-                }
-            }
-        }
         if !face.controls.is_empty() {
             NodeCardSection { label: "settings",
                 div { class: "tw:flex tw:flex-wrap tw:items-start tw:gap-4 tw:px-4 tw:py-3",
@@ -170,6 +173,27 @@ pub fn ShaderFace(
                             on_action,
                         }
                     }
+                }
+            }
+        }
+        // The declaration rides below settings as a default-collapsed
+        // drawer whose summary states it at a glance (G1 rework, P4b —
+        // "authoring, not day-to-day tuning"; the G1b decision matrix also
+        // shows the fold-into-code variant). Its rows are claimed out of
+        // the advanced drawer in core, so this is their only surface.
+        if let Some(space) = face.space.clone() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                summary: Some(space_section_summary(&space)),
+                open: Some(space_open()),
+                on_toggle: move |()| {
+                    let open = space_open();
+                    space_open.set(!open);
+                },
+                SpaceSection {
+                    section: space,
+                    picker_open_cell: space_picker_open_cell,
+                    on_action,
                 }
             }
         }
