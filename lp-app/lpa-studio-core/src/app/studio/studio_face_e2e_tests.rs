@@ -2043,7 +2043,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2106,7 +2106,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2166,7 +2166,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2216,7 +2216,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     let output_json = format!(
         r#"{{
   "kind": "Output",
-  "channels": {{
+  "ports": {{
     "0": {{ "endpoint": "ws281x:local:D10" }}
   }},
   "bindings": {{
@@ -2271,7 +2271,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -2331,7 +2331,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2382,7 +2382,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2432,7 +2432,7 @@ fn palette_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2694,7 +2694,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2755,7 +2755,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2806,7 +2806,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2852,7 +2852,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2906,7 +2906,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2947,7 +2947,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:IO18", "count": 6 },
     "1": { "endpoint": "ws281x:local:IO16", "count": 4 },
     "2": { "endpoint": "ws281x:local:IO2" }
@@ -3024,15 +3024,15 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels.len(), 3, "one row per authored wire");
+    assert_eq!(face.ports.len(), 3, "one row per authored wire");
     let labels: Vec<&str> = face
-        .channels
+        .ports
         .iter()
         .map(|channel| channel.pin_label.as_str())
         .collect();
     assert_eq!(labels, ["IO18", "IO16", "IO2"], "in channel-key order");
     assert_eq!(
-        face.channels
+        face.ports
             .iter()
             .map(|channel| (channel.count, channel.slice_start))
             .collect::<Vec<_>>(),
@@ -3042,7 +3042,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     // count-less wire can finally say what it drives.
     assert_eq!(face.total_lamps, Some(16));
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(6),
         "the remainder is what the counted wires left"
     );
@@ -3051,18 +3051,18 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         "this harness has no device registry — 'no board known' is a normal state"
     );
     assert!(
-        face.channels.iter().all(|channel| channel.gpio.is_none()),
+        face.ports.iter().all(|channel| channel.gpio.is_none()),
         "and with no board, no pin resolves"
     );
     assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
 
     // The addresses are real: editing a count rides the ordinary slot path
     // and the whole slice plan re-derives from it.
-    let count_address = face.channels[0]
+    let count_address = face.ports[0]
         .count_address
         .clone()
         .expect("a present count is addressed");
-    assert_eq!(count_address.path.to_string(), "channels[0].count.some");
+    assert_eq!(count_address.path.to_string(), "ports[0].count.some");
     handle
         .tx
         .send(set_value_action(count_address, LpValue::U32(8)));
@@ -3070,14 +3070,14 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("the edit emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels[0].count, Some(8));
+    assert_eq!(face.ports[0].count, Some(8));
     assert_eq!(
-        face.channels[1].slice_start,
+        face.ports[1].slice_start,
         Some(8),
         "the following wires shift with it"
     );
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(4),
         "and the remainder shrinks by the same four lamps"
     );

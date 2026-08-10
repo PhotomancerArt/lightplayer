@@ -1,15 +1,15 @@
 //! The output card's permanent face: the board, then one row per wire.
 //!
-//! An output node drives N physical wires (`OutputDef.channels`), and its one
+//! An output node drives N physical wires (`OutputDef.ports`), and its one
 //! control buffer is sliced across them in key order. The face makes that
 //! split visible and editable:
 //!
 //! - the **board** section draws [`BoardDiagram`] in [`DiagramMode::Wired`],
-//!   one violet connection per assigned channel — the first REAL data into
+//!   one violet connection per assigned port — the first REAL data into
 //!   `wired` (until now the mode was sample-fed from stories only). "No board
 //!   known" is first class: the section simply is not there, and a quiet line
-//!   in the channels section says where the pins are edited instead;
-//! - the **channels** section is one row per wire — key, pin, lamp count —
+//!   in the ports section says where the pins are edited instead;
+//! - the **ports** section is one row per wire — key, pin, lamp count —
 //!   over a caption carrying the wire's slice and resolved GPIO;
 //! - the **patch** section is the wire's own picture: one row per port,
 //!   with a bordered, live-pixel cell for each producer run landing on it
@@ -19,7 +19,7 @@
 //!
 //! Every edit here is an ORDINARY slot op against the addresses the DTO
 //! carries ([`crate::app::node::slot_edit_actions`]): the pin picker writes
-//! the endpoint string, the count field writes `channels[k].count.some`,
+//! the endpoint string, the count field writes `ports[k].count.some`,
 //! add/remove are the generic map-entry gestures, and the spread gesture is
 //! nothing but a sequence of those count writes (so it undoes edit by edit,
 //! and needs no op of its own).
@@ -28,13 +28,13 @@
 //! hit-test API, and that crate is shared with the board editor. Picking a
 //! pin happens in the row's own picker, which lists the eligible pins the
 //! decoration pass resolved (rails and screw terminals alike), marking the
-//! ones another channel already claims.
+//! ones another port already claims.
 
 use dioxus::prelude::*;
 use lpa_boards::{BoardDiagram, DiagramMode, WiredConnection, board_by_id};
 use lpa_studio_core::{
-    LpValue, ProjectSlotAddress, SlotMapKey, UiAction, UiOutputChannelRow,
-    UiOutputFace as UiOutputFaceData, UiOutputPin, UiSlotFieldState,
+    LpValue, ProjectSlotAddress, SlotMapKey, UiAction, UiOutputFace as UiOutputFaceData,
+    UiOutputPin, UiOutputPortRow, UiSlotFieldState,
 };
 
 use crate::app::node::face::PatchBaySection;
@@ -58,7 +58,7 @@ const DEFAULT_ENDPOINT_PREFIX: &str = "ws281x:local";
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OutputFace(
     face: UiOutputFaceData,
-    /// Open this channel's pin picker on first render (stories).
+    /// Open this port's pin picker on first render (stories).
     #[props(default = None)]
     pin_picker_open: Option<u32>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
@@ -71,9 +71,9 @@ pub fn OutputFace(
         .as_ref()
         .and_then(|facts| board_by_id(&facts.board_id).map(|board| (facts.clone(), board.clone())));
     let wired = wired_connections(&face);
-    // With no diagram above it, the channels section IS the top of the face
+    // With no diagram above it, the ports section IS the top of the face
     // and takes the first-section treatment (no divider under the header).
-    let channels_first = board.is_none();
+    let ports_first = board.is_none();
 
     rsx! {
         if let Some((facts, display)) = board {
@@ -91,9 +91,9 @@ pub fn OutputFace(
                 }
             }
         }
-        OutputChannels {
+        OutputPorts {
             face: face.clone(),
-            first: channels_first,
+            first: ports_first,
             pin_picker_open,
             on_action,
         }
@@ -111,25 +111,25 @@ pub fn OutputFace(
 /// (house rule: never in a header).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn OutputChannels(
+fn OutputPorts(
     face: UiOutputFaceData,
     first: bool,
     #[props(default = None)] pin_picker_open: Option<u32>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let summary = channels_summary(&face);
+    let summary = ports_summary(&face);
     let spread = spread_plan(&face);
     let spread_label = spread_label(&face);
     let spread_title = spread_title(&face);
-    let add_key = next_channel_key(&face);
+    let add_key = next_port_key(&face);
     let add_address = face
-        .channels_address
+        .ports_address
         .as_ref()
         .map(|map| map.child_map_entry(SlotMapKey::U32(add_key)));
-    let last_key = face.channels.last().map(|channel| channel.key);
+    let last_key = face.ports.last().map(|port| port.key);
 
     rsx! {
-        NodeCardSection { label: "channels", first,
+        NodeCardSection { label: "ports", first,
             div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                     span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground",
@@ -157,28 +157,28 @@ fn OutputChannels(
                         "No board known for this device — wires are still fully editable; pin names are free text in the advanced drawer."
                     }
                 }
-                if face.channels.is_empty() {
+                if face.ports.is_empty() {
                     p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground",
                         "No wires yet."
                     }
                 }
-                for channel in face.channels.clone() {
-                    OutputChannelRow {
-                        key: "{channel.key}",
-                        remainder_allowed: last_key == Some(channel.key),
-                        picker_open: pin_picker_open == Some(channel.key),
+                for port in face.ports.clone() {
+                    OutputPortRow {
+                        key: "{port.key}",
+                        remainder_allowed: last_key == Some(port.key),
+                        picker_open: pin_picker_open == Some(port.key),
                         face: face.clone(),
-                        channel,
+                        port,
                         on_action,
                     }
                 }
                 if let Some((address, handler)) = add_address.zip(on_action) {
                     div { class: "tw:flex tw:min-w-0",
                         InlineButton {
-                            label: "Add channel {add_key}",
-                            title: "Add channel {add_key} — a new wire at the end of the slice order",
+                            label: "Add port {add_key}",
+                            title: "Add port {add_key} — a new wire at the end of the slice order",
                             icon: StudioIconName::Add,
-                            text: "channel",
+                            text: "port",
                             on_press: move |_| {
                                 handler.call(slot_ensure_present_action(address.clone()));
                             },
@@ -208,39 +208,39 @@ fn OutputChannels(
 /// GPIO the pin resolved to.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn OutputChannelRow(
+fn OutputPortRow(
     face: UiOutputFaceData,
-    channel: UiOutputChannelRow,
-    /// This is the highest-keyed channel, so it — and only it — may drop its
+    port: UiOutputPortRow,
+    /// This is the highest-keyed port, so it — and only it — may drop its
     /// count and take the remainder.
     remainder_allowed: bool,
     #[props(default = false)] picker_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let key = channel.key;
+    let key = port.key;
     // Whether a pin RESOLVED only means something when there is a board to
     // resolve it against; without one, an unresolved pin is the normal state
     // of the whole face, not this wire's fault.
     let board_known = face.board.is_some();
-    let caption = channel_caption(&channel, board_known);
+    let caption = port_caption(&port, board_known);
     let entry_address = face
-        .channels_address
+        .ports_address
         .as_ref()
         .map(|map| map.child_map_entry(SlotMapKey::U32(key)));
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-muted tw:bg-card-subtle tw:px-2 tw:py-1.5",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                span { class: channel_key_class(&channel, board_known), "ch{key}" }
-                ChannelPinCell {
+                span { class: port_key_class(&port, board_known), "ch{key}" }
+                PortPinCell {
                     face: face.clone(),
-                    channel: channel.clone(),
+                    port: port.clone(),
                     picker_open,
                     on_action,
                 }
-                ChannelCountCell {
+                PortCountCell {
                     face: face.clone(),
-                    channel: channel.clone(),
+                    port: port.clone(),
                     remainder_allowed,
                     on_action,
                 }
@@ -257,7 +257,7 @@ fn OutputChannelRow(
                 // never a warning): this wire time-shares a transmitter slot
                 // and waits its turn each frame — by design at more wires
                 // than slots. Torn frames are the actual distress signal.
-                if let Some(status) = channel.wire_status.as_ref() {
+                if let Some(status) = port.wire_status.as_ref() {
                     if status.waves {
                         span {
                             class: "tw:shrink-0 tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:font-mono tw:text-[0.6rem] tw:text-subtle-foreground",
@@ -289,27 +289,27 @@ fn OutputChannelRow(
 /// drawer, which is the honest fallback rather than a picker with no list).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ChannelPinCell(
+fn PortPinCell(
     face: UiOutputFaceData,
-    channel: UiOutputChannelRow,
+    port: UiOutputPortRow,
     #[props(default = false)] picker_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let label = pin_display(&channel);
+    let label = pin_display(&port);
     let board_known = face.board.is_some();
-    let cell_class = pin_cell_class(&channel, board_known);
+    let cell_class = pin_cell_class(&port, board_known);
     let pins = face
         .board
         .as_ref()
         .map(|board| board.pins.clone())
         .unwrap_or_default();
-    let wiring = channel.endpoint_address.clone().zip(on_action);
+    let wiring = port.endpoint_address.clone().zip(on_action);
 
     let Some((address, handler)) = wiring.filter(|_| !pins.is_empty()) else {
         return rsx! {
             span {
                 class: "{cell_class} tw:min-w-0 tw:truncate",
-                title: "{channel.endpoint_display}",
+                title: "{port.endpoint_display}",
                 "{label}"
             }
         };
@@ -318,8 +318,8 @@ fn ChannelPinCell(
     rsx! {
         DetailPopover {
             icon: StudioIconName::NodeKind(NodeKindIcon::Output),
-            label: format!("Pin for channel {}", channel.key),
-            title: channel.endpoint_display.clone(),
+            label: format!("Pin for port {}", port.key),
+            title: port.endpoint_display.clone(),
             placement: PopoverPlacement::BottomStart,
             initially_open: picker_open,
             layer_keeps_layout: true,
@@ -333,9 +333,9 @@ fn ChannelPinCell(
                     for pin in pins {
                         PinPickerRow {
                             key: "{pin.label}",
-                            current: pin.label == channel.pin_label,
-                            channel_key: channel.key,
-                            endpoint: channel.endpoint_display.clone(),
+                            current: pin.label == port.pin_label,
+                            port_key: port.key,
+                            endpoint: port.endpoint_display.clone(),
                             address: address.clone(),
                             pin,
                             on_action: handler,
@@ -347,23 +347,23 @@ fn ChannelPinCell(
     }
 }
 
-/// One eligible pin in the picker. A pin another channel already claims is
+/// One eligible pin in the picker. A pin another port already claims is
 /// SHOWN and still pickable — two wires on one pin is an authoring mistake
 /// the face marks rather than hides.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PinPickerRow(
     pin: UiOutputPin,
-    /// The channel doing the picking (so its own claim reads "current"
+    /// The port doing the picking (so its own claim reads "current"
     /// rather than "taken").
-    channel_key: u32,
+    port_key: u32,
     current: bool,
     endpoint: String,
     address: ProjectSlotAddress,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
-    let claimed = pin.assigned_to.filter(|assigned| *assigned != channel_key);
+    let claimed = pin.assigned_to.filter(|assigned| *assigned != port_key);
     let next = endpoint_with_pin(&endpoint, &pin.label);
     let title = next.clone();
 
@@ -391,23 +391,23 @@ fn PinPickerRow(
 }
 
 /// The count cell: the authored lamp count as an ordinary uint field, or the
-/// remainder channel's resolved count as a readout — with the one gesture
+/// remainder port's resolved count as a readout — with the one gesture
 /// that flips between them (set the option / clear it).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ChannelCountCell(
+fn PortCountCell(
     face: UiOutputFaceData,
-    channel: UiOutputChannelRow,
+    port: UiOutputPortRow,
     remainder_allowed: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let resolved = channel.resolved_count;
+    let resolved = port.resolved_count;
 
-    if channel.count.is_none() {
+    if port.count.is_none() {
         // The remainder wire. Its count is not authored, so there is nothing
         // to edit here — only the gesture that freezes what it resolves to.
         let pin_count = resolved
-            .zip(face.channels_address.clone())
+            .zip(face.ports_address.clone())
             .zip(on_action)
             .map(|((count, _), handler)| (count, handler));
         return rsx! {
@@ -424,9 +424,9 @@ fn ChannelCountCell(
                     icon: StudioIconName::Add,
                     on_press: {
                         let face = face.clone();
-                        let channel = channel.clone();
+                        let port = port.clone();
                         move |_| {
-                            for action in count_edit_actions(&face, &channel, count) {
+                            for action in count_edit_actions(&face, &port, count) {
                                 handler.call(action);
                             }
                         }
@@ -436,12 +436,12 @@ fn ChannelCountCell(
         };
     }
 
-    let count = channel.count.unwrap_or_default();
+    let count = port.count.unwrap_or_default();
     let clear = remainder_allowed
-        .then(|| face.channels_address.as_ref())
+        .then(|| face.ports_address.as_ref())
         .flatten()
         .and_then(|map| {
-            map.child_map_entry(SlotMapKey::U32(channel.key))
+            map.child_map_entry(SlotMapKey::U32(port.key))
                 .child_field("count")
         })
         .zip(on_action);
@@ -452,7 +452,7 @@ fn ChannelCountCell(
                 value: count,
                 state: UiSlotFieldState::editable(),
                 min: Some(0.0),
-                address: channel.count_address.clone(),
+                address: port.count_address.clone(),
                 on_action,
             }
         }
@@ -471,27 +471,27 @@ fn ChannelCountCell(
 
 // -- derivations ---------------------------------------------------------------
 
-/// The diagram's connections: one per channel whose pin resolved to a GPIO
-/// on the known board. A channel naming a pin this board lacks contributes
+/// The diagram's connections: one per port whose pin resolved to a GPIO
+/// on the known board. A port naming a pin this board lacks contributes
 /// nothing to draw — the row still shows it, which is where that mistake is
 /// legible.
 fn wired_connections(face: &UiOutputFaceData) -> Vec<WiredConnection> {
-    face.channels
+    face.ports
         .iter()
-        .filter_map(|channel| {
-            let gpio = u8::try_from(channel.gpio?).ok()?;
+        .filter_map(|port| {
+            let gpio = u8::try_from(port.gpio?).ok()?;
             Some(WiredConnection {
                 gpio,
-                title: format!("ch{}", channel.key),
-                extra: channel.resolved_count.map(|count| format!("×{count}")),
+                title: format!("ch{}", port.key),
+                extra: port.resolved_count.map(|count| format!("×{count}")),
             })
         })
         .collect()
 }
 
-/// The channels section's summary: how many wires, over how many lamps.
-fn channels_summary(face: &UiOutputFaceData) -> String {
-    let wires = face.channels.len();
+/// The ports section's summary: how many wires, over how many lamps.
+fn ports_summary(face: &UiOutputFaceData) -> String {
+    let wires = face.ports.len();
     let noun = if wires == 1 { "wire" } else { "wires" };
     match (face.total_lamps, face.authored_lamps()) {
         (Some(total), _) => format!("{wires} {noun} · {total} lamps"),
@@ -506,8 +506,8 @@ fn channels_summary(face: &UiOutputFaceData) -> String {
 /// is one: with no board known, an un-translated pin label is the normal
 /// state of every wire on the card and saying otherwise would be five false
 /// alarms in a row.
-fn channel_caption(channel: &UiOutputChannelRow, board_known: bool) -> String {
-    let slice = match (channel.slice_start, channel.resolved_count) {
+fn port_caption(port: &UiOutputPortRow, board_known: bool) -> String {
+    let slice = match (port.slice_start, port.resolved_count) {
         (Some(start), Some(count)) if count > 0 => {
             format!("lamps {start}–{}", start + count - 1)
         }
@@ -515,11 +515,11 @@ fn channel_caption(channel: &UiOutputChannelRow, board_known: bool) -> String {
         (Some(start), None) => format!("lamps {start}–?"),
         (None, _) => "slice unknown".to_string(),
     };
-    match pin_state(channel, board_known) {
+    match pin_state(port, board_known) {
         PinState::Wired(gpio) => format!("{slice} · gpio {gpio}"),
         PinState::Unnamed => format!("{slice} · no pin"),
-        PinState::Named => format!("{slice} · {}", channel.pin_label),
-        PinState::NotOnBoard => format!("{slice} · {} unresolved", channel.pin_label),
+        PinState::Named => format!("{slice} · {}", port.pin_label),
+        PinState::NotOnBoard => format!("{slice} · {} unresolved", port.pin_label),
     }
 }
 
@@ -538,8 +538,8 @@ enum PinState {
     Unnamed,
 }
 
-fn pin_state(channel: &UiOutputChannelRow, board_known: bool) -> PinState {
-    match (channel.gpio, channel.pin_label.is_empty(), board_known) {
+fn pin_state(port: &UiOutputPortRow, board_known: bool) -> PinState {
+    match (port.gpio, port.pin_label.is_empty(), board_known) {
         (Some(gpio), _, _) => PinState::Wired(gpio),
         (None, true, _) => PinState::Unnamed,
         (None, false, true) => PinState::NotOnBoard,
@@ -549,20 +549,20 @@ fn pin_state(channel: &UiOutputChannelRow, board_known: bool) -> PinState {
 
 /// What the pin cell reads: the board's own label, or the fact that there
 /// isn't one.
-fn pin_display(channel: &UiOutputChannelRow) -> String {
-    if channel.pin_label.is_empty() {
+fn pin_display(port: &UiOutputPortRow) -> String {
+    if port.pin_label.is_empty() {
         return "no pin".to_string();
     }
-    channel.pin_label.clone()
+    port.pin_label.clone()
 }
 
 /// Violet marks a wire that lands on a real pin of the known board — the
 /// house bound/wired colour, never green. A pin the KNOWN board lacks takes
 /// attention, because that IS the fault the face exists to surface; a pin
 /// nothing has been checked against stays neutral.
-fn channel_key_class(channel: &UiOutputChannelRow, board_known: bool) -> &'static str {
+fn port_key_class(port: &UiOutputPortRow, board_known: bool) -> &'static str {
     const BASE: &str = "tw:inline-flex tw:flex-none tw:items-center tw:rounded-xs tw:border tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[0.68rem] tw:font-bold";
-    match pin_state(channel, board_known) {
+    match pin_state(port, board_known) {
         PinState::Wired(_) => {
             "tw:inline-flex tw:flex-none tw:items-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-status-bound-bg tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[0.68rem] tw:font-bold tw:text-status-bound-foreground"
         }
@@ -573,10 +573,10 @@ fn channel_key_class(channel: &UiOutputChannelRow, board_known: bool) -> &'stati
     }
 }
 
-/// The pin cell wears the same tone as its channel chip, so the row reads as
+/// The pin cell wears the same tone as its port chip, so the row reads as
 /// one wire rather than two independent chips.
-fn pin_cell_class(channel: &UiOutputChannelRow, board_known: bool) -> &'static str {
-    match pin_state(channel, board_known) {
+fn pin_cell_class(port: &UiOutputPortRow, board_known: bool) -> &'static str {
+    match pin_state(port, board_known) {
         PinState::Wired(_) => {
             "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-xs tw:text-status-bound-foreground tw:transition-colors tw:hover:bg-status-bound-bg"
         }
@@ -595,17 +595,17 @@ fn pin_cell_class(channel: &UiOutputChannelRow, board_known: bool) -> &'static s
 /// The key the add affordance creates: one past the highest authored one, so
 /// a new wire lands at the END of the slice order (where an added thing
 /// belongs).
-fn next_channel_key(face: &UiOutputFaceData) -> u32 {
-    face.channels
+fn next_port_key(face: &UiOutputFaceData) -> u32 {
+    face.ports
         .iter()
-        .map(|channel| channel.key)
+        .map(|port| port.key)
         .max()
         .map_or(0, |key| key.saturating_add(1))
 }
 
 /// Rebuild an endpoint spec around a new pin label, keeping the capability
 /// and target segments the wire already declares. An empty or malformed spec
-/// (a freshly added channel's default) is rebuilt from
+/// (a freshly added port's default) is rebuilt from
 /// [`DEFAULT_ENDPOINT_PREFIX`].
 fn endpoint_with_pin(endpoint: &str, pin_label: &str) -> String {
     let mut segments = endpoint.split(':');
@@ -621,7 +621,7 @@ fn endpoint_with_pin(endpoint: &str, pin_label: &str) -> String {
 
 // -- the spread gesture --------------------------------------------------------
 
-/// Distribute `total` lamps over `wires` channels.
+/// Distribute `total` lamps over `wires` ports.
 ///
 /// Two modes, one shape. The plain split gives every wire `total / wires` and
 /// hands the remainder to the LAST one. When the upstream fixture published
@@ -660,63 +660,63 @@ fn spread_counts(total: u32, wires: usize, boundaries: &[u32]) -> Vec<u32> {
         .collect()
 }
 
-/// The channels the spread gesture would actually rewrite, as
-/// `(channel key, new count)`.
+/// The ports the spread gesture would actually rewrite, as
+/// `(port key, new count)`.
 ///
-/// Two channels are deliberately left alone: one whose authored count is
+/// Two ports are deliberately left alone: one whose authored count is
 /// already the computed one (a no-op edit is still an undo step), and the
-/// LAST channel when it takes the remainder — the remainder already resolves
+/// LAST port when it takes the remainder — the remainder already resolves
 /// to exactly the computed count, so freezing it would only cost the node its
 /// one self-adjusting wire.
 fn spread_plan(face: &UiOutputFaceData) -> Vec<(u32, u32)> {
     let Some(total) = face.total_lamps else {
         return Vec::new();
     };
-    if face.channels.len() < 2 || face.channels_address.is_none() {
+    if face.ports.len() < 2 || face.ports_address.is_none() {
         return Vec::new();
     }
-    let counts = spread_counts(total, face.channels.len(), &face.span_boundaries);
-    let last = face.channels.len() - 1;
-    face.channels
+    let counts = spread_counts(total, face.ports.len(), &face.span_boundaries);
+    let last = face.ports.len() - 1;
+    face.ports
         .iter()
         .zip(counts)
         .enumerate()
-        .filter(|(index, (channel, count))| {
-            !(*index == last && channel.count.is_none()) && channel.count != Some(*count)
+        .filter(|(index, (port, count))| {
+            !(*index == last && port.count.is_none()) && port.count != Some(*count)
         })
-        .map(|(_, (channel, count))| (channel.key, count))
+        .map(|(_, (port, count))| (port.key, count))
         .collect()
 }
 
-/// The spread gesture as ordinary slot edits, in channel order.
+/// The spread gesture as ordinary slot edits, in port order.
 fn spread_actions(face: &UiOutputFaceData) -> Vec<UiAction> {
     spread_plan(face)
         .into_iter()
         .filter_map(|(key, count)| {
-            let channel = face.channels.iter().find(|channel| channel.key == key)?;
-            Some(count_edit_actions(face, channel, count))
+            let port = face.ports.iter().find(|port| port.key == key)?;
+            Some(count_edit_actions(face, port, count))
         })
         .flatten()
         .collect()
 }
 
-/// Write `count` to a channel, whether or not the option is already set: a
+/// Write `count` to a port, whether or not the option is already set: a
 /// present count edits its interior `some` through the address the DTO
 /// carries; an absent one is included first (the generic option gesture) and
 /// then written.
 fn count_edit_actions(
     face: &UiOutputFaceData,
-    channel: &UiOutputChannelRow,
+    port: &UiOutputPortRow,
     count: u32,
 ) -> Vec<UiAction> {
-    if let Some(address) = &channel.count_address {
+    if let Some(address) = &port.count_address {
         return vec![slot_set_value_action(address.clone(), LpValue::U32(count))];
     }
     let Some(some) = face
-        .channels_address
+        .ports_address
         .as_ref()
         .and_then(|map| {
-            map.child_map_entry(SlotMapKey::U32(channel.key))
+            map.child_map_entry(SlotMapKey::U32(port.key))
                 .child_field("count")
         })
         .and_then(|count| count.child_field("some"))
@@ -755,10 +755,10 @@ fn spread_title(face: &UiOutputFaceData) -> String {
     let Some(total) = face.total_lamps else {
         return String::new();
     };
-    let counts = spread_counts(total, face.channels.len(), &face.span_boundaries);
+    let counts = spread_counts(total, face.ports.len(), &face.span_boundaries);
     let mut parts: Vec<String> = counts.iter().map(u32::to_string).collect();
-    if let (Some(last), Some(channel)) = (parts.last_mut(), face.channels.last()) {
-        if channel.count.is_none() {
+    if let (Some(last), Some(port)) = (parts.last_mut(), face.ports.last()) {
+        if port.count.is_none() {
             *last = format!("{last} (rest)");
         }
     }
@@ -774,19 +774,19 @@ fn spread_title(face: &UiOutputFaceData) -> String {
 mod tests {
     use lpa_studio_core::{
         ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotPath, UiOutputBoardFacts,
-        UiOutputChannelRow, UiOutputFace, UiOutputPin,
+        UiOutputFace, UiOutputPin, UiOutputPortRow,
     };
 
     use super::{
-        channel_caption, channel_key_class, channels_summary, endpoint_with_pin, next_channel_key,
+        endpoint_with_pin, next_port_key, port_caption, port_key_class, ports_summary,
         spread_counts, spread_label, spread_plan, wired_connections,
     };
 
-    fn channels_address() -> ProjectSlotAddress {
+    fn ports_address() -> ProjectSlotAddress {
         ProjectSlotAddress::new(
             ProjectNodeAddress::parse("/demo.project/strips.output").expect("valid node address"),
             ProjectSlotRoot::def(),
-            SlotPath::parse("channels").expect("valid slot path"),
+            SlotPath::parse("ports").expect("valid slot path"),
         )
     }
 
@@ -794,7 +794,7 @@ mod tests {
     /// counts, slices resolved from `total`.
     fn face(total: Option<u32>, wires: &[(u32, &str, Option<u32>)]) -> UiOutputFace {
         let mut start = Some(0u32);
-        let channels = wires
+        let ports = wires
             .iter()
             .map(|(key, pin, count)| {
                 let slice_start = start;
@@ -802,20 +802,20 @@ mod tests {
                     Some(count) => start = start.map(|start| start + count),
                     None => start = None,
                 }
-                UiOutputChannelRow {
+                UiOutputPortRow {
                     key: *key,
                     endpoint_display: format!("ws281x:local:{pin}"),
                     pin_label: (*pin).to_string(),
                     count: *count,
                     resolved_count: *count,
                     slice_start,
-                    ..UiOutputChannelRow::default()
+                    ..UiOutputPortRow::default()
                 }
             })
             .collect();
         let mut face = UiOutputFace {
-            channels,
-            channels_address: Some(channels_address()),
+            ports,
+            ports_address: Some(ports_address()),
             ..UiOutputFace::default()
         };
         if let Some(total) = total {
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn only_wires_on_a_real_gpio_reach_the_diagram() {
         let mut face = face(Some(400), &[(0, "IO18", Some(200)), (1, "IO27", None)]);
-        face.channels[0].gpio = Some(18);
+        face.ports[0].gpio = Some(18);
         face.board = Some(UiOutputBoardFacts {
             board_id: "domraem/dom-z-102".to_string(),
             display_name: "DOM-Z-102".to_string(),
@@ -932,25 +932,22 @@ mod tests {
     #[test]
     fn the_summary_prefers_the_incoming_extent_over_the_authored_one() {
         let resolved = face(Some(1200), &[(0, "IO18", Some(300)), (1, "IO2", None)]);
-        assert_eq!(channels_summary(&resolved), "2 wires · 1200 lamps");
+        assert_eq!(ports_summary(&resolved), "2 wires · 1200 lamps");
 
         let authored = face(None, &[(0, "IO18", Some(300)), (1, "IO2", Some(60))]);
-        assert_eq!(channels_summary(&authored), "2 wires · 360 lamps authored");
+        assert_eq!(ports_summary(&authored), "2 wires · 360 lamps authored");
 
         let unknown = face(None, &[(0, "IO18", None)]);
-        assert_eq!(channels_summary(&unknown), "1 wire · lamps unknown");
+        assert_eq!(ports_summary(&unknown), "1 wire · lamps unknown");
     }
 
     #[test]
     fn the_caption_reads_the_slice_and_names_an_unresolved_pin() {
         let mut face = face(Some(400), &[(0, "IO18", Some(200)), (1, "IO27", None)]);
-        face.channels[0].gpio = Some(18);
+        face.ports[0].gpio = Some(18);
+        assert_eq!(port_caption(&face.ports[0], true), "lamps 0–199 · gpio 18");
         assert_eq!(
-            channel_caption(&face.channels[0], true),
-            "lamps 0–199 · gpio 18"
-        );
-        assert_eq!(
-            channel_caption(&face.channels[1], true),
+            port_caption(&face.ports[1], true),
             "lamps 200–399 · IO27 unresolved",
             "the KNOWN board has no IO27"
         );
@@ -959,18 +956,12 @@ mod tests {
     #[test]
     fn without_a_board_a_pin_is_shown_plainly_rather_than_called_unresolved() {
         let face = face(Some(400), &[(0, "IO18", Some(200)), (1, "IO27", None)]);
-        assert_eq!(
-            channel_caption(&face.channels[0], false),
-            "lamps 0–199 · IO18"
-        );
-        assert_eq!(
-            channel_caption(&face.channels[1], false),
-            "lamps 200–399 · IO27"
-        );
+        assert_eq!(port_caption(&face.ports[0], false), "lamps 0–199 · IO18");
+        assert_eq!(port_caption(&face.ports[1], false), "lamps 200–399 · IO27");
         // And the row stays neutral: nothing has been checked, so nothing is
         // wrong (violet stays reserved for a wire on a real pin).
-        for channel in &face.channels {
-            let chip = channel_key_class(channel, false);
+        for port in &face.ports {
+            let chip = port_key_class(port, false);
             assert!(!chip.contains("status-attention"), "{chip}");
             assert!(!chip.contains("status-bound"), "{chip}");
         }
@@ -992,9 +983,9 @@ mod tests {
 
     #[test]
     fn the_added_wire_lands_past_the_highest_key() {
-        assert_eq!(next_channel_key(&face(None, &[])), 0);
+        assert_eq!(next_port_key(&face(None, &[])), 0);
         assert_eq!(
-            next_channel_key(&face(None, &[(0, "IO18", Some(1)), (4, "IO2", None)])),
+            next_port_key(&face(None, &[(0, "IO18", Some(1)), (4, "IO2", None)])),
             5
         );
     }

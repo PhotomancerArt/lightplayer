@@ -3303,8 +3303,7 @@ impl ProjectController {
             return;
         };
         // (node, label, channels) for every output card in the tree.
-        let mut wires: Vec<(lpc_model::NodeId, String, Vec<crate::UiOutputChannelRow>)> =
-            Vec::new();
+        let mut wires: Vec<(lpc_model::NodeId, String, Vec<crate::UiOutputPortRow>)> = Vec::new();
         walk_faces(nodes, &mut |path, face| {
             let crate::UiNodeFace::Output(output) = face else {
                 return;
@@ -3318,7 +3317,7 @@ impl ProjectController {
             wires.push((
                 node.target().node_id,
                 node.label().to_string(),
-                output.channels.clone(),
+                output.ports.clone(),
             ));
         });
         if wires.is_empty() {

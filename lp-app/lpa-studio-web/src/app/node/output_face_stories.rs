@@ -7,7 +7,7 @@
 //! picking a pin is the one gesture a still capture otherwise cannot show.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiLedBudget, UiOutputChannelRow, UiOutputFace, UiWireStatus};
+use lpa_studio_core::{UiLedBudget, UiOutputFace, UiOutputPortRow, UiWireStatus};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{output_channel, output_face, output_node_view};
@@ -39,7 +39,7 @@ fn single_channel_face() -> UiOutputFace {
 /// Five wires over a 1500-lamp dome on the desk board: four authored counts
 /// and the highest-keyed wire taking the remainder. The upstream fixture
 /// authored five paths, so the face has a real snapping grid.
-fn dome_channels(counts: [Option<u32>; 5]) -> Vec<UiOutputChannelRow> {
+fn dome_channels(counts: [Option<u32>; 5]) -> Vec<UiOutputPortRow> {
     ["IO18", "IO16", "IO14", "IO2", "IO13"]
         .into_iter()
         .zip(counts)
@@ -59,7 +59,7 @@ fn live_dome_face(used: u32, budget: u32, torn_on_io13: u32) -> UiOutputFace {
         [Some(280), Some(330), Some(290), Some(310), None],
         Some(DESK_BOARD),
     );
-    for (index, row) in face.channels.iter_mut().enumerate() {
+    for (index, row) in face.ports.iter_mut().enumerate() {
         let waves = index == 4;
         row.wire_status = Some(UiWireStatus {
             sent: 14_380 - (index as u32 * 7),

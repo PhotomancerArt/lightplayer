@@ -17,7 +17,7 @@ fn create_test_project_dir() -> (TempDir, PathBuf) {
     let project_dir = temp_dir.path().join("test-project");
     fs::create_dir_all(&project_dir).unwrap();
 
-    let project_json = "{\n  \"format\": 9,\n  \"name\": \"test-project\"\n}\n";
+    let project_json = "{\n  \"format\": 10,\n  \"name\": \"test-project\"\n}\n";
     fs::write(project_dir.join("project.json"), project_json).unwrap();
 
     let module_json = "{\n  \"kind\": \"Module\",\n  \"nodes\": {}\n}\n";

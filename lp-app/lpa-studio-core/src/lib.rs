@@ -58,7 +58,7 @@ pub use app::node::{
     UiControlSampleFormat, UiExportsGroup, UiFixtureFace, UiFixturePatch, UiFixturePower,
     UiLedBudget, UiModuleExport, UiModuleFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiOutputBoardFacts,
-    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
+    UiOutputFace, UiOutputPin, UiOutputPortRow, UiPanelControl, UiPanelControlState,
     UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire,
     UiPanelWireRole, UiPatchBay, UiPatchCell, UiPatchPort, UiPhasorReading, UiPlaylistEntry,
     UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue,

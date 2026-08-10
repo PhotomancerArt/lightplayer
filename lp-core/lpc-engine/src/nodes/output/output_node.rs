@@ -63,7 +63,7 @@ const SAMPLES_PER_LAMP: u32 = 3;
 /// One producer's placement inside an output's control sample buffer.
 ///
 /// The offset is in samples, flat: the buffer an output publishes is one
-/// sequence, and the wire split (`OutputChannelDef`) reads it that way. A
+/// sequence, and the wire split (`OutputPortDef`) reads it that way. A
 /// producer's own extent may be multi-row; its samples land here in row
 /// order, which is what `ControlExtent::sample_count` already means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

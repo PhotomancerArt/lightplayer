@@ -4,15 +4,15 @@ use crate::ProjectSlotAddress;
 
 /// Permanent face for an output node card.
 ///
-/// One output node drives N physical wires: `OutputDef.channels` is a map of
-/// channel index → `{endpoint, count}`, and the node's single control buffer
-/// is split across those channels in key order. The face is that split made
+/// One output node drives N physical wires: `OutputDef.ports` is a map of
+/// port index → `{endpoint, count}`, and the node's single control buffer
+/// is split across those ports in key order. The face is that split made
 /// visible — a row per wire, with the board diagram (when the running device's
 /// board is known) as the picking surface for the wire's pin.
 ///
 /// Two provenances meet here, and they are deliberately kept apart:
 ///
-/// - **Authored + projected** ([`crate::UiOutputChannelRow`] keys, endpoints,
+/// - **Authored + projected** ([`crate::UiOutputPortRow`] keys, endpoints,
 ///   counts, slot addresses, and the derived slice starts) come from the node's
 ///   own projected sections in `node_face_builder` — the face-derivation rule
 ///   (never re-read controller state).
@@ -29,11 +29,11 @@ use crate::ProjectSlotAddress;
 /// rendered, and every channel row stays fully editable.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiOutputFace {
-    /// One row per authored channel, in ascending key order.
-    pub channels: Vec<UiOutputChannelRow>,
-    /// Address of the `channels` map slot itself — the target for the generic
+    /// One row per authored port, in ascending key order.
+    pub ports: Vec<UiOutputPortRow>,
+    /// Address of the `ports` map slot itself — the target for the generic
     /// map insert/remove entry ops (adding or dropping a wire).
-    pub channels_address: Option<ProjectSlotAddress>,
+    pub ports_address: Option<ProjectSlotAddress>,
     /// The binding endpoint feeding this output's control input (e.g.
     /// `bus:control.out`), when the input row is bound. The decoration pass
     /// uses it to find the upstream produced control product; the face can
@@ -43,7 +43,7 @@ pub struct UiOutputFace {
     ///
     /// `None` until the upstream produced control product is visible (no
     /// project running, or the input is unbound) — in which case the remainder
-    /// channel's [`UiOutputChannelRow::resolved_count`] is unknown too.
+    /// channel's [`UiOutputPortRow::resolved_count`] is unknown too.
     pub total_lamps: Option<u32>,
     /// The board's measured LED envelope vs the project's total use of it —
     /// board-wide (every face on the same device shows the same bar).
@@ -72,13 +72,13 @@ pub struct UiOutputFace {
 }
 
 impl UiOutputFace {
-    /// Total lamps the authored channels claim, when every channel says.
+    /// Total lamps the authored ports claim, when every port says.
     ///
     /// `None` when a channel takes the remainder — only the highest-keyed one
     /// may, and what "the rest" is depends on the upstream extent.
     #[must_use]
     pub fn authored_lamps(&self) -> Option<u32> {
-        self.channels
+        self.ports
             .iter()
             .map(|channel| channel.count)
             .try_fold(0u32, |total, count| Some(total.saturating_add(count?)))
@@ -86,7 +86,7 @@ impl UiOutputFace {
 
     /// Resolve everything that depends on the node's incoming lamp extent:
     /// [`Self::total_lamps`] and the remainder channel's
-    /// [`UiOutputChannelRow::resolved_count`].
+    /// [`UiOutputPortRow::resolved_count`].
     ///
     /// The arithmetic mirrors the engine's own slice planner
     /// (`lpc_engine`'s `planned_wires`): counts are lamps, slices start where
@@ -95,7 +95,7 @@ impl UiOutputFace {
     /// (the engine clamps there too, loudly).
     pub fn resolve_extent(&mut self, total_lamps: u32) {
         self.total_lamps = Some(total_lamps);
-        for channel in &mut self.channels {
+        for channel in &mut self.ports {
             if channel.resolved_count.is_some() {
                 continue;
             }
@@ -109,8 +109,8 @@ impl UiOutputFace {
 
 /// One physical wire driven by an output node.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiOutputChannelRow {
-    /// The `channels` map key — channel index, and the slice order.
+pub struct UiOutputPortRow {
+    /// The `ports` map key — port index, and the slice order.
     pub key: u32,
     /// The authored endpoint spec verbatim (`ws281x:local:IO18`).
     pub endpoint_display: String,
@@ -136,9 +136,9 @@ pub struct UiOutputChannelRow {
     /// mistake the engine refuses; the face degrades rather than guesses).
     pub slice_start: Option<u32>,
     /// Address of this channel's `endpoint` slot — the web edits the wire
-    /// through the normal slot write path (`channels[k].endpoint`).
+    /// through the normal slot write path (`ports[k].endpoint`).
     pub endpoint_address: Option<ProjectSlotAddress>,
-    /// Address of this channel's `count` slot (`channels[k].count`); the row
+    /// Address of this port's `count` slot (`ports[k].count`); the row
     /// is an `OptionSlot`, so the value edit targets its interior `some`.
     pub count_address: Option<ProjectSlotAddress>,
     /// Live per-wire transmission status from the device's heartbeat, joined

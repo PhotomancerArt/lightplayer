@@ -36,8 +36,10 @@ mod map2d_error;
 mod map2d_fit;
 mod map2d_object_id;
 mod map2d_resolve;
+mod map_object_path;
 mod patch;
 
+pub use map_object_path::MapObjectPath;
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
     Map2dDoc, Map2dObject, Map2dShape, PathShape, PolygonShape, RepeatShape, RingDir, RingOrder,
@@ -47,10 +49,11 @@ pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
 pub use map2d_object_id::{MAP2D_OBJECT_ID_MAX_LEN, Map2dObjectId, ensure_object_ids};
 pub use map2d_resolve::{
-    CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectSpan, ResolvedLamp, ResolvedMap2d,
-    Rotation2d, object_stride, resolve, shape_lamp_count, shape_stride,
+    CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectInstanceSpan, ObjectSpan,
+    ResolvedLamp, ResolvedMap2d, Rotation2d, object_instance_spans, object_stride, resolve,
+    shape_lamp_count, shape_stride,
 };
 pub use patch::{
-    PATCH_FORMAT, PatchAnchor, PatchDoc, PatchEntry, PatchError, PatchRange, PatchedRange,
-    resolve_patch,
+    PATCH_FORMAT, PATCH_FORMAT_BASE, PATCH_FORMAT_OBJECT_GRAIN, PatchDoc, PatchEntry, PatchError,
+    PatchRange, PatchResolveContext, PatchSource, PatchedRange, patched_wire_lamp, resolve_patch,
 };

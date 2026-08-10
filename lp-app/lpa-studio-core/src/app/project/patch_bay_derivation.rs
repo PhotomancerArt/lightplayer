@@ -21,8 +21,7 @@ use lpc_model::NodeId;
 use lpc_wire::WireOutputPlacement;
 
 use crate::{
-    UiControlProductPreview, UiFixturePatch, UiOutputChannelRow, UiPatchBay, UiPatchCell,
-    UiPatchPort,
+    UiControlProductPreview, UiFixturePatch, UiOutputPortRow, UiPatchBay, UiPatchCell, UiPatchPort,
 };
 
 /// Samples per RGB lamp — the unit the frame's extent is stated in.
@@ -40,7 +39,7 @@ pub(crate) struct OutputWire<'a> {
     /// The frame it published, when one has arrived.
     pub frame: Option<&'a UiControlProductPreview>,
     /// Its authored ports, in slice order.
-    pub channels: &'a [UiOutputChannelRow],
+    pub channels: &'a [UiOutputPortRow],
 }
 
 /// What the derivation knows about the node behind a run: its display
@@ -129,7 +128,7 @@ fn cell_id(run: &WireOutputPlacement) -> String {
 }
 
 /// The port a wire lamp falls in, when it falls in an authored one.
-fn port_of(channels: &[UiOutputChannelRow], lamp: u32) -> Option<&UiOutputChannelRow> {
+fn port_of(channels: &[UiOutputPortRow], lamp: u32) -> Option<&UiOutputPortRow> {
     channels.iter().find(|channel| {
         let Some(start) = channel.slice_start else {
             return false;
@@ -299,14 +298,14 @@ mod tests {
         }
     }
 
-    fn channel(key: u32, pin: &str, count: Option<u32>, start: Option<u32>) -> UiOutputChannelRow {
-        UiOutputChannelRow {
+    fn channel(key: u32, pin: &str, count: Option<u32>, start: Option<u32>) -> UiOutputPortRow {
+        UiOutputPortRow {
             key,
             pin_label: pin.to_string(),
             count,
             resolved_count: count,
             slice_start: start,
-            ..UiOutputChannelRow::default()
+            ..UiOutputPortRow::default()
         }
     }
 
@@ -320,7 +319,7 @@ mod tests {
 
     fn wire<'a>(
         placements: &'a [WireOutputPlacement],
-        channels: &'a [UiOutputChannelRow],
+        channels: &'a [UiOutputPortRow],
     ) -> OutputWire<'a> {
         OutputWire {
             node: NodeId::new(1),

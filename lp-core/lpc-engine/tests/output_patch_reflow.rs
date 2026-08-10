@@ -54,7 +54,7 @@ const LEAF_PATCH: &str = r#"{
 /// and the test needs no graphics backend.
 fn project_fs(patched: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 9\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -69,7 +69,7 @@ fn project_fs(patched: bool) -> LpFsMemory {
         "/output.json".as_path(),
         br#"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "input": { "source": "bus:control.out" } }
 }"#,
     )
@@ -431,7 +431,7 @@ fn a_newer_patch_format_refuses_the_fixture_at_load() {
     let mut fs = project_fs(true);
     fs.write_file_mut(
         "/body.patch.json".as_path(),
-        br#"{ "format": 2, "entries": [] }"#,
+        br#"{ "format": 3, "entries": [] }"#,
     )
     .expect("newer body patch");
 
@@ -441,7 +441,7 @@ fn a_newer_patch_format_refuses_the_fixture_at_load() {
     let NodeRuntimeStatus::Error(message) = status else {
         panic!("a refused document is an error");
     };
-    assert!(message.contains("unsupported patch format 2"), "{message}");
+    assert!(message.contains("unsupported patch format 3"), "{message}");
 }
 
 /// The output's published DISPLAY layout: where a client is told to draw each
@@ -712,7 +712,7 @@ fn the_header_total_gates_layouts_across_outputs() {
             format!(
                 r#"{{
   "kind": "Output",
-  "channels": {{ "0": {{ "endpoint": "ws281x:local:{endpoint}" }} }},
+  "ports": {{ "0": {{ "endpoint": "ws281x:local:{endpoint}" }} }},
   "bindings": {{ "input": {{ "source": "bus:control.out" }} }}
 }}"#
             )
