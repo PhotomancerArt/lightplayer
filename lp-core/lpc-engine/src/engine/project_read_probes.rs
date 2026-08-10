@@ -441,6 +441,14 @@ impl Engine {
             })
             .collect();
 
+        // The frame-probe HEADER is one unchunked event carrying EVERY
+        // entry's display layout, so the budget that matters here is the
+        // header TOTAL: three layouts that each pass the per-layout gate
+        // can still jointly blow the frame and wedge the read stream. Track
+        // the running layout bytes and degrade later entries to
+        // `Unsupported` once the total is spent — their frames still flow,
+        // only the geometry of the excess outputs is refused.
+        let mut layout_bytes_spent = 0usize;
         let mut outputs = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             let Some(buffer) = self.runtime_buffers().get(candidate.buffer_id) else {
@@ -462,7 +470,27 @@ impl Engine {
             let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
                 ControlDisplayLayoutProbeResult::Omitted
             } else {
-                self.output_frame_display_layout(registry, &candidate, request.display_layout)
+                let answer =
+                    self.output_frame_display_layout(registry, &candidate, request.display_layout);
+                match (self.display_layout_budget(), answer) {
+                    (Some(budget), ControlDisplayLayoutProbeResult::Layout(layout)) => {
+                        let layout_len = lpc_wire::ser_write_json_len(&layout);
+                        if layout_bytes_spent + layout_len > budget {
+                            ControlDisplayLayoutProbeResult::Unsupported {
+                                reason: format!(
+                                    "the frame header already carries {layout_bytes_spent} \
+                                     bytes of display layouts; this one ({layout_len} bytes) \
+                                     would push the single header event past the link's \
+                                     {budget}-byte budget"
+                                ),
+                            }
+                        } else {
+                            layout_bytes_spent += layout_len;
+                            ControlDisplayLayoutProbeResult::Layout(layout)
+                        }
+                    }
+                    (_, answer) => answer,
+                }
             };
 
             outputs.push(OutputFrameEntry {
@@ -581,6 +609,7 @@ impl Engine {
         gate_display_layout(
             ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision)),
             read,
+            self.display_layout_budget(),
         )
     }
 

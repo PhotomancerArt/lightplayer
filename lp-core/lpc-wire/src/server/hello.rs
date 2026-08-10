@@ -33,6 +33,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 18: display layouts cross the wire PACKED — `ControlLayout2d`
+///   serializes as packing spans (`[first_lamp, count, sample_start,
+///   sample_stride, radius]` 5-tuples) plus base64 u16le lamp centers,
+///   replacing the per-lamp `[i, s, x, y, r]` tuple list (~5.4 B/lamp vs
+///   ~75). An old peer cannot decode the new shape and vice versa —
+///   changed encoding of an existing message, which is what earns the
+///   bump. This is what lets a dome-scale (≤2048-lamp) layout ride one
+///   project-read frame instead of being refused as `Unsupported`.
 /// - 17: the wire's CUT reaches the read — `OutputFrameEntry` (and its
 ///   chunk header) gain `placements: Vec<WireOutputPlacement>`, one
 ///   `(fixture span ↔ wire span)` run per producer, in lamps. Required
@@ -135,7 +143,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 17;
+pub const WIRE_PROTO_VERSION: u32 = 18;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
