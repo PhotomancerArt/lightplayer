@@ -9,20 +9,24 @@ use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
-    NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
-    ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingGraph, WireCellProjection, WireChannelSampleFormat,
-    WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape, WireTextureFormat,
-    WireVisualSpace,
+    NodeReadSelection, OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest,
+    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
+    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireProjectionOrigin,
+    WireProjectionShape, WireTextureFormat, WireVisualSpace,
 };
 
+use super::output_frame_cache::OutputFrameCache;
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
     UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
     UiPreviewSpaces, UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductSpaceView,
     UiProjectionOrigin, UiProjectionShape, UiVisualProductSpace, UiVisualSpace,
 };
+
+/// The tree-path segment type an Output node wears (`node_kind_label`).
+const OUTPUT_NODE_TYPE: &str = "output";
 
 pub struct ProjectSync {
     view: ProjectView,
@@ -56,6 +60,11 @@ pub struct ProjectSync {
     /// before each request build, exactly like `visual_preview_frame`;
     /// products with no entry keep today's single 2D probe.
     preview_spaces: BTreeMap<UiProductRef, UiProductSpaceRequest>,
+    /// The frames this project's outputs have already published, keyed by
+    /// output node — the composed wire a module face heroes when its scope
+    /// owns an output. Filled by the published-frame probe, which rides
+    /// every read of a project that HAS an output and nothing otherwise.
+    output_frames: OutputFrameCache,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -87,6 +96,7 @@ impl ProjectSync {
             product_spaces: BTreeMap::new(),
             product_space_previews: BTreeMap::new(),
             preview_spaces: BTreeMap::new(),
+            output_frames: OutputFrameCache::default(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -304,6 +314,33 @@ impl ProjectSync {
         self.product_previews.get(product)
     }
 
+    /// The frame one OUTPUT node has published, as the lamp renderer consumes
+    /// it — the composed wire, with every producer's lamps rebased onto their
+    /// own samples.
+    ///
+    /// Not a product preview: an output node publishes no product (it is a
+    /// sink), so this is keyed by node and comes from the published-frame
+    /// probe rather than a render. `None` until a read carries one.
+    pub fn output_frame(&self, node: lpc_model::NodeId) -> Option<&UiControlProductPreview> {
+        self.output_frames.frame(node)
+    }
+
+    /// Whether the mirror carries any output node.
+    ///
+    /// The probe has no node selector — it answers for every output at once —
+    /// so this only decides WHETHER to ask, and a project driving no outputs
+    /// pays nothing. The kind comes off the tree path's last segment, the
+    /// same place `node_kind_label` reads it.
+    fn has_output_nodes(&self) -> bool {
+        self.view.tree.nodes.values().any(|entry| {
+            entry
+                .path
+                .0
+                .last()
+                .is_some_and(|segment| segment.ty.as_str() == OUTPUT_NODE_TYPE)
+        })
+    }
+
     /// Latest cached timebase listing for a time product (D10). `None` means
     /// no read has landed yet — distinct from a read that came back
     /// [`UiTimebaseRead::Unknown`].
@@ -444,10 +481,21 @@ impl ProjectSync {
         };
         let probe_refs: Vec<&ProjectProbeResult> = probes.iter().collect();
         self.apply_product_probe_results(&probe_refs);
+        self.apply_output_frame_probe_results(&probe_refs);
         self.apply_binding_graph_probe_results(&probe_refs);
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())
+    }
+
+    fn apply_output_frame_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
+        for probe in probes {
+            if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) =
+                probe
+            {
+                self.output_frames.apply(outputs);
+            }
+        }
     }
 
     fn apply_binding_graph_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
@@ -547,6 +595,18 @@ impl ProjectSync {
 
     fn probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
         let mut probes = self.product_probe_requests(products);
+        // The published-frame probe rides every read of a project that drives
+        // an output, exactly like the binding-graph probe rides every read of
+        // a ready one: what needs it is the MODULE FACE derivation — a scope
+        // that owns an output heroes the wire that output composes, and no
+        // product ref names that wire. It renders nothing device-side (the
+        // frame is already published), and the geometry half is revision-gated
+        // so a steady lens ships it once.
+        if self.has_output_nodes() {
+            probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
+                display_layout: self.output_frames.display_layout_read(),
+            }));
+        }
         if self.binding_graph_subscribed {
             probes.push(ProjectProbeRequest::BindingGraph(
                 BindingGraphProbeRequest {
@@ -969,9 +1029,11 @@ fn product_preview_from_probe(
             ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
-        // Published output frames are the device card's play-tab feed, not a
-        // lens product preview: they key on an output NODE, not a
-        // `UiProductRef`, and are consumed by their own path.
+        // Published output frames key on an output NODE, not a
+        // `UiProductRef` — an output node publishes no product — so they are
+        // not product previews at all. They land in `output_frames`
+        // (`apply_output_frame_probe_results`), which is where the module
+        // hero reads the composed wire from.
         ProjectProbeResult::OutputFrame(_) => None,
         ProjectProbeResult::BindingGraph(_) | ProjectProbeResult::Timebase(_) => None,
     }

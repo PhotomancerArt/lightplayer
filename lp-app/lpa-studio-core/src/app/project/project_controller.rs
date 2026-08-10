@@ -983,6 +983,32 @@ impl ProjectController {
         Some(lpc_wire::WireScopeRef::Module { owner })
     }
 
+    /// The frame published by an OUTPUT node this scope owns, when it has one
+    /// worth drawing.
+    ///
+    /// Direct children only: "owns an output" is the question, and an output
+    /// two scopes down belongs to the module that holds it. A frame whose
+    /// geometry the engine refused (dome scale, over the wire budget) is not
+    /// worth drawing — the lens has no synthesis to stand in, and a card
+    /// saying "no display layout" is worse than the mirror it displaced — so
+    /// that scope keeps the ordinary two-channel hero.
+    fn scope_output_frame(
+        &self,
+        children: &[crate::UiNodeChild],
+    ) -> Option<crate::UiControlProductPreview> {
+        let sync = self.sync.as_ref()?;
+        children
+            .iter()
+            .filter(|child| child.kind == OUTPUT_KIND_LABEL)
+            .find_map(|child| {
+                let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+                let node = self.node(&address)?;
+                sync.output_frame(node.target().node_id)
+                    .filter(|frame| frame.display_layout.is_some())
+                    .cloned()
+            })
+    }
+
     /// The product a scope's named channel resolved to, when it resolved to
     /// one at all. Strictly scoped — a channel of the same name one scope
     /// out is a different channel.
@@ -3382,6 +3408,18 @@ impl ProjectController {
         // so one pass per level clears the whole tree.
         groups.retain(|group| !group.is_empty());
 
+        // A scope that OWNS an output heroes the WIRE that output composes:
+        // every producer's lamps, patched into one strand (G1 round 3 — "the
+        // root module isn't showing control output, just the peach body
+        // visual.out"). It outranks both bus channels because it is the only
+        // honest answer for such a scope: the peach's root `control.out`
+        // carries a fragments MAP of two fixtures, so it resolves to no
+        // single product at all, and its `visual.out` is one CHILD's mirror —
+        // a picture of half the project standing in for the whole of it.
+        // Scopes with no output are untouched and keep the two-channel pick
+        // below, which is why the peach's `body/` and `leaf/` submodules go
+        // on showing their own visuals.
+        let scope_output = self.scope_output_frame(children);
         // The hero: whichever of the scope's two primary products the card's
         // preference names, defaulting to `control.out` — a fixture
         // project's output IS the lamps, and the raster behind them is the
@@ -3395,14 +3433,22 @@ impl ProjectController {
         let scope_control = self
             .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
             .filter(|product| matches!(product, UiProductRef::Control { .. }));
-        // Only a scope resolving BOTH offers a choice; anything else has one
-        // hero and no toggle to draw.
-        let hero_choice =
-            (scope_visual.is_some() && scope_control.is_some()).then_some(hero_product);
+        // Only a scope with BOTH a control side and a visual one offers a
+        // choice; anything else has one hero and no toggle to draw. An
+        // output's composed frame is the control side for this purpose — the
+        // toggle still flips to the mirror, which is how a viewer gets back
+        // to the raster the fixtures are sampling.
+        let has_control = scope_output.is_some() || scope_control.is_some();
+        let hero_choice = (scope_visual.is_some() && has_control).then_some(hero_product);
+        let control_first = hero_product == crate::ModuleHeroProduct::Control
+            || (hero_product == crate::ModuleHeroProduct::Visual && scope_visual.is_none());
         let chosen = match hero_product {
             crate::ModuleHeroProduct::Control => scope_control.or(scope_visual),
             crate::ModuleHeroProduct::Visual => scope_visual.or(scope_control),
         };
+        // The composed wire has no `UiProductRef` to re-home onto, so it is
+        // resolved as a preview outright rather than through `chosen`.
+        let output_hero = control_first.then_some(scope_output).flatten();
 
         // The R7 mirror ROW supplies identity and meta, but its bytes ride
         // the scope's resolved product: the mirror's own product ref is
@@ -3411,7 +3457,9 @@ impl ProjectController {
         // hero renders black while the shader card below it is live.
         let mut preview =
             super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
-        if preview.is_none() && matches!(chosen, Some(UiProductRef::Control { .. })) {
+        if preview.is_none()
+            && (output_hero.is_some() || matches!(chosen, Some(UiProductRef::Control { .. })))
+        {
             // The asymmetry control-first exposes: the R7 mirror is a
             // VISUAL row, so a module publishing no mirror at all would get
             // NO hero even though its scope drives lamps — "control-first"
@@ -3432,7 +3480,18 @@ impl ProjectController {
                 ))
             });
         }
-        if let Some(hero) = preview.as_mut() {
+        if let (Some(hero), Some(frame)) = (preview.as_mut(), output_hero) {
+            // The composed wire, drawn straight from the published frame.
+            // There is no `UiProductRef` to borrow bytes through — an output
+            // node is a sink and publishes no product — so the row carries
+            // the preview and no product identity. It is always `Tracking`:
+            // the probe rides every read of a project that drives an output,
+            // so there is no unfocused state to be honest about.
+            hero.kind = crate::UiProductKind::Control;
+            hero.tracking = crate::UiProductTrackingState::Tracking;
+            hero.product = None;
+            hero.preview = crate::UiProductPreview::ControlNative(frame);
+        } else if let Some(hero) = preview.as_mut() {
             match chosen {
                 Some(product @ UiProductRef::Visual { .. }) => {
                     if let Some(bytes) = self
@@ -6987,6 +7046,9 @@ fn count_nodes(node: &NodeController) -> usize {
 /// The card kind label module nodes wear (`node_kind_label`: `module`,
 /// `project`, and `show` all read as one kind).
 const MODULE_KIND_LABEL: &str = "Module";
+
+/// The card kind label output nodes wear (`node_kind_label`).
+const OUTPUT_KIND_LABEL: &str = "Output";
 
 /// The name every module's output row wears — the R7 mirror's slot name,
 /// reused when a control-first hero has to be synthesized without one.

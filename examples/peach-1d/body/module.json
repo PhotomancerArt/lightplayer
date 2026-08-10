@@ -8,11 +8,6 @@
       "ref": "./peach_body.json"
     }
   },
-  "bindings": {
-    "output": {
-      "target": "bus:visual.out"
-    }
-  },
   "exports": {
     "control.out": "bus:control.out"
   },
