@@ -413,44 +413,52 @@ pub static PEACH_1D_FILES: &[ExampleFile] = &[
         include_bytes!("../../../../../examples/peach-1d/output.json"),
     ),
     (
-        "peach_body.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_body.json"),
+        "body/module.json",
+        include_bytes!("../../../../../examples/peach-1d/body/module.json"),
     ),
     (
-        "peach_body.map2d.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_body.map2d.json"),
+        "body/peach_body.json",
+        include_bytes!("../../../../../examples/peach-1d/body/peach_body.json"),
     ),
     (
-        "peach_body.patch.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_body.patch.json"),
+        "body/peach_body.map2d.json",
+        include_bytes!("../../../../../examples/peach-1d/body/peach_body.map2d.json"),
     ),
     (
-        "peach_leaf.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_leaf.json"),
+        "body/peach_body.patch.json",
+        include_bytes!("../../../../../examples/peach-1d/body/peach_body.patch.json"),
     ),
     (
-        "peach_leaf.map2d.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_leaf.map2d.json"),
+        "body/body_glow.json",
+        include_bytes!("../../../../../examples/peach-1d/body/body_glow.json"),
     ),
     (
-        "peach_leaf.patch.json",
-        include_bytes!("../../../../../examples/peach-1d/peach_leaf.patch.json"),
+        "body/body_glow.glsl",
+        include_bytes!("../../../../../examples/peach-1d/body/body_glow.glsl"),
     ),
     (
-        "body_glow.json",
-        include_bytes!("../../../../../examples/peach-1d/body_glow.json"),
+        "leaf/module.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf/module.json"),
     ),
     (
-        "body_glow.glsl",
-        include_bytes!("../../../../../examples/peach-1d/body_glow.glsl"),
+        "leaf/peach_leaf.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf/peach_leaf.json"),
     ),
     (
-        "leaf_shimmer.json",
-        include_bytes!("../../../../../examples/peach-1d/leaf_shimmer.json"),
+        "leaf/peach_leaf.map2d.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf/peach_leaf.map2d.json"),
     ),
     (
-        "leaf_shimmer.glsl",
-        include_bytes!("../../../../../examples/peach-1d/leaf_shimmer.glsl"),
+        "leaf/peach_leaf.patch.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf/peach_leaf.patch.json"),
+    ),
+    (
+        "leaf/leaf_shimmer.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf/leaf_shimmer.json"),
+    ),
+    (
+        "leaf/leaf_shimmer.glsl",
+        include_bytes!("../../../../../examples/peach-1d/leaf/leaf_shimmer.glsl"),
     ),
 ];
 
@@ -477,44 +485,52 @@ pub static PEACH_2D_FILES: &[ExampleFile] = &[
         include_bytes!("../../../../../examples/peach-2d/output.json"),
     ),
     (
-        "peach_body.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_body.json"),
+        "body/module.json",
+        include_bytes!("../../../../../examples/peach-2d/body/module.json"),
     ),
     (
-        "peach_body.map2d.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_body.map2d.json"),
+        "body/peach_body.json",
+        include_bytes!("../../../../../examples/peach-2d/body/peach_body.json"),
     ),
     (
-        "peach_body.patch.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_body.patch.json"),
+        "body/peach_body.map2d.json",
+        include_bytes!("../../../../../examples/peach-2d/body/peach_body.map2d.json"),
     ),
     (
-        "peach_leaf.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_leaf.json"),
+        "body/peach_body.patch.json",
+        include_bytes!("../../../../../examples/peach-2d/body/peach_body.patch.json"),
     ),
     (
-        "peach_leaf.map2d.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_leaf.map2d.json"),
+        "body/body_glow.json",
+        include_bytes!("../../../../../examples/peach-2d/body/body_glow.json"),
     ),
     (
-        "peach_leaf.patch.json",
-        include_bytes!("../../../../../examples/peach-2d/peach_leaf.patch.json"),
+        "body/body_glow.glsl",
+        include_bytes!("../../../../../examples/peach-2d/body/body_glow.glsl"),
     ),
     (
-        "body_glow.json",
-        include_bytes!("../../../../../examples/peach-2d/body_glow.json"),
+        "leaf/module.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf/module.json"),
     ),
     (
-        "body_glow.glsl",
-        include_bytes!("../../../../../examples/peach-2d/body_glow.glsl"),
+        "leaf/peach_leaf.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf/peach_leaf.json"),
     ),
     (
-        "leaf_shimmer.json",
-        include_bytes!("../../../../../examples/peach-2d/leaf_shimmer.json"),
+        "leaf/peach_leaf.map2d.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf/peach_leaf.map2d.json"),
     ),
     (
-        "leaf_shimmer.glsl",
-        include_bytes!("../../../../../examples/peach-2d/leaf_shimmer.glsl"),
+        "leaf/peach_leaf.patch.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf/peach_leaf.patch.json"),
+    ),
+    (
+        "leaf/leaf_shimmer.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf/leaf_shimmer.json"),
+    ),
+    (
+        "leaf/leaf_shimmer.glsl",
+        include_bytes!("../../../../../examples/peach-2d/leaf/leaf_shimmer.glsl"),
     ),
 ];
 
@@ -651,10 +667,10 @@ mod tests {
         let one_d_files: std::collections::BTreeMap<_, _> = one_d.files().into_iter().collect();
         let two_d_files: std::collections::BTreeMap<_, _> = two_d.files().into_iter().collect();
         for shared in [
-            "peach_body.patch.json",
-            "peach_leaf.patch.json",
-            "peach_body.map2d.json",
-            "peach_leaf.map2d.json",
+            "body/peach_body.patch.json",
+            "leaf/peach_leaf.patch.json",
+            "body/peach_body.map2d.json",
+            "leaf/peach_leaf.map2d.json",
         ] {
             assert_eq!(
                 one_d_files[&shared.to_string()],

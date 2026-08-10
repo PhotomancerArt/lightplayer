@@ -1380,6 +1380,63 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     );
 }
 
+/// The peaches' root card shows the peach — not a black square.
+///
+/// A module face's hero reads its scope's BARE `visual.out`. An INSTANCE
+/// channel (`visual.out/body`) is a different channel, so a project whose
+/// only visual producers publish to instances leaves the root mirror cleared
+/// and the card renders black — which is exactly what the peaches did at G1
+/// round 1, and exactly the sort of thing that a passing panel walk and a
+/// green byte-identity check both say nothing about. The peaches are now two
+/// submodules, each publishing its own scope's bare `visual.out`, with the
+/// body's the authored pick at the root (R7 contention). This is what says
+/// the pick still lands.
+#[test]
+fn the_peaches_open_onto_a_live_hero() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        // The connect read arms the always-live subscriptions; the probe
+        // answers on later reads, and the shader needs a frame to compile.
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+        let hero = module_face(&snapshot)
+            .preview
+            .unwrap_or_else(|| panic!("{id}: the root module card has no hero at all"));
+        let crate::UiProductPreview::VisualSrgb8 { bytes, .. } = &hero.preview else {
+            panic!("{id}: the root hero is not the module's raster: {hero:?}");
+        };
+        assert!(
+            bytes.iter().any(|byte| *byte != 0),
+            "{id}: the root module hero is entirely black — its scope's \
+             `visual.out` resolves to nothing a viewer can see"
+        );
+    }
+}
+
 #[test]
 fn every_gallery_example_opens_onto_a_populated_root_panel() {
     // A gallery example that opens onto an EMPTY panel teaches the wrong

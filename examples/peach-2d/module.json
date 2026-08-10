@@ -1,23 +1,17 @@
 {
   "kind": "Module",
   "nodes": {
-    "body_glow": {
-      "ref": "./body_glow.json"
+    "body": {
+      "ref": "./body/module.json"
     },
     "clock": {
       "ref": "./clock.json"
     },
-    "leaf_shimmer": {
-      "ref": "./leaf_shimmer.json"
+    "leaf": {
+      "ref": "./leaf/module.json"
     },
     "output": {
       "ref": "./output.json"
-    },
-    "peach_body": {
-      "ref": "./peach_body.json"
-    },
-    "peach_leaf": {
-      "ref": "./peach_leaf.json"
     }
   },
   "provenance": {

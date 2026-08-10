@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, Kind, NodeId};
+use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
@@ -22,7 +22,9 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use crate::engine::engine::gate_display_layout;
 use crate::node::NodeEntryState;
+use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -41,7 +43,10 @@ struct PublishedOutputCandidate {
     node: NodeId,
     buffer_id: RuntimeBufferId,
     sample_layout: Option<ControlLayout>,
-    source_product: Option<ControlProduct>,
+    /// The placement set behind the published frame — the only thing that
+    /// knows where each producer's lamps ended up on this wire.
+    fragments: Vec<OutputFragment>,
+    placement_revision: Revision,
 }
 
 impl Engine {
@@ -426,7 +431,8 @@ impl Engine {
                     node: entry.id,
                     buffer_id,
                     sample_layout: node.runtime_output_sample_layout().cloned(),
-                    source_product: node.runtime_output_source_product(),
+                    fragments: node.runtime_output_fragments().to_vec(),
+                    placement_revision: node.runtime_output_placement_revision(),
                 })
             })
             .collect();
@@ -451,17 +457,8 @@ impl Engine {
 
             let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
                 ControlDisplayLayoutProbeResult::Omitted
-            } else if let Some(product) = candidate.source_product {
-                self.control_display_layout_probe(registry, product, request.display_layout)
-                    .unwrap_or_else(|error| ControlDisplayLayoutProbeResult::Unsupported {
-                        reason: format!("{error}"),
-                    })
             } else {
-                ControlDisplayLayoutProbeResult::Unsupported {
-                    reason: String::from(
-                        "output has not published a frame yet, so its source product is unknown",
-                    ),
-                }
+                self.output_frame_display_layout(registry, &candidate, request.display_layout)
             };
 
             outputs.push(OutputFrameEntry {
@@ -479,6 +476,98 @@ impl Engine {
         }
 
         OutputFrameProbeResult::Frame { outputs }
+    }
+
+    /// Where to draw the lamps of one published frame.
+    ///
+    /// The output's geometry is not any one producer's geometry. Each producer
+    /// states its lamps in its OWN numbering (`sample_start = channel * 3`),
+    /// and the fragment that placed it is the only thing that knows where
+    /// those samples ended up on the wire — after an authored offset, after a
+    /// reversal, after however many other strands share the run. So: ask each
+    /// producer once, rebase every fragment's share through the placement, and
+    /// merge. A client can then index the frame's bytes by each lamp's
+    /// `sample_start` and get that lamp's own color, which is the contract
+    /// `OutputFrameEntry` already claims.
+    ///
+    /// A producer whose layout the engine declines (over the wire budget at
+    /// dome scale, or a kind with no geometry at all) simply contributes no
+    /// lamps; the rest of the wire still draws. Only when NOTHING answers does
+    /// the whole read report `Unsupported`, carrying the first refusal's reason
+    /// so the client can say why.
+    fn output_frame_display_layout(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+        read: ControlDisplayLayoutRead,
+    ) -> ControlDisplayLayoutProbeResult {
+        if candidate.fragments.is_empty() {
+            return ControlDisplayLayoutProbeResult::Unsupported {
+                reason: String::from(
+                    "output has not published a frame yet, so it has no placed producers",
+                ),
+            };
+        }
+
+        // One probe per PRODUCT, not per fragment: a patched producer is cut
+        // into several runs and every one of them wants the same geometry.
+        let mut probed: Vec<(ControlProduct, Option<ControlLayout2d>)> = Vec::new();
+        let mut refusal: Option<String> = None;
+        for fragment in &candidate.fragments {
+            if probed
+                .iter()
+                .any(|(product, _)| *product == fragment.product)
+            {
+                continue;
+            }
+            // ALWAYS, never the caller's gate: the gate belongs to the merged
+            // answer, and an `Unchanged` on one part would silently drop that
+            // producer's lamps out of the composite.
+            let answer = match self.control_display_layout_probe(
+                registry,
+                fragment.product,
+                ControlDisplayLayoutRead::Always,
+            ) {
+                Ok(ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
+                    layout,
+                ))) => Some(layout),
+                Ok(ControlDisplayLayoutProbeResult::Unsupported { reason }) => {
+                    refusal.get_or_insert(reason);
+                    None
+                }
+                Ok(_) => None,
+                Err(error) => {
+                    refusal.get_or_insert_with(|| format!("{error}"));
+                    None
+                }
+            };
+            probed.push((fragment.product, answer));
+        }
+
+        let mut revision = candidate.placement_revision;
+        let mut placed = Vec::with_capacity(candidate.fragments.len());
+        for fragment in &candidate.fragments {
+            let Some((_, Some(layout))) = probed
+                .iter()
+                .find(|(product, _)| *product == fragment.product)
+            else {
+                continue;
+            };
+            revision = revision.max(layout.revision);
+            placed.push((*fragment, layout.clone()));
+        }
+        if placed.is_empty() {
+            return ControlDisplayLayoutProbeResult::Unsupported {
+                reason: refusal.unwrap_or_else(|| {
+                    String::from("no producer on this output exposes a display layout")
+                }),
+            };
+        }
+
+        gate_display_layout(
+            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision)),
+            read,
+        )
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).

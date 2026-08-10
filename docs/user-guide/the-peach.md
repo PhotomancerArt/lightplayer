@@ -24,6 +24,14 @@ A **fixture** is a group of lamps that gets its own picture. The peach has
 two: `peach_body` (44 lamps) and `peach_leaf` (12). They both send their
 colors to the same output, because they are both the same strip.
 
+Each one lives in a little module of its own — `body/` and `leaf/` — holding
+that fixture and the shader that draws for it, and nothing else. Inside a
+module the wiring is as plain as it gets: the shader publishes a picture, the
+fixture reads it, and neither has to say whose. The leaf's picture cannot
+reach the body's lamps, because they are not in the same room. What a module
+hands *outward* is its lamps, and the output at the top of the project puts
+both modules' lamps on the one wire.
+
 If you're coming from WLED, this is the segments idea — with the part that
 always chafed removed. A WLED segment is a slice of the strip that happens
 to run a different effect; here the fixture is the real thing, with its own

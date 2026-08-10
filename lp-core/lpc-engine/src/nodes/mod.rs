@@ -32,7 +32,8 @@ pub use fixture::fixture_node::{
 pub use fluid::{FluidNode, MsaFluidSolver, fluid_emitters_path, fluid_output_path};
 pub use module::ModuleNode;
 pub use output::output_node::{
-    FragmentCoverage, FragmentPlacement, OutputFragment, OutputNode, output_input_path,
+    FragmentCoverage, FragmentPlacement, OutputFragment, OutputNode,
+    merge_fragment_display_layouts, output_input_path,
 };
 pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;

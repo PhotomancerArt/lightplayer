@@ -72,8 +72,8 @@ pub(crate) const FIGURES: &[DocsCodeFigure] = &[
     },
     DocsCodeFigure {
         id: "peach-body-patch",
-        title: "peach-1d / peach_body.patch.json",
-        code: include_str!("../../../../../examples/peach-1d/peach_body.patch.json"),
+        title: "peach-1d / body/peach_body.patch.json",
+        code: include_str!("../../../../../examples/peach-1d/body/peach_body.patch.json"),
         // Line 5 is the second half of the body: the range that lands after
         // the leaves and arrives at the wire from its far end. `reversed` is
         // the word the article spends a section on, so the eye should find

@@ -30,8 +30,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeRuntimeStatus, OutputDefView, ProductRef, Revision, SlotData, SlotPath,
-    WithRevision,
+    ControlLamp2d, ControlLayout2d, ControlPathSpan2d, LpValue, NodeRuntimeStatus, OutputDefView,
+    ProductRef, Revision, SlotData, SlotPath, WithRevision,
 };
 
 use crate::dataflow::resolver::QueryKey;
@@ -147,13 +147,28 @@ pub struct OutputNode {
     /// these two fields are what make those bytes mean something without a
     /// second render. Both survive the test-pattern bypass on purpose — the
     /// pattern repaints an extent the graph already established, so the
-    /// layout and the source product are still the frame's truth.
+    /// layout and the placement set are still the frame's truth.
     published_sample_layout: Option<ControlLayout>,
-    /// The FIRST fragment's product — the one whose display geometry a
-    /// preview card draws. With one producer (the common case) it is simply
-    /// "the" source; with several it names the strand at the head of the
-    /// wire, and the per-fragment truth lives in `published_sample_layout`.
-    published_source_product: Option<ControlProduct>,
+    /// The placement set the frame in the buffer was rendered from.
+    ///
+    /// This is what makes the frame's GEOMETRY recoverable. A producer's
+    /// display layout is stated in its own lamp numbering, which stops being
+    /// the wire's numbering the moment a second producer joins or a patch
+    /// moves a run: only the fragment that placed it knows where those lamps
+    /// ended up. The published-frame read rebases each producer's layout
+    /// through its fragments (see [`merge_fragment_display_layouts`]), so
+    /// EVERY fixture's lamps appear, at their own wire positions, wearing
+    /// their own colors.
+    published_fragments: Vec<OutputFragment>,
+    /// Revision stamped the last time [`Self::published_fragments`] CHANGED.
+    ///
+    /// The display-layout read is revision-gated, and a producer's own layout
+    /// revision only moves when its mapping or render extent does — a patch
+    /// edit moves neither. Without this the wire could be re-cut underneath a
+    /// client that would never be told to re-fetch the geometry. Follows the
+    /// fixture's `FixtureDisplayLayoutKey` idiom: stamp on change, not per
+    /// frame.
+    placement_revision: Revision,
 }
 
 impl OutputNode {
@@ -165,7 +180,8 @@ impl OutputNode {
             def_view: None,
             fragment_status: None,
             published_sample_layout: None,
-            published_source_product: None,
+            published_fragments: Vec::new(),
+            placement_revision: Revision::default(),
         }
     }
 
@@ -294,7 +310,10 @@ impl OutputNode {
         }
 
         self.published_sample_layout = Some(ControlLayout { spans });
-        self.published_source_product = fragments.first().map(|fragment| fragment.product);
+        if self.published_fragments != fragments {
+            self.published_fragments = fragments.to_vec();
+            self.placement_revision = ctx.revision();
+        }
 
         self.publish_channel_buffer(ctx)
     }
@@ -489,13 +508,7 @@ fn place_spans(layout: &ControlLayout, fragment: &OutputFragment, out: &mut Vec<
         }
         let relative = clipped_start - source_start;
         let len = clipped_end - clipped_start;
-        let start = if fragment.reversed {
-            fragment
-                .offset_samples
-                .saturating_add(fragment.len_samples.saturating_sub(relative + len))
-        } else {
-            fragment.offset_samples.saturating_add(relative)
-        };
+        let start = place_offset(fragment, relative, len);
         let encoding = if len == span.len {
             span.encoding.clone()
         } else {
@@ -514,6 +527,117 @@ fn place_spans(layout: &ControlLayout, fragment: &OutputFragment, out: &mut Vec<
             encoding,
         });
     }
+}
+
+/// Map one sample offset INSIDE a fragment's source run onto the output
+/// buffer, honouring the fragment's reversal.
+///
+/// `relative` counts from the run's first sample; `len` is the run's length in
+/// samples. A reversed run is laid down end-first, so the mirror is taken over
+/// whole `size`-sample groups (a lamp stays a lamp — reversal reorders lamps,
+/// it never reorders a lamp's channels, which is exactly what
+/// [`reverse_lamps`] does to the samples).
+const fn place_offset(fragment: &OutputFragment, relative: u32, size: u32) -> u32 {
+    if fragment.reversed {
+        fragment.offset_samples.saturating_add(
+            fragment
+                .len_samples
+                .saturating_sub(relative.saturating_add(size)),
+        )
+    } else {
+        fragment.offset_samples.saturating_add(relative)
+    }
+}
+
+/// Rebase one fragment's share of its producer's DISPLAY layout into the
+/// output buffer's coordinates, appending to `lamps` / `paths`.
+///
+/// The display twin of [`place_spans`], and it exists for the same reason: a
+/// producer states geometry in its OWN lamp numbering (`sample_start =
+/// channel * 3`), and the wire's numbering is the fragment's. A lamp outside
+/// this fragment's source run belongs to another run and is skipped here — it
+/// gets rebased when that run is placed.
+fn place_display_lamps(
+    layout: &ControlLayout2d,
+    fragment: &OutputFragment,
+    lamps: &mut Vec<ControlLamp2d>,
+    paths: &mut Vec<ControlPathSpan2d>,
+) {
+    let source_start = fragment.source_offset_samples;
+    let source_end = source_start.saturating_add(fragment.len_samples);
+
+    for lamp in &layout.lamps {
+        let lamp_end = lamp.sample_start.saturating_add(SAMPLES_PER_LAMP);
+        // Whole lamps only: a lamp straddling the edge of a run has no honest
+        // wire position, and a patch cuts on lamp boundaries by construction.
+        if lamp.sample_start < source_start || lamp_end > source_end {
+            continue;
+        }
+        let start = place_offset(fragment, lamp.sample_start - source_start, SAMPLES_PER_LAMP);
+        lamps.push(ControlLamp2d {
+            lamp_index: start / SAMPLES_PER_LAMP,
+            sample_start: start,
+            center: lamp.center,
+            radius: lamp.radius,
+        });
+    }
+
+    for path in &layout.paths {
+        let path_start = path.first_lamp.saturating_mul(SAMPLES_PER_LAMP);
+        let path_end = path_start.saturating_add(path.lamp_count.saturating_mul(SAMPLES_PER_LAMP));
+        let clipped_start = path_start.max(source_start);
+        let clipped_end = path_end.min(source_end);
+        if clipped_start >= clipped_end {
+            continue;
+        }
+        let len = clipped_end - clipped_start;
+        let start = place_offset(fragment, clipped_start - source_start, len);
+        paths.push(ControlPathSpan2d {
+            first_lamp: start / SAMPLES_PER_LAMP,
+            lamp_count: len / SAMPLES_PER_LAMP,
+        });
+    }
+}
+
+/// The display layout of a whole OUTPUT: every producer's lamps, rebased
+/// through the fragments that placed them, in wire order.
+///
+/// A client draws a published frame by reading each lamp's `sample_start` out
+/// of the frame's bytes ([`lpc_wire::OutputFrameEntry`]), so those offsets
+/// have to be the WIRE's, not the producer's. One unpatched producer makes
+/// the two coincide, which is why single-fixture projects looked right while
+/// the peach — two fixtures, one of them cut in half and plugged in backwards
+/// around the other — painted the body's far half with the leaf's colors and
+/// drew no leaf at all.
+///
+/// `revision` is the caller's fold of every input layout's revision with the
+/// output's own placement revision: geometry here changes when a mapping
+/// changes OR when the patch moves a run, and the `IfChanged` gate has to see
+/// both.
+///
+/// Extent hints are the componentwise max: the merged layout is a composite of
+/// producers that may render at different sizes, and lamp centers are already
+/// normalized, so the hints only tell a viewer what aspect to reserve.
+#[must_use]
+pub fn merge_fragment_display_layouts(
+    placed: &[(OutputFragment, ControlLayout2d)],
+    revision: Revision,
+) -> ControlLayout2d {
+    let mut lamps = Vec::new();
+    let mut paths = Vec::new();
+    let mut width_hint = 0;
+    let mut height_hint = 0;
+    for (fragment, layout) in placed {
+        width_hint = width_hint.max(layout.width_hint);
+        height_hint = height_hint.max(layout.height_hint);
+        place_display_lamps(layout, fragment, &mut lamps, &mut paths);
+    }
+    // Wire order, so a consumer can scan lamps and bytes together. Contested
+    // samples can leave two lamps on one offset — both are drawn, dark,
+    // which is the honest picture of two strands claiming one channel.
+    lamps.sort_by_key(|lamp| lamp.sample_start);
+    paths.sort_by_key(|path| path.first_lamp);
+    ControlLayout2d::new(revision, width_hint, height_hint, lamps).with_paths(paths)
 }
 
 /// What a fragment set covers: its extent, its overlaps, and its holes.
@@ -655,8 +779,12 @@ impl NodeRuntime for OutputNode {
         self.published_sample_layout.as_ref()
     }
 
-    fn runtime_output_source_product(&self) -> Option<ControlProduct> {
-        self.published_source_product
+    fn runtime_output_fragments(&self) -> &[OutputFragment] {
+        &self.published_fragments
+    }
+
+    fn runtime_output_placement_revision(&self) -> Revision {
+        self.placement_revision
     }
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
@@ -1369,9 +1497,48 @@ mod tests {
             vec![(0, 6), (6, 3)],
         );
         assert_eq!(
-            node.runtime_output_source_product().map(|p| p.output()),
-            Some(1),
-            "the head of the wire is the frame's source product",
+            node.runtime_output_fragments()
+                .iter()
+                .map(|fragment| (fragment.product.output(), fragment.offset_samples))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (2, 6)],
+            "the placement set is latched with the frame, in wire order",
+        );
+    }
+
+    /// The placement revision is a CHANGE stamp, not a frame counter: a
+    /// client gating geometry on it must not be told to re-fetch every tick,
+    /// and must be told the moment the wire is re-cut.
+    #[test]
+    fn the_placement_revision_moves_only_when_the_placement_does() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_products = vec![product(1, TWO_LAMPS), product(2, ONE_LAMP)];
+
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("first frame");
+        let first = node.runtime_output_placement_revision();
+        consume_at(&mut node, &mut resolver, Revision::new(2)).expect("second frame");
+        assert_eq!(
+            node.runtime_output_placement_revision(),
+            first,
+            "an unchanged wire keeps its stamp",
+        );
+
+        // The patch moves the second producer: same products, new placement.
+        resolver.patches = vec![(
+            product(2, ONE_LAMP),
+            vec![PatchedRun {
+                start: 0,
+                count: 1,
+                channel: 9,
+                reversed: false,
+            }],
+        )];
+        consume_at(&mut node, &mut resolver, Revision::new(3)).expect("repatched frame");
+        assert_eq!(
+            node.runtime_output_placement_revision(),
+            Revision::new(3),
+            "re-cutting the wire stamps the frame that did it",
         );
     }
 
