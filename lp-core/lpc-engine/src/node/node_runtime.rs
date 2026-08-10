@@ -1,6 +1,7 @@
 //! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
-use crate::products::control::{ControlLayout, ControlProduct};
+use crate::nodes::OutputFragment;
+use crate::products::control::ControlLayout;
 use crate::resource::RuntimeBufferId;
 use lpc_model::{
     AssetLocation, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
@@ -194,14 +195,30 @@ pub trait NodeRuntime {
         None
     }
 
-    /// The control product the last published frame was rendered from.
+    /// The placement set the last published frame was rendered from: which
+    /// producers contributed, and where on the wire each of their runs landed.
     ///
-    /// The output node consumes some upstream producer's control product;
-    /// that producer — not the output — is what knows the display geometry.
-    /// Latched alongside [`Self::runtime_output_sample_layout`] so a reader
-    /// can ask the right node for a layout without re-resolving the graph.
-    fn runtime_output_source_product(&self) -> Option<ControlProduct> {
-        None
+    /// The output node consumes N upstream control products; each producer —
+    /// not the output — is what knows its own display geometry, and only the
+    /// fragment knows where that geometry ended up on the wire. A reader
+    /// therefore asks each producer for its layout and rebases it through the
+    /// fragment that placed it
+    /// ([`crate::nodes::output::merge_fragment_display_layouts`]). Latched
+    /// alongside [`Self::runtime_output_sample_layout`], so no graph re-resolve
+    /// is needed. Empty before the first successful render.
+    fn runtime_output_fragments(&self) -> &[OutputFragment] {
+        &[]
+    }
+
+    /// Revision stamped the last time [`Self::runtime_output_fragments`]
+    /// changed.
+    ///
+    /// A producer's display-layout revision tracks its mapping and render
+    /// extent; it says nothing about where the output put the result. A client
+    /// gating on `IfChanged` needs both, so the published-frame read folds this
+    /// into the revision it reports for the merged layout.
+    fn runtime_output_placement_revision(&self) -> Revision {
+        Revision::default()
     }
 
     /// Where this node's control product lands on its output's wire, when the

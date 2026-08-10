@@ -15,6 +15,10 @@
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{NodeRuntimeStatus, Revision, TreePath};
 use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpc_wire::{
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameProbeRequest,
+    OutputFrameProbeResult,
+};
 use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 /// The body strand: four lamps, full brightness.
@@ -438,6 +442,142 @@ fn a_newer_patch_format_refuses_the_fixture_at_load() {
         panic!("a refused document is an error");
     };
     assert!(message.contains("unsupported patch format 2"), "{message}");
+}
+
+/// The output's published DISPLAY layout: where a client is told to draw each
+/// lamp, and which sample of the published frame to colour it from.
+///
+/// This is the picture the simulator and the device card paint. It has to be
+/// the WHOLE wire's picture: `sample_start` indexes the frame the output
+/// published, so a producer's own lamp numbering is the wrong space the
+/// moment a second producer joins or a patch moves a run.
+fn published_display_layout(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+) -> lpc_model::ControlLayout2d {
+    let result = engine.read_project_output_frame_probe(
+        registry,
+        OutputFrameProbeRequest {
+            display_layout: ControlDisplayLayoutRead::Always,
+        },
+    );
+    let OutputFrameProbeResult::Frame { outputs } = result;
+    let entry = outputs.into_iter().next().expect("one published output");
+    match entry.display_layout {
+        ControlDisplayLayoutProbeResult::Layout(lpc_model::ControlDisplayLayout::Layout2d(
+            layout,
+        )) => layout,
+        other => panic!("expected a published display layout, got {other:?}"),
+    }
+}
+
+/// The x coordinate of each drawn lamp, in wire order. Every lamp in these
+/// two fixtures sits at a distinct x (the body's four at 0.125…0.875 of its
+/// own canvas, the leaf's two at 0.25/0.75 of its own), so this reads as
+/// "which physical lamp is on which channel".
+fn drawn_lamp_positions(layout: &lpc_model::ControlLayout2d) -> Vec<f32> {
+    layout.lamps.iter().map(|lamp| lamp.center[0]).collect()
+}
+
+/// Even unpatched, an output is a MERGE: the leaf's lamps sit six samples
+/// into the wire, and a layout stated in the leaf's own numbering would draw
+/// them over the body's first two.
+#[test]
+fn the_published_display_layout_covers_every_fixture_on_the_wire() {
+    let (mut engine, registry) = settled(&project_fs(false));
+    let layout = published_display_layout(&mut engine, &registry);
+
+    assert_eq!(
+        layout
+            .lamps
+            .iter()
+            .map(|lamp| (lamp.lamp_index, lamp.sample_start))
+            .collect::<Vec<_>>(),
+        vec![(0, 0), (1, 3), (2, 6), (3, 9), (4, 12), (5, 15)],
+        "six channels, six drawn lamps, numbered as the WIRE numbers them"
+    );
+    assert_eq!(
+        drawn_lamp_positions(&layout),
+        vec![0.125, 0.375, 0.625, 0.875, 0.25, 0.75],
+        "the body's four lamps lead, then the leaf's two"
+    );
+}
+
+/// The peach, from the viewer's side. Fixture order and wire order have
+/// parted company — and the picture must follow the LAMPS, not the wire: every
+/// lamp keeps its position and its own colour, whatever channel it was
+/// plugged into.
+#[test]
+fn a_patched_display_layout_draws_every_lamp_at_its_own_colour() {
+    let (mut flowed_engine, flowed_registry) = settled(&project_fs(false));
+    let flowed_layout = published_display_layout(&mut flowed_engine, &flowed_registry);
+    let flowed_colors = published_lamps(&flowed_engine);
+
+    let (mut engine, registry) = settled(&project_fs(true));
+    let layout = published_display_layout(&mut engine, &registry);
+    let colors = published_lamps(&engine);
+
+    assert_eq!(
+        drawn_lamp_positions(&layout),
+        vec![0.125, 0.375, 0.25, 0.75, 0.875, 0.625],
+        "body 0-1, then the leaf between the halves, then the far half backwards"
+    );
+
+    // The claim that matters: pair the two projects' lamps by POSITION — the
+    // same physical lamp in both — and the colour a client is told to paint
+    // there must be the same colour. Nothing here mentions a channel number,
+    // so it holds for any patch.
+    assert_eq!(layout.lamps.len(), flowed_layout.lamps.len());
+    for lamp in &layout.lamps {
+        let twin = flowed_layout
+            .lamps
+            .iter()
+            .find(|other| other.center == lamp.center)
+            .expect("every patched lamp is a lamp the unpatched wire also had");
+        assert_eq!(
+            colors[lamp.sample_start as usize / 3],
+            flowed_colors[twin.sample_start as usize / 3],
+            "the lamp at {:?} must be drawn in its own colour",
+            lamp.center
+        );
+    }
+}
+
+/// A patch edit re-cuts the wire without touching any mapping — so the
+/// producers' own layout revisions do not move, and a client gating on
+/// `IfChanged` would keep drawing the old geometry over the new frame.
+#[test]
+fn re_patching_moves_the_display_layout_revision() {
+    let mut fs = project_fs(true);
+    let (mut engine, mut registry) = load(&fs);
+    tick(&mut engine, &registry, SETTLE_TICKS);
+    let before = published_display_layout(&mut engine, &registry);
+
+    fs.write_file_mut(
+        "/leaf.patch.json".as_path(),
+        br#"{
+  "format": 1,
+  "entries": [
+    { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 }, "reversed": true }
+  ]
+}"#,
+    )
+    .expect("flip the leaf");
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.patch.json"]);
+    tick(&mut engine, &registry, 2);
+
+    let after = published_display_layout(&mut engine, &registry);
+    assert_eq!(
+        drawn_lamp_positions(&after),
+        vec![0.125, 0.375, 0.75, 0.25, 0.875, 0.625],
+        "the leaf's two lamps swapped channels"
+    );
+    assert!(
+        after.revision > before.revision,
+        "a re-cut wire must announce itself: {:?} then {:?}",
+        before.revision,
+        after.revision
+    );
 }
 
 fn apply_asset_change(

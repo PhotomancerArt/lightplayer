@@ -1,12 +1,12 @@
 {
   "kind": "Fixture",
   "render_size": {
-    "width": 64,
-    "height": 64
+    "width": 12,
+    "height": 1
   },
   "bindings": {
     "input": {
-      "source": "bus:visual.out/leaf"
+      "source": "bus:visual.out"
     },
     "output": {
       "target": "bus:control.out"
@@ -22,6 +22,7 @@
     "kind": "File",
     "source": "peach_leaf.patch.json"
   },
+  "strip_order_meaningful": true,
   "color_order": "rgb",
   "transform": [
     [1, 0, 0],
