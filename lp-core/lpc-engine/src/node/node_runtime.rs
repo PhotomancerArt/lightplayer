@@ -41,23 +41,30 @@ pub enum AssetRefreshResult {
 /// output node is never gated out while the mapping crate can be: placement is
 /// a producer-declared property, and what a producer resolved it FROM is that
 /// producer's business.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PatchedRun {
     /// First lamp of the run, in the producer's own order.
     pub start: u32,
     /// Lamps in the run.
     pub count: u32,
-    /// First wire lamp the run occupies.
-    pub channel: u32,
-    /// Lay the run down end-first.
+    /// First wire lamp of the run's window.
+    pub lamp: u32,
+    /// Lay the run down end-first (applied before rotation — the kernel's
+    /// canonical composition order, `lpc_mapping::patched_wire_lamp`).
     pub reversed: bool,
+    /// Rotation in lamps within the run's window (0 = none).
+    pub offset: u32,
+    /// The addressed output's NAME; `None` = the default output (the first
+    /// fragments-consuming output on the bus, D40).
+    pub output: Option<alloc::string::String>,
 }
 
 impl PatchedRun {
-    /// One past the last wire lamp this run occupies.
+    /// One past the last wire lamp this run occupies. Rotation permutes
+    /// within the window, so the window is the whole story.
     #[must_use]
-    pub const fn channel_end(&self) -> u32 {
-        self.channel.saturating_add(self.count)
+    pub const fn lamp_end(&self) -> u32 {
+        self.lamp.saturating_add(self.count)
     }
 }
 

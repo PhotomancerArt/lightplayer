@@ -692,9 +692,60 @@ fn the_declared_link_budget_gates_the_published_layout() {
 /// their frames still flow.
 #[test]
 fn the_header_total_gates_layouts_across_outputs() {
-    // Three outputs on the same control bus: three published frames, three
-    // layouts of identical size in one header.
+    // Three outputs on the same control bus, each carrying real content:
+    // since the scatter rule (D40) landed, an unpatched producer flows to
+    // the DEFAULT output only, so the extra outputs get theirs by explicit
+    // format-2 scatter — body split across the default and "B", leaf whole
+    // on "C". Three published frames, three same-sized layouts (two lamps
+    // each) in one header.
     let fs = project_fs(false);
+    fs.write_file(
+        "/body.patch.json".as_path(),
+        br#"{
+  "format": 2,
+  "outputs": ["B"],
+  "entries": [
+    [[0, 2], -1, 0],
+    [[2, 2], 0, 0]
+  ]
+}
+"#,
+    )
+    .expect("scattered body patch");
+    fs.write_file(
+        "/leaf.patch.json".as_path(),
+        br#"{
+  "format": 2,
+  "outputs": ["C"],
+  "entries": [
+    [[0, 2], 0, 0]
+  ]
+}
+"#,
+    )
+    .expect("scattered leaf patch");
+    for name in ["body", "leaf"] {
+        // Re-point the fixtures at the patch docs (project_fs(false) wrote
+        // them unpatched).
+        let def = format!(
+            r#"{{
+  "kind": "Fixture",
+  "render_size": {{ "width": {lamps}, "height": 1 }},
+  "bindings": {{ "output": {{ "target": "bus:control.out" }} }},
+  "sampling": "direct",
+  "diagnostic_mode": "led_index",
+  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }},
+  "patch": {{ "kind": "File", "source": "{name}.patch.json" }},
+  "color_order": "rgb",
+  "brightness": {brightness},
+  "gamma_correction": false
+}}"#,
+            lamps = if name == "body" { 4 } else { 2 },
+            brightness = if name == "body" { 1.0 } else { 0.25 },
+        );
+        fs.write_file(format!("/{name}.json").as_path(), def.as_bytes())
+            .expect("re-pointed fixture def");
+    }
     fs.write_file(
         "/module.json".as_path(),
         br#"{ "kind": "Module", "nodes": {
@@ -706,12 +757,13 @@ fn the_header_total_gates_layouts_across_outputs() {
 } }"#,
     )
     .expect("module.json");
-    for (name, endpoint) in [("output2", "D11"), ("output3", "D12")] {
+    for (name, endpoint, output_name) in [("output2", "D11", "B"), ("output3", "D12", "C")] {
         fs.write_file(
             format!("/{name}.json").as_path(),
             format!(
                 r#"{{
   "kind": "Output",
+  "name": "{output_name}",
   "ports": {{ "0": {{ "endpoint": "ws281x:local:{endpoint}" }} }},
   "bindings": {{ "input": {{ "source": "bus:control.out" }} }}
 }}"#

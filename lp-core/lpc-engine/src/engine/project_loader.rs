@@ -830,14 +830,15 @@ impl ProjectLoader {
                     continue;
                 };
                 match resolve_fixture_mapping(fs, registry, node, &config) {
-                    Ok((mapping, map2d_source)) => {
+                    Ok((mapping, map2d_source, object_spans)) => {
                         let mut fixture =
                             FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
                                 .with_render_defaults(
                                     config.render_width(),
                                     config.render_height(),
                                     *config.color_order.value(),
-                                );
+                                )
+                                .with_object_spans(object_spans);
                         if let Some(source) = map2d_source {
                             fixture = fixture.with_map2d_source(source);
                         }
@@ -1153,7 +1154,14 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<(FixtureMapping, Option<FixtureMap2dSource>), ProjectLoadError> {
+) -> Result<
+    (
+        FixtureMapping,
+        Option<FixtureMap2dSource>,
+        Vec<lpc_mapping::ObjectInstanceSpan>,
+    ),
+    ProjectLoadError,
+> {
     match config.mapping.value() {
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
@@ -1175,6 +1183,12 @@ fn resolve_fixture_mapping(
                         path: node_label(node),
                         reason: format!("resolve map2d fixture mapping: {e}"),
                     })?;
+            // The per-strand instance-address table `/sector/2`-style patch
+            // entries lower through — same doc, same resolve as the mapping
+            // (the runtime node recomputes it on asset refresh).
+            let spans = lpc_mapping::resolve(&doc)
+                .map(|resolved| lpc_mapping::object_instance_spans(&doc, &resolved))
+                .unwrap_or_default();
             // Keep the source so the runtime node can re-resolve on asset
             // refresh (the in-place editor's apply path).
             let source = FixtureMap2dSource {
@@ -1185,11 +1199,11 @@ fn resolve_fixture_mapping(
             };
             // Document geometry stays compact: never expanded into slots,
             // never serialized, never slot-addressed.
-            Ok((FixtureMapping::Compact(mapping), Some(source)))
+            Ok((FixtureMapping::Compact(mapping), Some(source), spans))
         }
         // Hand-authored `PathPoints` (and an unset mapping) keep the slot
         // form — Studio edits individual lamps there.
-        other => Ok((FixtureMapping::Slots(other.clone()), None)),
+        other => Ok((FixtureMapping::Slots(other.clone()), None, Vec::new())),
     }
 }
 
