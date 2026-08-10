@@ -1240,6 +1240,7 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
     resolve_authored_slices(&mut channels);
 
     Some(UiOutputFace {
+        name: authored_output_name(&rows),
         led_budget: None,
         ports: channels,
         ports_address: channels_row.address.clone(),
@@ -1332,6 +1333,19 @@ fn option_u32_field(fields: &[UiConfigSlot], name: &str) -> Option<u32> {
 }
 
 /// The endpoint label a top-level row is bound to, when it is bound.
+/// The authored output `name` (D39), read from its option row's interior
+/// value. Absent (option excluded, or an empty string) reads as unnamed.
+fn authored_output_name(rows: &[&UiConfigSlot]) -> Option<String> {
+    let row = rows.iter().find(|row| row.key == "name")?;
+    let UiConfigSlotBody::Value(value) = &row.body else {
+        return None;
+    };
+    match &value.kind {
+        UiSlotValueKind::String(text) if !text.is_empty() => Some(text.clone()),
+        _ => None,
+    }
+}
+
 fn bound_endpoint_label(rows: &[&UiConfigSlot], key: &str) -> Option<String> {
     match &rows.iter().find(|row| row.key == key)?.source {
         UiSlotSourceState::Bound(endpoint) => Some(endpoint.label.clone()),

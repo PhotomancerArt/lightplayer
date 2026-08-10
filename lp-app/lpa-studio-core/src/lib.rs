@@ -92,7 +92,8 @@ pub use app::project::{
     ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
     ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
     UiAddNodeMenuEntry, UiAffordance, UiAssetContent, UiAssetContentBody, UiAttachTarget,
-    UiImportablePattern, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
+    UiImportablePattern, UiNodeRemovePreflight, UiPatchInstance, UiPatchSurface,
+    UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind,
     UiPendingEditPhase, UiPreviewSpaces, UiProductSpaceRequest, UiProjectManifest, UiShaderError,
     UiTimebaseRead, visual_probe_request,
 };

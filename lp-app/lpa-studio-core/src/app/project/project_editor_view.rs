@@ -83,6 +83,13 @@ pub struct ProjectEditorView {
     /// (`Pending`/`InFlight` phases). Non-zero only in mid-op progressive
     /// snapshots; drives the project header's "in progress" state.
     pub edits_in_flight: usize,
+    /// The project-scoped patch surface (D36, slice 2): every output's
+    /// ports/cells and every fixture's runs/instances, derived in the same
+    /// pass as the face bays. `None` while nothing patchable has answered.
+    pub patch_surface: Option<crate::UiPatchSurface>,
+    /// The surface's one shared selection (core-owned so e2e can drive it
+    /// and P6's verbs can read it; hover stays a web-side context).
+    pub patch_selection: Option<crate::UiPatchTarget>,
 }
 
 impl ProjectEditorView {
@@ -113,6 +120,8 @@ impl ProjectEditorView {
             header_actions: Vec::new(),
             add_node_menu: None,
             edits_in_flight: 0,
+            patch_surface: None,
+            patch_selection: None,
         }
     }
 
@@ -180,6 +189,17 @@ impl ProjectEditorView {
     /// Attach the count of buffered edits awaiting acknowledgement.
     pub fn with_edits_in_flight(mut self, edits_in_flight: usize) -> Self {
         self.edits_in_flight = edits_in_flight;
+        self
+    }
+
+    /// Attach the project-scoped patch surface and its selection.
+    pub fn with_patch_surface(
+        mut self,
+        surface: Option<crate::UiPatchSurface>,
+        selection: Option<crate::UiPatchTarget>,
+    ) -> Self {
+        self.patch_surface = surface;
+        self.patch_selection = selection;
         self
     }
 

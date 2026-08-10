@@ -3368,3 +3368,152 @@ fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
     };
     face.brightness
 }
+
+/// The patch surface (D36, slice 2), end to end at BOTH grains: on
+/// mini-dome (instance grain: two named outputs, sectors + doors,
+/// instance chips with strides) and on peach-1d (range grain: one unnamed
+/// output, NO instances — the surface must not invent an address grain
+/// the format cannot store). Selection round-trips through
+/// `ProjectEditorOp::PatchSelect` — the core-owned state the P6 verbs
+/// read.
+#[test]
+fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
+    use crate::UiPatchTarget;
+
+    for (id, expect_instances) in [("examples/mini-dome", true), ("examples/peach-1d", false)] {
+        let example = crate::app::home::embedded_example(id).expect("example embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        // Resolve the fixtures' map2d bodies (the page dispatches the same
+        // fetch on mount), then refresh so the instance tables fill in.
+        {
+            let editor = project_editor(&snapshot);
+            let surface = editor
+                .patch_surface
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+            for fixture in &surface.fixtures {
+                if let Some(artifact) = fixture.mapping_artifact.clone() {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().unwrap_or(snapshot);
+        let editor = project_editor(&snapshot);
+        let surface = editor
+            .patch_surface
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+
+        if expect_instances {
+            // The mini-dome: two named outputs, both fixtures at instance
+            // grain with the archetype's strides (sector 30, door side 3).
+            assert_eq!(surface.outputs.len(), 2, "{id}");
+            let names: Vec<&str> = surface
+                .outputs
+                .iter()
+                .map(|output| output.display_name())
+                .collect();
+            assert!(
+                names.contains(&"1") && names.contains(&"Box 2"),
+                "{names:?}"
+            );
+            let dome = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
+            assert_eq!(dome.instances.len(), 5, "{id}: five sector instances");
+            assert_eq!(dome.instances[2].path, "/sector/2");
+            // A path strut has no intrinsic period, so its instances step
+            // by 1 (fine rotation); the intrinsic stride belongs to the
+            // polygon doors below. G1 question 3 owns whether sectors
+            // should inherit an authored override instead.
+            assert_eq!(dome.instances[2].stride, 1);
+            let doors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("door"))
+                .unwrap_or_else(|| panic!("{id}: no doors fixture on the surface"));
+            assert_eq!(doors.instances.len(), 3, "{id}: three door panels");
+            assert_eq!(
+                doors.instances[1].stride, 3,
+                "{id}: a door rotates by one polygon side"
+            );
+        } else {
+            // The peach: one unnamed output; fixtures patch at range grain.
+            assert_eq!(surface.outputs.len(), 1, "{id}");
+            assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
+            assert!(
+                surface
+                    .fixtures
+                    .iter()
+                    .all(|fixture| fixture.instances.is_empty()),
+                "{id}: no ids, no instance grain"
+            );
+            assert!(
+                !surface.fixtures.is_empty(),
+                "{id}: the range-grain fixtures still show their runs"
+            );
+        }
+
+        // Selection round-trip: PatchSelect lands in the next snapshot.
+        let target = surface
+            .fixtures
+            .first()
+            .map(|fixture| UiPatchTarget::Fixture { node: fixture.node })
+            .expect("a fixture to select");
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                crate::ProjectEditorTarget::NodeTree.node_id(),
+                crate::ProjectEditorOp::PatchSelect {
+                    target: Some(target.clone()),
+                },
+            )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let mut latest = None;
+        while let Some(next) = view.try_recv() {
+            latest = Some(next);
+        }
+        let snapshot = latest.expect("selection emits a snapshot");
+        assert_eq!(
+            project_editor(&snapshot).patch_selection,
+            Some(target),
+            "{id}: the selection is core state, not view-local"
+        );
+    }
+}
