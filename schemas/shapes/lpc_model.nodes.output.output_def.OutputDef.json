@@ -5,7 +5,8 @@
         "default_bind": "bus:control.out",
         "name": "input",
         "semantics": {
-          "direction": "consumed"
+          "direction": "consumed",
+          "merge": "fragments"
         },
         "shape": {
           "value": {

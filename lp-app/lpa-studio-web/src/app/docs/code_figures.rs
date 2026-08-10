@@ -54,21 +54,38 @@ impl DocsCodeFigure {
 
 /// Every registered figure. Ids are stable — an article's fence references
 /// them.
-pub(crate) const FIGURES: &[DocsCodeFigure] = &[DocsCodeFigure {
-    id: "plasma-shader",
-    title: "plasma / shader.glsl",
-    code: include_str!("../../../../../examples/plasma/shader.glsl"),
-    // Line 3 declares `scale`, the uniform the example binds to `bus:scale`
-    // (see `examples/plasma/shader.json`) and therefore the one the Scale
-    // knob drives — the beat the article is making: turn the knob, this
-    // line's value changes.
-    highlights: &[DocsCodeHighlight {
-        first_line: 3,
-        last_line: 3,
-        tone: CodeHighlightTone::Bound,
-        label: Some("the Scale knob"),
-    }],
-}];
+pub(crate) const FIGURES: &[DocsCodeFigure] = &[
+    DocsCodeFigure {
+        id: "plasma-shader",
+        title: "plasma / shader.glsl",
+        code: include_str!("../../../../../examples/plasma/shader.glsl"),
+        // Line 3 declares `scale`, the uniform the example binds to `bus:scale`
+        // (see `examples/plasma/shader.json`) and therefore the one the Scale
+        // knob drives — the beat the article is making: turn the knob, this
+        // line's value changes.
+        highlights: &[DocsCodeHighlight {
+            first_line: 3,
+            last_line: 3,
+            tone: CodeHighlightTone::Bound,
+            label: Some("the Scale knob"),
+        }],
+    },
+    DocsCodeFigure {
+        id: "peach-body-patch",
+        title: "peach-1d / body/peach_body.patch.json",
+        code: include_str!("../../../../../examples/peach-1d/body/peach_body.patch.json"),
+        // Line 5 is the second half of the body: the range that lands after
+        // the leaves and arrives at the wire from its far end. `reversed` is
+        // the word the article spends a section on, so the eye should find
+        // the row before the prose does.
+        highlights: &[DocsCodeHighlight {
+            first_line: 5,
+            last_line: 5,
+            tone: CodeHighlightTone::Note,
+            label: Some("plugged in backwards"),
+        }],
+    },
+];
 
 /// Resolve a fence's `src=<id>`. Unknown ids are author error surfaced by
 /// the caller (a placeholder box), not a panic.
@@ -124,6 +141,23 @@ mod tests {
         assert!(
             line.contains("uniform") && line.contains("scale"),
             "plasma-shader line 3 no longer declares the `scale` uniform \
+             (found {line:?}) — re-author the highlight range"
+        );
+    }
+
+    /// Same rot, other figure: the peach's highlighted row is only the right
+    /// one while it is still the reversed entry the article talks about.
+    #[test]
+    fn the_peach_range_still_points_at_the_reversed_entry() {
+        let figure = code_figure("peach-body-patch").expect("peach patch figure");
+        let line = figure
+            .code
+            .lines()
+            .nth(4)
+            .expect("the peach body patch has at least five lines");
+        assert!(
+            line.contains("reversed"),
+            "peach-body-patch line 5 is no longer the reversed entry \
              (found {line:?}) — re-author the highlight range"
         );
     }

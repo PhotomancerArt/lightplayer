@@ -32,6 +32,41 @@ pub enum MappingConfig {
     Map2d { source: AssetSlot },
 }
 
+/// Where a fixture's lamps land on its output's wire, authored on a fixture
+/// definition.
+///
+/// Deliberately shaped like [`MappingConfig`]'s `Map2d` arm and deliberately
+/// a SEPARATE slot: mapping is built once and patching changes on every
+/// install, so an installer clears the patch (back to `Unset`, pure
+/// auto-flow) without disturbing a single lamp position. `lpc-mapping` owns
+/// the document schema; nothing here is slot-modeled.
+#[derive(Debug, Clone, PartialEq, Slotted)]
+pub enum PatchConfig {
+    /// No patch: this fixture's lamps auto-flow onto the wire, in fixture
+    /// order, after everything anchored ahead of them.
+    #[default]
+    Unset,
+
+    /// An opaque patch document (`*.patch.json`) resolved at project load.
+    File { source: AssetSlot },
+}
+
+impl PatchConfig {
+    pub fn file(source: impl Into<LpPathBuf>) -> Self {
+        Self::File {
+            source: AssetSlot::path(source),
+        }
+    }
+
+    /// The patch document this fixture references, if it has one.
+    pub fn source(&self) -> Option<&AssetSlot> {
+        match self {
+            Self::Unset => None,
+            Self::File { source } => Some(source),
+        }
+    }
+}
+
 /// Specifies one path for a fixture.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum PathSpec {

@@ -317,8 +317,10 @@ pub fn check_export(export: &str, files: &ExportFileSet<'_>) -> Vec<ExportFindin
             }
         }
 
-        // Asset refs (`*.glsl` shader sources, `*.map2d.json` mappings):
-        // checked for escape but never walked — they are not node artifacts.
+        // Asset refs (`*.glsl` shader sources, `*.map2d.json` mappings,
+        // `*.patch.json` patches): checked for escape but never walked — they
+        // are not node artifacts. `referenced_asset_paths` is plural per node,
+        // so a fixture's two documents are both covered.
         match def.referenced_asset_paths(path.as_path()) {
             Ok(assets) => {
                 for asset in assets {

@@ -1380,6 +1380,300 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     );
 }
 
+/// The peaches' root card shows the WHOLE peach — the wire its output
+/// composes, not one child's raster.
+///
+/// A module face's hero used to read its scope's two bus channels and
+/// nothing else, so the peaches' root card wore the BODY submodule's
+/// `visual.out` mirror: a full-frame pink plane standing in for a project
+/// whose actual output is 56 lamps of body AND leaf (G1 round 3 — "peach
+/// (2d) root module isn't showing control output, just the peach body
+/// visual.out"). The root `control.out` cannot answer for it either: two
+/// submodules export onto it, so it resolves to a fragments map rather than
+/// to any single product. A scope that OWNS an output now heroes that
+/// output's published frame, which is the only thing that knows the whole
+/// composition.
+///
+/// The leaf assertion is the load-bearing half: pink alone would also pass
+/// with the body's own lamps, and "the leaf is nowhere" is exactly the shape
+/// both of this gate's display defects took.
+#[test]
+fn the_peaches_open_onto_a_live_hero() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        // The connect read arms the always-live subscriptions; the probe
+        // answers on later reads, and the shader needs a frame to compile.
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+        let hero = module_face(&snapshot)
+            .preview
+            .unwrap_or_else(|| panic!("{id}: the root module card has no hero at all"));
+        assert_eq!(
+            hero.kind,
+            crate::UiProductKind::Control,
+            "{id}: a scope owning an output heroes its lamps, not a raster"
+        );
+        let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+            panic!("{id}: the root hero is not the composed wire: {hero:?}");
+        };
+        let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+            frame.display_layout.as_deref()
+        else {
+            panic!("{id}: the root hero carries no geometry to draw its lamps with");
+        };
+        assert_eq!(
+            layout.lamps.len(),
+            56,
+            "{id}: the hero draws the WHOLE wire — body (44) plus leaf (12)"
+        );
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the root module hero is entirely black"
+        );
+
+        // Both fixtures, each in its own colour. The leaf is the strand
+        // patched INTO the middle of the body's run (channels 22-33), so a
+        // hero that draws only the first producer, or draws every lamp with
+        // the first producer's offsets, fails here.
+        let lamp_colour = |slot: u32| -> [u16; 3] {
+            let lamp = layout
+                .lamps
+                .iter()
+                .find(|lamp| lamp.sample_start == slot * 3)
+                .unwrap_or_else(|| panic!("{id}: no lamp draws wire channel {slot}"));
+            let base = lamp.sample_start as usize * 2;
+            core::array::from_fn(|channel| {
+                let at = base + channel * 2;
+                u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+            })
+        };
+        for slot in [0, 21, 34, 55] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                red > green,
+                "{id}: wire channel {slot} is the peach's flesh and reads pink"
+            );
+        }
+        for slot in [22, 33] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                green > red,
+                "{id}: wire channel {slot} is a leaf and reads green"
+            );
+        }
+
+        // …and the rule stops at the scope that owns the output. `body/` and
+        // `leaf/` drive no output of their own, so their cards keep the
+        // ordinary two-channel hero: each shows the lamps ITS scope resolves
+        // (through a real product ref), never the merged wire.
+        let root = project_editor(&snapshot)
+            .nodes
+            .first()
+            .expect("the root module card")
+            .clone();
+        for (name, own_lamps) in [("Body", 44), ("Leaf", 12)] {
+            let child = root
+                .children
+                .iter()
+                .find(|child| child.label == name)
+                .unwrap_or_else(|| panic!("{id}: the {name} submodule card"));
+            let Some(UiNodeFace::Module(face)) = child.face.clone() else {
+                panic!("{id}: {name} wears a module face");
+            };
+            let hero = face
+                .preview
+                .unwrap_or_else(|| panic!("{id}: {name} has no hero"));
+            assert!(
+                hero.product.is_some(),
+                "{id}: {name} heroes its own scope's product, not a sink's frame"
+            );
+            let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+                panic!("{id}: {name}'s hero is not its own lamps: {hero:?}");
+            };
+            let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+                frame.display_layout.as_deref()
+            else {
+                panic!("{id}: {name}'s hero carries no geometry");
+            };
+            assert_eq!(
+                layout.lamps.len(),
+                own_lamps,
+                "{id}: {name} draws its OWN fixture, not the whole wire"
+            );
+        }
+    }
+}
+
+/// Both ends of the peach's patch, off a real running project: the output
+/// card's port row and each fixture card's own row, showing THE SAME cells.
+///
+/// The bay is the first surface in Studio whose data cannot be re-derived
+/// from the project file — auto-flow order belongs to the resolver — so
+/// this walks it the whole way: engine placements → probe → frame cache →
+/// both faces. The load-bearing assertion is the pairing: the body's
+/// reversed run wears one id on the wire row and on its own row, and the
+/// two rows disagree about ORDER (0–21 then 34–55 on the wire; 0–43
+/// unbroken in the fixture's own numbering) while agreeing about content.
+/// That disagreement IS the patch.
+#[test]
+fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        let faces = all_faces(&snapshot);
+
+        // -- the output side: one port, the three runs in wire order ------
+        let bay = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Output(output) => output.patch.clone(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the output card carries no patch bay"));
+        assert_eq!(bay.ports.len(), 1, "{id}: the peach drives one port");
+        assert_eq!(
+            bay.ports[0]
+                .cells
+                .iter()
+                .map(|cell| (
+                    cell.producer.clone(),
+                    cell.wire_start,
+                    cell.lamps,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Peach body".to_string(), 0, 22, false),
+                ("Peach leaf".to_string(), 22, 12, false),
+                ("Peach body".to_string(), 34, 22, true),
+            ],
+            "{id}: body 0-21, the leaf between the halves, body backwards from 34"
+        );
+        assert_eq!(bay.contested_lamps, 0, "{id}: the peach's patch is clean");
+        assert_eq!(bay.gap_lamps, 0, "{id}: and covers its whole wire");
+        let frame = bay
+            .frame
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the bay draws no live wire"));
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the bay's pixels are entirely black"
+        );
+
+        // -- the fixture side: the same runs, the fixture's own order -----
+        let body = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Fixture(fixture) => fixture
+                    .patch
+                    .as_ref()
+                    .filter(|patch| patch.lamps == 44)
+                    .cloned(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the body fixture card carries no patch row"));
+        assert_eq!(
+            body.cells
+                .iter()
+                .map(|cell| (
+                    cell.source_start,
+                    cell.lamps,
+                    cell.wire_start,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, 22, 0, false), (22, 22, 34, true)],
+            "{id}: 0-21 forward at ch0, 22-43 backwards from ch34 — unbroken here"
+        );
+        assert!(
+            !body.is_single_run(),
+            "{id}: the body reaches the wire in two pieces"
+        );
+
+        // -- and they are the SAME cells ----------------------------------
+        let wire_ids: Vec<&str> = bay.ports[0]
+            .cells
+            .iter()
+            .map(|cell| cell.id.as_str())
+            .collect();
+        for cell in &body.cells {
+            assert!(
+                wire_ids.contains(&cell.id.as_str()),
+                "{id}: the body's run {} has no twin on the wire row ({wire_ids:?})",
+                cell.id
+            );
+        }
+    }
+}
+
+/// Every face in a snapshot's editor tree, root cards and nested alike.
+fn all_faces(view: &UiStudioView) -> Vec<UiNodeFace> {
+    fn walk(children: &[crate::UiNodeChild], out: &mut Vec<UiNodeFace>) {
+        for child in children {
+            if let Some(face) = child.face.clone() {
+                out.push(face);
+            }
+            walk(&child.children, out);
+        }
+    }
+    let mut faces = Vec::new();
+    for node in &project_editor(view).nodes {
+        if let Some(face) = node.face.clone() {
+            faces.push(face);
+        }
+        walk(&node.children, &mut faces);
+    }
+    faces
+}
+
 #[test]
 fn every_gallery_example_opens_onto_a_populated_root_panel() {
     // A gallery example that opens onto an EMPTY panel teaches the wrong
@@ -1549,11 +1843,13 @@ fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
 
 #[test]
 fn a_one_product_module_falls_back_to_whichever_product_it_has() {
-    // The preference names a kind the scope does not resolve: the hero
-    // falls back to the other one, in both directions, and no toggle is
-    // offered — a one-product module has no choice to make. Neither
-    // project routes its primaries any differently from a real one; each
-    // simply leaves one primary channel unwritten.
+    // The preference names a kind the scope does not resolve. Both projects
+    // route their primaries like a real one; each simply leaves one primary
+    // channel unwritten — and both DRIVE AN OUTPUT, which is the other half
+    // of the answer here: a scope that owns an output heroes the wire that
+    // output composes whichever bus channels resolve, so the fallback the
+    // toggle expresses is between the wire and the raster, not between two
+    // bus channels.
     for visual_only in [false, true] {
         let server = Rc::new(RefCell::new(single_product_e2e_server(visual_only)));
         let io = InProcessServerIo {
@@ -1577,19 +1873,18 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
 
         let face = module_face(&snapshot);
         assert_eq!(
-            face.hero_choice, None,
-            "visual_only={visual_only}: one product is not a choice"
+            face.hero_choice,
+            // The raster-only project publishes `visual.out` AND drives an
+            // output, so there is a genuine choice to draw; the other writes
+            // no `visual.out` at all and has nothing to flip to.
+            visual_only.then_some(crate::ModuleHeroProduct::Control),
+            "visual_only={visual_only}: a toggle appears exactly when both sides exist"
         );
-        let want = if visual_only {
-            crate::UiProductKind::Visual
-        } else {
-            crate::UiProductKind::Control
-        };
         assert_eq!(
             face.preview.expect("the root module's hero").kind,
-            want,
-            "visual_only={visual_only}: the hero falls back to the product \
-             the scope actually resolves"
+            crate::UiProductKind::Control,
+            "visual_only={visual_only}: the lamps lead either way — through the \
+             scope's own control product, or through the output's wire"
         );
     }
 }

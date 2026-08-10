@@ -10,10 +10,20 @@ pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:local:D10";
 /// Authored hardware output node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct OutputDef {
-    /// Control product this output drives each frame. Runtime dataflow
+    /// Control products this output drives each frame. Runtime dataflow
     /// input — resolved through the binding graph, never authored as a
     /// value (declared so the wiring is first-class schema, roadmap D8).
-    #[slot(consumed, default_bind = "bus:control.out")]
+    ///
+    /// `merge = "fragments"` is the consumer-declared policy that makes an
+    /// output an N-producer receiver (D8/D17v): every provider on the bound
+    /// channel becomes an **output fragment** rendered into its own
+    /// sub-slice of this node's sample buffer, in the resolver's provider
+    /// order. Two fixtures on one `control.out` is therefore a composition
+    /// here — a strand followed by a panel on the same wire — where the same
+    /// two producers on a *visual* slot stay the single-producer ambiguity
+    /// they have always been. The policy lives on the receiver precisely so
+    /// the two cases can differ while the producers are indistinguishable.
+    #[slot(consumed, merge = "fragments", default_bind = "bus:control.out")]
     pub input: ControlProductSlot,
     /// Physical wires this output drives, keyed by channel index.
     ///

@@ -971,6 +971,9 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
         power: None,
         space: Some(fixture_space_section()),
         shape_presets: Some(fixture_shape_presets()),
+        // The bay's fixture side is probe state; the patch stories hand
+        // one in explicitly.
+        patch: None,
     }
 }
 
@@ -1068,6 +1071,7 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
             has_map2d: true,
             ..fixture_shape_presets()
         }),
+        patch: None,
     }
 }
 
@@ -1340,6 +1344,7 @@ pub(crate) fn output_face(
         total_lamps: None,
         span_boundaries,
         board,
+        patch: None,
     };
     if let Some(total) = total_lamps {
         face.resolve_extent(total);

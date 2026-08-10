@@ -501,6 +501,9 @@ mod tests {
                 }],
             },
             display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            // These feeds render lamps, not the bay: one auto-flowed
+            // producer over the whole wire is the shape they see.
+            placements: Vec::new(),
             bytes,
         }
     }

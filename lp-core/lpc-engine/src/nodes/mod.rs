@@ -26,12 +26,15 @@ pub use button::{ButtonNode, button_down_path, button_held_path, button_up_path}
 pub use clock::{ClockNode, clock_product_path, clock_seconds_path};
 #[cfg(feature = "node-fixture")]
 pub use fixture::fixture_node::{
-    FixtureMap2dSource, FixtureMapping, FixtureNode, fixture_input_path,
+    FixtureMap2dSource, FixtureMapping, FixtureNode, FixturePatchSource, fixture_input_path,
 };
 #[cfg(feature = "node-fluid")]
 pub use fluid::{FluidNode, MsaFluidSolver, fluid_emitters_path, fluid_output_path};
 pub use module::ModuleNode;
-pub use output::output_node::{OutputNode, output_input_path};
+pub use output::output_node::{
+    FragmentCoverage, FragmentPlacement, OutputFragment, OutputNode,
+    merge_fragment_display_layouts, output_input_path,
+};
 pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;
 #[cfg(feature = "node-playlist")]

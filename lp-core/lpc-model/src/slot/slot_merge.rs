@@ -17,4 +17,17 @@ pub enum SlotMerge {
     Latest,
     /// Merge stable-key maps by key.
     ByKey,
+    /// Accept EVERY provider on the channel as an ordered fragment set.
+    ///
+    /// The receiver gets all candidates, in the resolver's deterministic
+    /// provider order, and decides what each one covers — it does not pick a
+    /// winner and does not combine values. The output node's control input is
+    /// the case this exists for: N fixtures render into disjoint sub-slices of
+    /// one wire's sample buffer, so "two producers" is a composition, not the
+    /// ambiguity [`Self::Error`] and [`Self::Latest`] treat it as.
+    ///
+    /// Unlike [`Self::ByKey`], nothing is keyed and nothing is replaced:
+    /// order is the whole meaning, and the receiver is responsible for
+    /// reporting overlaps in whatever coordinate system it owns.
+    Fragments,
 }

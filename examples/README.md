@@ -14,9 +14,9 @@ survive a load → write round trip byte-for-byte
 
 ## In the Studio gallery
 
-Eight are compiled into the app and listed in the gallery's *Examples*
+Ten are compiled into the app and listed in the gallery's *Examples*
 section — `fyeah-sign`, `plasma`, `meteor`, `comet`, `palette-waves`,
-`fire2012`, `plasma-duo`, `zook-dome`.
+`fire2012`, `plasma-duo`, `zook-dome`, `peach-1d`, `peach-2d`.
 Their file lists live in
 `lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
 (`include_bytes!` against this directory), so a change here reaches
@@ -39,6 +39,8 @@ authored binding to a bus channel
 | `comet` | `speed`, `tail`, `palette` | a true 1D shader: `vec4 render_1d(float)` against a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }` — the factored default projection. Ported from WLED |
 | `palette-waves` | `speed`, `scale`, `depth`, `palette` | the declared-projection example: a 1D shader declaring `OneD { in_2d: Project { radial } }`, so the strip it is written along arrives on the disc fixture as rings. Ported from WLED |
 | `fire2012` | `speed`, `reach`, `sparks`, `palette` | a fire climbing a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }`. Ported from WLED — but *stateless*: the per-cell heat simulation is not ported, the closed form writes down what it settles into |
+| `peach-1d` | `speed`, `glow` (one set per submodule) | the patching example: two fixtures (body + leaves), each in its own submodule (`body/`, `leaf/`), sharing ONE 56-lamp wire, placed by hand-authored `.patch.json` files — the body claims two discontiguous ranges and its second range is `reversed`. Both fixtures run `render_1d` shaders along the strand (`strip_order_meaningful`), which is how this art runs on WLED today |
+| `peach-2d` | `speed`, `glow` (one set per submodule) | the same artwork, the same wiring, the *byte-identical* patch files, declared 2D: `render_2d` planes sampled at the lamps' mapped positions. The pair is the whole mapping-and-patching argument — presentation and sampling are separate questions. See [the peach](../docs/user-guide/the-peach.md) |
 | `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
 | `button` | — | input nodes and playlist triggering |
 | `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |
@@ -49,6 +51,12 @@ authored binding to a bus channel
 
 Sample content in this repository is CC0 unless a project's
 `module.json` provenance says otherwise.
+
+The two peaches are original content: their geometry is sampled at even
+arc-length stations along the wire-true segment paths of Yona Appletree's
+reference drawing, so both mapping documents describe the strand as it is
+actually run — 22 lamps up one side of the body, 12 across the leaves, 22
+back down the other side. No upstream project is involved.
 
 ## Ports from WLED
 

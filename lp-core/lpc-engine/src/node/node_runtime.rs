@@ -1,6 +1,7 @@
 //! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
-use crate::products::control::{ControlLayout, ControlProduct};
+use crate::nodes::OutputFragment;
+use crate::products::control::ControlLayout;
 use crate::resource::RuntimeBufferId;
 use lpc_model::{
     AssetLocation, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
@@ -31,6 +32,33 @@ pub enum AssetRefreshResult {
     Unchanged,
     /// The node refreshed internal state from the new effective asset body.
     Refreshed,
+}
+
+/// One run of a producer's lamps, placed on an output's wire.
+///
+/// The engine's word for `lpc_mapping::PatchedRange` — a resolved patch entry.
+/// It is restated here, in LAMPS like the document it came from, because the
+/// output node is never gated out while the mapping crate can be: placement is
+/// a producer-declared property, and what a producer resolved it FROM is that
+/// producer's business.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PatchedRun {
+    /// First lamp of the run, in the producer's own order.
+    pub start: u32,
+    /// Lamps in the run.
+    pub count: u32,
+    /// First wire lamp the run occupies.
+    pub channel: u32,
+    /// Lay the run down end-first.
+    pub reversed: bool,
+}
+
+impl PatchedRun {
+    /// One past the last wire lamp this run occupies.
+    #[must_use]
+    pub const fn channel_end(&self) -> u32 {
+        self.channel.saturating_add(self.count)
+    }
 }
 
 /// Runtime node instance for the demand-driven engine spine.
@@ -167,13 +195,45 @@ pub trait NodeRuntime {
         None
     }
 
-    /// The control product the last published frame was rendered from.
+    /// The placement set the last published frame was rendered from: which
+    /// producers contributed, and where on the wire each of their runs landed.
     ///
-    /// The output node consumes some upstream producer's control product;
-    /// that producer — not the output — is what knows the display geometry.
-    /// Latched alongside [`Self::runtime_output_sample_layout`] so a reader
-    /// can ask the right node for a layout without re-resolving the graph.
-    fn runtime_output_source_product(&self) -> Option<ControlProduct> {
+    /// The output node consumes N upstream control products; each producer —
+    /// not the output — is what knows its own display geometry, and only the
+    /// fragment knows where that geometry ended up on the wire. A reader
+    /// therefore asks each producer for its layout and rebases it through the
+    /// fragment that placed it
+    /// ([`crate::nodes::output::merge_fragment_display_layouts`]). Latched
+    /// alongside [`Self::runtime_output_sample_layout`], so no graph re-resolve
+    /// is needed. Empty before the first successful render.
+    fn runtime_output_fragments(&self) -> &[OutputFragment] {
+        &[]
+    }
+
+    /// Revision stamped the last time [`Self::runtime_output_fragments`]
+    /// changed.
+    ///
+    /// A producer's display-layout revision tracks its mapping and render
+    /// extent; it says nothing about where the output put the result. A client
+    /// gating on `IfChanged` needs both, so the published-frame read folds this
+    /// into the revision it reports for the merged layout.
+    fn runtime_output_placement_revision(&self) -> Revision {
+        Revision::default()
+    }
+
+    /// Where this node's control product lands on its output's wire, when the
+    /// node authored a patch for it.
+    ///
+    /// `None` — every node but a patched fixture — means auto-flow: the
+    /// output places this producer end-to-end after the ones ahead of it.
+    /// `Some` replaces that placement entirely with the resolved runs, which
+    /// is how a run gets to be non-contiguous, or reversed, or both.
+    ///
+    /// Read by the output DURING its own consume, after the resolve that ran
+    /// this node's `produce` — so it is this frame's answer, and an edited
+    /// patch document reaches the wire on the next tick with no cache to
+    /// invalidate.
+    fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
         None
     }
 
