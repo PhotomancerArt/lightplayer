@@ -208,7 +208,11 @@ fn packing_spans(lamps: &[ControlLamp2d]) -> Vec<PackingSpan> {
 /// Quantize a normalized [0, 1] coordinate onto the u16 wire grid.
 fn quantize_center(v: f32) -> u16 {
     let clamped = if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) };
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to [0,1] then scaled to u16 range; the cast cannot truncate or lose sign"
+    )]
     {
         (clamped * 65535.0 + 0.5) as u16
     }
@@ -402,11 +406,11 @@ impl schemars::JsonSchema for ControlLayout2d {
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         #[derive(schemars::JsonSchema)]
-        #[allow(dead_code)]
+        #[allow(dead_code, reason = "schema mirror: described, never constructed")]
         struct PackingSpanSchema((u32, u32, u32, u32, f32));
 
         #[derive(schemars::JsonSchema)]
-        #[allow(dead_code)]
+        #[allow(dead_code, reason = "schema mirror: described, never constructed")]
         struct ControlLayout2dSchema {
             /// Layout revision.
             rev: Revision,
