@@ -4,17 +4,21 @@
 //!
 //! # Output fragments
 //!
-//! An output consumes N control products, not one. Each becomes an
-//! [`OutputFragment`] — a `(product, offset, len, reversed)` placement — and
-//! is rendered into its OWN sub-slice of `control_samples`. With a single
-//! producer (every checked-in example) the one fragment covers the whole
-//! buffer and the path is byte-identical to the pre-fragment one; that
-//! identity is pinned by `tests/output_control_samples_golden.rs`.
+//! An output consumes N control products, not one. Each becomes one or more
+//! [`OutputFragment`]s — a `(product, source offset, offset, len, reversed)`
+//! placement — rendered into its OWN sub-slice of `control_samples`. With a
+//! single unpatched producer (every checked-in example) the one fragment
+//! covers the whole buffer and the path is byte-identical to the pre-fragment
+//! one; that identity is pinned by
+//! `tests/output_control_samples_golden.rs`.
 //!
-//! Placement in this phase is **auto-flow**: fragments follow the resolver's
+//! Placement default is **auto-flow**: fragments follow the resolver's
 //! provider order, each starting where the previous one ended (D17v, the
-//! map2d "object order is wiring order" rule scaled up to fixtures). A patch
-//! file will author offsets later and plug into the same structure.
+//! map2d "object order is wiring order" rule scaled up to fixtures). A
+//! producer that authored a **patch** replaces its own auto-flow placement
+//! with the runs that patch resolved to — several ranges of its lamps, at
+//! authored wire offsets, forward or reversed — while everything unpatched
+//! keeps flowing, after every anchor. See [`plan_fragments`].
 //!
 //! Overlap and gaps are **degraded and reported**, never fatal: contested
 //! samples go dark and [`OutputNode::runtime_status`] names the lamp range,
@@ -32,11 +36,12 @@ use lpc_model::{
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
-    TickContext, err_ctx,
+    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PatchedRun,
+    PressureLevel, TickContext, err_ctx,
 };
 use crate::products::control::{
-    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
+    ControlHint, ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
+    ControlSampleFormat, ControlSpan,
 };
 use crate::resource::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
@@ -65,6 +70,12 @@ const SAMPLES_PER_LAMP: u32 = 3;
 pub struct OutputFragment {
     /// The control product rendered into this range.
     pub product: ControlProduct,
+    /// First sample OF THE PRODUCT this range takes.
+    ///
+    /// Zero for every auto-flowed producer — a fixture with no patch
+    /// contributes its whole product as one run. A patched fixture splits
+    /// into several runs of its own lamps, and this is which run.
+    pub source_offset_samples: u32,
     /// First sample of the range, in the output's buffer.
     pub offset_samples: u32,
     /// Length of the range, in samples.
@@ -84,6 +95,28 @@ impl OutputFragment {
     pub const fn end_samples(&self) -> u32 {
         self.offset_samples.saturating_add(self.len_samples)
     }
+
+    /// Does this fragment take the producer's whole product?
+    ///
+    /// The yes case renders straight into the output buffer, which is the
+    /// path every unpatched project takes and the one whose bytes the golden
+    /// oracle pins. A partial run cannot: rendering materializes a whole
+    /// product, so a slice of one has to come out of a scratch buffer.
+    #[must_use]
+    fn covers_whole_product(&self) -> bool {
+        self.source_offset_samples == 0
+            && self.len_samples == self.product.preferred_extent().sample_count()
+    }
+}
+
+/// One producer as the placement planner sees it: the product plus the patch
+/// it resolved to, if it has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FragmentPlacement {
+    pub product: ControlProduct,
+    /// The producer's resolved patch, in LAMPS. `None` — the ordinary case —
+    /// means "auto-flow me".
+    pub patch: Option<Vec<PatchedRun>>,
 }
 
 /// What a fragment set covers, and where it disagrees with itself.
@@ -208,29 +241,49 @@ impl OutputNode {
             .resize(coverage.total_samples as usize, 0);
 
         let mut spans = Vec::new();
+        let mut scratch = ProductScratch::default();
         for fragment in fragments {
             let start = fragment.offset_samples as usize;
             let end = fragment.end_samples() as usize;
-            let Some(target_samples) = self.control_samples.get_mut(start..end) else {
+            if self.control_samples.get(start..end).is_none() {
                 // Unreachable while the buffer is sized from the same
                 // coverage; a fragment that cannot be placed is skipped
                 // rather than allowed to panic mid-frame.
                 continue;
-            };
+            }
             let extent = fragment.product.preferred_extent();
-            let request = ControlRenderRequest::unorm16(extent);
-            let target =
-                ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, target_samples);
-            let layout = ctx.render_control(fragment.product, &request, target)?;
-            if fragment.reversed
-                && let Some(placed) = self.control_samples.get_mut(start..end)
-            {
-                reverse_lamps(placed);
-            }
-            for mut span in layout.spans {
-                span.start = span.start.saturating_add(fragment.offset_samples);
-                spans.push(span);
-            }
+            let layout = if fragment.covers_whole_product() {
+                let target_samples = &mut self.control_samples[start..end];
+                let request = ControlRenderRequest::unorm16(extent);
+                let target =
+                    ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, target_samples);
+                let layout = ctx.render_control(fragment.product, &request, target)?;
+                if fragment.reversed {
+                    reverse_lamps(&mut self.control_samples[start..end]);
+                }
+                layout
+            } else {
+                // A partial run: the producer renders whole (once per frame,
+                // however many runs it was cut into), and each run is copied
+                // out of that. The copy is the price of a patched fixture and
+                // nobody else pays it.
+                let rendered = scratch.render(ctx, fragment.product)?;
+                let source_start = fragment.source_offset_samples as usize;
+                let source_end = source_start.saturating_add(fragment.len_samples as usize);
+                let Some(source) = rendered.samples.get(source_start..source_end) else {
+                    // A run past the end of its own product — the patch was
+                    // resolved against a different lamp count than the one
+                    // that just rendered. Leave those lamps dark rather than
+                    // shifting the rest of the wire to cover it up.
+                    continue;
+                };
+                self.control_samples[start..end].copy_from_slice(source);
+                if fragment.reversed {
+                    reverse_lamps(&mut self.control_samples[start..end]);
+                }
+                rendered.layout.clone()
+            };
+            place_spans(&layout, fragment, &mut spans);
         }
 
         for (start, end) in coverage.gaps.iter().chain(coverage.contested.iter()) {
@@ -311,29 +364,156 @@ fn control_product(value: &LpValue) -> Result<ControlProduct, NodeError> {
     }
 }
 
-/// Lay products end to end in provider order — this phase's whole placement
-/// policy (D17v).
+/// The whole placement policy: anchors land where they say, everyone else
+/// auto-flows after every anchor (D17v, D5).
 ///
-/// Provider order is the resolver's, and the resolver's is deterministic:
-/// binding priority first, then binding ref — which is owner node id, which
-/// is the order the loader attached the nodes, which is the order the module
-/// lists them (its `nodes` map is key-sorted). So "the second fixture starts
-/// where the first one ended" is a property of the project document, not of a
-/// hash iteration; `tests/output_fragments.rs` pins it.
-fn auto_flow_fragments(products: &[ControlProduct]) -> Vec<OutputFragment> {
-    let mut offset = 0u32;
-    let mut fragments = Vec::with_capacity(products.len());
-    for product in products {
-        let len = product.preferred_extent().sample_count();
-        fragments.push(OutputFragment {
-            product: *product,
-            offset_samples: offset,
-            len_samples: len,
-            reversed: false,
-        });
-        offset = offset.saturating_add(len);
+/// **Auto-flow** is the unpatched rule and the base case: each producer starts
+/// where the previous one ended, in provider order — which is the resolver's,
+/// and the resolver's is deterministic (binding priority first, then binding
+/// ref, which is owner node id, which is the order the loader attached the
+/// nodes, which is the order the module lists them; its `nodes` map is
+/// key-sorted). "The second fixture starts where the first one ended" is a
+/// property of the project document, not of a hash iteration;
+/// `tests/output_fragments.rs` pins it.
+///
+/// **Partial patching is first-class** — patching one fixture of five must not
+/// require patching the other four — so unpatched producers keep the
+/// running-sum rule among themselves and simply start past the highest
+/// anchored end.
+fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
+    let mut cursor = 0u32;
+    for placement in placements {
+        for range in placement.patch.iter().flatten() {
+            cursor = cursor.max(lamps_to_samples(range.channel_end()));
+        }
+    }
+
+    let mut fragments = Vec::with_capacity(placements.len());
+    for placement in placements {
+        match &placement.patch {
+            Some(ranges) => {
+                for range in ranges {
+                    fragments.push(OutputFragment {
+                        product: placement.product,
+                        source_offset_samples: lamps_to_samples(range.start),
+                        offset_samples: lamps_to_samples(range.channel),
+                        len_samples: lamps_to_samples(range.count),
+                        reversed: range.reversed,
+                    });
+                }
+            }
+            None => {
+                let len = placement.product.preferred_extent().sample_count();
+                fragments.push(OutputFragment {
+                    product: placement.product,
+                    source_offset_samples: 0,
+                    offset_samples: cursor,
+                    len_samples: len,
+                    reversed: false,
+                });
+                cursor = cursor.saturating_add(len);
+            }
+        }
     }
     fragments
+}
+
+/// Patch documents count in lamps; buffers count in samples.
+const fn lamps_to_samples(lamps: u32) -> u32 {
+    lamps.saturating_mul(SAMPLES_PER_LAMP)
+}
+
+/// One product rendered whole, for the fragments that only want part of it.
+struct RenderedProduct {
+    product: ControlProduct,
+    samples: Vec<u16>,
+    layout: ControlLayout,
+}
+
+/// Per-frame cache of whole-product renders.
+///
+/// A patched fixture is cut into several runs, and every one of them wants the
+/// same rendered product. Rendering it once per frame rather than once per run
+/// is the difference between a patch costing a copy and a patch costing a
+/// whole extra shader sample pass per range.
+#[derive(Default)]
+struct ProductScratch {
+    rendered: Vec<RenderedProduct>,
+}
+
+impl ProductScratch {
+    fn render(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        product: ControlProduct,
+    ) -> Result<&RenderedProduct, NodeError> {
+        if let Some(index) = self
+            .rendered
+            .iter()
+            .position(|rendered| rendered.product == product)
+        {
+            return Ok(&self.rendered[index]);
+        }
+        let extent = product.preferred_extent();
+        let mut samples = alloc::vec![0u16; extent.sample_count() as usize];
+        let request = ControlRenderRequest::unorm16(extent);
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = ctx.render_control(product, &request, target)?;
+        self.rendered.push(RenderedProduct {
+            product,
+            samples,
+            layout,
+        });
+        Ok(self.rendered.last().expect("just pushed"))
+    }
+}
+
+/// Rebase one fragment's share of its producer's layout into the output
+/// buffer's coordinates, appending to `out` in fragment order.
+///
+/// A whole-product fragment keeps its producer's spans verbatim, offset — the
+/// unpatched path, unchanged. A partial one clips each span to the run it
+/// took and, when the run is reversed, mirrors it inside the run: the lamps
+/// are laid down end-first, so the span that led the product trails on the
+/// wire. A clipped RGB span is still RGB — a run of lamps in the same channel
+/// order — with a lamp count to match its new length.
+fn place_spans(layout: &ControlLayout, fragment: &OutputFragment, out: &mut Vec<ControlSpan>) {
+    let source_start = fragment.source_offset_samples;
+    let source_end = source_start.saturating_add(fragment.len_samples);
+    for span in &layout.spans {
+        let span_end = span.start.saturating_add(span.len);
+        let clipped_start = span.start.max(source_start);
+        let clipped_end = span_end.min(source_end);
+        if clipped_start >= clipped_end {
+            continue;
+        }
+        let relative = clipped_start - source_start;
+        let len = clipped_end - clipped_start;
+        let start = if fragment.reversed {
+            fragment
+                .offset_samples
+                .saturating_add(fragment.len_samples.saturating_sub(relative + len))
+        } else {
+            fragment.offset_samples.saturating_add(relative)
+        };
+        let encoding = if len == span.len {
+            span.encoding.clone()
+        } else {
+            match &span.encoding {
+                ControlHint::RgbPixels { color_order, .. } => ControlHint::RgbPixels {
+                    count: len / SAMPLES_PER_LAMP,
+                    color_order: *color_order,
+                },
+                other => other.clone(),
+            }
+        };
+        out.push(ControlSpan {
+            row: span.row,
+            start,
+            len,
+            encoding,
+        });
+    }
 }
 
 /// What a fragment set covers: its extent, its overlaps, and its holes.
@@ -501,7 +681,19 @@ impl NodeRuntime for OutputNode {
             .map_err(|e| NodeError::msg(format!("resolve output input: {}", e.message)))?;
 
         let products = control_products(prod.data())?;
-        let fragments = auto_flow_fragments(&products);
+        // Each producer's patch, asked for at the moment it is placed. A
+        // fixture resolves its patch in its own `produce` — which the input
+        // resolve above just ran — so this reads THIS frame's answer, and an
+        // edited patch document moves the wire on the next tick with no cache
+        // to invalidate.
+        let placements: Vec<FragmentPlacement> = products
+            .into_iter()
+            .map(|product| FragmentPlacement {
+                patch: ctx.control_patch_placement(product),
+                product,
+            })
+            .collect();
+        let fragments = plan_fragments(&placements);
         self.render_fragments(ctx, &fragments)
     }
 
@@ -591,6 +783,9 @@ mod tests {
         /// `graph_color`, so a fragment's identity AND its internal order are
         /// both legible in the published buffer.
         paint_by_product: bool,
+        /// Resolved patches, per product — what the engine's host answers
+        /// from the producing node.
+        patches: Vec<(ControlProduct, Vec<PatchedRun>)>,
     }
 
     impl FakeResolver {
@@ -606,6 +801,7 @@ mod tests {
                 graph_color: [1000, 2000, 3000],
                 graph_products: Vec::new(),
                 paint_by_product: false,
+                patches: Vec::new(),
             }
         }
 
@@ -724,6 +920,13 @@ mod tests {
                     encoding: lpc_model::ControlSampleEncoding::Raw,
                 }],
             })
+        }
+
+        fn control_patch_placement(&self, product: ControlProduct) -> Option<Vec<PatchedRun>> {
+            self.patches
+                .iter()
+                .find(|(patched, _)| *patched == product)
+                .map(|(_, runs)| runs.clone())
         }
 
         fn runtime_buffer_mut(
@@ -1022,8 +1225,39 @@ mod tests {
         ControlProduct::new(node_id(), output, extent)
     }
 
-    /// Drive a hand-built placement, bypassing auto-flow — the seam the patch
-    /// file will author into.
+    /// The unpatched placement of a producer list: what [`plan_fragments`]
+    /// does when nobody authored a patch, which is the base case every
+    /// checked-in project takes.
+    fn auto_flow_fragments(products: &[ControlProduct]) -> Vec<OutputFragment> {
+        let placements: Vec<FragmentPlacement> = products
+            .iter()
+            .map(|product| FragmentPlacement {
+                product: *product,
+                patch: None,
+            })
+            .collect();
+        plan_fragments(&placements)
+    }
+
+    /// A patched producer, for the planner tests.
+    fn patched(product: ControlProduct, runs: &[PatchedRun]) -> FragmentPlacement {
+        FragmentPlacement {
+            product,
+            patch: Some(runs.to_vec()),
+        }
+    }
+
+    fn run(start: u32, count: u32, channel: u32, reversed: bool) -> PatchedRun {
+        PatchedRun {
+            start,
+            count,
+            channel,
+            reversed,
+        }
+    }
+
+    /// Drive a hand-built placement, bypassing the planner — the seam a
+    /// resolved patch authors into.
     fn render_fragments_at(
         node: &mut OutputNode,
         resolver: &mut FakeResolver,
@@ -1153,6 +1387,7 @@ mod tests {
             Revision::new(1),
             &[OutputFragment {
                 product: product(1, TWO_LAMPS),
+                source_offset_samples: 0,
                 offset_samples: 0,
                 len_samples: 6,
                 reversed: true,
@@ -1182,12 +1417,14 @@ mod tests {
             &[
                 OutputFragment {
                     product: product(1, TWO_LAMPS),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 6,
                     reversed: false,
                 },
                 OutputFragment {
                     product: product(2, TWO_LAMPS),
+                    source_offset_samples: 0,
                     offset_samples: 6,
                     len_samples: 6,
                     reversed: true,
@@ -1216,6 +1453,7 @@ mod tests {
             &[
                 OutputFragment {
                     product: product(1, ControlExtent::new(1, 9)),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 9,
                     reversed: false,
@@ -1223,6 +1461,7 @@ mod tests {
                 // Starts one lamp before the first one ends.
                 OutputFragment {
                     product: product(2, TWO_LAMPS),
+                    source_offset_samples: 0,
                     offset_samples: 6,
                     len_samples: 6,
                     reversed: false,
@@ -1259,12 +1498,14 @@ mod tests {
             &[
                 OutputFragment {
                     product: product(1, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 9,
                     len_samples: 3,
                     reversed: false,
@@ -1292,6 +1533,7 @@ mod tests {
         resolver.paint_by_product = true;
         let covered = [OutputFragment {
             product: product(1, ControlExtent::new(1, 12)),
+            source_offset_samples: 0,
             offset_samples: 0,
             len_samples: 12,
             reversed: false,
@@ -1306,12 +1548,14 @@ mod tests {
             &[
                 OutputFragment {
                     product: product(1, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 9,
                     len_samples: 3,
                     reversed: false,
@@ -1340,12 +1584,14 @@ mod tests {
             &[
                 OutputFragment {
                     product: product(1, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
+                    source_offset_samples: 0,
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
@@ -1373,12 +1619,14 @@ mod tests {
         let overlapping = [
             OutputFragment {
                 product: product(1, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 0,
                 len_samples: 3,
                 reversed: false,
             },
             OutputFragment {
                 product: product(2, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 0,
                 len_samples: 3,
                 reversed: false,
@@ -1404,24 +1652,28 @@ mod tests {
         let coverage = fragment_coverage(&[
             OutputFragment {
                 product: product(1, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 0,
                 len_samples: 6,
                 reversed: false,
             },
             OutputFragment {
                 product: product(2, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 3,
                 len_samples: 6,
                 reversed: false,
             },
             OutputFragment {
                 product: product(3, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 6,
                 len_samples: 6,
                 reversed: false,
             },
             OutputFragment {
                 product: product(4, ONE_LAMP),
+                source_offset_samples: 0,
                 offset_samples: 15,
                 len_samples: 3,
                 reversed: false,
@@ -1481,5 +1733,233 @@ mod tests {
             }));
 
         assert!(control_products(&map).is_err());
+    }
+
+    // --- Patched placement -------------------------------------------------
+
+    /// The equivalence the whole design leans on: with nobody patched, the
+    /// planner IS auto-flow. Every checked-in project is this case.
+    #[test]
+    fn an_unpatched_plan_is_exactly_auto_flow() {
+        let products = [product(1, TWO_LAMPS), product(2, ONE_LAMP)];
+        let placements: Vec<FragmentPlacement> = products
+            .iter()
+            .map(|product| FragmentPlacement {
+                product: *product,
+                patch: None,
+            })
+            .collect();
+
+        assert_eq!(
+            plan_fragments(&placements),
+            vec![
+                OutputFragment {
+                    product: product(1, TWO_LAMPS),
+                    source_offset_samples: 0,
+                    offset_samples: 0,
+                    len_samples: 6,
+                    reversed: false,
+                },
+                OutputFragment {
+                    product: product(2, ONE_LAMP),
+                    source_offset_samples: 0,
+                    offset_samples: 6,
+                    len_samples: 3,
+                    reversed: false,
+                },
+            ]
+        );
+    }
+
+    /// A patched producer contributes one fragment per resolved run, at the
+    /// wire offsets the patch authored, in lamps-to-samples.
+    #[test]
+    fn a_patched_producer_contributes_one_fragment_per_run() {
+        let body = product(1, ControlExtent::new(1, 12));
+
+        let fragments =
+            plan_fragments(&[patched(body, &[run(0, 2, 0, false), run(2, 2, 10, true)])]);
+
+        assert_eq!(
+            fragments,
+            vec![
+                OutputFragment {
+                    product: body,
+                    source_offset_samples: 0,
+                    offset_samples: 0,
+                    len_samples: 6,
+                    reversed: false,
+                },
+                OutputFragment {
+                    product: body,
+                    source_offset_samples: 6,
+                    offset_samples: 30,
+                    len_samples: 6,
+                    reversed: true,
+                },
+            ]
+        );
+    }
+
+    /// Partial patching (D5): the unpatched fixture is not required to declare
+    /// anything, and it lands past every anchor rather than under one.
+    #[test]
+    fn unpatched_producers_flow_after_the_highest_anchored_end() {
+        let body = product(1, ControlExtent::new(1, 12));
+        let leaf = product(2, ONE_LAMP);
+
+        let fragments = plan_fragments(&[
+            patched(body, &[run(0, 4, 8, false)]),
+            FragmentPlacement {
+                product: leaf,
+                patch: None,
+            },
+        ]);
+
+        assert_eq!(fragments[1].offset_samples, 36, "past lamp 12, not at 0");
+        assert!(fragment_coverage(&fragments).contested.is_empty());
+    }
+
+    /// The patched fixture's own runs are what the buffer gets — the lamps in
+    /// the run, from the run's place in the product, reversed when asked.
+    #[test]
+    fn a_patched_product_places_its_own_sub_runs() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.paint_by_product = true;
+        let body = product(1, ControlExtent::new(1, 12));
+
+        render_fragments_at(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            &plan_fragments(&[patched(body, &[run(2, 2, 0, false), run(0, 2, 2, true)])]),
+        )
+        .expect("render");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![106, 107, 108, 109, 110, 111, 103, 104, 105, 100, 101, 102],
+            "lamps 2-3 lead the wire; lamps 0-1 follow, end-first",
+        );
+        assert_eq!(node.runtime_status(), None, "the runs tile the wire");
+    }
+
+    /// One render per producer per frame, however many runs it was cut into —
+    /// a patch costs a copy, not an extra sample pass per range.
+    #[test]
+    fn a_producer_cut_into_several_runs_still_renders_once() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.paint_by_product = true;
+        let body = product(1, ControlExtent::new(1, 12));
+
+        render_fragments_at(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            &plan_fragments(&[patched(
+                body,
+                &[
+                    run(0, 1, 0, false),
+                    run(1, 1, 1, false),
+                    run(2, 2, 2, false),
+                ],
+            )]),
+        )
+        .expect("render");
+
+        assert_eq!(resolver.render_control_calls, 1);
+    }
+
+    /// A partial run's spans are clipped to the lamps it took and rebased onto
+    /// the wire; a reversed run mirrors them inside itself, because the span
+    /// that led the product trails on the wire.
+    #[test]
+    fn a_partial_runs_spans_are_clipped_and_a_reversed_ones_mirrored() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        let body = product(1, ControlExtent::new(1, 12));
+
+        render_fragments_at(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            &plan_fragments(&[patched(body, &[run(0, 1, 0, false), run(1, 3, 1, true)])]),
+        )
+        .expect("render");
+
+        // The fake publishes ONE span per product covering all 12 samples;
+        // each run clips it to its own share.
+        let layout = node
+            .runtime_output_sample_layout()
+            .expect("published layout");
+        assert_eq!(
+            layout
+                .spans
+                .iter()
+                .map(|span| (span.start, span.len))
+                .collect::<Vec<_>>(),
+            vec![(0, 3), (3, 9)],
+        );
+    }
+
+    /// A run that reaches past its own product — a patch resolved against a
+    /// lamp count the fixture no longer has — leaves those lamps dark instead
+    /// of sliding the rest of the wire over to cover it.
+    #[test]
+    fn a_run_past_the_end_of_its_product_leaves_its_lamps_dark() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.paint_by_product = true;
+
+        render_fragments_at(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            &[
+                OutputFragment {
+                    product: product(1, TWO_LAMPS),
+                    source_offset_samples: 0,
+                    offset_samples: 0,
+                    len_samples: 3,
+                    reversed: false,
+                },
+                OutputFragment {
+                    product: product(1, TWO_LAMPS),
+                    source_offset_samples: 60,
+                    offset_samples: 3,
+                    len_samples: 3,
+                    reversed: false,
+                },
+            ],
+        )
+        .expect("render");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![100, 101, 102, 0, 0, 0],
+            "the placeable run still lights",
+        );
+    }
+
+    /// The patch reaches the render through `consume`, not only through a
+    /// hand-built fragment list: this is the path a real frame takes.
+    #[test]
+    fn consume_places_the_producers_patch() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.paint_by_product = true;
+        let body = product(1, ControlExtent::new(1, 6));
+        resolver.graph_products = vec![body];
+        resolver.patches = vec![(body, vec![run(1, 1, 0, false), run(0, 1, 1, false)])];
+
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![103, 104, 105, 100, 101, 102],
+            "the patch swapped the two lamps on the wire",
+        );
     }
 }

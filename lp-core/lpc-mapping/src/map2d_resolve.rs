@@ -2,8 +2,13 @@
 //!
 //! Wiring order is primary: lamps are numbered end-to-end across objects in
 //! document order, and DMX-style addresses are *derived* from that order by
-//! auto-flow ([`LAMPS_PER_UNIVERSE`] RGB lamps per universe). Manual patching
-//! is future work layered on top; the wiring order never changes for it.
+//! auto-flow ([`LAMPS_PER_UNIVERSE`] RGB lamps per universe).
+//!
+//! Manual patching layers on top and never touches the wiring order: it lives
+//! in the fixture's own patch document ([`crate::PatchDoc`]), addressing runs
+//! of lamps by their position in THIS order. The universe addresses derived
+//! here stay pure auto-flow — placing a run on a wire is the output's job,
+//! and giving a lamp two competing addresses would make neither trustworthy.
 
 use alloc::string::ToString;
 use alloc::vec::Vec;

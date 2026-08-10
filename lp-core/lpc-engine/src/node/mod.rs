@@ -28,7 +28,7 @@ pub use node_entry::RuntimeNodeEntry;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
 pub(crate) use node_error::err_ctx;
-pub use node_runtime::{AssetRefreshResult, NodeRuntime, ProduceResult};
+pub use node_runtime::{AssetRefreshResult, NodeRuntime, PatchedRun, ProduceResult};
 pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;

@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, PhasorConfig, Revision, SlotMerge, SlotPath, TimeProduct};
 
 use crate::dataflow::binding::{BindingEntry, BindingRef};
-use crate::node::ScopeRef;
+use crate::node::{PatchedRun, ScopeRef};
 
 /// Engine or test fake that can satisfy demand for uncached queries.
 pub trait ResolveHost {
@@ -106,6 +106,17 @@ pub trait ResolveHost {
         Err(SessionResolveError::other(
             "resolve host has no render control access",
         ))
+    }
+
+    /// Where a control product's producer says its lamps land on its output's
+    /// wire (its resolved patch, in lamps), or `None` for auto-flow.
+    ///
+    /// A READ of the producing node, not a call into it: it answers from what
+    /// its own tick already resolved, so the output can ask while it is
+    /// planning fragments without re-entering the graph.
+    fn control_patch_placement(&self, product: ControlProduct) -> Option<Vec<PatchedRun>> {
+        let _ = product;
+        None
     }
 
     fn runtime_buffer_mut(

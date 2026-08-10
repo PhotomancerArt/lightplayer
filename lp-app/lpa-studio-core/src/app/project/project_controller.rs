@@ -5662,8 +5662,9 @@ impl ProjectController {
         logs.extend(read.logs);
         let def_bytes = read.data;
 
-        // Assets: the def's own sibling reference, resolved exactly the way
-        // the server resolves it (the same resolution the inline editor's
+        // Assets: every sibling the def references (a fixture has two — its
+        // mapping document and its patch), resolved exactly the way the
+        // server resolves them (the same resolution the inline editor's
         // Apply targets).
         let mut assets = Vec::new();
         // Parse through the MODEL's static registry, not the synced
@@ -5671,12 +5672,13 @@ impl ProjectController {
         // and carries no creatable factories, so it cannot read an authored
         // node def back ("slot shape is not creatable"). Writing still goes
         // through the synced registry, exactly as `create_node` does.
-        let asset_ref = core::str::from_utf8(&def_bytes)
+        let asset_refs = core::str::from_utf8(&def_bytes)
             .ok()
             .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
             .as_ref()
-            .and_then(lpc_model::node_def_asset_ref);
-        if let Some(source) = asset_ref {
+            .map(lpc_model::node_def_asset_refs)
+            .unwrap_or_default();
+        for source in asset_refs {
             match self.resolve_node_asset_artifact_from(&def_artifact, &source) {
                 Some(artifact) => {
                     let read = server
@@ -5686,7 +5688,7 @@ impl ProjectController {
                     assets.push((source.clone(), read.data));
                 }
                 None => {
-                    log::warn!("copy {label}: cannot resolve asset {source}; copying def only");
+                    log::warn!("copy {label}: cannot resolve asset {source}; skipping it");
                 }
             }
         }
@@ -5749,23 +5751,28 @@ impl ProjectController {
             None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
         };
 
-        // Re-home the def's asset (at most one today — see
-        // `lpc_model::node_def_asset_ref`) onto the free name, and rewrite
-        // the reference to match.
+        // Re-home EVERY asset the envelope carries (a fixture brings its
+        // mapping document and its patch) onto the free name, and rewrite the
+        // references to match. Each keeps its own compound suffix, so the two
+        // siblings stay distinguishable — see `asset_extension`.
         let mut asset_paths = std::collections::BTreeMap::new();
         let mut body = envelope
             .body_text()
             .ok_or_else(|| UiError::Project("the pasted node body is not text".to_string()))?
             .as_bytes()
             .to_vec();
-        if let Some((source_path, _)) = envelope.assets.iter().next() {
-            let target = format!("./{name}{}", asset_extension(source_path));
-            asset_paths.insert(source_path.clone(), target.clone());
+        if !envelope.assets.is_empty() {
+            for (source_path, _) in envelope.assets.iter() {
+                let target = format!("./{name}{}", asset_extension(source_path));
+                asset_paths.insert(source_path.clone(), target);
+            }
             let body_text = core::str::from_utf8(&body)
                 .map_err(|_| UiError::Project("the pasted node body is not text".to_string()))?;
             match lpc_model::NodeDef::from_json_str(body_text) {
                 Ok(mut def) => {
-                    lpc_model::set_node_def_asset_ref(&mut def, &target);
+                    lpc_model::rewrite_node_def_asset_refs(&mut def, |current| {
+                        asset_paths.get(current).cloned()
+                    });
                     body = def
                         .write_json(&self.slot_shapes)
                         .map_err(|err| {
@@ -6793,6 +6800,15 @@ pub struct ProjectEditRun {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// Compound suffixes that identify a document FORMAT rather than a file type.
+///
+/// `sign.map2d.json` renamed to `pasted.json` would still parse as JSON and
+/// still be found by name — and would silently stop being recognizable as a
+/// mapping document by every filename-dispatching surface in the app. A
+/// fixture's two documents would also collide on one pasted name. These
+/// suffixes travel with the file.
+const COMPOUND_ASSET_SUFFIXES: &[&str] = &[".map2d.json", ".patch.json"];
+
 /// A pasted asset's extension, INCLUDING the dot (`""` when it has none).
 ///
 /// Split the file NAME, never the whole path: `"./orbit"` has no
@@ -6801,6 +6817,12 @@ pub struct ProjectEditRun {
 /// `./name./orbit`.
 fn asset_extension(source_path: &str) -> String {
     let file_name = source_path.rsplit('/').next().unwrap_or(source_path);
+    if let Some(suffix) = COMPOUND_ASSET_SUFFIXES
+        .iter()
+        .find(|suffix| file_name.len() > suffix.len() && file_name.ends_with(*suffix))
+    {
+        return (*suffix).to_string();
+    }
     match file_name.rsplit_once('.') {
         // A leading-dot name (`.hidden`) is not an extension either.
         Some((stem, ext)) if !stem.is_empty() => format!(".{ext}"),
@@ -8150,6 +8172,20 @@ mod asset_extension_tests {
     #[test]
     fn only_the_last_extension_counts() {
         assert_eq!(asset_extension("./orbit.tar.gz"), ".gz");
+    }
+
+    /// …except for the compound suffixes that ARE the document's identity.
+    /// A pasted fixture whose `sign.map2d.json` landed as `copy.json` would
+    /// stop being a mapping document to every filename-dispatching surface,
+    /// and its patch would collide with it on the same name.
+    #[test]
+    fn document_suffixes_travel_whole() {
+        assert_eq!(asset_extension("./sign.map2d.json"), ".map2d.json");
+        assert_eq!(asset_extension("nested/sign.patch.json"), ".patch.json");
+        // Not a compound suffix, just a `.json` file.
+        assert_eq!(asset_extension("./settings.json"), ".json");
+        // The suffix alone is a dotfile-ish name, not a stem plus suffix.
+        assert_eq!(asset_extension(".patch.json"), ".json");
     }
 }
 
