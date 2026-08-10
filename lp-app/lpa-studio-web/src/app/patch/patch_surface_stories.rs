@@ -129,6 +129,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 mapping_artifact: None,
                 patch_artifact: None,
                 mapping_loaded: true,
+                patch_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 150,
                     cells: vec![
@@ -160,6 +161,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 mapping_artifact: None,
                 patch_artifact: None,
                 mapping_loaded: true,
+                patch_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 27,
                     cells: vec![
@@ -217,6 +219,7 @@ fn peach_surface() -> UiPatchSurface {
                 mapping_artifact: None,
                 patch_artifact: None,
                 mapping_loaded: true,
+                patch_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 44,
                     cells: vec![cell("body:0:0:0", "peach_body", 0, 22, 0), {
@@ -236,6 +239,7 @@ fn peach_surface() -> UiPatchSurface {
                 mapping_artifact: None,
                 patch_artifact: None,
                 mapping_loaded: true,
+                patch_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 12,
                     cells: vec![cell("leaf:0:0:22", "peach_leaf", 0, 12, 22)],
