@@ -39,7 +39,7 @@
 //!   preview snapshot, node-select action). Deriving the face ALSO
 //!   enforces the sibling invariant: the children list keeps ONLY the
 //!   active entry's child (see [`kind_face`]).
-//! - **Output**: face = one row per authored `channels[k]` wire (endpoint,
+//! - **Output**: face = one row per authored `ports[k]` wire (endpoint,
 //!   pin label parsed out of the endpoint spec, authored count, derived
 //!   slice start) plus the slot addresses the web edits through. Everything
 //!   the builder cannot see from this node's sections — the running device's
@@ -60,7 +60,7 @@ use crate::app::project::node::node_space_section;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputChannelRow, UiOutputFace,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputFace, UiOutputPortRow,
     UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
     UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect, UiSlotAspectKind,
     UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
@@ -1211,11 +1211,11 @@ fn option_list_field_is_non_empty(fields: &[UiConfigSlot], name: &str) -> bool {
 
 // -- output face ---------------------------------------------------------------
 
-/// The output card's face: one row per authored `channels[k]` wire, plus the
+/// The output card's face: one row per authored `ports[k]` wire, plus the
 /// slice arithmetic that can be done from the authored counts alone.
 ///
 /// `None` — generic-sections fallback — only when the node carries no
-/// `channels` map row at all. An EMPTY map still derives a face: an output
+/// `ports` map row at all. An EMPTY map still derives a face: an output
 /// with no wires is exactly the state whose surface should be "add a wire",
 /// the same reasoning as the playlist's empty strip.
 ///
@@ -1224,11 +1224,11 @@ fn option_list_field_is_non_empty(fields: &[UiConfigSlot], name: &str) -> bool {
 /// controller state. The studio controller's decoration pass fills them.
 fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
     let rows = config_rows(sections);
-    let channels_row = rows.iter().find(|row| row.key == "channels")?;
+    let channels_row = rows.iter().find(|row| row.key == "ports")?;
     let UiConfigSlotBody::Record(channels_map) = &channels_row.body else {
         return None;
     };
-    let mut channels: Vec<UiOutputChannelRow> = channels_map
+    let mut channels: Vec<UiOutputPortRow> = channels_map
         .fields
         .iter()
         .filter_map(output_channel_row)
@@ -1241,8 +1241,8 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
 
     Some(UiOutputFace {
         led_budget: None,
-        channels,
-        channels_address: channels_row.address.clone(),
+        ports: channels,
+        ports_address: channels_row.address.clone(),
         input_binding: bound_endpoint_label(&rows, "input"),
         // Filled by the decoration pass (board + upstream extent).
         total_lamps: None,
@@ -1259,7 +1259,7 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
 /// count-less channel takes the remainder — so nothing after it has a
 /// defined start (an authoring mistake the engine refuses outright; the face
 /// leaves those starts `None` rather than inventing one).
-fn resolve_authored_slices(channels: &mut [UiOutputChannelRow]) {
+fn resolve_authored_slices(channels: &mut [UiOutputPortRow]) {
     let mut start = Some(0u32);
     for channel in channels {
         channel.slice_start = start;
@@ -1276,7 +1276,7 @@ fn resolve_authored_slices(channels: &mut [UiOutputChannelRow]) {
 /// One `channels[<key>]` record row → its wire row. Rows whose key does not
 /// parse as a channel index, or which carry no `endpoint` field, are not
 /// wires and are dropped.
-fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
+fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputPortRow> {
     let UiConfigSlotBody::Record(record) = &row.body else {
         return None;
     };
@@ -1285,7 +1285,7 @@ fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
     let endpoint_row = uniform_field(fields, "endpoint")?;
     let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
 
-    Some(UiOutputChannelRow {
+    Some(UiOutputPortRow {
         wire_status: None,
         key,
         pin_label: endpoint_pin_label(&endpoint_display),
@@ -1969,24 +1969,24 @@ mod tests {
             panic!("expected an output face");
         };
 
-        assert_eq!(face.channels.len(), 2);
-        let first = &face.channels[0];
+        assert_eq!(face.ports.len(), 2);
+        let first = &face.ports[0];
         assert_eq!((first.key, first.pin_label.as_str()), (0, "IO18"));
         assert_eq!(first.endpoint_display, "ws281x:local:IO18");
         assert_eq!((first.count, first.resolved_count), (Some(100), Some(100)));
         assert_eq!(first.slice_start, Some(0));
         assert_eq!(
             slot_path(&first.endpoint_address),
-            "channels[0].endpoint",
+            "ports[0].endpoint",
             "the wire is edited through the normal slot write path"
         );
         assert_eq!(
             slot_path(&first.count_address),
-            "channels[0].count.some",
+            "ports[0].count.some",
             "a PRESENT count edits its interior option slot"
         );
 
-        let second = &face.channels[1];
+        let second = &face.ports[1];
         assert_eq!((second.key, second.pin_label.as_str()), (1, "IO2"));
         assert_eq!(second.count, None, "the highest key may omit its count");
         assert_eq!(
@@ -2004,11 +2004,11 @@ mod tests {
         );
 
         assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
-        assert_eq!(slot_path(&face.channels_address), "channels");
+        assert_eq!(slot_path(&face.ports_address), "ports");
         // Hardware and upstream facts are the decoration pass's business.
         assert_eq!(face.board, None);
         assert_eq!(face.total_lamps, None);
-        assert!(face.channels.iter().all(|channel| channel.gpio.is_none()));
+        assert!(face.ports.iter().all(|channel| channel.gpio.is_none()));
         assert_eq!(face.authored_lamps(), None, "the remainder is open-ended");
     }
 
@@ -2022,13 +2022,13 @@ mod tests {
         else {
             panic!("expected an output face");
         };
-        assert_eq!(face.channels[0].slice_start, Some(0));
-        assert_eq!(face.channels[0].resolved_count, None);
+        assert_eq!(face.ports[0].slice_start, Some(0));
+        assert_eq!(face.ports[0].resolved_count, None);
 
         // What the decoration pass then does with a 241-lamp buffer.
         face.resolve_extent(241);
         assert_eq!(face.total_lamps, Some(241));
-        assert_eq!(face.channels[0].resolved_count, Some(241));
+        assert_eq!(face.ports[0].resolved_count, Some(241));
     }
 
     #[test]
@@ -2045,7 +2045,7 @@ mod tests {
             panic!("expected an output face");
         };
         assert_eq!(
-            face.channels
+            face.ports
                 .iter()
                 .map(|channel| channel.slice_start)
                 .collect::<Vec<_>>(),
@@ -2064,7 +2064,7 @@ mod tests {
         else {
             panic!("expected an empty output face");
         };
-        assert!(face.channels.is_empty());
+        assert!(face.ports.is_empty());
         assert_eq!(face.authored_lamps(), Some(0));
 
         // No `channels` row at all is not an output card we understand.
@@ -2084,8 +2084,8 @@ mod tests {
         else {
             panic!("expected an output face");
         };
-        assert_eq!(face.channels[0].endpoint_display, "nonsense");
-        assert_eq!(face.channels[0].pin_label, "");
+        assert_eq!(face.ports[0].endpoint_display, "nonsense");
+        assert_eq!(face.ports[0].pin_label, "");
     }
 
     // -- fixtures ------------------------------------------------------------
@@ -2104,7 +2104,7 @@ mod tests {
         let entries = wires
             .iter()
             .map(|(key, endpoint, count)| {
-                let prefix = format!("channels[{key}]");
+                let prefix = format!("ports[{key}]");
                 let endpoint_key = format!("{prefix}.endpoint");
                 let count_key = format!("{prefix}.count");
                 let count_row = match count {
@@ -2138,7 +2138,7 @@ mod tests {
             UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
                 UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
             ),
-            UiConfigSlot::record("channels", "Channels", entries).with_address(address("channels")),
+            UiConfigSlot::record("ports", "Ports", entries).with_address(address("ports")),
         ])]
     }
 

@@ -393,14 +393,14 @@ impl EngineServices {
             return;
         }
 
-        for (key, channel) in config.channels.entries.iter() {
-            match channel.count() {
+        for (key, port) in config.ports.entries.iter() {
+            match port.count() {
                 Some(0) => {
                     log::warn!(
-                        "EngineServices: output node {} channel {key} ({}) authors a lamp count \
+                        "EngineServices: output node {} port {key} ({}) authors a lamp count \
                          of 0; it drives nothing and is skipped",
                         set.node,
-                        channel.endpoint(),
+                        port.endpoint(),
                     );
                 }
                 // Authored-count validation, at registration rather than at the
@@ -412,19 +412,19 @@ impl EngineServices {
                 // this is the config-time half of the same warning.
                 Some(count) if count > WS281X_MAX_LEDS_PER_CHANNEL as u32 => {
                     log::warn!(
-                        "EngineServices: output node {} channel {key} ({}) authors {count} \
-                         lamps, above the shared {WS281X_MAX_LEDS_PER_CHANNEL}-lamp per-channel \
+                        "EngineServices: output node {} port {key} ({}) authors {count} \
+                         lamps, above the shared {WS281X_MAX_LEDS_PER_CHANNEL}-lamp per-wire \
                          cap; it registers capped and drives only the first \
                          {WS281X_MAX_LEDS_PER_CHANNEL} lamps",
                         set.node,
-                        channel.endpoint(),
+                        port.endpoint(),
                     );
                 }
                 _ => {}
             }
         }
 
-        let mut wires = Vec::with_capacity(config.channel_count());
+        let mut wires = Vec::with_capacity(config.port_count());
         for planned in planned_wires(config) {
             let existing = previous
                 .iter()
@@ -517,7 +517,7 @@ impl Drop for EngineServices {
 fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
     let mut start = 0u32;
     config
-        .channels
+        .ports
         .entries
         .iter()
         .filter_map(move |(key, channel)| match channel.count() {
@@ -909,7 +909,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use lpc_hardware::OutputError;
-    use lpc_model::nodes::output::{OutputChannelDef, OutputDef, OutputDriverOptionsConfig};
+    use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig, OutputPortDef};
     use lpc_model::{HwEndpointSpec, NodeId, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -1398,9 +1398,9 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
-        let config = OutputDef::with_channels([
-            (0, OutputChannelDef::new(endpoint("ws281x:local:D10"))),
-            (1, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+        let config = OutputDef::with_ports([
+            (0, OutputPortDef::new(endpoint("ws281x:local:D10"))),
+            (1, OutputPortDef::new(endpoint("ws281x:local:D9"))),
         ]);
         services.register_output_sink(buffer_id, node(1), &config);
 
@@ -1438,19 +1438,13 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         // Three lamps for a project that authored 2 + 3 + 4.
         let buffer_id = ramp_buffer(&mut buffers, 3, Revision::new(1));
-        let config = OutputDef::with_channels([
+        let config = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+                OutputPortDef::with_count(endpoint("ws281x:local:D10"), 2),
             ),
-            (
-                1,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
-            ),
-            (
-                2,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D8"), 4),
-            ),
+            (1, OutputPortDef::with_count(endpoint("ws281x:local:D9"), 3)),
+            (2, OutputPortDef::with_count(endpoint("ws281x:local:D8"), 4)),
         ]);
         services.register_output_sink(buffer_id, node(1), &config);
 
@@ -1492,15 +1486,12 @@ mod tests {
         // Eight lamps for a project that authored 2 + 3: a second fixture's
         // fragment grew the buffer past what the wires ask for.
         let buffer_id = ramp_buffer(&mut buffers, 8, Revision::new(1));
-        let config = OutputDef::with_channels([
+        let config = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+                OutputPortDef::with_count(endpoint("ws281x:local:D10"), 2),
             ),
-            (
-                1,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
-            ),
+            (1, OutputPortDef::with_count(endpoint("ws281x:local:D9"), 3)),
         ]);
         services.register_output_sink(buffer_id, node(1), &config);
 
@@ -1571,12 +1562,12 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
-        let wide = OutputDef::with_channels([
+        let wide = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 4),
+                OutputPortDef::with_count(endpoint("ws281x:local:D10"), 4),
             ),
-            (2, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+            (2, OutputPortDef::new(endpoint("ws281x:local:D9"))),
         ]);
         services.register_output_sink(buffer_id, node(1), &wide);
         services
@@ -1587,12 +1578,12 @@ mod tests {
             .expect("first handle");
         assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 12));
 
-        let narrow = OutputDef::with_channels([
+        let narrow = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+                OutputPortDef::with_count(endpoint("ws281x:local:D10"), 2),
             ),
-            (2, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+            (2, OutputPortDef::new(endpoint("ws281x:local:D9"))),
         ]);
         services.update_output_sink_config(buffer_id, node(1), &narrow);
         services
@@ -1626,12 +1617,12 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = ramp_buffer(&mut buffers, 4, Revision::new(1));
-        let config = OutputDef::with_channels([
+        let config = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:NOT-A-PIN"), 2),
+                OutputPortDef::with_count(endpoint("ws281x:local:NOT-A-PIN"), 2),
             ),
-            (1, OutputChannelDef::new(endpoint("ws281x:local:D10"))),
+            (1, OutputPortDef::new(endpoint("ws281x:local:D10"))),
         ]);
         services.register_output_sink(buffer_id, node(1), &config);
 
@@ -1681,14 +1672,14 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = ramp_buffer(&mut buffers, 4, Revision::new(1));
         let missing = |zero: &str, one: &str| {
-            OutputDef::with_channels([
+            OutputDef::with_ports([
                 (
                     0,
-                    OutputChannelDef::with_count(HwEndpointSpec::parse(zero).expect("spec"), 2),
+                    OutputPortDef::with_count(HwEndpointSpec::parse(zero).expect("spec"), 2),
                 ),
                 (
                     1,
-                    OutputChannelDef::with_count(HwEndpointSpec::parse(one).expect("spec"), 2),
+                    OutputPortDef::with_count(HwEndpointSpec::parse(one).expect("spec"), 2),
                 ),
             ])
         };
@@ -1836,10 +1827,10 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = ramp_buffer(&mut buffers, 1500, Revision::new(1));
-        let config = OutputDef::with_channels((0..5).map(|i| {
+        let config = OutputDef::with_ports((0..5).map(|i| {
             (
                 i,
-                OutputChannelDef::with_count(
+                OutputPortDef::with_count(
                     HwEndpointSpec::parse(&alloc::format!("ws281x:local:D{i}")).expect("spec"),
                     300,
                 ),
@@ -1882,12 +1873,12 @@ mod tests {
         // remainder — 3 lamps — starting where channel 0's *authored* extent
         // ends, at sample 4500, not where its *capped* write ended.
         let buffer_id = ramp_buffer(&mut buffers, 1503, Revision::new(1));
-        let config = OutputDef::with_channels([
+        let config = OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D0"), 1500),
+                OutputPortDef::with_count(endpoint("ws281x:local:D0"), 1500),
             ),
-            (1, OutputChannelDef::new(endpoint("ws281x:local:D1"))),
+            (1, OutputPortDef::new(endpoint("ws281x:local:D1"))),
         ]);
         services.register_output_sink(buffer_id, node(1), &config);
 
@@ -1917,16 +1908,13 @@ mod tests {
 
     /// Three wires over one buffer: 2 lamps, 3 lamps, and the remainder.
     fn triple_channel_output() -> OutputDef {
-        OutputDef::with_channels([
+        OutputDef::with_ports([
             (
                 0,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+                OutputPortDef::with_count(endpoint("ws281x:local:D10"), 2),
             ),
-            (
-                1,
-                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
-            ),
-            (2, OutputChannelDef::new(endpoint("ws281x:local:D8"))),
+            (1, OutputPortDef::with_count(endpoint("ws281x:local:D9"), 3)),
+            (2, OutputPortDef::new(endpoint("ws281x:local:D8"))),
         ])
     }
 

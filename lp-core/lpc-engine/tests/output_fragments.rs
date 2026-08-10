@@ -25,7 +25,7 @@ use lpfs::{AsLpPath, LpFs, LpFsMemory};
 /// between two fragments is legible in its contents.
 fn project_fs(fixtures: &[(&str, u32, f32)]) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 9\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
         .expect("container manifest");
 
     let mut nodes = String::from(
@@ -59,7 +59,7 @@ fn project_fs(fixtures: &[(&str, u32, f32)]) -> LpFsMemory {
         "/output.json".as_path(),
         br#"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "input": { "source": "bus:control.out" } }
 }"#,
     )

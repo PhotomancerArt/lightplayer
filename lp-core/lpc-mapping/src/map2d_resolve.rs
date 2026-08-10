@@ -403,6 +403,79 @@ fn resolve_polygon(
     Ok(positions)
 }
 
+/// One physical strand with its full patch-path address: which object (by
+/// stable id, when the object has one), which repeat-instance chain, and
+/// the fixture-relative lamp range it occupies.
+///
+/// This is the table [`crate::resolve_patch`] lowers [`crate::MapObjectPath`]
+/// entries through — the bridge between "/sector/2" and "lamps 60..90".
+/// Strand order matches [`ResolvedMap2d::spans`] exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectInstanceSpan {
+    /// The owning object's stable id; `None` when the document has not been
+    /// through ensure-ids (such strands are unaddressable by path).
+    pub id: Option<crate::map2d_object_id::Map2dObjectId>,
+    /// Repeat-instance indices, outermost first; empty for a plain shape.
+    pub instances: Vec<u32>,
+    /// Zero-based wiring index of the strand's first lamp.
+    pub start: u32,
+    pub count: u32,
+}
+
+/// The per-strand instance-address table for a resolved document.
+///
+/// Strand k of an object corresponds to instance path k in the shape's
+/// instance enumeration — the same order [`resolve`] emits spans in (a
+/// repeat resolves instance 0's strands, then instance 1's, …), pinned by
+/// test against the resolver.
+#[must_use]
+pub fn object_instance_spans(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<ObjectInstanceSpan> {
+    let mut per_object_paths: Vec<Vec<Vec<u32>>> = Vec::with_capacity(doc.objects.len());
+    for object in &doc.objects {
+        per_object_paths.push(shape_instance_paths(&object.shape));
+    }
+    let mut cursor = alloc::vec![0usize; doc.objects.len()];
+    let mut spans = Vec::with_capacity(resolved.spans.len());
+    for span in &resolved.spans {
+        let object = span.object as usize;
+        let instances = per_object_paths
+            .get(object)
+            .and_then(|paths| paths.get(cursor[object]))
+            .cloned()
+            .unwrap_or_default();
+        cursor[object] += 1;
+        spans.push(ObjectInstanceSpan {
+            id: doc.objects.get(object).and_then(|object| object.id.clone()),
+            instances,
+            start: span.start,
+            count: span.count,
+        });
+    }
+    spans
+}
+
+/// Every strand's instance path for one shape, in wiring order: a leaf is
+/// one strand with no steps; a repeat prefixes each inner path with its
+/// instance index.
+fn shape_instance_paths(shape: &Map2dShape) -> Vec<Vec<u32>> {
+    match shape {
+        Map2dShape::Repeat(repeat) => {
+            let inner = shape_instance_paths(&repeat.shape);
+            let mut paths = Vec::with_capacity(inner.len() * repeat.count.max(1) as usize);
+            for instance in 0..repeat.count.max(1) {
+                for inner_path in &inner {
+                    let mut path = Vec::with_capacity(1 + inner_path.len());
+                    path.push(instance);
+                    path.extend_from_slice(inner_path);
+                    paths.push(path);
+                }
+            }
+            paths
+        }
+        _ => alloc::vec![Vec::new()],
+    }
+}
+
 /// The rotation-stride hint an object's UI steps `offset` by, in lamps.
 ///
 /// An explicit [`Map2dObject::stride`] override wins; otherwise the stride

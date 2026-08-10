@@ -300,7 +300,11 @@ impl FixtureNode {
         // The same count the control product is sized from, and the same one
         // the patch document's ranges are written against.
         let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
-        match lpc_mapping::resolve_patch(lamp_count, doc) {
+        // P3 widens this context with the fixture's object-instance spans
+        // (path-grain entries) and the output set; until then a bare
+        // fixture context resolves the format-1 grain exactly as before.
+        let ctx = lpc_mapping::PatchResolveContext::for_fixture(lamp_count);
+        match lpc_mapping::resolve_patch(&ctx, doc) {
             Ok(ranges) => {
                 self.resolved_patch = Some((
                     key.0,
@@ -310,7 +314,7 @@ impl FixtureNode {
                         .map(|range| PatchedRun {
                             start: range.start,
                             count: range.count,
-                            channel: range.channel,
+                            channel: range.lamp,
                             reversed: range.reversed,
                         })
                         .collect(),

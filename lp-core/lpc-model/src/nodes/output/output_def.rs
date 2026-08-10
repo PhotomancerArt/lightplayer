@@ -1,6 +1,7 @@
 use lp_collection::VecMap;
 
-use super::OutputChannelDef;
+use super::OutputPortDef;
+use super::output_name::OutputName;
 use crate::{
     BindingDefs, ControlProductSlot, HwEndpointSpec, MapSlot, OptionSlot, Slotted, ValueSlot,
 };
@@ -25,16 +26,22 @@ pub struct OutputDef {
     /// the two cases can differ while the producers are indistinguishable.
     #[slot(consumed, merge = "fragments", default_bind = "bus:control.out")]
     pub input: ControlProductSlot,
-    /// Physical wires this output drives, keyed by channel index.
+    /// Optional authored display name (D39): how patch entries and the
+    /// studio refer to this output — "Box 5", "1". Auto-assigned a numeric
+    /// default the first time a patch names this output; user-editable;
+    /// never hardware identity. Project-unique among outputs (validated at
+    /// resolve, like node-name collisions).
+    pub name: OptionSlot<ValueSlot<OutputName>>,
+    /// Physical wires this output drives, keyed by port index.
     ///
-    /// The node's single control product is split across the channels in key
+    /// The node's single control product is split across the ports in key
     /// order, each taking its authored `count` of lamps.
-    pub channels: MapSlot<u32, OutputChannelDef>,
+    pub ports: MapSlot<u32, OutputPortDef>,
     /// Authored slot bindings for output inputs.
     pub bindings: BindingDefs,
-    /// Optional display pipeline options, shared by every channel.
+    /// Optional display pipeline options, shared by every port.
     pub options: OptionSlot<OutputDriverOptionsConfig>,
-    /// Light every channel of this output solid white, bypassing the graph.
+    /// Light every port of this output solid white, bypassing the graph.
     ///
     /// A `Debug` slot: diagnostics only ("is this pin wired to that strip?"),
     /// never authored into a project file and never saved. It survives the
@@ -48,18 +55,19 @@ impl OutputDef {
 
     /// An output driving `endpoint` as its only wire (no count = whole extent).
     pub fn new(endpoint: HwEndpointSpec) -> Self {
-        Self::with_channels([(0, OutputChannelDef::new(endpoint))])
+        Self::with_ports([(0, OutputPortDef::new(endpoint))])
     }
 
-    /// An output driving the given `(channel index, channel)` pairs.
-    pub fn with_channels(channels: impl IntoIterator<Item = (u32, OutputChannelDef)>) -> Self {
+    /// An output driving the given `(port index, port)` pairs.
+    pub fn with_ports(ports: impl IntoIterator<Item = (u32, OutputPortDef)>) -> Self {
         let mut entries = VecMap::new();
-        for (index, channel) in channels {
-            entries.insert(index, channel);
+        for (index, port) in ports {
+            entries.insert(index, port);
         }
         Self {
             input: ControlProductSlot::default(),
-            channels: MapSlot::new(entries),
+            name: OptionSlot::none(),
+            ports: MapSlot::new(entries),
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),
             test_pattern: ValueSlot::new(false),
@@ -70,8 +78,13 @@ impl OutputDef {
         HwEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
     }
 
-    pub fn channel_count(&self) -> usize {
-        self.channels.entries.len()
+    pub fn port_count(&self) -> usize {
+        self.ports.entries.len()
+    }
+
+    /// The authored name, when one is set.
+    pub fn output_name(&self) -> Option<&OutputName> {
+        self.name.data.as_ref().map(|slot| slot.value())
     }
 
     pub fn kind(&self) -> crate::NodeKind {
@@ -134,21 +147,21 @@ mod tests {
     fn test_output_def_kind() {
         let def = OutputDef::new(HwEndpointSpec::from_static("ws281x:local:D10"));
         assert_eq!(def.kind(), NodeKind::Output);
-        assert_eq!(channel_endpoint(&def, 0), "ws281x:local:D10");
+        assert_eq!(port_endpoint(&def, 0), "ws281x:local:D10");
     }
 
     #[test]
     fn test_output_def_endpoint_json_deserialize() {
         let json = r#"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "options": { "white_point": [0.8, 1.0, 1.0], "dithering_enabled": false }
 }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
-        assert_eq!(channel_endpoint(&def, 0), "ws281x:local:D10");
+        assert_eq!(port_endpoint(&def, 0), "ws281x:local:D10");
         let opts = def.options().unwrap();
         assert!((opts.white_point.value()[0] - 0.8).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
@@ -156,10 +169,10 @@ mod tests {
     }
 
     #[test]
-    fn output_def_channels_round_trip_json() {
+    fn output_def_ports_round_trip_json() {
         let json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:IO18", "count": 100 },
     "2": { "endpoint": "ws281x:local:IO16" }
   }
@@ -170,11 +183,11 @@ mod tests {
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
-        assert_eq!(def.channel_count(), 2);
-        let first = def.channels.entries.get(&0).expect("channel 0");
+        assert_eq!(def.port_count(), 2);
+        let first = def.ports.entries.get(&0).expect("port 0");
         assert_eq!(first.endpoint().as_str(), "ws281x:local:IO18");
         assert_eq!(first.count(), Some(100));
-        let second = def.channels.entries.get(&2).expect("channel 2");
+        let second = def.ports.entries.get(&2).expect("port 2");
         assert_eq!(second.endpoint().as_str(), "ws281x:local:IO16");
         assert_eq!(second.count(), None);
 
@@ -182,8 +195,33 @@ mod tests {
         assert_eq!(
             NodeDef::read_json(&registry(), &written).expect("re-read"),
             NodeDef::read_json(&registry(), json).expect("re-read source"),
-            "channels survive a write/read round trip: {written}"
+            "ports survive a write/read round trip: {written}"
         );
+    }
+
+    /// The authored `name` slot (D39): parses, validates, round-trips, and
+    /// stays absent when unset (single-output projects never grow one).
+    #[test]
+    fn output_def_name_slot_round_trips_and_stays_optional() {
+        let json = r#"{
+  "kind": "Output",
+  "name": "Box 5",
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } }
+}"#;
+        let def = NodeDef::read_json(&registry(), json).unwrap();
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
+        assert_eq!(def.output_name().unwrap().as_str(), "Box 5");
+        let written = NodeDef::Output(def).write_json(&registry()).expect("write");
+        assert!(written.contains("Box 5"), "{written}");
+
+        let unnamed = OutputDef::default();
+        assert_eq!(unnamed.output_name(), None);
+        let written = NodeDef::Output(unnamed)
+            .write_json(&registry())
+            .expect("write");
+        assert!(!written.contains("\"name\""), "{written}");
     }
 
     #[test]
@@ -196,7 +234,7 @@ mod tests {
     }
 
     /// Format 2 authored a single top-level `endpoint`. Format 3 replaced it
-    /// with `channels`, and the loader must say so rather than silently
+    /// with wire entries, and the loader must say so rather than silently
     /// producing an output with no wires (A1: version-and-refuse, never
     /// migrate).
     #[test]
@@ -208,6 +246,20 @@ mod tests {
         assert!(format!("{err}").contains("endpoint"), "{err}");
     }
 
+    /// Format 9 spelled the wire map `channels` (D45 retired the word: a
+    /// "channel" is a 512-limited DMX unit, not a lamp wire). The v9→v10
+    /// upgrade step rewrites the key; a v10 build refuses the old spelling
+    /// rather than silently producing an output with no wires.
+    #[test]
+    fn output_def_rejects_legacy_channels_json() {
+        let json =
+            r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:D10" } } }"#;
+
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
+
+        assert!(format!("{err}").contains("channels"), "{err}");
+    }
+
     #[test]
     fn generated_output_def_view_compiles() {
         let registry = SlotShapeRegistry::default();
@@ -216,10 +268,7 @@ mod tests {
 
         assert_eq!(view.registry_revision(), registry.revision());
         assert!(view.is_valid_for(&registry));
-        assert_eq!(
-            view.channels().path(),
-            &SlotPath::parse("channels").unwrap()
-        );
+        assert_eq!(view.ports().path(), &SlotPath::parse("ports").unwrap());
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
     }
 
@@ -240,7 +289,7 @@ mod tests {
 
     #[test]
     fn authored_test_pattern_is_ignored() {
-        let json = r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:D10" } }, "test_pattern": true }"#;
+        let json = r#"{ "kind": "Output", "ports": { "0": { "endpoint": "ws281x:local:D10" } }, "test_pattern": true }"#;
 
         let def = NodeDef::read_json(&registry(), json).unwrap();
 
@@ -257,11 +306,11 @@ mod tests {
         SlotShapeRegistry::default()
     }
 
-    fn channel_endpoint(def: &OutputDef, key: u32) -> &str {
-        def.channels
+    fn port_endpoint(def: &OutputDef, key: u32) -> &str {
+        def.ports
             .entries
             .get(&key)
-            .unwrap_or_else(|| panic!("channel {key}"))
+            .unwrap_or_else(|| panic!("port {key}"))
             .endpoint()
             .as_str()
     }

@@ -179,11 +179,11 @@ mod tests {
 
     #[test]
     fn a_future_format_is_rejected_rather_than_migrated() {
-        let json = r#"{"kind":"lp.package","format":9,"name":"x","files":{}}"#;
+        let json = r#"{"kind":"lp.package","format":10,"name":"x","files":{}}"#;
         assert_eq!(
             PackageEnvelope::decode(json).unwrap_err(),
             ShareError::UnsupportedFormat {
-                found: 9,
+                found: 10,
                 supported: 1
             }
         );

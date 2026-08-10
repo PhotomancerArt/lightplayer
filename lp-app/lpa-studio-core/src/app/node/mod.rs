@@ -39,8 +39,8 @@ mod ui_slot_value;
 
 pub use face::{
     UiClockFace, UiClockTransport, UiExportsGroup, UiFixtureFace, UiFixturePatch, UiFixturePower,
-    UiLedBudget, UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputChannelRow,
-    UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState, UiPanelControlView,
+    UiLedBudget, UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputFace,
+    UiOutputPin, UiOutputPortRow, UiPanelControl, UiPanelControlState, UiPanelControlView,
     UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole,
     UiPatchBay, UiPatchCell, UiPatchPort, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
     UiShaderFace, UiShapePresets, UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
