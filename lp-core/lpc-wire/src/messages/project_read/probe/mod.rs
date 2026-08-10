@@ -18,7 +18,7 @@ pub use control_product_probe::{
 };
 pub use output_frame_probe::{
     OutputFrameEntry, OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
-    OutputFrameProbeResultHeader,
+    OutputFrameProbeResultHeader, WireOutputPlacement,
 };
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
 pub use render_product_probe::{

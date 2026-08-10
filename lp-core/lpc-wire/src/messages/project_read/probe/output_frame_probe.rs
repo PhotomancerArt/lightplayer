@@ -94,10 +94,50 @@ pub struct OutputFrameEntry {
     /// Where to draw the lamps, gated by the request's
     /// [`ControlDisplayLayoutRead`].
     pub display_layout: ControlDisplayLayoutProbeResult,
+    /// How the frame was CUT: one entry per producer run placed on this
+    /// wire, in the output's own planning order.
+    ///
+    /// Ungated (unlike `display_layout`): the whole set is a handful of
+    /// six-field rows even at dome scale, and it is the only description of
+    /// which fixture owns which stretch of the strand. Empty when the output
+    /// has not planned a placement yet — never a signal that the wire is
+    /// unpatched.
+    pub placements: Vec<WireOutputPlacement>,
     /// The published buffer, verbatim.
     #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
+}
+
+/// One producer run placed on an output's wire — the `(fixture span ↔ wire
+/// span)` tuple, **in lamps**.
+///
+/// The engine plans placements in samples (three per RGB lamp); the wire
+/// states them in lamps because every surface that reads them — the patch
+/// document, the output's channel counts, the bay — counts lamps. A producer
+/// with no patch contributes exactly one run covering its whole product; a
+/// patched one contributes one per authored anchor, and the ones it did not
+/// author still auto-flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct WireOutputPlacement {
+    /// The node whose control product this run came from — the join back to
+    /// the producing card.
+    pub node: NodeId,
+    /// Which of that node's control outputs.
+    pub output: u32,
+    /// First lamp OF THE PRODUCER's own numbering this run takes.
+    pub source_lamp: u32,
+    /// Lamps the producer's whole product carries, so a reader knows how
+    /// much of it this run is without owning the product.
+    pub source_lamps: u32,
+    /// First lamp of the run on the output's wire.
+    pub wire_lamp: u32,
+    /// Lamps in the run.
+    pub lamps: u32,
+    /// The run is laid onto the wire end-first (a strand plugged in at the
+    /// far end). Distinct from a fixture's own `wire_reversed` sampling.
+    pub reversed: bool,
 }
 
 /// An [`OutputFrameProbeResult`] with every entry's bulk `bytes` removed.
@@ -124,6 +164,9 @@ pub struct OutputFrameEntryHeader {
     pub sample_format: WireChannelSampleFormat,
     pub sample_layout: ControlSampleLayout,
     pub display_layout: ControlDisplayLayoutProbeResult,
+    /// The wire's cut — small enough to ride the header with the rest of the
+    /// interpretation metadata.
+    pub placements: Vec<WireOutputPlacement>,
     /// Bytes this entry claims out of the concatenated bulk payload.
     pub byte_length: u32,
 }
@@ -149,6 +192,7 @@ impl OutputFrameProbeResult {
                 sample_format: entry.sample_format,
                 sample_layout: entry.sample_layout,
                 display_layout: entry.display_layout,
+                placements: entry.placements,
                 byte_length,
             });
         }
@@ -182,6 +226,7 @@ impl OutputFrameProbeResultHeader {
                     sample_format: header.sample_format,
                     sample_layout: header.sample_layout,
                     display_layout: header.display_layout,
+                    placements: header.placements,
                     bytes: bytes[start..end].to_vec(),
                 }
             })
@@ -332,6 +377,15 @@ mod tests {
                 }],
             },
             display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            placements: vec![WireOutputPlacement {
+                node: NodeId::new(9),
+                output: 0,
+                source_lamp: 0,
+                source_lamps: (bytes.len() / 6) as u32,
+                wire_lamp: 0,
+                lamps: (bytes.len() / 6) as u32,
+                reversed: false,
+            }],
             bytes,
         }
     }

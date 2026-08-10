@@ -1528,6 +1528,152 @@ fn the_peaches_open_onto_a_live_hero() {
     }
 }
 
+/// Both ends of the peach's patch, off a real running project: the output
+/// card's port row and each fixture card's own row, showing THE SAME cells.
+///
+/// The bay is the first surface in Studio whose data cannot be re-derived
+/// from the project file — auto-flow order belongs to the resolver — so
+/// this walks it the whole way: engine placements → probe → frame cache →
+/// both faces. The load-bearing assertion is the pairing: the body's
+/// reversed run wears one id on the wire row and on its own row, and the
+/// two rows disagree about ORDER (0–21 then 34–55 on the wire; 0–43
+/// unbroken in the fixture's own numbering) while agreeing about content.
+/// That disagreement IS the patch.
+#[test]
+fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        let faces = all_faces(&snapshot);
+
+        // -- the output side: one port, the three runs in wire order ------
+        let bay = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Output(output) => output.patch.clone(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the output card carries no patch bay"));
+        assert_eq!(bay.ports.len(), 1, "{id}: the peach drives one port");
+        assert_eq!(
+            bay.ports[0]
+                .cells
+                .iter()
+                .map(|cell| (
+                    cell.producer.clone(),
+                    cell.wire_start,
+                    cell.lamps,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Peach body".to_string(), 0, 22, false),
+                ("Peach leaf".to_string(), 22, 12, false),
+                ("Peach body".to_string(), 34, 22, true),
+            ],
+            "{id}: body 0-21, the leaf between the halves, body backwards from 34"
+        );
+        assert_eq!(bay.contested_lamps, 0, "{id}: the peach's patch is clean");
+        assert_eq!(bay.gap_lamps, 0, "{id}: and covers its whole wire");
+        let frame = bay
+            .frame
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the bay draws no live wire"));
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the bay's pixels are entirely black"
+        );
+
+        // -- the fixture side: the same runs, the fixture's own order -----
+        let body = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Fixture(fixture) => fixture
+                    .patch
+                    .as_ref()
+                    .filter(|patch| patch.lamps == 44)
+                    .cloned(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the body fixture card carries no patch row"));
+        assert_eq!(
+            body.cells
+                .iter()
+                .map(|cell| (
+                    cell.source_start,
+                    cell.lamps,
+                    cell.wire_start,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, 22, 0, false), (22, 22, 34, true)],
+            "{id}: 0-21 forward at ch0, 22-43 backwards from ch34 — unbroken here"
+        );
+        assert!(
+            !body.is_single_run(),
+            "{id}: the body reaches the wire in two pieces"
+        );
+
+        // -- and they are the SAME cells ----------------------------------
+        let wire_ids: Vec<&str> = bay.ports[0]
+            .cells
+            .iter()
+            .map(|cell| cell.id.as_str())
+            .collect();
+        for cell in &body.cells {
+            assert!(
+                wire_ids.contains(&cell.id.as_str()),
+                "{id}: the body's run {} has no twin on the wire row ({wire_ids:?})",
+                cell.id
+            );
+        }
+    }
+}
+
+/// Every face in a snapshot's editor tree, root cards and nested alike.
+fn all_faces(view: &UiStudioView) -> Vec<UiNodeFace> {
+    fn walk(children: &[crate::UiNodeChild], out: &mut Vec<UiNodeFace>) {
+        for child in children {
+            if let Some(face) = child.face.clone() {
+                out.push(face);
+            }
+            walk(&child.children, out);
+        }
+    }
+    let mut faces = Vec::new();
+    for node in &project_editor(view).nodes {
+        if let Some(face) = node.face.clone() {
+            faces.push(face);
+        }
+        walk(&node.children, &mut faces);
+    }
+    faces
+}
+
 #[test]
 fn every_gallery_example_opens_onto_a_populated_root_panel() {
     // A gallery example that opens onto an EMPTY panel teaches the wrong

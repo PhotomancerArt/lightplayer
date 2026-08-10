@@ -44,6 +44,8 @@ pub(crate) mod palette_chooser_stories;
 pub(crate) mod palette_swatch_stories;
 mod panel;
 #[cfg(feature = "stories")]
+pub(crate) mod patch_bay_stories;
+#[cfg(feature = "stories")]
 pub(crate) mod playlist_face_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod produced_product_stories;
@@ -96,8 +98,8 @@ pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub(crate) use face::node_ui_action;
 pub use face::{
-    ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
-    PlaylistFace, ShaderFace, TapeTransport,
+    ClockFace, FixtureFace, HoveredPatchCell, NodeCardDrawers, NodeCardSection, NodeFaceBody,
+    OutputFace, PlaylistFace, ShaderFace, TapeTransport,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};

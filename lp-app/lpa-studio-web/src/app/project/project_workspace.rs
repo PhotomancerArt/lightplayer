@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectEditorView, ProjectSyncPhase, UiAction, UiChannelChoice};
 
-use crate::app::node::{NodePane, PaletteCatalog, WorkspaceAddNodeButton, project_palette_choices};
+use crate::app::node::{
+    HoveredPatchCell, NodePane, PaletteCatalog, WorkspaceAddNodeButton, project_palette_choices,
+};
 
 /// The node-body column of the project editor: one `NodePane` per synced
 /// node. The sidebar column is the [`ProjectPane`](super::ProjectPane) —
@@ -28,6 +30,12 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiA
             catalog: None,
         });
     }
+    // The patch bay's twin-hover key (D34a). It has to live ABOVE the
+    // cards: the two faces of one cell are on two different cards (a
+    // fixture's and the output's), and lighting them together is the whole
+    // point. A bay rendered outside a workspace (stories, docs embeds)
+    // provides its own and degrades to per-face hover.
+    use_context_provider(|| HoveredPatchCell(Signal::new(None)));
     // An empty node list means "still syncing" only before the first sync
     // completes; afterwards it is a real (and normal) empty project.
     let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);

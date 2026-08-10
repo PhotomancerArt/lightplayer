@@ -31,6 +31,7 @@ pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
 pub(crate) mod output_frame_cache;
+pub(crate) mod patch_bay_derivation;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
