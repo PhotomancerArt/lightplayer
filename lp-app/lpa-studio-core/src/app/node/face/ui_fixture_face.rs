@@ -22,6 +22,9 @@ pub struct UiFixtureFace {
     /// The mapping document's inline-editor plumbing (fetch/apply/revert
     /// targets), present when the mapping slot resolves to a `Map2d` asset.
     pub mapping_editor: Option<UiAssetEditor>,
+    /// The patch document's plumbing (`{stem}.patch.json`), when the
+    /// fixture authors one — the patch surface's write target (P6).
+    pub patch_editor: Option<UiAssetEditor>,
     /// Estimated draw against the declared supply budget. `None` when the
     /// fixture declares no budget, in which case nothing is ever limited and
     /// there is nothing worth saying on the face.

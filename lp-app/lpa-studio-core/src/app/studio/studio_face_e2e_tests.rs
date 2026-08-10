@@ -3517,3 +3517,195 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
         );
     }
 }
+
+/// The G1 acceptance run, headless: author the mini-dome's as-built
+/// permutation LIVE through the verb ops — clear both fixtures, assign
+/// every sector and door to its port, reverse `/sector/1`, rotate
+/// `/sector/2` by ten lamps and `/door/1` by one SIDE — and the written
+/// documents equal the shipped hand-authored files **byte for byte**.
+/// Then undo walks the whole thing back to the cleared state.
+#[test]
+fn verbs_author_the_mini_dome_permutation_byte_identically() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let shipped: std::collections::BTreeMap<&str, &[u8]> = example
+        .files
+        .iter()
+        .map(|(path, bytes)| (*path, *bytes))
+        .collect();
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    // Fetch every fixture's patch + map2d bodies (what the page does).
+    let (dome, doors) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let by_label = |needle: &str| {
+            surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains(needle))
+                .unwrap_or_else(|| panic!("no {needle} fixture"))
+                .clone()
+        };
+        (by_label("dome"), by_label("door"))
+    };
+    for fixture in [&dome, &doors] {
+        for artifact in [
+            fixture.patch_artifact.clone(),
+            fixture.mapping_artifact.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    crate::AssetContentFetchOp { artifact },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }
+    }
+
+    let fixtures = || {
+        [&dome, &doors]
+            .iter()
+            .map(|fixture| crate::PatchVerbFixture {
+                node: fixture.node,
+                patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
+                mapping_artifact: fixture.mapping_artifact.clone(),
+                lamp_count: fixture.patch.lamps,
+            })
+            .collect::<Vec<_>>()
+    };
+    macro_rules! verb {
+        ($subject_fixture:expr, $path:expr, $kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some($subject_fixture),
+                        subject: PatchVerbSubject {
+                            path: ($path as Option<&str>).map(str::to_string),
+                            range: None,
+                        },
+                        fixtures: fixtures(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+
+    // Clear both docs, then author the permutation in row order.
+    verb!(dome.node, None, PatchVerbKind::Clear);
+    verb!(doors.node, None, PatchVerbKind::Clear);
+    let assign = |name: &str, lamp: u32| PatchVerbKind::Assign {
+        output_name: Some(name.to_string()),
+        lamp,
+    };
+    verb!(dome.node, Some("/sector/0"), assign("1", 69));
+    verb!(dome.node, Some("/sector/1"), assign("Box 2", 0));
+    verb!(dome.node, Some("/sector/1"), PatchVerbKind::Reverse);
+    verb!(dome.node, Some("/sector/2"), assign("1", 0));
+    verb!(
+        dome.node,
+        Some("/sector/2"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 10,
+        }
+    );
+    verb!(dome.node, Some("/sector/3"), assign("Box 2", 39));
+    verb!(dome.node, Some("/sector/4"), assign("1", 39));
+    verb!(doors.node, Some("/door/0"), assign("1", 30));
+    verb!(doors.node, Some("/door/1"), assign("Box 2", 30));
+    verb!(
+        doors.node,
+        Some("/door/1"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 3
+        }
+    );
+    verb!(doors.node, Some("/door/2"), assign("1", 99));
+
+    // Persist the overlay so the authored bytes are on disk (the same
+    // save the user presses), then read them back.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+
+    // The authored bytes ARE the shipped bytes.
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let body_of = |artifact: &lpc_model::ArtifactLocation| {
+        let path = format!(
+            "{project_dir}/{}",
+            artifact.file_path().as_str().trim_start_matches('/')
+        );
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(path.as_str().as_path())
+            .unwrap_or_else(|_| panic!("no body at {path}"));
+        String::from_utf8(bytes).expect("utf8 patch doc")
+    };
+    assert_eq!(
+        body_of(dome.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["dome/dome.patch.json"]).to_string(),
+        "the dome's authored patch equals the hand-authored truth"
+    );
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["doors/doors.patch.json"]).to_string(),
+        "the doors' authored patch equals the hand-authored truth"
+    );
+
+    // Undo restores the exact prior bytes, one gesture at a time.
+    let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    verb!(doors.node, None, PatchVerbKind::Undo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    assert_ne!(before_undo, after_undo, "undo moved the document back");
+    verb!(doors.node, None, PatchVerbKind::Redo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        before_undo,
+        "redo restores the undone gesture byte-for-byte"
+    );
+}
