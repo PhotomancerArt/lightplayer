@@ -333,3 +333,62 @@ surface; the agent still owns exactly the overlay door.
 - OpenRouter reasoning requires a request opt-in (`reasoning: {}`) —
   provider-gated request field when wanted.
 - Transcript/session persistence across reloads remains v1-out-of-scope.
+
+## Addendum (2026-08-09): `declare_space` — the write surface reaches dimensionality
+
+The dimensionality studio surface (PR #399) put a `dimensionality`
+section on the shader card: the author picks 1D/2D and, for 1D, the
+projection 2D consumers see (`shape × mirror × flip`, format v9). G1
+ruling 2 was explicit that agents must reach it too — "whatever section
+owns dimensionality must be reachable by the agent pane, like code edits
+are."
+
+### Write surface: three tools, still one door
+
+`declare_space` joins `iterate` and `upsert_param`, following the same
+rule this ADR set: **a write op gets its own explicit tool**, never an
+`iterate` argument. Input is `{space: "1d"|"2d", shape?, mirror?, flip?}`;
+the projection fields are REFUSED on a `2d` declaration rather than
+ignored (the `deny_unknown_fields` posture — silently dropping an
+argument teaches the model a false model of the tool). It materializes
+as ONE `MutationCmdBatch` of `PutSlotEdit`s on the def artifact, through
+the same Save-gated overlay. The door count still did not change.
+
+Unlike `upsert_param` there is **no pre-check against the current
+source**. Declaring the space the GLSL does not yet match is the normal
+repair order in both directions, so gating the write on a matching entry
+point would refuse exactly the call that fixes a mismatch — the same
+live-session lesson that produced the textual-declaration-scan fallback.
+
+### One writer, two presentations
+
+The section's tiles carry slot ADDRESSES and dispatch the generic
+`EnsurePresent <enum row>.<Variant>` gesture. `declare_space` cannot
+reuse the derivation directly — it writes `space.OneD` and its payload
+in ONE call, so the payload rows do not exist in the tree yet to be
+addressed — so `space_declaration_edits()` in `agent_support.rs` spells
+the same ops for statically-known paths, and
+`agent_edits_match_the_dimensionality_tiles` pins every path it emits
+against the derivation's own addresses. Drift on either side is a test
+failure, not a silent second write path.
+
+The def-write ack protocol (seq cell, bounded poll) was factored into
+one `dispatch_def_write` on the host bridge, shared by both write tools.
+
+### The prompt's entry line is DERIVED, not asserted
+
+The system prompt stated "The entry point is `vec4 render_2d(vec2 pos)`"
+unconditionally. On a `OneD` node — `examples/fire2012`, `comet`,
+`palette-waves`, and the 1D project template — that is false, and the
+agent's first edit breaks the node, because the declaration IS the entry
+contract (`lp_shader::ShaderEntrySpace`). `ShaderContext` now carries the
+node's declared space and the line follows it, naming
+`vec4 render_1d(float pos)` and the `pos / outputSize.x` normalization
+for 1D nodes.
+
+### Known gap (not closed here)
+
+`lps-probe` — the agent's probe/oracle world — hard-requires
+`render_2d`. On a 1D node `iterate` still stages source and reports the
+engine verdict correctly, but its PROBES cannot evaluate the shader.
+Probe-world 1D support is its own piece of work.
