@@ -727,63 +727,8 @@ impl ProjectSync {
         }
     }
 
-    /// Control products whose latest preview carries no display layout,
-    /// paired with that preview's product revision — the candidates for the
-    /// client-side fallback
-    /// ([`crate::app::project::control_display_layout_fallback`]).
-    ///
-    /// A layout is missing whenever the engine refused it (over the wire
-    /// budget, or a producer that publishes none) and nothing cached stands
-    /// in, which is exactly the state
-    /// [`display_layout_from_probe_result`]'s `Unsupported` arm leaves
-    /// behind.
-    pub(in crate::app::project) fn control_products_missing_display_layout(
-        &self,
-    ) -> Vec<(UiProductRef, Revision)> {
-        self.product_previews
-            .iter()
-            .filter_map(|(product, preview)| match preview {
-                UiProductPreview::ControlNative(preview) if preview.display_layout.is_none() => {
-                    Some((*product, Revision::new(preview.revision)))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Install a client-synthesized display layout on a cached control
-    /// preview. A no-op when the preview is gone or is not a native control
-    /// preview — the fallback never creates preview state of its own.
-    pub(in crate::app::project) fn set_control_display_layout(
-        &mut self,
-        product: &UiProductRef,
-        layout: Rc<ControlDisplayLayout>,
-    ) {
-        if let Some(UiProductPreview::ControlNative(preview)) =
-            self.product_previews.get_mut(product)
-        {
-            preview.display_layout = Some(layout);
-        }
-    }
-
     /// What the next probe should ask for: nothing new while the cached
     /// layout's revision still stands, otherwise the whole layout.
-    ///
-    /// A client-synthesized layout ([`Self::set_control_display_layout`])
-    /// rides this the same way an engine-sent one does, carrying the
-    /// preview's PRODUCT revision rather than the engine's layout revision —
-    /// the refusal never tells us the latter. Both answers the engine can
-    /// give back are correct:
-    ///
-    /// - the revisions differ (the normal case, since the product revision
-    ///   advances every tick), so the engine re-evaluates, refuses again,
-    ///   and the fallback re-synthesizes from the current document;
-    /// - they coincide, so the engine answers `Unchanged` and the cached
-    ///   synthesis is kept — which is what a matching layout revision means
-    ///   anyway: the geometry has not moved.
-    ///
-    /// Neither path issues an extra request or loses the layout, so the
-    /// fallback cannot churn the read loop.
     fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
         match self
             .product_previews
