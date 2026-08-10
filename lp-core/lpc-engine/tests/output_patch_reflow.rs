@@ -543,6 +543,58 @@ fn a_patched_display_layout_draws_every_lamp_at_its_own_colour() {
     }
 }
 
+/// "No placements yet" is a MOMENT, not a refusal.
+///
+/// `Unsupported` is permanent on the wire: both client feeds stop asking for
+/// geometry the instant they see one, and stand a locally synthesized layout
+/// up in its place — which, for a project with more than one fixture, is one
+/// fixture's lamps reading the whole wire's samples. Answering an output that
+/// has simply not planned its fragments yet with `Unsupported` would therefore
+/// strand a card on that wrong picture for the rest of the connection. The
+/// honest answer is `Omitted`, and the very next read carries the layout.
+#[test]
+fn an_output_with_no_placements_yet_omits_its_layout_rather_than_refusing_it() {
+    let fs = project_fs(true);
+    let (mut engine, registry) = load(&fs);
+
+    // Before the first settled frame the output has published no fragments.
+    let answer = display_layout_answer(&mut engine, &registry);
+    assert!(
+        matches!(
+            answer,
+            ControlDisplayLayoutProbeResult::Omitted | ControlDisplayLayoutProbeResult::Layout(_)
+        ),
+        "a not-yet-placed output says nothing, it does not refuse forever: {answer:?}"
+    );
+
+    tick(&mut engine, &registry, SETTLE_TICKS);
+    assert!(
+        matches!(
+            display_layout_answer(&mut engine, &registry),
+            ControlDisplayLayoutProbeResult::Layout(_)
+        ),
+        "and the geometry arrives once the placements do"
+    );
+}
+
+/// The display-layout half of the published-frame answer, whatever it is.
+fn display_layout_answer(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+) -> ControlDisplayLayoutProbeResult {
+    let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
+        registry,
+        OutputFrameProbeRequest {
+            display_layout: ControlDisplayLayoutRead::Always,
+        },
+    );
+    outputs
+        .into_iter()
+        .next()
+        .map(|entry| entry.display_layout)
+        .unwrap_or(ControlDisplayLayoutProbeResult::Omitted)
+}
+
 /// A patch edit re-cuts the wire without touching any mapping — so the
 /// producers' own layout revisions do not move, and a client gating on
 /// `IfChanged` would keep drawing the old geometry over the new frame.

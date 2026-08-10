@@ -1380,17 +1380,23 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     );
 }
 
-/// The peaches' root card shows the peach — not a black square.
+/// The peaches' root card shows the WHOLE peach — the wire its output
+/// composes, not one child's raster.
 ///
-/// A module face's hero reads its scope's BARE `visual.out`. An INSTANCE
-/// channel (`visual.out/body`) is a different channel, so a project whose
-/// only visual producers publish to instances leaves the root mirror cleared
-/// and the card renders black — which is exactly what the peaches did at G1
-/// round 1, and exactly the sort of thing that a passing panel walk and a
-/// green byte-identity check both say nothing about. The peaches are now two
-/// submodules, each publishing its own scope's bare `visual.out`, with the
-/// body's the authored pick at the root (R7 contention). This is what says
-/// the pick still lands.
+/// A module face's hero used to read its scope's two bus channels and
+/// nothing else, so the peaches' root card wore the BODY submodule's
+/// `visual.out` mirror: a full-frame pink plane standing in for a project
+/// whose actual output is 56 lamps of body AND leaf (G1 round 3 — "peach
+/// (2d) root module isn't showing control output, just the peach body
+/// visual.out"). The root `control.out` cannot answer for it either: two
+/// submodules export onto it, so it resolves to a fragments map rather than
+/// to any single product. A scope that OWNS an output now heroes that
+/// output's published frame, which is the only thing that knows the whole
+/// composition.
+///
+/// The leaf assertion is the load-bearing half: pink alone would also pass
+/// with the body's own lamps, and "the leaf is nowhere" is exactly the shape
+/// both of this gate's display defects took.
 #[test]
 fn the_peaches_open_onto_a_live_hero() {
     for id in ["examples/peach-1d", "examples/peach-2d"] {
@@ -1426,14 +1432,99 @@ fn the_peaches_open_onto_a_live_hero() {
         let hero = module_face(&snapshot)
             .preview
             .unwrap_or_else(|| panic!("{id}: the root module card has no hero at all"));
-        let crate::UiProductPreview::VisualSrgb8 { bytes, .. } = &hero.preview else {
-            panic!("{id}: the root hero is not the module's raster: {hero:?}");
-        };
-        assert!(
-            bytes.iter().any(|byte| *byte != 0),
-            "{id}: the root module hero is entirely black — its scope's \
-             `visual.out` resolves to nothing a viewer can see"
+        assert_eq!(
+            hero.kind,
+            crate::UiProductKind::Control,
+            "{id}: a scope owning an output heroes its lamps, not a raster"
         );
+        let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+            panic!("{id}: the root hero is not the composed wire: {hero:?}");
+        };
+        let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+            frame.display_layout.as_deref()
+        else {
+            panic!("{id}: the root hero carries no geometry to draw its lamps with");
+        };
+        assert_eq!(
+            layout.lamps.len(),
+            56,
+            "{id}: the hero draws the WHOLE wire — body (44) plus leaf (12)"
+        );
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the root module hero is entirely black"
+        );
+
+        // Both fixtures, each in its own colour. The leaf is the strand
+        // patched INTO the middle of the body's run (channels 22-33), so a
+        // hero that draws only the first producer, or draws every lamp with
+        // the first producer's offsets, fails here.
+        let lamp_colour = |slot: u32| -> [u16; 3] {
+            let lamp = layout
+                .lamps
+                .iter()
+                .find(|lamp| lamp.sample_start == slot * 3)
+                .unwrap_or_else(|| panic!("{id}: no lamp draws wire channel {slot}"));
+            let base = lamp.sample_start as usize * 2;
+            core::array::from_fn(|channel| {
+                let at = base + channel * 2;
+                u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+            })
+        };
+        for slot in [0, 21, 34, 55] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                red > green,
+                "{id}: wire channel {slot} is the peach's flesh and reads pink"
+            );
+        }
+        for slot in [22, 33] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                green > red,
+                "{id}: wire channel {slot} is a leaf and reads green"
+            );
+        }
+
+        // …and the rule stops at the scope that owns the output. `body/` and
+        // `leaf/` drive no output of their own, so their cards keep the
+        // ordinary two-channel hero: each shows the lamps ITS scope resolves
+        // (through a real product ref), never the merged wire.
+        let root = project_editor(&snapshot)
+            .nodes
+            .first()
+            .expect("the root module card")
+            .clone();
+        for (name, own_lamps) in [("Body", 44), ("Leaf", 12)] {
+            let child = root
+                .children
+                .iter()
+                .find(|child| child.label == name)
+                .unwrap_or_else(|| panic!("{id}: the {name} submodule card"));
+            let Some(UiNodeFace::Module(face)) = child.face.clone() else {
+                panic!("{id}: {name} wears a module face");
+            };
+            let hero = face
+                .preview
+                .unwrap_or_else(|| panic!("{id}: {name} has no hero"));
+            assert!(
+                hero.product.is_some(),
+                "{id}: {name} heroes its own scope's product, not a sink's frame"
+            );
+            let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+                panic!("{id}: {name}'s hero is not its own lamps: {hero:?}");
+            };
+            let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+                frame.display_layout.as_deref()
+            else {
+                panic!("{id}: {name}'s hero carries no geometry");
+            };
+            assert_eq!(
+                layout.lamps.len(),
+                own_lamps,
+                "{id}: {name} draws its OWN fixture, not the whole wire"
+            );
+        }
     }
 }
 
@@ -1606,11 +1697,13 @@ fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
 
 #[test]
 fn a_one_product_module_falls_back_to_whichever_product_it_has() {
-    // The preference names a kind the scope does not resolve: the hero
-    // falls back to the other one, in both directions, and no toggle is
-    // offered — a one-product module has no choice to make. Neither
-    // project routes its primaries any differently from a real one; each
-    // simply leaves one primary channel unwritten.
+    // The preference names a kind the scope does not resolve. Both projects
+    // route their primaries like a real one; each simply leaves one primary
+    // channel unwritten — and both DRIVE AN OUTPUT, which is the other half
+    // of the answer here: a scope that owns an output heroes the wire that
+    // output composes whichever bus channels resolve, so the fallback the
+    // toggle expresses is between the wire and the raster, not between two
+    // bus channels.
     for visual_only in [false, true] {
         let server = Rc::new(RefCell::new(single_product_e2e_server(visual_only)));
         let io = InProcessServerIo {
@@ -1634,19 +1727,18 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
 
         let face = module_face(&snapshot);
         assert_eq!(
-            face.hero_choice, None,
-            "visual_only={visual_only}: one product is not a choice"
+            face.hero_choice,
+            // The raster-only project publishes `visual.out` AND drives an
+            // output, so there is a genuine choice to draw; the other writes
+            // no `visual.out` at all and has nothing to flip to.
+            visual_only.then_some(crate::ModuleHeroProduct::Control),
+            "visual_only={visual_only}: a toggle appears exactly when both sides exist"
         );
-        let want = if visual_only {
-            crate::UiProductKind::Visual
-        } else {
-            crate::UiProductKind::Control
-        };
         assert_eq!(
             face.preview.expect("the root module's hero").kind,
-            want,
-            "visual_only={visual_only}: the hero falls back to the product \
-             the scope actually resolves"
+            crate::UiProductKind::Control,
+            "visual_only={visual_only}: the lamps lead either way — through the \
+             scope's own control product, or through the output's wire"
         );
     }
 }

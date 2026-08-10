@@ -4804,3 +4804,154 @@ fn drive<F: Future>(future: F) -> F::Output {
     }
     panic!("link e2e future did not complete within the poll budget");
 }
+
+/// The DEVICE tier of the patched-wire promise: what lands on a card's ▶ tab
+/// for a project whose output merges TWO fixtures has to draw every lamp on
+/// the wire, at its own place, in its own colour.
+///
+/// `examples/peach-2d` is the shape that broke: the body is patched as two
+/// runs (channels 0–21, then 22–43 reversed onto 34–55) with the leaf plugged
+/// into the hole between them (22–33). Ask ONE producer for the whole
+/// output's geometry — as the display path did before the fragment rebase —
+/// and you get the body's 44 lamps reading the WIRE's first 44 channels: the
+/// body's far half painted with the leaf's green, and no leaf drawn at all.
+/// That is precisely what a viewer reported seeing on the simulator's card,
+/// and the engine-side rows (`lpc-engine/tests/output_patch_reflow.rs`) said
+/// nothing about it because they stop at the probe.
+///
+/// So this row runs the whole pipeline the card actually uses: a real host
+/// `LpServer` behind the real `M!` serial framing, reached through the link,
+/// pulled by the real feed, folded by `CardFeedState`, read off the DTO the
+/// ▶ tab renders.
+#[test]
+fn a_patched_two_fixture_card_draws_every_lamp_in_its_own_colour() {
+    let (mut studio, card_key, _device) = studio_feeding_a_loaded_peach();
+
+    run_card_feeds(&mut studio);
+
+    let card = device_card(&studio, &card_key);
+    let frame = card
+        .frame_preview
+        .as_ref()
+        .expect("the board published a frame");
+    let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) = frame.display_layout.as_deref()
+    else {
+        panic!("the card has no geometry to draw the published frame with");
+    };
+
+    // Every wire channel drawn exactly once. The one-producer answer has 44
+    // lamps here, and the 12 it is missing are the leaf.
+    let mut slots: Vec<u32> = layout
+        .lamps
+        .iter()
+        .map(|lamp| lamp.sample_start / 3)
+        .collect();
+    slots.sort_unstable();
+    assert_eq!(
+        slots,
+        (0..56).collect::<Vec<u32>>(),
+        "the card's layout covers the whole 56-channel wire, one lamp per channel"
+    );
+
+    // Each lamp reads ITS OWN samples: the body's flesh is pink everywhere it
+    // sits on the wire, and the leaf — the run patched into the middle of the
+    // body's — is green. A layout carrying a producer's own offsets instead
+    // of the wire's fails on the reversed tail (34–55) as well as the leaf.
+    let colour = |slot: u32| -> [u16; 3] {
+        let lamp = layout
+            .lamps
+            .iter()
+            .find(|lamp| lamp.sample_start == slot * 3)
+            .expect("a lamp for every channel");
+        let base = lamp.sample_start as usize * 2;
+        core::array::from_fn(|channel| {
+            let at = base + channel * 2;
+            u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+        })
+    };
+    for slot in (0..22).chain(34..56) {
+        let [red, green, _] = colour(slot);
+        assert!(
+            red > green,
+            "channel {slot} is the peach's flesh and must read pink, not the leaf's green"
+        );
+    }
+    for slot in 22..34 {
+        let [red, green, _] = colour(slot);
+        assert!(green > red, "channel {slot} is a leaf and must read green");
+    }
+
+    // The lamps are where the fixtures put them, not stacked on one another:
+    // the leaf band sits above the body in the shared canvas both maps
+    // declare, which is what makes "the leaf is nowhere" visible.
+    let mid_y = |slots: &mut dyn Iterator<Item = u32>| -> f32 {
+        let ys: Vec<f32> = slots
+            .map(|slot| {
+                layout
+                    .lamps
+                    .iter()
+                    .find(|lamp| lamp.sample_start == slot * 3)
+                    .expect("a lamp for every channel")
+                    .center[1]
+            })
+            .collect();
+        ys.iter().sum::<f32>() / ys.len() as f32
+    };
+    let leaf_y = mid_y(&mut (22..34));
+    let body_y = mid_y(&mut (0..22).chain(34..56));
+    assert!(
+        leaf_y < body_y,
+        "the leaves draw above the fruit ({leaf_y} vs {body_y}) — a layout that \
+         normalized each fixture to its own bounds would pile them together"
+    );
+}
+
+/// A fake board booted with `examples/peach-2d` loaded and running, its
+/// card's ▶ tab selected — the patched-wire fixture.
+fn studio_feeding_a_loaded_peach() -> (StudioController, String, FakeEsp32Device) {
+    let (store, host) = library();
+    let example =
+        crate::app::home::embedded_example("examples/peach-2d").expect("the peach is embedded");
+    let summary = store
+        .install_package("Peach", &example.files(), PackageProvenance::Created, 1.0)
+        .expect("the peach installs");
+    let library_files = store
+        .open(summary.uid)
+        .expect("the installed package opens")
+        .read_all_files()
+        .expect("its files read back");
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "devaaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let endpoint_id = LinkEndpointId::new("fake-device-0");
+    let provider =
+        FakeProvider::new().with_device_endpoint(endpoint_id.clone(), "Fake ESP32", script);
+    let device = provider.device(&endpoint_id).expect("device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let mut studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        view.home
+            .as_ref()
+            .expect("gallery showing")
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card")
+            .identity_key()
+            .to_string()
+    };
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
+    (studio, card_key, device)
+}

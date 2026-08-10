@@ -495,6 +495,15 @@ impl Engine {
     /// lamps; the rest of the wire still draws. Only when NOTHING answers does
     /// the whole read report `Unsupported`, carrying the first refusal's reason
     /// so the client can say why.
+    ///
+    /// `Unsupported` is a PERMANENT answer, and every client treats it as one:
+    /// both feeds stop asking for geometry on the spot and stand a local
+    /// synthesis up in its place (see `card_feed.rs` and
+    /// `preview_output_feed.rs`), because re-asking would make a dome-scale
+    /// board rebuild and measure a layout it cannot send, every pull. So an
+    /// output that has simply not planned its placements yet must NOT answer
+    /// with it: "nothing to say this tick" is `Omitted`, and the client keeps
+    /// asking until there is.
     fn output_frame_display_layout(
         &mut self,
         registry: &ProjectRegistry,
@@ -502,11 +511,7 @@ impl Engine {
         read: ControlDisplayLayoutRead,
     ) -> ControlDisplayLayoutProbeResult {
         if candidate.fragments.is_empty() {
-            return ControlDisplayLayoutProbeResult::Unsupported {
-                reason: String::from(
-                    "output has not published a frame yet, so it has no placed producers",
-                ),
-            };
+            return ControlDisplayLayoutProbeResult::Omitted;
         }
 
         // One probe per PRODUCT, not per fragment: a patched producer is cut
