@@ -64,6 +64,22 @@ pub trait AgentHost {
         Box::pin(async { Err(HostError::new("this host cannot edit param records")) })
     }
 
+    /// Write the shader's declared space (`ShaderDef::space`) through the
+    /// host's Save-gated overlay path (the `declare_space` tool's write
+    /// seam) — the SAME op sequence the dimensionality section's tiles
+    /// dispatch.
+    fn declare_space<'a>(
+        &'a mut self,
+        declaration: &'a SpaceDeclaration,
+    ) -> HostFuture<'a, Result<(), HostError>> {
+        let _ = declaration;
+        Box::pin(async {
+            Err(HostError::new(
+                "this host cannot edit the space declaration",
+            ))
+        })
+    }
+
     /// The target fixture's LED sample points (normalized coordinates).
     fn led_points(&self) -> Vec<LedPoint>;
 
@@ -165,6 +181,120 @@ pub struct ParamUpsert {
     pub phase_offset: Option<f32>,
 }
 
+/// The space a shader DECLARES it renders in (`ShaderDef::space`'s
+/// variant). The declaration IS the entry contract: a `TwoD` node's GLSL
+/// defines `vec4 render_2d(vec2 pos)`, a `OneD` node's defines
+/// `vec4 render_1d(float pos)`, and the compiler refuses the mismatch —
+/// which is why the system prompt has to state the RIGHT one.
+///
+/// `TwoD` is the default because the model's is: every shader authored
+/// before the dimensionality work is `TwoD`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeclaredSpace {
+    #[default]
+    TwoD,
+    OneD,
+}
+
+impl DeclaredSpace {
+    /// The wire tag the `declare_space` tool accepts (`"1d"` / `"2d"`).
+    pub fn parse(tag: &str) -> Option<Self> {
+        match tag {
+            "1d" => Some(Self::OneD),
+            "2d" => Some(Self::TwoD),
+            _ => None,
+        }
+    }
+
+    /// The model's variant ident — a slot path segment, so it must match
+    /// `ShaderSpace`'s declaration verbatim.
+    pub fn variant_ident(self) -> &'static str {
+        match self {
+            Self::TwoD => "TwoD",
+            Self::OneD => "OneD",
+        }
+    }
+
+    /// The wire tag (`"1d"` / `"2d"`), for echoing a write back.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::TwoD => "2d",
+            Self::OneD => "1d",
+        }
+    }
+}
+
+/// The base coordinate map a 1D shader offers 2D consumers — the factored
+/// `SpaceAnswer2::Project`'s `shape` field (format v9). Mirrored here
+/// rather than reused from `lpc-model` because the agent core does not
+/// depend on the model crate; [`Self::variant_ident`] is the contract that
+/// keeps the two spellings aligned, pinned by a studio-side test.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectionShapeTag {
+    /// `u = x`: the strip runs the columns (the system default).
+    #[default]
+    ExtrudeX,
+    /// `u = y`: the strip runs the rows.
+    ExtrudeY,
+    /// Distance from the centre.
+    Radial,
+    /// Angle around the centre.
+    Angular,
+}
+
+impl ProjectionShapeTag {
+    /// Every wire tag the tool accepts, in declaration order.
+    pub const TAGS: [&'static str; 4] = ["extrude-x", "extrude-y", "radial", "angular"];
+
+    /// Parse one wire tag.
+    pub fn parse(tag: &str) -> Option<Self> {
+        match tag {
+            "extrude-x" => Some(Self::ExtrudeX),
+            "extrude-y" => Some(Self::ExtrudeY),
+            "radial" => Some(Self::Radial),
+            "angular" => Some(Self::Angular),
+            _ => None,
+        }
+    }
+
+    /// The model's variant ident — a slot path segment.
+    pub fn variant_ident(self) -> &'static str {
+        match self {
+            Self::ExtrudeX => "ExtrudeX",
+            Self::ExtrudeY => "ExtrudeY",
+            Self::Radial => "Radial",
+            Self::Angular => "Angular",
+        }
+    }
+
+    /// The wire tag, for echoing a write back.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::ExtrudeX => "extrude-x",
+            Self::ExtrudeY => "extrude-y",
+            Self::Radial => "radial",
+            Self::Angular => "angular",
+        }
+    }
+}
+
+/// One `declare_space` write: the declared space, plus — for a `OneD`
+/// declaration only — the projection it offers 2D consumers. The three
+/// projection fields are written only when present, exactly like
+/// [`ParamUpsert`]'s optional fields; the tool refuses them outright on a
+/// `TwoD` declaration rather than ignoring them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpaceDeclaration {
+    /// The space to declare.
+    pub space: DeclaredSpace,
+    /// The projection's base shape (`OneD` only).
+    pub shape: Option<ProjectionShapeTag>,
+    /// Fold the strip around the map's midpoint (`OneD` only).
+    pub mirror: Option<bool>,
+    /// Reverse the strip, applied after the fold (`OneD` only).
+    pub flip: Option<bool>,
+}
+
 /// A host-side failure (project unavailable, write refused, ...). These are
 /// the only failures reported as `is_error` tool results.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,6 +319,10 @@ pub struct ShaderContext {
     pub fixture: Option<FixtureSummary>,
     /// Declared uniform bindings with their current values.
     pub bindings: Vec<BindingInfo>,
+    /// The node's DECLARED space. The prompt's entry-point line is derived
+    /// from this — stating `render_2d` unconditionally is false on every
+    /// 1D node and breaks the agent's first edit.
+    pub space: DeclaredSpace,
 }
 
 /// Fixture summary for the prompt.
