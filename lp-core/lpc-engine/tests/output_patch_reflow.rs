@@ -739,7 +739,12 @@ fn the_header_total_gates_layouts_across_outputs() {
     assert_eq!(outputs.len(), 3, "all three frames flow regardless");
     let answered = outputs
         .iter()
-        .filter(|entry| matches!(entry.display_layout, ControlDisplayLayoutProbeResult::Layout(_)))
+        .filter(|entry| {
+            matches!(
+                entry.display_layout,
+                ControlDisplayLayoutProbeResult::Layout(_)
+            )
+        })
         .count();
     let refused: Vec<_> = outputs
         .iter()

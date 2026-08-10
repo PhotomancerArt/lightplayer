@@ -364,7 +364,6 @@ mod tests {
         );
     }
 
-
     /// A refusal is permanent for the connection: the feed stops asking so
     /// the engine stops re-building and re-measuring a layout it will
     /// refuse again — and the card stays honestly layout-less.

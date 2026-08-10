@@ -1888,7 +1888,6 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
     }
 }
 
-
 /// Dome scale: the ENGINE answers the 1500-lamp layout over the wire.
 ///
 /// Packed (spans + base64 u16 centers, ~5.4 B/lamp) the dome's layout

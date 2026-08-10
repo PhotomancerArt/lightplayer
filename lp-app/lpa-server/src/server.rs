@@ -686,7 +686,9 @@ impl LpServer {
             project
                 .engine_mut()
                 .set_safe_output_clamp(self.safe_output_clamp);
-            project.engine_mut().set_display_layout_budget(engine_budget);
+            project
+                .engine_mut()
+                .set_display_layout_budget(engine_budget);
         }
         Ok(handle)
     }
@@ -735,7 +737,9 @@ impl LpServer {
             .collect();
         for handle in handles {
             if let Some(project) = self.project_manager.get_project_mut(handle) {
-                project.engine_mut().set_display_layout_budget(engine_budget);
+                project
+                    .engine_mut()
+                    .set_display_layout_budget(engine_budget);
             }
         }
     }

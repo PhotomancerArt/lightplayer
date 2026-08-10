@@ -454,14 +454,7 @@ mod tests {
     /// A run of `count` lamps from `first` with RGB stride and one radius.
     fn run(first: u32, count: u32, sample_start: u32, radius: f32) -> Vec<ControlLamp2d> {
         (0..count)
-            .map(|k| {
-                lamp(
-                    first + k,
-                    sample_start + k * 3,
-                    [0.25, 0.75],
-                    radius,
-                )
-            })
+            .map(|k| lamp(first + k, sample_start + k * 3, [0.25, 0.75], radius))
             .collect()
     }
 
@@ -595,10 +588,7 @@ mod tests {
     /// ignores it.
     #[test]
     fn single_lamp_spans_round_trip() {
-        let lamps = vec![
-            lamp(0, 0, [0.0, 0.0], 0.01),
-            lamp(5, 900, [1.0, 1.0], 0.02),
-        ];
+        let lamps = vec![lamp(0, 0, [0.0, 0.0], 0.01), lamp(5, 900, [1.0, 1.0], 0.02)];
         let layout = ControlLayout2d::new(Revision::new(4), 4, 4, lamps.clone());
 
         let json = serde_json::to_string(&layout).unwrap();
