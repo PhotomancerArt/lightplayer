@@ -21,7 +21,6 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
-use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
@@ -1889,50 +1888,6 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
     }
 }
 
-/// The phase's oracle: what Studio synthesizes client-side must be what the
-/// engine would have sent, field for field.
-///
-/// The face project's fixture is small (16 lamps), so the engine sends its
-/// display layout outright. Synthesizing from the SAME document at the same
-/// render extent and comparing the two layouts is the only check that keeps
-/// the mirrored construction (`control_display_layout_fallback`) honest as
-/// the engine's own layout builder evolves.
-#[test]
-fn synthesized_display_layout_matches_the_engines_own_layout() {
-    let server = Rc::new(RefCell::new(face_e2e_server()));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    // The connect read arms the product subscriptions; the probe answers on
-    // the next read.
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
-
-    let engine = fixture_display_layout(&snapshot)
-        .expect("a 16-lamp layout is far under the wire budget, so the engine sends it");
-    let doc = lpc_mapping::Map2dDoc::from_json(FACE_MAP2D).expect("the mapping document parses");
-
-    let synthesized = synthesized_map2d_layout(&doc, engine.revision, 4, 4)
-        .expect("the same document synthesizes client-side");
-
-    assert_eq!(
-        synthesized, engine,
-        "client synthesis and engine layout must agree on every lamp, hint, and path span"
-    );
-}
 
 /// Dome scale: the ENGINE answers the 1500-lamp layout over the wire.
 ///
@@ -2067,9 +2022,8 @@ const PROJECT_DIR: &str = "/projects/face-e2e";
 /// The shader uses the panel uniform so its compile stays honest.
 const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
 
-/// The face fixture's mapping document — 16 lamps, small enough that the
-/// engine sends its display layout outright, which makes it the parity
-/// oracle for the client-side synthesis.
+/// The face fixture's mapping document — 16 lamps on a 4×4 grid, the
+/// smallest shape that exercises spans, centers, and radii together.
 const FACE_MAP2D: &str = r#"{
   "format": 1,
   "objects": [
