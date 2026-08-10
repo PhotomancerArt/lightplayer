@@ -1934,12 +1934,17 @@ fn synthesized_display_layout_matches_the_engines_own_layout() {
     );
 }
 
-/// Dome scale: the engine refuses the 1500-lamp layout (over the read-frame
-/// wire budget), and the client fills it in from the mapping document
-/// instead of leaving both faces reading "Control product has no display
-/// layout."
+/// Dome scale: the ENGINE answers the 1500-lamp layout over the wire.
+///
+/// Packed (spans + base64 u16 centers, ~5.4 B/lamp) the dome's layout
+/// rides one project-read frame with margin — no client-side synthesis,
+/// no mapping-document fetch, no re-derivation that can drift from the
+/// engine's own geometry. The declared embedded ceiling is 2048 lamps
+/// (`a_2048_lamp_layout_fits_the_serial_frame_budget` in lpc-wire); this
+/// is the studio-tier proof that the flagship dome case lands on the face
+/// straight from the probe.
 #[test]
-fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
+fn a_dome_scale_layout_arrives_over_the_wire() {
     let example = crate::app::home::embedded_example("examples/zook-dome")
         .expect("the zook-dome example ships in the bundle");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
@@ -1964,11 +1969,10 @@ fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("the refresh emits a snapshot");
 
-    // The engine refused the layout (over the wire budget), and the sync
-    // path fetched the mapping document itself — no card has to mount, no
-    // editor has to open. The synthesized layout is already on the preview.
+    // The probe answered: the packed layout crossed the read and is already
+    // on the preview — no card has to mount, no editor has to open.
     let layout = fixture_display_layout(&snapshot)
-        .expect("the sync fetches the document and synthesizes the layout the engine refused");
+        .expect("the engine answers the dome-scale layout over the wire");
     assert_eq!(layout.lamps.len(), 1500, "every dome lamp is laid out");
     assert_eq!(
         (layout.width_hint, layout.height_hint),
