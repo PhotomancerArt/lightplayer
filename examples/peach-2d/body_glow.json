@@ -1,0 +1,40 @@
+{
+  "kind": "Shader",
+  "source": "body_glow.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out/body"
+    },
+    "phase": {
+      "source": "bus:speed"
+    },
+    "glow": {
+      "source": "bus:glow"
+    }
+  },
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 12.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Phase",
+      "description": "Master cycle; one sweep of the sheen across the fruit per turn"
+    },
+    "glow": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.35,
+      "min": 0.05,
+      "max": 1.0,
+      "label": "Glow",
+      "description": "How wide the sheen is as it crosses the fruit"
+    }
+  }
+}
