@@ -296,8 +296,13 @@ mod cross_serializer_tests {
             )),
         };
 
-        // Control probe with 2D lamp layout: f32 centers/radius are the classic
-        // ryu vs ryu-js divergence.
+        // Control probe with a 2D lamp layout. The packed wire form carries
+        // centers as base64 (no floats), but each packing span's RADIUS is
+        // still an f32 — and an INTEGRAL radius is where the serializers
+        // part company (serde_json renders `1.0`, ser-write-json `1`),
+        // which is the divergence this corpus exists to document. Two
+        // radius groups make two packing spans: one integral, one
+        // fractional (fractional f32s render identically in both).
         let product = ControlProduct::new(NodeId::new(2), 0, ControlExtent::new(1, 30));
         let control_probe = ProjectReadEvent::Probe {
             index: 0,
@@ -328,7 +333,7 @@ mod cross_serializer_tests {
                                     lamp_index: index,
                                     sample_start: index * 3,
                                     center: [index as f32 / 16.0, index as f32 / 15.0],
-                                    radius: 0.02,
+                                    radius: if index < 5 { 1.0 } else { 0.02 },
                                 })
                                 .collect(),
                         )),

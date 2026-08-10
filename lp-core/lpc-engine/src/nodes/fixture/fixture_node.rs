@@ -3657,15 +3657,17 @@ mod tests {
         assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
     }
 
-    /// A dome-scale fixture's display layout cannot ride one project-read
-    /// frame (1500 lamps serialize far past the 16 KiB budget), and the
+    /// A fixture past the packed encoding's frame ceiling (~2650 lamps at
+    /// ~5.4 B/lamp against the 16 KiB budget; dome-scale 1500 now FITS)
+    /// still gets its display layout refused as `Unsupported` — the
     /// transport's over-budget rejection is terminal for the whole read
-    /// stream. The engine must refuse the layout as `Unsupported` — a
-    /// graceful per-probe fallback — instead of handing the transport an
-    /// event that wedges the entire project view.
+    /// stream, so the engine must degrade the one probe rather than hand
+    /// the transport an event that wedges the entire project view. Above
+    /// the declared 2048-lamp embedded ceiling this refusal is product
+    /// posture, not a defect.
     #[test]
     #[cfg(feature = "node-shader")]
-    fn fixture_project_read_refuses_over_budget_display_layout() {
+    fn fixture_project_read_refuses_display_layout_past_the_packed_budget() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
@@ -3703,9 +3705,10 @@ mod tests {
             )
             .unwrap();
 
-        // Dome scale: 1500 lamps on one path, the Zook dome regime.
-        let points: Vec<[f32; 2]> = (0..1500)
-            .map(|i| [(i % 100) as f32 / 100.0, (i / 100) as f32 / 15.0])
+        // Past the packed ceiling: 4000 lamps on one path — beyond what a
+        // single 16 KiB frame can carry even at ~5.4 packed bytes a lamp.
+        let points: Vec<[f32; 2]> = (0..4000)
+            .map(|i| [(i % 100) as f32 / 100.0, (i / 100) as f32 / 40.0])
             .collect();
         let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, points)], 2.0);
 
@@ -3773,7 +3776,7 @@ mod tests {
         engine.add_demand_root(fix_id);
         engine.tick(&registry, 10).unwrap();
 
-        let extent = ControlExtent::new(1, 4500);
+        let extent = ControlExtent::new(1, 12000);
         let product = ControlProduct::new(fix_id, 0, extent);
         let results = read_probe_results(
             &mut engine,
@@ -3801,8 +3804,8 @@ mod tests {
             panic!("expected preview with refused display layout, got {results:?}");
         };
         assert!(
-            reason.contains("wire budget"),
-            "reason names the wire budget: {reason}"
+            reason.contains("byte budget") && reason.contains("bytes serialized"),
+            "reason names the link budget and the measured size: {reason}"
         );
     }
 

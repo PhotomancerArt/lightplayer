@@ -79,6 +79,13 @@ pub struct Engine {
     /// not be editable by the thing that broke it. Composed into every
     /// fixture's power scale via `min` in the fixture render.
     safe_output_clamp_q16: Option<u32>,
+    /// The most bytes a serialized display layout may occupy in one
+    /// project-read answer, declared by the EMBEDDER for its transport
+    /// (`Engine::set_display_layout_budget`). `None` = unbounded. Defaults
+    /// to the serial frame budget — the conservative, fail-safe value: an
+    /// un-plumbed host refuses big layouts rather than wedging a serial
+    /// link. Device/link state, never project data.
+    display_layout_budget: Option<usize>,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -109,6 +116,10 @@ impl Engine {
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
             timebases: crate::dataflow::timebase::TimebaseStore::new(),
             safe_output_clamp_q16: None,
+            display_layout_budget: Some(
+                lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+                    - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
+            ),
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -372,6 +383,24 @@ impl Engine {
     /// feature entirely.
     pub fn set_safe_output_clamp(&mut self, level: Option<u8>) {
         self.safe_output_clamp_q16 = level.map(|level| (u32::from(level) << 16) / 255);
+    }
+
+    /// Declare the transport's display-layout byte budget.
+    ///
+    /// `Some(n)`: a serialized layout larger than `n` bytes is refused as
+    /// `Unsupported` instead of being handed to a transport whose frame it
+    /// would wedge. `None`: the link has no meaningful frame limit
+    /// (in-proc, websocket) and any layout is answered. The default is the
+    /// embedded serial value; embedders with bigger pipes opt OUT, so a
+    /// host that never calls this stays safe on the smallest link.
+    pub fn set_display_layout_budget(&mut self, budget: Option<usize>) {
+        self.display_layout_budget = budget;
+    }
+
+    /// The declared transport display-layout budget (see
+    /// [`Self::set_display_layout_budget`]).
+    pub(crate) fn display_layout_budget(&self) -> Option<usize> {
+        self.display_layout_budget
     }
 
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
@@ -641,6 +670,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
 
@@ -725,6 +755,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_texture(product, request)
@@ -764,6 +795,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.visual_node_space(product)
@@ -852,6 +884,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         let result = session.resolve(&mut host, &key);
@@ -908,6 +941,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_control(product, request, target)
@@ -949,6 +983,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
@@ -990,6 +1025,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_control_probe(product, request, target, display_layout)
@@ -1028,6 +1064,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.node_control_display_layout(product, display_layout)
@@ -1077,6 +1114,7 @@ struct EngineResolveHost<'a> {
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
     safe_output_clamp_q16: Option<u32>,
+    display_layout_budget: Option<usize>,
     /// The engine's current frame revision — the same value the tick stamps
     /// on compile windows ([`NodeRuntime::open_compile_window`]).
     ///
@@ -2225,6 +2263,7 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
+            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2236,8 +2275,13 @@ impl EngineResolveHost<'_> {
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 let sample_layout =
                     control_node.render_control(product, request, target, &mut ctx)?;
-                let display_layout =
-                    control_display_layout_result(control_node, product, display_layout, &mut ctx)?;
+                let display_layout = control_display_layout_result(
+                    control_node,
+                    product,
+                    display_layout,
+                    budget,
+                    &mut ctx,
+                )?;
                 Ok((sample_layout, display_layout))
             })
         };
@@ -2325,6 +2369,7 @@ impl EngineResolveHost<'_> {
                     ),
                 });
             };
+            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2334,7 +2379,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                control_display_layout_result(control_node, product, request, &mut ctx)
+                control_display_layout_result(control_node, product, request, budget, &mut ctx)
             })
         };
 
@@ -2350,24 +2395,11 @@ impl EngineResolveHost<'_> {
     }
 }
 
-/// The most bytes a serialized display layout may occupy and still ride one
-/// project-read frame alongside its probe header and frame envelope.
-///
-/// The transport rejects any single event larger than
-/// [`lpc_wire::PROJECT_READ_FRAME_MAX_BYTES`], and that rejection is terminal
-/// for the whole read stream — an over-budget layout wedges the entire
-/// project view, not just one probe. Until layouts stream in bounded chunks
-/// (the "semantic layout split" escalation noted in
-/// `lpc-wire`'s probe tests), an oversized layout is refused here as
-/// `Unsupported`, which clients already render as a graceful fallback. The
-/// 2 KiB margin covers the probe header (extent, sample layout, product) and
-/// the frame envelope around the event.
-const DISPLAY_LAYOUT_WIRE_BUDGET: usize = lpc_wire::PROJECT_READ_FRAME_MAX_BYTES - 2048;
-
 fn control_display_layout_result(
     control_node: &mut dyn crate::node::ControlNode,
     product: ControlProduct,
     request: ControlDisplayLayoutRead,
+    budget: Option<usize>,
     ctx: &mut ControlRenderContext<'_>,
 ) -> Result<ControlDisplayLayoutProbeResult, NodeError> {
     match request {
@@ -2380,21 +2412,30 @@ fn control_display_layout_result(
                     ),
                 });
             };
-            Ok(gate_display_layout(layout, request))
+            Ok(gate_display_layout(layout, request, budget))
         }
     }
 }
 
-/// Apply the read's revision gate and the wire budget to a layout that is
-/// already in hand.
+/// Apply the read's revision gate and the transport's byte budget to a
+/// layout that is already in hand.
 ///
 /// Split out of [`control_display_layout_result`] because the published-frame
 /// read builds its layout rather than asking one node for it — an output's
 /// geometry is N producers' layouts rebased through the fragments that placed
 /// them — and the gate must be the same gate either way.
+///
+/// `budget` is the embedder-declared transport limit
+/// ([`Engine::set_display_layout_budget`]): the transport rejects any single
+/// event larger than its frame, and that rejection is terminal for the whole
+/// read stream — an over-budget layout wedges the entire project view, not
+/// just one probe. So an oversized layout is refused here as `Unsupported`,
+/// which clients render as an honest "no layout". `None` = the link has no
+/// meaningful frame limit and every layout is answered.
 pub(crate) fn gate_display_layout(
     layout: ControlDisplayLayout,
     request: ControlDisplayLayoutRead,
+    budget: Option<usize>,
 ) -> ControlDisplayLayoutProbeResult {
     let revision = layout.revision();
     match request {
@@ -2403,15 +2444,17 @@ pub(crate) fn gate_display_layout(
             known_revision: Some(known),
         } if known == revision => ControlDisplayLayoutProbeResult::Unchanged { revision },
         _ => {
-            let layout_len = lpc_wire::ser_write_json_len(&layout);
-            if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
-                return ControlDisplayLayoutProbeResult::Unsupported {
-                    reason: alloc::format!(
-                        "display layout is {layout_len} bytes serialized, over the \
-                         {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
-                         large need chunked streaming (not yet implemented)"
-                    ),
-                };
+            if let Some(budget) = budget {
+                let layout_len = lpc_wire::ser_write_json_len(&layout);
+                if layout_len > budget {
+                    return ControlDisplayLayoutProbeResult::Unsupported {
+                        reason: alloc::format!(
+                            "display layout is {layout_len} bytes serialized, over this \
+                             link's {budget}-byte budget; a layout this large cannot ride \
+                             one project-read frame"
+                        ),
+                    };
+                }
             }
             ControlDisplayLayoutProbeResult::Layout(layout)
         }
@@ -2816,6 +2859,7 @@ pub(crate) fn resolve_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
     };
     let result = session
@@ -2858,6 +2902,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {

@@ -138,18 +138,6 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
-    /// Client-synthesized display layouts for the device card feed, keyed
-    /// by "project uid @ observed content hash" — the geometry a board's
-    /// project has, which changes only when that project changes. A `None`
-    /// value records an attempt that could not synthesize (not a map2d
-    /// fixture, unreadable document), so a card feed cannot re-read the
-    /// whole library package on every 150 ms pull.
-    ///
-    /// Deliberately NOT keyed by frame revision: that advances on every
-    /// publish, which would make every lookup a miss and every frame a
-    /// fresh `Rc` — the one thing the renderer's repaint key must not see.
-    card_layout_cache:
-        std::collections::HashMap<String, Option<Rc<lpc_model::ControlDisplayLayout>>>,
     /// The CARD-OWNED op flows in flight (state-flow model §2), one per
     /// managed SESSION: set at management dispatch, fed by the manage
     /// event sink, and — the point (I1) — NOT cleared when the session
@@ -293,7 +281,6 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
-            card_layout_cache: std::collections::HashMap::new(),
             device_card_ops: std::collections::BTreeMap::new(),
             device_backup: None,
             device_backup_seq: 0,
@@ -1107,7 +1094,6 @@ impl StudioController {
         };
         self.record_session_logs(id, request_logs);
         let now = (self.now_secs)();
-        let mut wants_layout = false;
         let mut new_frame = false;
         if let Some(session) = self.pool.session_mut(id) {
             session.card_feed_mut().mark_pull_complete(now);
@@ -1117,7 +1103,6 @@ impl StudioController {
                     let feed = session.card_feed_mut();
                     if let Some(entry) = feed.pick_entry(&outputs).cloned() {
                         let applied = feed.apply_entry(&entry, now);
-                        wants_layout = applied.wants_layout;
                         new_frame = applied.new_frame;
                     }
                 }
@@ -1130,9 +1115,6 @@ impl StudioController {
         }
         if new_frame {
             self.mark_dirty();
-        }
-        if wants_layout {
-            self.synthesize_card_feed_layout(id).await;
         }
     }
 
@@ -1169,109 +1151,6 @@ impl StudioController {
             .card_feed_mut()
             .set_handle_id(handle);
         Some(handle)
-    }
-
-    /// Fill in a display layout the device refused (a dome-scale fixture is
-    /// over the wire budget) by synthesizing it from the library's copy of
-    /// the project the board is running — the same bytes connect-as-pull
-    /// banked (D8), through the same shared generator the engine uses.
-    ///
-    /// Cached per (project uid, observed content hash) — NOT per frame
-    /// revision, which advances on every publish and would make the cache a
-    /// miss every time. A failed attempt is cached too: without that, a
-    /// project the fallback cannot handle would re-read the whole library
-    /// package every 150 ms.
-    async fn synthesize_card_feed_layout(&mut self, id: crate::RuntimeId) {
-        let Some((project_uid, observed, revision)) = self.card_feed_layout_key(id) else {
-            return;
-        };
-        let cache_key = format!("{project_uid}@{observed}");
-        if let Some(cached) = self.card_layout_cache.get(&cache_key) {
-            if let Some(layout) = cached.clone() {
-                self.install_card_feed_layout(id, layout);
-            }
-            return;
-        }
-        let layout = self
-            .package_display_layout(&project_uid, revision)
-            .await
-            .map(|layout| Rc::new(lpc_model::ControlDisplayLayout::Layout2d(layout)));
-        self.card_layout_cache.insert(cache_key, layout.clone());
-        match layout {
-            Some(layout) => self.install_card_feed_layout(id, layout),
-            None => log::debug!(
-                "device card feed: no client-side display layout for project {project_uid}"
-            ),
-        }
-    }
-
-    /// (project uid, observed content hash, current frame revision) for the
-    /// session's feed — the synthesis inputs. `None` unless the board is
-    /// running a project the library knows.
-    fn card_feed_layout_key(
-        &self,
-        id: crate::RuntimeId,
-    ) -> Option<(String, String, lpc_model::Revision)> {
-        let session = self.pool.session(id)?;
-        let revision = lpc_model::Revision::new(session.card_feed().frame()?.revision);
-        if session.is_sim() {
-            // The sim runs the library's own copy, so the uid alone finds
-            // the bytes. "sim" as the observed half means a fixture-layout
-            // edit mid-session could serve a stale cached synthesis until
-            // the next studio reload — an accepted edge: sim-scale
-            // projects normally get their layout over the in-proc wire
-            // and never reach the synthesis fallback.
-            let project_uid = session.sim_loaded_project()?.uid.clone();
-            return Some((project_uid, "sim".to_string(), revision));
-        }
-        let (project_uid, observed) = match &session.device_sync()?.content {
-            DeviceContent::Known {
-                project_uid,
-                observed,
-                ..
-            }
-            | DeviceContent::Adopted {
-                project_uid,
-                observed,
-                ..
-            } => (project_uid.clone(), observed.to_string()),
-            _ => return None,
-        };
-        Some((project_uid, observed, revision))
-    }
-
-    /// The layout a library package's own files synthesize to.
-    async fn package_display_layout(
-        &mut self,
-        project_uid: &str,
-        revision: lpc_model::Revision,
-    ) -> Option<lpc_model::ControlLayout2d> {
-        let host = self.library_host().ok()?;
-        let fs = host.catalog_snapshot().await.ok()?;
-        let store = crate::app::library::LibraryStore::read_only(fs);
-        let uid = store.resolve_key(project_uid).ok()?;
-        let handle = store.open(uid).ok()?;
-        let files = handle.read_all_files().ok()?;
-        crate::app::project::control_display_layout_fallback::synthesized_layout_from_package_files(
-            &files, revision,
-        )
-    }
-
-    fn install_card_feed_layout(
-        &mut self,
-        id: crate::RuntimeId,
-        layout: Rc<lpc_model::ControlDisplayLayout>,
-    ) {
-        let installed = match self.pool.session_mut(id) {
-            Some(session) => {
-                session.card_feed_mut().set_synthesized_layout(layout);
-                true
-            }
-            None => false,
-        };
-        if installed {
-            self.mark_dirty();
-        }
     }
 
     pub fn actions(&self) -> UiActions {

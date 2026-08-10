@@ -21,7 +21,6 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
-use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
@@ -1889,57 +1888,17 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
     }
 }
 
-/// The phase's oracle: what Studio synthesizes client-side must be what the
-/// engine would have sent, field for field.
+/// Dome scale: the ENGINE answers the 1500-lamp layout over the wire.
 ///
-/// The face project's fixture is small (16 lamps), so the engine sends its
-/// display layout outright. Synthesizing from the SAME document at the same
-/// render extent and comparing the two layouts is the only check that keeps
-/// the mirrored construction (`control_display_layout_fallback`) honest as
-/// the engine's own layout builder evolves.
+/// Packed (spans + base64 u16 centers, ~5.4 B/lamp) the dome's layout
+/// rides one project-read frame with margin — no client-side synthesis,
+/// no mapping-document fetch, no re-derivation that can drift from the
+/// engine's own geometry. The declared embedded ceiling is 2048 lamps
+/// (`a_2048_lamp_layout_fits_the_serial_frame_budget` in lpc-wire); this
+/// is the studio-tier proof that the flagship dome case lands on the face
+/// straight from the probe.
 #[test]
-fn synthesized_display_layout_matches_the_engines_own_layout() {
-    let server = Rc::new(RefCell::new(face_e2e_server()));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    // The connect read arms the product subscriptions; the probe answers on
-    // the next read.
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
-
-    let engine = fixture_display_layout(&snapshot)
-        .expect("a 16-lamp layout is far under the wire budget, so the engine sends it");
-    let doc = lpc_mapping::Map2dDoc::from_json(FACE_MAP2D).expect("the mapping document parses");
-
-    let synthesized = synthesized_map2d_layout(&doc, engine.revision, 4, 4)
-        .expect("the same document synthesizes client-side");
-
-    assert_eq!(
-        synthesized, engine,
-        "client synthesis and engine layout must agree on every lamp, hint, and path span"
-    );
-}
-
-/// Dome scale: the engine refuses the 1500-lamp layout (over the read-frame
-/// wire budget), and the client fills it in from the mapping document
-/// instead of leaving both faces reading "Control product has no display
-/// layout."
-#[test]
-fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
+fn a_dome_scale_layout_arrives_over_the_wire() {
     let example = crate::app::home::embedded_example("examples/zook-dome")
         .expect("the zook-dome example ships in the bundle");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
@@ -1964,11 +1923,10 @@ fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("the refresh emits a snapshot");
 
-    // The engine refused the layout (over the wire budget), and the sync
-    // path fetched the mapping document itself — no card has to mount, no
-    // editor has to open. The synthesized layout is already on the preview.
+    // The probe answered: the packed layout crossed the read and is already
+    // on the preview — no card has to mount, no editor has to open.
     let layout = fixture_display_layout(&snapshot)
-        .expect("the sync fetches the document and synthesizes the layout the engine refused");
+        .expect("the engine answers the dome-scale layout over the wire");
     assert_eq!(layout.lamps.len(), 1500, "every dome lamp is laid out");
     assert_eq!(
         (layout.width_hint, layout.height_hint),
@@ -2063,9 +2021,8 @@ const PROJECT_DIR: &str = "/projects/face-e2e";
 /// The shader uses the panel uniform so its compile stays honest.
 const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
 
-/// The face fixture's mapping document — 16 lamps, small enough that the
-/// engine sends its display layout outright, which makes it the parity
-/// oracle for the client-side synthesis.
+/// The face fixture's mapping document — 16 lamps on a 4×4 grid, the
+/// smallest shape that exercises spans, centers, and radii together.
 const FACE_MAP2D: &str = r#"{
   "format": 1,
   "objects": [
