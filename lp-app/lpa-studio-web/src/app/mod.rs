@@ -18,6 +18,7 @@ pub(crate) mod mapping_editor_stories;
 /// The module face, panel, and play-mode surfaces.
 pub mod module;
 pub mod node;
+pub mod patch;
 pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod readme_stories;

@@ -1337,6 +1337,7 @@ pub(crate) fn output_face(
         }
     }
     let mut face = UiOutputFace {
+        name: None,
         led_budget: None,
         ports: channels,
         ports_address: Some(output_slot_address("ports")),

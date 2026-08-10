@@ -50,6 +50,7 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 pub mod ui_affordance;
+pub(crate) mod ui_patch_surface;
 pub mod ui_pending_edit;
 
 pub use agent_support::AgentEngineStatus;
@@ -99,4 +100,7 @@ pub use slot::{
     SlotKind,
 };
 pub use ui_affordance::UiAffordance;
+pub use ui_patch_surface::{
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+};
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

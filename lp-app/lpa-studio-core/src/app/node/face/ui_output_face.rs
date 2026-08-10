@@ -29,6 +29,10 @@ use crate::ProjectSlotAddress;
 /// rendered, and every channel row stays fully editable.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiOutputFace {
+    /// The authored output NAME (D39: "1", "Box 5") when set — what patch
+    /// entries reference and what the patch surface shows for this output.
+    /// `None` for the unnamed single-output ordinary case.
+    pub name: Option<String>,
     /// One row per authored port, in ascending key order.
     pub ports: Vec<UiOutputPortRow>,
     /// Address of the `ports` map slot itself — the target for the generic

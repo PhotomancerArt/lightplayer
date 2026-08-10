@@ -127,6 +127,9 @@ pub struct ProjectController {
     /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
     /// build, pruned with the loaded project.
     node_card_ui: BTreeMap<String, NodeCardUiState>,
+    /// The patch surface's one shared selection (D36; core-owned so e2e
+    /// can drive it and the P6 verbs can read it).
+    patch_selection: Option<crate::UiPatchTarget>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -381,6 +384,7 @@ impl ProjectController {
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
+            patch_selection: None,
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
@@ -2349,6 +2353,10 @@ impl ProjectController {
         // Both sides of the patch bay, in one pass over output AND fixture
         // faces: they show the same cells, so they are derived together.
         self.apply_patch_bays(&mut nodes);
+        // The project-scoped patch surface reads what that pass just wrote
+        // onto the faces (bays + fixture rows) plus each fixture's own
+        // map2d body — built here so the two can never disagree.
+        let surface = self.build_patch_surface(&nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -2399,6 +2407,7 @@ impl ProjectController {
         .with_header_actions(project_header_actions(&dirty))
         .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
+        .with_patch_surface(surface, self.patch_selection.clone())
     }
 
     /// Human-readable project name for the project pane title and the root
@@ -3045,6 +3054,12 @@ impl ProjectController {
                 self.apply_node_ui_op(op);
                 Ok(UiNotices::new())
             }
+            // The patch surface's one shared selection — local and
+            // synchronous like the card ops.
+            ProjectEditorOp::PatchSelect { target } => {
+                self.patch_selection = target;
+                Ok(UiNotices::new())
+            }
         }
     }
 
@@ -3296,6 +3311,70 @@ impl ProjectController {
     /// the output faces before anything is written back, because the
     /// fixture cells name the port they land on — a fixture card cannot be
     /// filled until every output's ports are known.
+    /// Build the project-scoped patch surface (D36) from what
+    /// [`Self::apply_patch_bays`] just wrote onto the faces: every output's
+    /// bay, every patched fixture's row, and each fixture's instance table
+    /// parsed from its OWN map2d body (the same bytes its mapping editor
+    /// holds). `None` when nothing patchable has answered — the surface
+    /// route then renders its empty state.
+    fn build_patch_surface(&self, nodes: &[UiNodeView]) -> Option<crate::UiPatchSurface> {
+        let mut surface = crate::UiPatchSurface::default();
+        walk_faces_ref(nodes, &mut |path, face| match face {
+            crate::UiNodeFace::Output(output) => {
+                let Some(bay) = output.patch.clone() else {
+                    return;
+                };
+                let Some(node) = ProjectNodeAddress::parse(path)
+                    .ok()
+                    .and_then(|address| self.node(&address))
+                else {
+                    return;
+                };
+                surface.outputs.push(crate::UiPatchSurfaceOutput {
+                    node: node.target().node_id,
+                    label: node.label().to_string(),
+                    name: output.name.clone(),
+                    address: Some(path.to_string()),
+                    bay,
+                });
+            }
+            crate::UiNodeFace::Fixture(fixture) => {
+                let Some(patch) = fixture.patch.clone() else {
+                    return;
+                };
+                let Some(node) = ProjectNodeAddress::parse(path)
+                    .ok()
+                    .and_then(|address| self.node(&address))
+                else {
+                    return;
+                };
+                let body = fixture
+                    .mapping_editor
+                    .as_ref()
+                    .and_then(|editor| editor.content.as_ref())
+                    .and_then(|content| content.text());
+                let mapping_loaded = body.is_some();
+                let instances = body
+                    .map(super::ui_patch_surface::instances_from_map2d)
+                    .unwrap_or_default();
+                surface.fixtures.push(crate::UiPatchSurfaceFixture {
+                    node: node.target().node_id,
+                    label: node.label().to_string(),
+                    address: Some(path.to_string()),
+                    patch,
+                    mapping_artifact: fixture
+                        .mapping_editor
+                        .as_ref()
+                        .map(|editor| editor.artifact.clone()),
+                    mapping_loaded,
+                    instances,
+                });
+            }
+            _ => {}
+        });
+        (!surface.outputs.is_empty()).then_some(surface)
+    }
+
     fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
         use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
 
@@ -7477,6 +7556,28 @@ fn walk_faces(nodes: &mut [UiNodeView], visit: &mut impl FnMut(&str, &mut crate:
             visit(&node.header.path, face);
         }
         walk_children(&mut node.children, visit);
+    }
+}
+
+/// The read-only twin of [`walk_faces`], for passes that derive FROM the
+/// finished faces (the patch surface) rather than writing onto them.
+fn walk_faces_ref(nodes: &[UiNodeView], visit: &mut impl FnMut(&str, &crate::UiNodeFace)) {
+    fn walk_children(
+        children: &[crate::UiNodeChild],
+        visit: &mut impl FnMut(&str, &crate::UiNodeFace),
+    ) {
+        for child in children {
+            if let Some(face) = child.face.as_ref() {
+                visit(&child.detail, face);
+            }
+            walk_children(&child.children, visit);
+        }
+    }
+    for node in nodes {
+        if let Some(face) = node.face.as_ref() {
+            visit(&node.header.path, face);
+        }
+        walk_children(&node.children, visit);
     }
 }
 
