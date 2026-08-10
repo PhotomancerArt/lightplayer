@@ -4,7 +4,7 @@
   "render_order": 0,
   "bindings": {
     "output": {
-      "target": "bus:visual.out/body"
+      "target": "bus:visual.out"
     },
     "phase": {
       "source": "bus:speed"
