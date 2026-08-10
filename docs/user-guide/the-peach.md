@@ -155,6 +155,9 @@ around; delete a whole entry and watch the lamps flow in behind what's left.
 
 ## Where next
 
+- [Patching the dome](#/docs/patching-the-dome) — when you have many
+  fixtures and many outputs: the same patch idea at install scale, with
+  repeated instances, named outputs, reversal and rotation.
 - [What's a shader?](#/docs/what-is-a-shader) — the little programs the two
   peaches disagree about.
 - [Brightness and smooth fades](#/docs/brightness-and-smooth-fades) — what

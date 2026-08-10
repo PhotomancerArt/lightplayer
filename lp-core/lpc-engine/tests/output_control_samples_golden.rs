@@ -185,6 +185,37 @@ const GOLDEN: &[Expectation] = &[
             ],
         )],
     },
+    // The mini-dome: TWO producers scattered across TWO named outputs
+    // (many-to-many, format-2 path-identity patches, reversal + rotation).
+    // Captured 2026-08-10 as the scatter engine landed (slice-2 P3/P4) —
+    // there was no earlier behavior to preserve; from here on these bytes
+    // are as load-bearing as every other row. `out_b` publishes empty on
+    // tick 1: output identities self-register on first consume, so the
+    // fixtures' named runs settle one tick later — deterministic, and part
+    // of the pinned behavior.
+    Expectation {
+        project: "mini-dome",
+        outputs: &[
+            (
+                "/mini_dome.show/out_a.output",
+                &[
+                    (648, 0xd6d7c0c9db5a6bc5, [0, 0, 0, 0, 0, 0]),
+                    (648, 0x2230a42e4638d8b8, [77, 66, 42, 99, 211, 144]),
+                    (648, 0x678a3e30dcf52f20, [239, 65, 14, 99, 249, 144]),
+                    (648, 0x932bafaee622498f, [139, 65, 235, 98, 23, 145]),
+                ],
+            ),
+            (
+                "/mini_dome.show/out_b.output",
+                &[
+                    (0, 0xcbf29ce484222325, [0, 0, 0, 0, 0, 0]),
+                    (414, 0x1518cf3bccf96a17, [31, 7, 145, 22, 55, 41]),
+                    (414, 0x671c7df0bb808ce4, [37, 7, 147, 22, 51, 41]),
+                    (414, 0xb5f71a69347e3423, [44, 7, 148, 22, 48, 41]),
+                ],
+            ),
+        ],
+    },
     Expectation {
         project: "palette-waves",
         outputs: &[(
@@ -194,6 +225,34 @@ const GOLDEN: &[Expectation] = &[
                 (1446, 0xe054737b58c4a061, [249, 140, 18, 96, 50, 35]),
                 (1446, 0xe8e6c2b5534ae66a, [53, 139, 70, 94, 138, 34]),
                 (1446, 0xf31c7a419567abd8, [123, 137, 136, 92, 232, 33]),
+            ],
+        )],
+    },
+    // The peaches: two fixtures on one output, one of them cut in half and
+    // patched in backwards — the multi-producer + format-1-patch case the
+    // scatter work (slice 2 P3) must keep byte-identical. Captured
+    // 2026-08-10 at e71d3d82b, before any scatter change.
+    Expectation {
+        project: "peach-1d",
+        outputs: &[(
+            "/peach_1d.show/output.output",
+            &[
+                (336, 0x51795983e22e1d65, [0, 0, 0, 0, 0, 0]),
+                (336, 0xaf0b86d5b1ad0d8b, [255, 255, 46, 106, 41, 34]),
+                (336, 0x1e6a3fa2e15e4b25, [255, 255, 238, 104, 198, 33]),
+                (336, 0x02ef6aa2395df3a2, [255, 255, 174, 103, 98, 33]),
+            ],
+        )],
+    },
+    Expectation {
+        project: "peach-2d",
+        outputs: &[(
+            "/peach_2d.show/output.output",
+            &[
+                (336, 0x51795983e22e1d65, [0, 0, 0, 0, 0, 0]),
+                (336, 0x9220b815e84449a0, [170, 142, 69, 93, 60, 71]),
+                (336, 0x612a05bf5303f400, [171, 142, 70, 93, 60, 71]),
+                (336, 0xe34576a55778a25d, [171, 142, 70, 93, 61, 71]),
             ],
         )],
     },
@@ -452,7 +511,10 @@ const EXAMPLES: &[&str] = &[
     "fire2012",
     "fluid",
     "meteor",
+    "mini-dome",
     "palette-waves",
+    "peach-1d",
+    "peach-2d",
     "perf/baseline",
     "perf/fastmath",
     "plasma",

@@ -1,0 +1,19 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "dome": {
+      "ref": "./dome.json"
+    },
+    "dome_sky": {
+      "ref": "./dome_sky.json"
+    }
+  },
+  "exports": {
+    "control.out": "bus:control.out"
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}
