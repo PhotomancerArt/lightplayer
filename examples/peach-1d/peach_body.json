@@ -6,7 +6,7 @@
   },
   "bindings": {
     "input": {
-      "source": "bus:visual.out/body"
+      "source": "bus:visual.out"
     },
     "output": {
       "target": "bus:control.out"
@@ -25,9 +25,21 @@
   "strip_order_meaningful": true,
   "color_order": "rgb",
   "transform": [
-    [1, 0, 0],
-    [0, 1, 0],
-    [0, 0, 1]
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
   ],
   "brightness": 1.0,
   "gamma_correction": false
