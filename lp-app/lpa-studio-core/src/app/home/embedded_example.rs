@@ -390,6 +390,134 @@ pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/peach-1d` — the stained-glass peach declared 1D: two fixtures
+/// (body and leaves) on ONE wire, each running a `render_1d` shader along
+/// the strand, with `strip_order_meaningful` selecting wire order over the
+/// map. Its `.patch.json` files are byte-identical to `examples/peach-2d`'s
+/// — the patch is where the lamps land, not what they are told to draw.
+pub static PEACH_1D_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/peach-1d/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/peach-1d/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/peach-1d/clock.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/peach-1d/output.json"),
+    ),
+    (
+        "peach_body.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_body.json"),
+    ),
+    (
+        "peach_body.map2d.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_body.map2d.json"),
+    ),
+    (
+        "peach_body.patch.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_body.patch.json"),
+    ),
+    (
+        "peach_leaf.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_leaf.json"),
+    ),
+    (
+        "peach_leaf.map2d.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_leaf.map2d.json"),
+    ),
+    (
+        "peach_leaf.patch.json",
+        include_bytes!("../../../../../examples/peach-1d/peach_leaf.patch.json"),
+    ),
+    (
+        "body_glow.json",
+        include_bytes!("../../../../../examples/peach-1d/body_glow.json"),
+    ),
+    (
+        "body_glow.glsl",
+        include_bytes!("../../../../../examples/peach-1d/body_glow.glsl"),
+    ),
+    (
+        "leaf_shimmer.json",
+        include_bytes!("../../../../../examples/peach-1d/leaf_shimmer.json"),
+    ),
+    (
+        "leaf_shimmer.glsl",
+        include_bytes!("../../../../../examples/peach-1d/leaf_shimmer.glsl"),
+    ),
+];
+
+/// `examples/peach-2d` — the same artwork, the same wiring, the same patch
+/// files, declared 2D: `render_2d` planes sampled at the lamps' mapped
+/// positions. The pair is the mapping-and-patching evidence — presentation
+/// (where the lamps are) and sampling (what asks them for a color) are
+/// separate questions.
+pub static PEACH_2D_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/peach-2d/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/peach-2d/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/peach-2d/clock.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/peach-2d/output.json"),
+    ),
+    (
+        "peach_body.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_body.json"),
+    ),
+    (
+        "peach_body.map2d.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_body.map2d.json"),
+    ),
+    (
+        "peach_body.patch.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_body.patch.json"),
+    ),
+    (
+        "peach_leaf.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_leaf.json"),
+    ),
+    (
+        "peach_leaf.map2d.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_leaf.map2d.json"),
+    ),
+    (
+        "peach_leaf.patch.json",
+        include_bytes!("../../../../../examples/peach-2d/peach_leaf.patch.json"),
+    ),
+    (
+        "body_glow.json",
+        include_bytes!("../../../../../examples/peach-2d/body_glow.json"),
+    ),
+    (
+        "body_glow.glsl",
+        include_bytes!("../../../../../examples/peach-2d/body_glow.glsl"),
+    ),
+    (
+        "leaf_shimmer.json",
+        include_bytes!("../../../../../examples/peach-2d/leaf_shimmer.json"),
+    ),
+    (
+        "leaf_shimmer.glsl",
+        include_bytes!("../../../../../examples/peach-2d/leaf_shimmer.glsl"),
+    ),
+];
+
 /// The gallery's *Examples* section, in order — the demo first, then the
 /// single-effect modules.
 static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
@@ -440,6 +568,18 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Zook dome",
         kind: "Module",
         files: ZOOK_DOME_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/peach-1d",
+        name: "Peach (1D)",
+        kind: "Module",
+        files: PEACH_1D_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/peach-2d",
+        name: "Peach (2D)",
+        kind: "Module",
+        files: PEACH_2D_FILES,
     },
 ];
 
@@ -494,6 +634,32 @@ mod tests {
                 plasma_files[&shared.to_string()],
                 duo_files[&shared.to_string()],
                 "{shared} must stay byte-identical between plasma and plasma-duo"
+            );
+        }
+    }
+
+    /// The mapping-and-patching claim, pinned: the peach's patch documents
+    /// say where the lamps land on the wire, which is a fact about the
+    /// installation and not about how anything samples them. So the 1D and
+    /// 2D peaches — same artwork, opposite declarations — carry the SAME
+    /// patch bytes, and the mapping documents they patch against too. A
+    /// change to one that is not copied to the other breaks this loudly.
+    #[test]
+    fn the_two_peaches_share_their_patch_and_mapping_bytes() {
+        let one_d = embedded_example("examples/peach-1d").expect("peach-1d is embedded");
+        let two_d = embedded_example("examples/peach-2d").expect("peach-2d is embedded");
+        let one_d_files: std::collections::BTreeMap<_, _> = one_d.files().into_iter().collect();
+        let two_d_files: std::collections::BTreeMap<_, _> = two_d.files().into_iter().collect();
+        for shared in [
+            "peach_body.patch.json",
+            "peach_leaf.patch.json",
+            "peach_body.map2d.json",
+            "peach_leaf.map2d.json",
+        ] {
+            assert_eq!(
+                one_d_files[&shared.to_string()],
+                two_d_files[&shared.to_string()],
+                "{shared} must stay byte-identical between peach-1d and peach-2d"
             );
         }
     }
