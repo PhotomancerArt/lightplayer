@@ -3575,13 +3575,19 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
         };
         (by_label("dome"), by_label("door"))
     };
+    // Fetch exactly what the page's mount prefetch would: bodies whose
+    // loaded flag is still false. If the DTO flags ever lie (claim loaded
+    // while the cache is cold), the verbs below block and this test fails —
+    // the live-surface contract, not a test-only shortcut.
     for fixture in [&dome, &doors] {
-        for artifact in [
-            fixture.patch_artifact.clone(),
-            fixture.mapping_artifact.clone(),
-        ]
-        .into_iter()
-        .flatten()
+        let wanted = [
+            (fixture.patch_loaded, fixture.patch_artifact.clone()),
+            (fixture.mapping_loaded, fixture.mapping_artifact.clone()),
+        ];
+        for artifact in wanted
+            .into_iter()
+            .filter_map(|(loaded, artifact)| (!loaded).then_some(artifact))
+            .flatten()
         {
             handle
                 .tx

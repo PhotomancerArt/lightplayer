@@ -3363,6 +3363,10 @@ impl ProjectController {
                     .and_then(|editor| editor.content.as_ref())
                     .and_then(|content| content.text());
                 let mapping_loaded = body.is_some();
+                let patch_loaded = fixture
+                    .patch_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.content.is_some());
                 let instances = body
                     .map(super::ui_patch_surface::instances_from_map2d)
                     .unwrap_or_default();
@@ -3380,6 +3384,7 @@ impl ProjectController {
                         .as_ref()
                         .map(|editor| editor.artifact.clone()),
                     mapping_loaded,
+                    patch_loaded,
                     instances,
                 });
             }

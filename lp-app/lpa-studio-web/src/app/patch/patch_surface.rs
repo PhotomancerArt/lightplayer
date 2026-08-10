@@ -187,13 +187,23 @@ pub fn PatchSurfacePage(view: ProjectEditorView, on_action: EventHandler<UiActio
     // the workspace, and its bay strips + canvases hover as one.
     use_context_provider(|| HoveredPatchCell(Signal::new(None)));
     let selection = view.patch_selection.clone();
-    // Resolve unfetched map2d bodies so the instance chips fill in — the
-    // same fetch op the editor tab dispatches on mount (a no-op once the
-    // body is cached, so re-renders cost nothing).
+    // Resolve unfetched map2d AND patch bodies — the same fetch op the
+    // editor tab dispatches on mount (a no-op once the body is cached, so
+    // re-renders cost nothing). The map2d body fills the instance chips;
+    // the patch body is what the verbs transform, so without this fetch
+    // every edit blocks with "still loading".
     if let Some(surface) = view.patch_surface.as_ref() {
         for fixture in &surface.fixtures {
             if !fixture.mapping_loaded
                 && let Some(artifact) = fixture.mapping_artifact.clone()
+            {
+                on_action.call(UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    lpa_studio_core::AssetContentFetchOp { artifact },
+                ));
+            }
+            if !fixture.patch_loaded
+                && let Some(artifact) = fixture.patch_artifact.clone()
             {
                 on_action.call(UiAction::from_op(
                     ProjectController::NODE_ID,

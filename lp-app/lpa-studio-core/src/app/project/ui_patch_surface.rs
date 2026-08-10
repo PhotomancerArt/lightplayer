@@ -94,6 +94,10 @@ pub struct UiPatchSurfaceFixture {
     /// not landed yet; the page dispatches it and the table fills on the
     /// next snapshot.
     pub mapping_loaded: bool,
+    /// The patch body was resolvable at build time. False = the fetch has
+    /// not landed yet; the page dispatches it so verbs have their document
+    /// (a verb before it lands blocks honestly).
+    pub patch_loaded: bool,
     /// The addressable instance table (`/sector/0` …), parsed from the
     /// fixture's map2d document. EMPTY for shape-less strips and for docs
     /// without object ids — the fixture then patches at range grain only
