@@ -1,12 +1,14 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
+use alloc::vec::Vec;
+
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::dataflow::timebase::PhasorKey;
-use crate::node::ScopeRef;
+use crate::node::{PatchedRun, ScopeRef};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -66,6 +68,17 @@ pub trait TickResolver {
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
     ) -> Result<ControlLayout, ResolveError>;
+
+    /// Where a control product's producer says its lamps land on its output's
+    /// wire — the resolved patch, in lamps — or `None` for auto-flow.
+    ///
+    /// Defaulted to `None` so a node-level test fake need not model patching
+    /// to tick a node that asks; the engine's own resolver forwards to the
+    /// producing node.
+    fn control_patch_placement(&self, product: ControlProduct) -> Option<Vec<PatchedRun>> {
+        let _ = product;
+        None
+    }
 
     fn runtime_buffer_mut(
         &mut self,
@@ -174,6 +187,10 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.host
             .render_control(product, request, target)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn control_patch_placement(&self, product: ControlProduct) -> Option<Vec<PatchedRun>> {
+        self.host.control_patch_placement(product)
     }
 
     fn render_texture(

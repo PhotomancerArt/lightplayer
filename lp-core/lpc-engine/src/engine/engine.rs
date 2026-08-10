@@ -1441,6 +1441,26 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.render_node_control(product, request, target)
     }
 
+    /// Read the producing node's resolved patch.
+    ///
+    /// Deliberately silent when the node is missing or mid-execution: this
+    /// answers "how is this producer patched", and "we could not ask right
+    /// now" means auto-flow, not a dead frame. A node whose patch failed to
+    /// parse keeps its last good placement and reports the failure as its own
+    /// runtime status.
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+    ) -> Option<Vec<crate::node::PatchedRun>> {
+        let entry = self.tree.get(product.node())?;
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            return None;
+        };
+        node.control_patch_placement()
+            .map(|runs| runs.to_vec())
+            .filter(|runs| !runs.is_empty())
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: crate::resource::RuntimeBufferId,

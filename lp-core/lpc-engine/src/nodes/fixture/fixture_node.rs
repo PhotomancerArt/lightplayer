@@ -25,8 +25,8 @@ use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
-    MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
-    TickContext, err_ctx,
+    MemPressureCtx, NodeError, NodeRuntime, PatchedRun, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
@@ -52,6 +52,24 @@ pub struct FixtureMap2dSource {
     /// Render-texture extent the doc was resolved against (from the def).
     pub render_width: u32,
     pub render_height: u32,
+}
+
+/// The patch document a fixture's placement was resolved from, kept so the
+/// node can re-resolve when the asset body changes — the same live-edit path
+/// [`FixtureMap2dSource`] gives the mapping.
+#[derive(Clone, Debug)]
+pub struct FixturePatchSource {
+    pub location: lpc_model::AssetLocation,
+    /// Asset revision the current patch document was read at.
+    pub revision: Revision,
+    /// The document itself. Kept parsed because resolution is
+    /// fixture-relative: the lamp count comes from the MAPPING, so a mapping
+    /// edit re-resolves the same document against the new count.
+    ///
+    /// `None` when the reference resolves to a body this build cannot read (a
+    /// newer format, a typo mid-edit). The fixture still lights — auto-flowed
+    /// — and says why; the location stays so the next edit is picked up.
+    pub doc: Option<lpc_mapping::PatchDoc>,
 }
 
 /// A fixture's resolved mapping, in whichever representation it was built
@@ -106,6 +124,26 @@ pub struct FixtureNode {
     /// Keep-last-good: a failed map2d refresh keeps the old mapping
     /// rendering and surfaces the failure as the node's runtime status.
     mapping_error: Option<alloc::string::String>,
+    /// Present when the fixture authored a `.patch.json`.
+    patch_source: Option<FixturePatchSource>,
+    /// Bumped whenever the patch DOCUMENT changes, exactly as
+    /// `mapping_version` tracks the mapping. Paired with `mapping_version` as
+    /// the key `resolved_patch` was computed under — resolution is
+    /// fixture-relative, so a mapping edit invalidates it just as surely as a
+    /// patch edit does.
+    patch_version: Revision,
+    /// The patch resolved against the current lamp count, and the
+    /// `(patch_version, mapping_version)` it was resolved under.
+    ///
+    /// An unpatched fixture leaves this `None` forever and the output
+    /// auto-flows it. A patched one that fails to RESOLVE (a range past the
+    /// end of a fixture that shrank) also leaves it `None` — auto-flow is the
+    /// honest fallback, since the alternative is placing lamps the document
+    /// no longer describes — and says so in `patch_error`.
+    resolved_patch: Option<(Revision, Revision, alloc::vec::Vec<PatchedRun>)>,
+    /// Keep-last-good, like `mapping_error`: a patch that stops parsing keeps
+    /// the last good placement lighting and surfaces the failure as status.
+    patch_error: Option<alloc::string::String>,
     /// The input didn't resolve (fresh fixture, nothing bound yet): lamps
     /// render unlit and the cause surfaces as runtime status.
     input_error: Option<alloc::string::String>,
@@ -161,6 +199,10 @@ impl FixtureNode {
             mapping_version,
             map2d_source: None,
             mapping_error: None,
+            patch_source: None,
+            patch_version: mapping_version,
+            resolved_patch: None,
+            patch_error: None,
             input_error: None,
             def_view: None,
             last_visual_product: None,
@@ -207,6 +249,83 @@ impl FixtureNode {
     pub fn with_map2d_source(mut self, source: FixtureMap2dSource) -> Self {
         self.map2d_source = Some(source);
         self
+    }
+
+    /// Attach the patch document this fixture is placed by.
+    ///
+    /// The document is not resolved here: resolution needs the lamp count,
+    /// which the mapping owns and which can change under a live edit, so the
+    /// first `produce` (and every one after a mapping or patch change) does
+    /// it. A patch that cannot resolve degrades to auto-flow and reports.
+    #[must_use]
+    pub fn with_patch_source(mut self, source: FixturePatchSource) -> Self {
+        self.patch_source = Some(source);
+        self
+    }
+
+    /// Seed the reason a patch document could not be read at load, so the
+    /// node reports it from its first status read rather than only after a
+    /// refresh.
+    #[must_use]
+    pub fn with_patch_error(mut self, error: alloc::string::String) -> Self {
+        self.patch_error = Some(error);
+        self
+    }
+
+    /// Resolve the patch document against the CURRENT lamp count, if that
+    /// pair has moved since the last resolve.
+    ///
+    /// Cheap and idempotent: an unpatched fixture returns immediately, and a
+    /// patched one re-resolves only when its document or its mapping changed.
+    fn ensure_patch_resolved(&mut self) {
+        let Some(source) = &self.patch_source else {
+            self.resolved_patch = None;
+            return;
+        };
+        // An empty document is a CLEARED patch, and a cleared patch means
+        // auto-flow — the same thing deleting the file means. Resolving it
+        // would instead anchor the whole fixture at channel 0, which is
+        // auto-flow only when this fixture is alone on the wire; an installer
+        // who cleared one strand of three would find the wire contested.
+        let Some(doc) = source.doc.as_ref().filter(|doc| !doc.entries.is_empty()) else {
+            self.resolved_patch = None;
+            return;
+        };
+        let key = (self.patch_version, self.mapping_version);
+        if let Some((patch_ver, mapping_ver, _)) = &self.resolved_patch
+            && (*patch_ver, *mapping_ver) == key
+        {
+            return;
+        }
+        // The same count the control product is sized from, and the same one
+        // the patch document's ranges are written against.
+        let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
+        match lpc_mapping::resolve_patch(lamp_count, doc) {
+            Ok(ranges) => {
+                self.resolved_patch = Some((
+                    key.0,
+                    key.1,
+                    ranges
+                        .into_iter()
+                        .map(|range| PatchedRun {
+                            start: range.start,
+                            count: range.count,
+                            channel: range.channel,
+                            reversed: range.reversed,
+                        })
+                        .collect(),
+                ));
+                self.patch_error = None;
+            }
+            Err(error) => {
+                // No last-good placement to keep here — the document IS
+                // readable, it just does not describe this fixture — so fall
+                // back to auto-flow rather than lighting lamps by a rule
+                // nobody authored.
+                self.resolved_patch = None;
+                self.patch_error = Some(format!("resolve fixture patch: {error}"));
+            }
+        }
     }
 
     /// Seed render settings from the def at load, so control probes work
@@ -326,6 +445,46 @@ impl FixtureNode {
         Ok(())
     }
 
+    /// The patch half of [`NodeRuntime::refresh_asset`].
+    ///
+    /// `None` means "not my patch document" and the caller falls through to
+    /// the mapping. Bumping `patch_version` is what makes the next `produce`
+    /// re-resolve, and the tick after that re-places the wire — a patch edit
+    /// therefore reaches the lamps the same way a mapping edit does.
+    fn refresh_patch_asset(
+        &mut self,
+        location: &lpc_model::AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Option<AssetRefreshResult> {
+        let source = self.patch_source.as_ref()?;
+        if location != &source.location {
+            return None;
+        }
+        let text = match ctx.read_asset_text_if_changed(location, source.revision) {
+            Ok(Some(text)) => text,
+            Ok(None) => return Some(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                // Keep-last-good: no new document to parse.
+                self.patch_error = Some(format!("read fixture patch document: {err:?}"));
+                return Some(AssetRefreshResult::Refreshed);
+            }
+        };
+        match lpc_mapping::PatchDoc::from_json(&text.text) {
+            Ok(doc) => {
+                if let Some(source) = self.patch_source.as_mut() {
+                    source.doc = Some(doc);
+                    source.revision = text.revision;
+                }
+                self.patch_version = ctx.revision();
+                self.patch_error = None;
+            }
+            // Keep-last-good: the placement standing on the wire came from a
+            // document that parsed, and a half-typed edit should not go dark.
+            Err(error) => self.patch_error = Some(format!("parse fixture patch document: {error}")),
+        }
+        Some(AssetRefreshResult::Refreshed)
+    }
+
     fn control_display_layout_revision(
         &mut self,
         settings: FixtureRenderSettings,
@@ -437,6 +596,10 @@ impl NodeRuntime for FixtureNode {
             self.consume_policy = policy;
         }
         self.sync_mapping_from_def(ctx)?;
+        // After the mapping settles and before the control product is
+        // published: the output reads this placement in the same tick, right
+        // after the resolve that ran us.
+        self.ensure_patch_resolved();
         let width = render_size.width;
         let height = render_size.height;
 
@@ -569,6 +732,11 @@ impl NodeRuntime for FixtureNode {
         location: &lpc_model::AssetLocation,
         ctx: &mut AssetRefreshContext<'_>,
     ) -> Result<AssetRefreshResult, NodeError> {
+        // A fixture has TWO refreshable documents. Try the patch first (the
+        // cheaper one), then fall through to the mapping.
+        if let Some(result) = self.refresh_patch_asset(location, ctx) {
+            return Ok(result);
+        }
         let Some(source) = &self.map2d_source else {
             return Ok(AssetRefreshResult::Unused);
         };
@@ -612,8 +780,15 @@ impl NodeRuntime for FixtureNode {
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
         self.mapping_error
             .as_ref()
+            .or(self.patch_error.as_ref())
             .or(self.input_error.as_ref())
             .map(|error| NodeRuntimeStatus::Error(error.clone()))
+    }
+
+    fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
+        self.resolved_patch
+            .as_ref()
+            .map(|(_, _, runs)| runs.as_slice())
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {

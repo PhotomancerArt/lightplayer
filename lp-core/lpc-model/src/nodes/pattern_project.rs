@@ -615,6 +615,7 @@ mod tests {
             for (name, bytes) in &files {
                 if !name.ends_with(".json")
                     || name.ends_with(".map2d.json")
+                    || name.ends_with(".patch.json")
                     || name == "project.json"
                 {
                     continue;

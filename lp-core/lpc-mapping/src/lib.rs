@@ -10,6 +10,13 @@
 //! `{universe, channel}` addresses); [`fit_points`] maps doc-space positions
 //! into a fixture render target without stretching.
 //!
+//! The crate owns a second document: the per-fixture **patch**
+//! ([`PatchDoc`], e.g. `fixture.patch.json`), which says where a fixture's
+//! lamps land on an output's wire. Mapping answers "where is this lamp?" and
+//! is built once; patching answers "which jack did that strand end up in?"
+//! and changes on every install — so they are stored apart and
+//! [`resolve_patch`] anchors sparse entries over auto-flow.
+//!
 //! Boundary: schema + pure geometry only. No filesystem access, no engine
 //! types, no UI. The crate is `no_std + alloc` and dependency-light because
 //! the device resolves documents at project load.
@@ -28,6 +35,7 @@ mod map2d_doc;
 mod map2d_error;
 mod map2d_fit;
 mod map2d_resolve;
+mod patch;
 
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
@@ -38,4 +46,8 @@ pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
 pub use map2d_resolve::{
     CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectSpan, ResolvedLamp, ResolvedMap2d,
     Rotation2d, resolve,
+};
+pub use patch::{
+    PATCH_FORMAT, PatchAnchor, PatchDoc, PatchEntry, PatchError, PatchRange, PatchedRange,
+    resolve_patch,
 };
