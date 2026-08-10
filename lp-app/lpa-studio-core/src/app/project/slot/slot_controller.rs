@@ -1731,6 +1731,15 @@ fn asset_editor_kind(
     let lower = source.to_ascii_lowercase();
     if lower.ends_with(".map2d.json") {
         UiAssetEditorKind::Map2d
+    } else if lower.ends_with(".patch.json") {
+        // Named outright, ahead of the fallback, because the answer is a
+        // DECISION and not an accident of ordering: a patch document is
+        // edited as raw JSON this slice (no bespoke editor — the bay is
+        // read-only, D34a), and the text path's refuse-don't-rewrite
+        // parse guard is exactly the behaviour a `format`-versioned
+        // document wants. A later `.json` arm must not silently capture
+        // this one.
+        UiAssetEditorKind::Text
     } else if lower.ends_with(".glsl") || content.is_some_and(looks_like_inline_glsl) {
         UiAssetEditorKind::Glsl
     } else if lower.ends_with(".svg") || content.is_some_and(looks_like_inline_svg) {
@@ -2536,5 +2545,26 @@ mod tests {
         let slot = controller.ui_config_slot(&SlotEditJoin::empty());
 
         assert_eq!(slot.composite, None);
+    }
+
+    /// A patch document opens in the TEXT editor — raw JSON, with the text
+    /// path's refuse-don't-rewrite parse guard. Named ahead of the
+    /// fallback so a later `.json` arm cannot capture it, and behind
+    /// `.map2d.json` so the mapping document keeps its own editor.
+    #[test]
+    fn a_patch_document_opens_as_text_and_a_mapping_one_still_does_not() {
+        assert_eq!(
+            asset_editor_kind("peach_body.patch.json", None, None),
+            UiAssetEditorKind::Text
+        );
+        assert_eq!(
+            asset_editor_kind("./body/PEACH_BODY.Patch.JSON", None, None),
+            UiAssetEditorKind::Text,
+            "the suffix match is case-insensitive like its neighbours"
+        );
+        assert_eq!(
+            asset_editor_kind("peach_body.map2d.json", None, None),
+            UiAssetEditorKind::Map2d
+        );
     }
 }

@@ -27,6 +27,7 @@ mod ui_panel_control;
 mod ui_panel_control_view;
 mod ui_panel_group;
 mod ui_panel_widget;
+mod ui_patch_bay;
 mod ui_playlist_entry;
 mod ui_playlist_face;
 mod ui_shader_face;
@@ -48,6 +49,7 @@ pub use ui_panel_control::{
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
 pub use ui_panel_group::UiPanelGroup;
 pub use ui_panel_widget::UiPanelWidget;
+pub use ui_patch_bay::{UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchPort};
 pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;
 pub use ui_shader_face::UiShaderFace;

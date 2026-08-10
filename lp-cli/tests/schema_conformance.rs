@@ -8,10 +8,11 @@
 //! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` container
 //!   manifests validate against `schemas/project.schema.json`, `module.json`
 //!   root modules validate against `schemas/module.schema.json`,
-//!   `*.map2d.json` files are fixture
-//!   mapping documents and validate by parsing with the real `lpc-mapping`
-//!   parser (which owns that format), and every other `*.json` is a node
-//!   artifact and validates against `schemas/node.schema.json`. Non-JSON
+//!   `*.map2d.json` files are fixture mapping documents and `*.patch.json`
+//!   files are fixture patch documents — both validate by parsing with the
+//!   real `lpc-mapping` parser (which owns those formats) — and every other
+//!   `*.json` is a node artifact and validates against
+//!   `schemas/node.schema.json`. Non-JSON
 //!   files (`.glsl`, `.svg`, ...) are not artifacts and are ignored by
 //!   extension.
 //! - [`HARDWARE_ROOTS`] hold board manifests (`HardwareManifestFile`), which
@@ -61,6 +62,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
         let mut modules = 0usize;
         let mut nodes = 0usize;
         let mut mappings = 0usize;
+        let mut patches = 0usize;
         for file in &files {
             let rel = relative(&workspace, file);
             if SKIP_JSON.contains(&rel.as_str()) {
@@ -69,6 +71,11 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             if rel.ends_with(".map2d.json") {
                 mappings += 1;
                 validate_map2d_file(file, &rel, &mut failures)?;
+                continue;
+            }
+            if rel.ends_with(".patch.json") {
+                patches += 1;
+                validate_patch_file(file, &rel, &mut failures)?;
                 continue;
             }
             let validator = if file.file_name().is_some_and(|name| name == "project.json") {
@@ -84,7 +91,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             validate_file(validator, file, &rel, &mut failures)?;
         }
         println!(
-            "{root}: validated {projects} container manifests + {modules} module roots + {nodes} node artifacts + {mappings} mapping documents"
+            "{root}: validated {projects} container manifests + {modules} module roots + {nodes} node artifacts + {mappings} mapping documents + {patches} patch documents"
         );
     }
 
@@ -217,6 +224,19 @@ fn validate_map2d_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Re
             }
         }
         Err(error) => failures.push(format!("{rel}: {error}")),
+    }
+    Ok(())
+}
+
+/// Patch documents validate by PARSING with the real `lpc-mapping` parser,
+/// which owns that format. They are not resolved here: resolution is
+/// fixture-relative (it needs the lamp count the fixture's mapping produces),
+/// and the document alone does not carry it — the loader does that, and
+/// reports it on the fixture.
+fn validate_patch_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
+    if let Err(error) = lpc_mapping::PatchDoc::from_json(&text) {
+        failures.push(format!("{rel}: {error}"));
     }
     Ok(())
 }

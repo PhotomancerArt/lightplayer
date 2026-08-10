@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mapping &amp; patching surface — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --card: #171b20;          --card-subtle: #14181d;
+    --card-muted: #11161b;    --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+    --sel-border: #d6dae0; --sel-bg: rgba(214,218,224,.12);
+
+    --good-bg: #13241d;  --good-border: #365545;  --good-text: #7be0b2;
+    --live-bg: #142330;  --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --warn-bg: #292614;  --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --attn-bg: #291f14;  --attn-border: #795833;  --attn-text: #f0b97a;
+    --err-bg: #301b1d;   --err-border: #874b4b;   --err-text: #ffc7c7;
+    --bound-bg: #241a33; --bound-border: #5f4a85; --bound-text: #c9b1f5;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+
+    /* spike-local: fixture identity + wire vocab (never violet — violet = bound) */
+    --fx-body: #f0b97a;      /* peach body   */
+    --fx-leaf: #7be0b2;      /* peach leaf   */
+    --fx-matrix: #9cc8ee;    /* matrix       */
+    --fx-strip: #f0dc7a;     /* strip        */
+    --uni: #9cc8ee;          /* universe ticks */
+    --gap: #3a4149;          /* unassigned lamps */
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 860px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 40px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+  p.thesis b { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 860px; border: 1px solid var(--border); background: var(--card-muted);
+              border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
+              margin: 12px 0 0; }
+  .leannote b { color: var(--muted); }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols button, .seg button {
+    background: var(--card-muted); color: var(--muted); font: inherit; font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .xcontrols button:hover { color: var(--text); border-color: var(--border-strong); }
+  .xcontrols button.on { background: var(--good-bg); border-color: var(--good-border); color: var(--good-text); }
+
+  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .ccol { width: 420px; max-width: 100%; }
+  .ccol.wide { width: 640px; }
+  .ccol h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--muted); margin: 0 0 8px; }
+  .ccol h3 .lean { color: var(--good-text); font-size: 9.5px; margin-left: 6px; }
+  .ccol p.why { font-size: 11.5px; color: var(--dim); margin: 8px 0 0; line-height: 1.45; }
+
+  .panel { border: 1px solid var(--border); border-radius: var(--r-md);
+           background: var(--card); overflow: hidden; }
+  .panel .phead { display: flex; align-items: center; gap: 8px; min-height: 34px;
+    padding: 0 12px; background: var(--card-subtle); border-bottom: 1px solid var(--border-muted); }
+  .panel .phead b { font-size: 12px; color: var(--strong); font-weight: 700; }
+  .panel .phead .kind { font-size: 10.5px; color: var(--dim); text-transform: lowercase; }
+  .panel .phead .sp { flex: 1; }
+  .pbody { padding: 12px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px;
+          font-family: var(--mono); border: 1px solid var(--border-strong); color: var(--subtle);
+          border-radius: 3px; padding: 1px 6px; white-space: nowrap; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .chip.err { border-color: var(--err-border); color: var(--err-text); background: var(--err-bg); }
+  .chip.warn { border-color: var(--warn-border); color: var(--warn-text); background: var(--warn-bg); }
+  .chip.ok { border-color: var(--good-border); color: var(--good-text); background: var(--good-bg); }
+
+  svg text { font-family: var(--mono); }
+  .svgstage { display: block; width: 100%; background:
+      radial-gradient(ellipse at 50% 42%, rgba(255,255,255,.025), transparent 70%), var(--terminal);
+      border-radius: var(--r-sm); border: 1px solid var(--border-muted); }
+
+  /* ---- section 1: today ---- */
+  .today-map { background: var(--track); border: 1px solid var(--border-muted);
+               border-radius: var(--r-sm); }
+
+  /* ---- section 2: wire bar concept ---- */
+  .wirebar { position: relative; height: 44px; background: var(--track);
+             border: 1px solid var(--border-muted); border-radius: var(--r-sm); margin-top: 4px; }
+  .wirebar .blk { position: absolute; top: 7px; height: 20px; border-radius: 3px;
+                  border: 1px solid rgba(0,0,0,.5); opacity: .92; }
+  .wirebar .blk .lab { position: absolute; top: 22px; left: 0; font: 9.5px var(--mono);
+                       color: var(--subtle); white-space: nowrap; }
+  .wirebar .blk.rev::after { content: "◀ rev"; position: absolute; right: 3px; top: 2px;
+                             font: 9px var(--mono); color: rgba(0,0,0,.75); font-weight: 700; }
+  .wirebar .clashzone { position: absolute; top: 4px; height: 26px; border-radius: 3px;
+    background: repeating-linear-gradient(45deg, rgba(239,83,80,.55) 0 5px, rgba(239,83,80,.25) 5px 10px);
+    border: 1px solid var(--err-border); z-index: 3; }
+  .wirebar .utick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--uni); opacity: .6; }
+  .wirebar .utick span { position: absolute; top: -1px; left: 3px; font: 9px var(--mono); color: var(--uni); }
+
+  /* ---- section 2: rail concept ---- */
+  table.rail { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+  table.rail th { text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em;
+                  color: var(--dim); font-weight: 600; padding: 2px 8px 6px; }
+  table.rail td { padding: 5px 8px; border-top: 1px solid var(--border-muted); font-family: var(--mono);
+                  font-size: 11px; color: var(--muted); }
+  table.rail td.fx { font-family: var(--sans); }
+  table.rail tr.clash td { background: var(--err-bg); color: var(--err-text); }
+  table.rail .mini { font-size: 10px; color: var(--dim); }
+
+  .statusline { margin-top: 8px; font-size: 11px; color: var(--subtle); min-height: 16px; }
+  .statusline.err { color: var(--err-text); }
+
+  /* ---- section 4: mode switch + cards ---- */
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+         overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 16px; }
+  .seg button + button { border-left: 1px solid var(--border-subtle); }
+  .seg button.on { background: var(--sel-bg); color: var(--strong); }
+
+  .cardrow { display: flex; gap: 12px; flex-wrap: wrap; }
+  .pcard { width: 148px; border: 1px solid var(--border); border-radius: var(--r-md);
+           background: var(--card); overflow: hidden; cursor: pointer; }
+  .pcard:hover { border-color: var(--border-strong); }
+  .pcard .art { height: 96px; background: var(--terminal); display: flex;
+                align-items: center; justify-content: center; }
+  .pcard .art.textonly { color: var(--dim); font-size: 26px; }
+  .pcard .nm { padding: 7px 10px; font-size: 12px; color: var(--strong); font-weight: 600;
+               border-top: 1px solid var(--border-muted); }
+  .pcard .nm span { color: var(--dim); font-weight: 400; font-size: 10.5px; margin-left: 5px; }
+
+  /* ---- section 5: dome ---- */
+  .dome-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* ---- patch bay cells: (fixture span ↔ output span) tuples ---- */
+  .bayrow { position: relative; height: 33px; background: var(--track); border-radius: 3px; margin-top: 2px; }
+  .baycell { position: absolute; top: 2px; border: 1px solid var(--border-strong); border-radius: 3px;
+             overflow: hidden; background: var(--card-muted); cursor: default; }
+  .baycell canvas { display: block; width: 100%; height: 12px; image-rendering: pixelated; }
+  .baycell .clab { font: 8.5px var(--mono); color: var(--dim); padding: 0 3px; line-height: 14px;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .baycell.err { border-color: var(--err-border); }
+  .baycell.err .clab { color: var(--err-text); }
+  .baycell.hl { border-color: var(--sel-border); box-shadow: 0 0 0 1px var(--sel-border); z-index: 2; }
+  .baycell.hl .clab { color: var(--muted); }
+  .baygrp { font-size: 11px; color: var(--muted); font-weight: 700; }
+  .bayhead { font: 9.5px var(--mono); color: var(--subtle); margin-top: 7px; }
+  polygon.panelp { cursor: pointer; stroke: var(--border-strong); stroke-width: 1; }
+  polygon.panelp:hover { stroke: var(--sel-border); }
+  polygon.panelp.selp { stroke: var(--sel-border); stroke-width: 2; }
+</style>
+</head>
+<body>
+
+<h1>Mapping &amp; patching surface — design spike</h1>
+<p class="hint">
+  Vision: <code>2026-08-09-0048-mapping-patching-surface</code>. One surface, modes —
+  <b>arrange</b> (ground state) / <b>map</b> / <b>patch</b>. Patch = sparse anchors over auto-flow,
+  per fixture. Visuals display in their <b>native sampling dimension</b>: 2D = plane below the lamps,
+  1D = a rope threading the LEDs. This playground tests the feel of those calls on the
+  <b>peach</b> (slice 1) and a <b>mini-dome</b> (slice 2). Everything animates live; nothing here is production code.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>Live</b>
+    <button id="animbtn" class="on" onclick="toggleAnim()">animating ▶</button>
+  </span>
+  <span class="grp"><b>§2 patch state</b>
+    <button data-st="auto"    class="stbtn" onclick="setState('auto')">auto-flow</button>
+    <button data-st="noreverse" class="stbtn" onclick="setState('noreverse')">patched, no reverse</button>
+    <button data-st="patched" class="stbtn on" onclick="setState('patched')">patched ✓</button>
+    <button data-st="overlap" class="stbtn" onclick="setState('overlap')">overlap error</button>
+    <button id="prodbtn" onclick="toggleProd()">2D products</button>
+  </span>
+  <span class="grp"><b>§3 visual</b>
+    <button id="visbtn" class="on" onclick="toggleVis()">show visual product</button>
+  </span>
+</div>
+
+<!-- ================================================================ -->
+<h2>1 · today — why this work exists</h2>
+<p class="thesis">
+  Faithful repro of the current fixture-face treatment. An essentially-1D mapping renders as a
+  <b>thin line of dots in a 2D box</b> (the fire2012 / meteor / comet look Yona flagged at G1).
+  The same 56 lamps, drawn as what they physically are, is the entire pitch.
+</p>
+<div class="row">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach-strip</b><span class="kind">fixture · output section (today)</span></div>
+      <div class="pbody"><svg id="todayline" class="today-map" viewBox="0 0 396 200" width="100%"></svg>
+      </div></div>
+    <p class="why">Current: lamps in texture space, auto-fit. A strip is a collinear smear — "looks odd."</p>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">same fixture · presentation shape</span></div>
+      <div class="pbody"><svg id="todayshape" class="today-map" viewBox="0 0 396 200" width="100%"></svg>
+      </div></div>
+    <p class="why">With a presentation shape (D24v): the same 1D-sampled strip, drawn as the thing you built.</p>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<h2>2 · the peach — patch mode, three treatments</h2>
+<p class="thesis">
+  One physical strip (wire runs from Yona's reference art): bottom → up one side (<b>body</b>, ch 0–21)
+  → across the <b>leaves</b> (ch 22–33) → back down the other (<b>body</b>, ch 34–55, <b>reversed</b>). Body and leaf are separate fixtures on one
+  output. Use the <b>§2 patch state</b> buttons above: <i>auto-flow</i> shows why patching must exist
+  (fixture-order flow puts the leaf pattern at the bottom of the down-leg), <i>no reverse</i> breaks the
+  gradient symmetry, <i>overlap</i> shows guided diagnostics — contested lamps red, orphaned lamps dark.
+  Click a red row/segment to flash its counterpart.
+</p>
+<div class="row">
+  <div class="ccol wide">
+    <h3>A — fixture snakes on the shape <span class="lean">◈ + bay</span></h3>
+    <div class="panel"><div class="phead"><b>out A</b><span class="kind">patch · on presentation · one snake per fixture</span>
+      <span class="sp"></span><span class="chip"><span class="dot" style="background:var(--fx-body)"></span>body</span>
+      <span class="chip"><span class="dot" style="background:var(--fx-leaf)"></span>leaf</span></div>
+      <div class="pbody">
+        <svg id="ropeA" class="svgstage" viewBox="0 0 396 300"></svg>
+        <div class="statusline" id="statusA"></div>
+      </div></div>
+    <p class="why">Each fixture has its <b>own snake, in shader order</b> — body and leaf never share a
+      rope. Where the body's shader space jumps the physical gap (ch 21 → ch 22), the connector is
+      <b>uncolored</b>: those lamps are adjacent in shader space, not in output space — coloring the
+      jump would draw the wrong space. Bounding boxes group each fixture.
+      <b>2D products</b> (toggle in the strip): both fixtures flip to their own 2D visual — pink body,
+      green leaves, planes instead of snakes — and <b>the patch and its cells do not change</b> (D19v:
+      patching is dimension-agnostic).</p>
+  </div>
+  <div class="ccol wide">
+    <h3>B — the patch bay, both sides · pixels</h3>
+    <div class="panel"><div class="phead"><b>patch bay</b><span class="kind">output-side · output → port · wire order</span></div>
+      <div class="pbody" id="bayout"></div></div>
+    <div class="panel" style="margin-top:10px"><div class="phead"><b>patch bay</b><span class="kind">fixture-side · fixture → range · shader order</span></div>
+      <div class="pbody" id="bayfix"></div>
+      <div class="statusline" id="statusC" style="padding:0 12px 10px"></div></div>
+    <p class="why">Rows are made of <b>cells</b> — <code>(fixture span ↔ output span)</code> tuples,
+      and both views show <b>the same cells</b>: output-side lays them along the wire and labels them
+      with fixture info; fixture-side lays them along shader space and labels them with output info.
+      <b>Hover a cell</b> to light up its twin. Gaps dark, contested red, the split body reads
+      unbroken in shader order — that difference IS the patch.</p>
+  </div>
+</div>
+<div class="leannote"><b>Converged:</b> A (shape surface) and the two-sided bay are an "and", not an or —
+  the single-port bar folded into the bay as its row primitive. (lp2014's universe-rail table cut at
+  this gate: "don't really get it.") Overlap affordance everywhere: red on the lamps, click →
+  counterpart, plain-language fix hint.</div>
+
+<!-- ================================================================ -->
+<h2>3 · rope vs plane — same shape, both declarations</h2>
+<p class="thesis">
+  D26v, the crux. The <b>same mapping shape</b>, flipped between declared-1D and declared-2D
+  ("show visual" toggle in the strip above): declared <b>1D</b> shows the visual as a rope
+  <b>snaking the wire</b>; declared <b>2D</b> shows it as a plane below the sampled lamps.
+  Presentation never changes — only the sampling dimension does. Nobody needs the lecture
+  after seeing this once.
+</p>
+<div class="row">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">declared 1D · aurora rope on the wire</span></div>
+      <div class="pbody"><svg id="n3-p1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">declared 2D · plasma plane under the lamps</span></div>
+      <div class="pbody"><svg id="n3-p2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+<div class="row" style="margin-top:14px">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">declared 1D · the snake</span></div>
+      <div class="pbody"><svg id="n3-m1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+    <p class="why">The serpentine rope IS the matrix's wire — a 1D pattern runs along it like any strip.</p>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">declared 2D · plane below the lamps</span></div>
+      <div class="pbody"><svg id="n3-m2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+    <p class="why">Same lamps, same wire — but declared 2D, they sample positions on the plane.</p>
+  </div>
+</div>
+
+<h2>3b · continuous vs discrete sources — the other axis (Q11, chipped)</h2>
+<p class="thesis">
+  Punted from this work by ruling, drawn here so the idea isn't lost: <b>what is one unit of shader
+  space?</b> A <b>continuous</b> source (<code>float</code>/<code>vec2</code>, 1 = the whole extent)
+  samples at screen resolution — capped to something reasonable for embedded. A <b>discrete</b> source
+  (<code>int</code>/<code>ivec2</code>, 1 = one cell) renders at its own resolution: <b>line
+  segments</b> in 1D, <b>blocks</b> in 2D — and lamps snap to cells. A per-shader choice, likely as
+  fundamental as dimension.
+</p>
+<div class="row">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">1D · continuous source</span></div>
+      <div class="pbody"><svg id="n3-c1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>peach</b><span class="kind">1D · discrete source (12 cells)</span></div>
+      <div class="pbody"><svg id="n3-d1" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+<div class="row" style="margin-top:14px">
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">2D · continuous source</span></div>
+      <div class="pbody"><svg id="n3-c2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+  <div class="ccol">
+    <div class="panel"><div class="phead"><b>matrix 12×8</b><span class="kind">2D · discrete source (6×4 cells)</span></div>
+      <div class="pbody"><svg id="n3-d2" class="svgstage" viewBox="0 0 396 260"></svg></div></div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<h2>4 · the project canvas — three layers, visualized</h2>
+<p class="thesis">
+  The spatial editor's pitch (D21v–D23v + rd 14): LightPlayer's three layers on one canvas —
+  <b>1 · visual</b> (the product, shown in each fixture's native dimension), <b>2 · fixture</b>
+  (shapes, movable in presentation space — a transform stored on the fixture), <b>3 · output</b>
+  (the wires). All three fixtures below consume the <b>same 1D aurora bus</b>: the peach and shelf
+  strip show it natively as ropes; the matrix is 2D-declared, so it shows the <b>projection</b> —
+  switch it in the properties panel. <b>Drag fixtures</b> to arrange. <b>Click</b> to select and edit
+  its dimensionality (the #399 section, in object-properties clothing).
+</p>
+<div style="margin: 0 0 10px; display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+<span class="seg" id="modeseg">
+  <button data-m="arrange" class="on" onclick="setMode('arrange')">arrange</button>
+  <button data-m="map" onclick="setMode('map')">map</button>
+  <button data-m="patch" onclick="setMode('patch')">patch</button>
+</span>
+<span class="grp" style="display:inline-flex; gap:10px; font-size:11.5px; color:var(--subtle)">
+  <b style="font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)">layers</b>
+  <label style="cursor:pointer"><input type="checkbox" id="lyr-reference" checked onchange="setLayer('reference',this.checked)" style="accent-color:var(--accent)"> reference</label>
+  <label style="cursor:pointer"><input type="checkbox" id="lyr-visual" checked onchange="setLayer('visual',this.checked)" style="accent-color:var(--accent)"> visual</label>
+  <label style="cursor:pointer"><input type="checkbox" id="lyr-fixture" checked onchange="setLayer('fixture',this.checked)" style="accent-color:var(--accent)"> fixture</label>
+  <label style="cursor:pointer"><input type="checkbox" id="lyr-output" onchange="setLayer('output',this.checked)" style="accent-color:var(--accent)"> output</label>
+</span>
+<span id="modehint" style="font-size:11.5px; color:var(--dim)"></span></div>
+<div class="row">
+  <div style="flex:1; min-width:520px; max-width:760px">
+    <div class="panel"><div class="phead"><b>ocf-studio-wall</b>
+      <span class="kind">project canvas · drag fixtures · click to select</span></div>
+      <div class="pbody"><svg id="canvasstage" class="svgstage" viewBox="0 0 760 340" style="touch-action:none"></svg></div></div>
+  </div>
+  <div style="width:186px">
+    <div class="panel"><div class="phead"><b id="sbtitle">fixtures</b><span class="kind" id="sbkind"></span></div>
+      <div class="pbody" id="sidebar" style="font-size:11.5px; line-height:1.9; padding:8px 12px"></div></div>
+    <p class="why">The sidebar's hierarchy follows the tab: <b>map</b> = fixture → object,
+      <b>patch</b> = output → port.</p>
+  </div>
+  <div style="width:250px">
+    <div class="panel" id="propspanel"></div>
+    <p class="why">Object properties = the #399 dimensionality section, per fixture. "Show visual"
+      is the D26v toggle. The strip is 1D — flip it to 2D to watch its rope become an extruded plane.</p>
+  </div>
+</div>
+
+<div style="margin-top:18px" class="row">
+  <div class="ccol">
+    <h3>cards, names only (today-ish)</h3>
+    <div class="cardrow">
+      <div class="pcard"><div class="art textonly">peach</div><div class="nm">peach <span>56 lamps</span></div></div>
+      <div class="pcard"><div class="art textonly">dragon</div><div class="nm">dragon <span>212 lamps</span></div></div>
+      <div class="pcard"><div class="art textonly">dome</div><div class="nm">dome <span>1.5k lamps</span></div></div>
+    </div>
+  </div>
+  <div class="ccol">
+    <h3>shape-cards, live <span class="lean">◈ the product moment</span></h3>
+    <div class="cardrow" id="livecards"></div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<h2>5 · zook-mini — the real dome mapping: one path, 5-way symmetry</h2>
+<p class="thesis">
+  Zook's dome as actually mapped: a <b>repeat with 5-way symmetry</b> — one serpentine strut path per
+  sector, each sector one <b>port</b>. The as-built plugging is the real story: sector k landed on port
+  <code>(1,5,4,3,2)[k]</code>, fixed in software — a patch file trying to be born. <b>Click a sector</b>
+  to cycle its port; two sectors on one port = contested channels, red in the readout. Also a good
+  1D-vs-2D archetype: the same path samples as five 1D runs or as positions on the dome.
+</p>
+<div class="row">
+  <div class="ccol wide">
+    <div class="panel"><div class="phead"><b>zook-mini</b><span class="kind">patch · sector = repeat instance</span>
+      <span class="sp"></span><span id="portchips"></span></div>
+      <div class="pbody">
+        <svg id="domestage" class="svgstage" viewBox="0 0 620 380"></svg>
+        <div class="statusline" id="domestatus">click a sector to select · click again to cycle its port · selected sector gets ⟳ rotate (offset by strut stride) and ◀ reverse</div>
+      </div></div>
+  </div>
+  <div class="ccol">
+    <h3>port readout</h3>
+    <div class="panel"><div class="phead"><b>out A</b><span class="kind">5 ports · derived fragments</span></div>
+      <div class="pbody" id="domefrags" style="font: 11px var(--mono); color: var(--muted); line-height: 1.8;"></div></div>
+    <p class="why">Fragments regenerate on every click — anchors + reflow, never hand-kept math.
+      The permutation is data, not folklore: today it lives hand-coded in the zook example's
+      channel order.</p>
+  </div>
+</div>
+
+<div class="leannote" style="margin-top:26px"><b>Gate focus:</b> §2 treatment (A/B/C), whether §3's
+  plane-vs-rope earns "show visual" as a per-fixture toggle, §4 mode weights (is arrange-as-ground-state
+  right?), and whether §5's click-to-cycle grain feels like the dome workflow. Spike is throwaway;
+  the vision doc is the record.</div>
+
+<script>
+"use strict";
+const TAU = Math.PI * 2;
+let animating = true, showVis = true, patchState = "patched", mode = "arrange";
+let T0 = performance.now();
+
+/* ---------- color helpers ---------- */
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function heatColor(h){ /* fire: 0 cold → 1 hot */
+  h = clamp(h,0,1);
+  const r = clamp(h*3,0,1), g = clamp(h*3-1,0,1), b = clamp(h*3-2,0,1);
+  return `rgb(${Math.round(30+225*r)},${Math.round(14+210*g*0.82)},${Math.round(18+200*b)})`;
+}
+function bodyCol(u,t){ /* fire along body height: hot at bottom (u=0) */
+  const flick = 0.82 + 0.13*Math.sin(t*2.1 + u*14) + 0.09*Math.sin(t*3.7 + u*29 + 1.7);
+  return heatColor((1-u) * flick);
+}
+function leafCol(u,t){ /* green shimmer */
+  const v = 0.55 + 0.45*Math.sin(t*1.8 + u*9);
+  return `rgb(${Math.round(30+60*v)},${Math.round(150+90*v)},${Math.round(90+70*v)})`;
+}
+function auroraCol(u,t){ /* 1D visual for §3 */
+  const v = Math.sin(u*5 - t*1.1) * .5 + .5, w = Math.sin(u*11 + t*.7) * .5 + .5;
+  return `rgb(${Math.round(30+90*w)},${Math.round(120+120*v)},${Math.round(150+100*(1-u)*v)})`;
+}
+function plasmaCol(x,y,t){ /* 2D visual for §3, studio-friendly teal/blue/pink */
+  const v = Math.sin(x*2.6+t) + Math.sin(y*3.1-t*1.25) + Math.sin((x+y)*1.9+t*.6);
+  const p = v/3*.5+.5;
+  return `rgb(${Math.round(40+140*p)},${Math.round(90+110*(1-Math.abs(p-.5)*2))},${Math.round(120+120*(1-p))})`;
+}
+
+/* ---------- peach geometry — sampled from Yona's reference art ----------
+   lp-example-peach.svg (Dropbox/…/Lightplayer): three authored wire segments
+   (01-seg-body-1 bottom→up one side · 02-seg-leaf across both leaves ·
+   03-seg-body-2 back down) + the reference artwork itself. */
+const ART = {
+  body:  "M389.4,310.9c-176.5-497.5-766.7,303.7-12.3,412.3,493.3-160.3,280.8-764.3-83.9-552.1",
+  leaf1: "M292.8,158.3c-22,6-47.7,5.2-68.6-1.6-13.8-4.5-25.6-11.1-36.6-20-18.2-14.8-33.2-31.6-45.5-52.9-7.8-13.7-13.9-28.1-18-43.6-1.4-5.6-2.7-11.3-3.3-17.9,0,0,.6-.8.6-.8,40.5-4.5,82.7,8.5,115.5,30.6,30.7,19.7,49.7,47.9,55.2,84.8.7,4.8,1.2,10.1,1.3,14.9,0,1.6,0,4,0,5.6,0,0-.6.8-.6.8h0Z",
+  leaf2: "M295.4,157.4c2.5-23.2,13-47.4,27.2-64.9,9.4-11.7,20.2-20.8,32.9-28.2,20.9-12.4,42.7-21,67.7-25.7,15.9-2.9,32.1-3.9,48.5-2.5,5.9.6,11.9,1.3,18.4,2.8l.5.9c-11,40.6-39.3,76.1-72.5,99.9-31.5,23.6-67.5,32.2-106.7,23.2-3.3-.7-6.8-1.7-10-2.7-1.5-.5-3.9-1.3-5.4-2,0,0-.5-.9-.5-.9h0Z",
+  stem:  "M290.3,170.5c.9-6.5.8-13.4.6-20.2-.8-21-3-41.5-2.9-62.9,0-31,5.6-69.2,36.9-84.4,17.2-7.9,29.5,16.2,12.9,25.5-.6.3-1.3.6-2,.8-4.4,1.5-8.4,3.9-12,7.7-7.9,8.3-12.3,20.5-15.1,32.1-4.8,19.8-6.1,40-7.6,60.6-1.2,14.1-1.6,28.2-5.3,42.1-.4,1.5-2,2.4-3.5,2-1.4-.4-2.3-1.8-2-3.2h0Z",
+  seg1:  "M376.2,713C-19.9,685.2-97.9,202.5,248.8,173.8",
+  segLeaf: "M223.3,136.9c-44.6-21-74.5-56.2-90.3-105,79.2,4.7,141.8,36.9,162.4,111.2,45.1-59.4,90.8-95.5,178.9-95.8-7,42.7-55.2,72.6-139.8,91.1",
+  seg2:  "M334.5,166.5c289.2-106.1,458,317.1,58.5,540.3",
+};
+const ART_C = [350, 390];   /* art-space center */
+const SVGNS = "http://www.w3.org/2000/svg";
+const _measure = document.createElementNS(SVGNS, "svg");
+_measure.setAttribute("width", 0); _measure.setAttribute("height", 0);
+_measure.style.position = "absolute";
+document.body.appendChild(_measure);
+function samplePath(d, n){
+  const p = document.createElementNS(SVGNS, "path");
+  p.setAttribute("d", d);
+  _measure.appendChild(p);
+  const L = p.getTotalLength(), out = [];
+  for (let k=0;k<n;k++){ const q = p.getPointAtLength(L*(k+.5)/n); out.push([q.x, q.y]); }
+  p.remove(); return out;
+}
+const RAW = { up: samplePath(ART.seg1, 22), leaf: samplePath(ART.segLeaf, 12), down: samplePath(ART.seg2, 22) };
+function peachPts(cx, cy, s){
+  const sc = s/280, tf = p => [cx + (p[0]-ART_C[0])*sc, cy + (p[1]-ART_C[1])*sc];
+  const up = RAW.up.map(tf), leaf = RAW.leaf.map(tf), down = RAW.down.map(tf);
+  return { up, leaf, down, all: up.concat(leaf, down) };
+}
+function refArt(cx, cy, s, parent){
+  const sc = s/280;
+  const g = el("g", { class: "refart", opacity: .9,
+    transform: `translate(${cx},${cy}) scale(${sc}) translate(${-ART_C[0]},${-ART_C[1]})` }, parent);
+  el("path", { d: ART.body,  fill: "rgba(249,168,129,.05)", stroke: "#46362f", "stroke-width": 4 }, g);
+  el("path", { d: ART.leaf1, fill: "rgba(26,173,75,.06)",   stroke: "#31463a", "stroke-width": 2.8 }, g);
+  el("path", { d: ART.leaf2, fill: "rgba(26,173,75,.06)",   stroke: "#31463a", "stroke-width": 2.8 }, g);
+  el("path", { d: ART.stem,  fill: "rgba(135,69,30,.12)",   stroke: "#3b332d", "stroke-width": 2.8 }, g);
+  return g;
+}
+
+/* ---------- patch model (§2) ---------- */
+/* ranges: wireStart, len, fix ('body'|'leaf'), fixStart, rev */
+const STATES = {
+  auto:      [ {fix:"body", ws:0,  len:44, fs:0,  rev:false},
+               {fix:"leaf", ws:44, len:12, fs:0,  rev:false} ],
+  patched:   [ {fix:"body", ws:0,  len:22, fs:0,  rev:false},
+               {fix:"leaf", ws:22, len:12, fs:0,  rev:false},
+               {fix:"body", ws:34, len:22, fs:22, rev:true } ],
+  noreverse: [ {fix:"body", ws:0,  len:22, fs:0,  rev:false},
+               {fix:"leaf", ws:22, len:12, fs:0,  rev:false},
+               {fix:"body", ws:34, len:22, fs:22, rev:false} ],
+  overlap:   [ {fix:"body", ws:0,  len:22, fs:0,  rev:false},
+               {fix:"leaf", ws:30, len:12, fs:0,  rev:false},
+               {fix:"body", ws:34, len:22, fs:22, rev:true } ],
+};
+const FIXLEN = { body: 44, leaf: 12 };
+const N_WIRE = 56;
+function wireInfo(state){
+  const owners = Array.from({length:N_WIRE}, ()=>[]);
+  for (const r of STATES[state])
+    for (let k=r.ws; k<r.ws+r.len && k<N_WIRE; k++) owners[k].push(r);
+  return owners;
+}
+function fixtureWireIndex(state){   /* fixture channel → wire index, per fixture */
+  const map = { body: new Array(FIXLEN.body).fill(-1), leaf: new Array(FIXLEN.leaf).fill(-1) };
+  for (const r of STATES[state])
+    for (let i=0;i<r.len;i++){
+      const k = r.rev ? r.ws + r.len - 1 - i : r.ws + i;
+      if (k < N_WIRE) map[r.fix][r.fs + i] = k;
+    }
+  return map;
+}
+function lampColor(k, owners, t){
+  const own = owners[k];
+  if (own.length === 0) return { col: "#252b32", status: "gap" };
+  if (own.length > 1){
+    const pulse = .5 + .5*Math.sin(t*5);
+    return { col: `rgb(${Math.round(160+80*pulse)},60,62)`, status: "clash" };
+  }
+  const r = own[0];
+  const fc = r.rev ? r.fs + r.len - 1 - (k - r.ws) : r.fs + (k - r.ws);
+  const u = fc / (FIXLEN[r.fix]-1);
+  return { col: r.fix === "body" ? bodyCol(u,t) : leafCol(u,t), status: "ok", fix: r.fix };
+}
+/* §2 product mode: same patch, 1D or 2D products per fixture (D19v) */
+let prodMode = "1d", LAMPUV = {};
+function body2dCol(u,v,t){   /* peachy pink 2D visual */
+  const p = (Math.sin(u*4+t*.9) + Math.sin(v*5-t*1.2) + Math.sin((u+v)*3+t*.5))/3*.5+.5;
+  return `rgb(${Math.round(210+45*p)},${Math.round(105+70*(1-Math.abs(p-.5)*2))},${Math.round(120+70*(1-p))})`;
+}
+function leaf2dCol(u,v,t){   /* green 2D visual */
+  const p = (Math.sin(u*5-t) + Math.sin(v*4+t*.8))/2*.5+.5;
+  return `rgb(${Math.round(40+70*p)},${Math.round(135+95*p)},${Math.round(80+60*(1-p))})`;
+}
+function computeLampUV(state){
+  const fmap = fixtureWireIndex(state), out = {};
+  for (const fx of ["body","leaf"]){
+    const ks = fmap[fx].filter(k=>k>=0);
+    if (!ks.length) continue;
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for (const k of ks){ const p=PA.all[k];
+      x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    out["bbox_"+fx] = [x0,y0,x1,y1];
+    for (const k of ks){ const p=PA.all[k];
+      out[k] = { fx, u:(p[0]-x0)/((x1-x0)||1), v:(p[1]-y0)/((y1-y0)||1) }; }
+  }
+  return out;
+}
+function colorForLamp(k, owners, t){
+  const c = lampColor(k, owners, t);
+  if (c.status !== "ok" || prodMode === "1d") return c;
+  const q = LAMPUV[k];
+  if (!q) return c;
+  return { col: q.fx === "body" ? body2dCol(q.u,q.v,t) : leaf2dCol(q.u,q.v,t), status: "ok", fix: q.fx };
+}
+function toggleProd(){
+  prodMode = prodMode === "1d" ? "2d" : "1d";
+  document.getElementById("prodbtn").classList.toggle("on", prodMode === "2d");
+  buildRopeA(); buildPatchBay();
+}
+const STATUS_TEXT = {
+  auto:      ["", "auto-flow: body [0,44) then leaf [44,56) — fixture order is wire order. Wrong for this build: the leaf pattern lands on the lower left leg."],
+  patched:   ["ok", "patched: body → ch 0–21 ▲ and ch 34–55 ▼ rev · leaf → ch 22–33. Two body fragments, no gaps."],
+  noreverse: ["", "patched but down-leg not reversed: gradient climbs the wrong way on the left side — the peach is lopsided."],
+  overlap:   ["err", "overlap: leaf anchored at ch 30 collides with body ch 34–41 (8 lamps contested) · ch 22–29 unpatched (8 lamps dark). Click red to see both claimants."],
+};
+
+/* ---------- svg helpers ---------- */
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function polyPath(pts){ return pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(""); }
+
+/* ================= §1 today ================= */
+(function buildToday(){
+  const s1 = document.getElementById("todayline");
+  for (let i=0;i<N_WIRE;i++)
+    el("circle", { cx: 24 + i*(348/(N_WIRE-1)), cy: 100, r: 2.6, class: "l1today" }, s1);
+  el("text", { x: 12, y: 190, fill: "var(--dim)", "font-size": 9 }, s1).textContent = "essentially-1D mapping · auto-fit in texture space";
+
+  const s2 = document.getElementById("todayshape");
+  const g = peachPts(198, 108, 60);
+  refArt(198, 108, 60, s2);
+  g.all.forEach(p => el("circle", { cx: p[0], cy: p[1], r: 3.1, class: "l1shape" }, s2));
+  el("text", { x: 12, y: 190, fill: "var(--dim)", "font-size": 9 }, s2).textContent = "same fixture · presentation shape + reference art · same 1D sampling";
+})();
+
+/* ================= §2 peach concepts ================= */
+const PA = peachPts(190, 150, 78);
+function buildRopeA(){
+  const svg = document.getElementById("ropeA");
+  svg.innerHTML = "";
+  refArt(190, 150, 78, svg);
+  const owners = wireInfo(patchState);
+  const fmap = fixtureWireIndex(patchState);
+  /* per-fixture bounding boxes (grouping) */
+  for (const fx of ["body","leaf"]){
+    const pos = fmap[fx].filter(k=>k>=0).map(k=>PA.all[k]);
+    if (!pos.length) continue;
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for (const p of pos){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    el("rect", { x: x0-8, y: y0-8, width: x1-x0+16, height: y1-y0+16, rx: 8, fill: "none",
+      stroke: `var(--fx-${fx})`, "stroke-width": 1, "stroke-dasharray": "5 5", opacity: .35 }, svg);
+    el("text", { x: x0-6, y: y0-12, fill: `var(--fx-${fx})`, "font-size": 8.5, opacity: .8 }, svg)
+      .textContent = fx;
+  }
+  LAMPUV = computeLampUV(patchState);
+  if (prodMode === "1d"){
+    /* one snake per fixture, in SHADER order; physically-distant shader neighbors get an
+       UNCOLORED jump (adjacent in shader space, not output space) */
+    const segG = el("g", { id: "segA" }, svg);
+    for (const fx of ["body","leaf"]){
+      const seq = fmap[fx];
+      for (let fc=0; fc<seq.length-1; fc++){
+        const kA = seq[fc], kB = seq[fc+1];
+        if (kA < 0 || kB < 0) continue;
+        const a = PA.all[kA], b = PA.all[kB];
+        if (Math.abs(kA-kB) === 1)
+          el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": 5,
+            "stroke-linecap": "round", class: "seg", "data-fx": fx, "data-fc": fc,
+            "data-ka": kA, "data-kb": kB }, segG);
+        else
+          el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "var(--border-strong)",
+            "stroke-width": 1.2, "stroke-dasharray": "4 5", opacity: .6 }, segG);
+      }
+    }
+  } else {
+    /* 2D products: each fixture shows its own plane over its bbox — pink body, green leaves.
+       No snakes: 2D input space has no 1D adjacency to draw. Patch cells unchanged. */
+    for (const fx of ["body","leaf"]){
+      const bb = LAMPUV["bbox_"+fx];
+      if (!bb) continue;
+      const [x0,y0,x1,y1] = [bb[0]-6, bb[1]-6, bb[2]+6, bb[3]+6];
+      const cols = 12, rows = Math.max(4, Math.round(12*(y1-y0)/((x1-x0)||1)));
+      const cw = (x1-x0)/cols, chh = (y1-y0)/rows;
+      const pg = el("g", { opacity: .8 }, svg);
+      for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+        el("rect", { x: x0+i*cw, y: y0+j*chh, width: cw+.5, height: chh+.5, class: "a2cell",
+                     "data-fx": fx, "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, pg);
+      el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
+                   stroke: `var(--fx-${fx})`, "stroke-width": 1, opacity: .5 }, svg);
+    }
+  }
+  // fragment ticks + labels + direction arrows
+  for (const r of STATES[patchState]){
+    const p = PA.all[Math.min(r.ws, N_WIRE-1)], pe = PA.all[Math.min(r.ws+r.len-1, N_WIRE-1)];
+    el("circle", { cx: p[0], cy: p[1], r: 6.5, fill: "none", stroke: "var(--uni)", "stroke-width": 1, opacity:.85 }, svg);
+    const lx = clamp(p[0]+(p[0]<190?-64:10), 4, 320), ly = clamp(p[1]+(p[1]<158?-8:14), 12, 292);
+    const t = el("text", { x: lx, y: ly, fill: "var(--uni)", "font-size": 8.5 }, svg);
+    t.textContent = `u0·ch${r.ws}${r.rev?" ◀":" ▶"}`;
+    if (r.rev) el("text", { x: clamp(pe[0]-30,4,330), y: clamp(pe[1],12,292), fill: "var(--attn-text)", "font-size": 8.5 }, svg).textContent = "rev ↺";
+  }
+  // lamps
+  const lampG = el("g", { id: "lampA" }, svg);
+  PA.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 3.4, class: "lamp", "data-k": k, style: "cursor:pointer" }, lampG));
+  svg.onclick = (ev)=>{
+    const k = ev.target.getAttribute("data-k");
+    if (k===null) return;
+    flashCounterpart(+k);
+  };
+}
+let flashUntil = 0, flashRanges = [];
+function flashCounterpart(k){
+  const owners = wireInfo(patchState);
+  if (owners[k].length > 1){ flashRanges = owners[k]; flashUntil = performance.now()+1600; }
+}
+/* The patch bay is made of CELLS — (fixture span ↔ output span) tuples. The SAME cells
+   appear in both views; only the label's context changes (fixture view shows output info,
+   output view shows fixture info). Hover a cell to light up its twin. */
+let BAYCELLS = {};
+function buildPatchBay(){
+  const st = STATES[patchState];
+  const owners = wireInfo(patchState);
+  BAYCELLS = {};
+  st.forEach((r,i)=> BAYCELLS["c"+i] = r);
+  const clashCell = r => { for (let k=r.ws;k<r.ws+r.len && k<N_WIRE;k++) if (owners[k].length>1) return true; return false; };
+  const cell = (cid, side, leftPct, widthPct, canvasW, label, err) =>
+    `<div class="baycell${err?" err":""}" data-cid="${cid}" style="left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%">
+       <canvas width="${canvasW}" height="1" data-cv="${cid}" data-side="${side}"></canvas>
+       <div class="clab">${label}</div></div>`;
+  /* output side — cells along the wire; labels carry FIXTURE info */
+  let outA = "";
+  st.forEach((r,i)=> outA += cell("c"+i, "o", r.ws/60*100, r.len/60*100, r.len,
+    `${r.fix} ${r.fs}–${r.fs+r.len-1}${r.rev?" ◀":""}`, clashCell(r)));
+  document.getElementById("bayout").innerHTML =
+    `<div class="baygrp">out A</div><div class="bayhead">port 1 · 56/170 · wire order</div>` +
+    `<div class="bayrow">${outA}</div>` +
+    `<div class="baygrp" style="margin-top:8px">out B</div><div class="bayhead">port 1 · 60/170</div>` +
+    `<div class="bayrow">${cell("m","o",0,100,60,"matrix 0–59",false)}</div>` +
+    `<div class="bayhead">port 2 · 24/170</div>` +
+    `<div class="bayrow">${cell("s","o",0,40,24,"shelf 0–23",false)}</div>`;
+  /* fixture side — the SAME cells along shader space; labels carry OUTPUT info */
+  const fxRow = (fix, len) => {
+    let cells = "";
+    st.forEach((r,i)=>{ if (r.fix !== fix) return;
+      cells += cell("c"+i, "f", r.fs/len*100, r.len/len*100, r.len,
+        `→ A·p1 ch${r.ws}${r.rev?" ◀":" ▶"}`, clashCell(r)); });
+    return cells;
+  };
+  document.getElementById("bayfix").innerHTML =
+    `<div class="bayhead">body · shader order</div><div class="bayrow">${fxRow("body", FIXLEN.body)}</div>` +
+    `<div class="bayhead">leaf · shader order</div><div class="bayrow">${fxRow("leaf", FIXLEN.leaf)}</div>` +
+    `<div class="bayhead">matrix · shader order</div><div class="bayrow">${cell("m","f",0,100,60,"→ B·p1 ch0 ▶",false)}</div>` +
+    `<div class="bayhead">shelf · shader order</div><div class="bayrow">${cell("s","f",0,100,24,"→ B·p2 ch0 ▶",false)}</div>`;
+  /* same tuple, two views: hover-link the twins */
+  document.querySelectorAll(".baycell").forEach(n=>{
+    n.onmouseenter = () => document.querySelectorAll(`.baycell[data-cid="${n.dataset.cid}"]`)
+      .forEach(m => m.classList.add("hl"));
+    n.onmouseleave = () => document.querySelectorAll(`.baycell[data-cid="${n.dataset.cid}"]`)
+      .forEach(m => m.classList.remove("hl"));
+  });
+}
+function bayFrame(t){
+  const owners = wireInfo(patchState);
+  document.querySelectorAll("#bayout canvas, #bayfix canvas").forEach(c=>{
+    const g = c.getContext("2d"), cid = c.dataset.cv, side = c.dataset.side;
+    if (cid === "m"){ for (let i=0;i<60;i++){ g.fillStyle = plasmaCol(i/59*3,.5,t); g.fillRect(i,0,1,1); } return; }
+    if (cid === "s"){ for (let i=0;i<24;i++){ g.fillStyle = auroraCol(i/23,t); g.fillRect(i,0,1,1); } return; }
+    const r = BAYCELLS[cid]; if (!r) return;
+    for (let j=0;j<r.len;j++){
+      let col;
+      if (side === "o") col = colorForLamp(r.ws+j, owners, t).col;
+      else {
+        const k = r.rev ? r.ws + r.len-1-j : r.ws + j;
+        if (k < N_WIRE && owners[k].length > 1) col = "#ef5350";
+        else if (prodMode === "2d" && LAMPUV[k])
+          col = (r.fix === "body" ? body2dCol : leaf2dCol)(LAMPUV[k].u, LAMPUV[k].v, t);
+        else {
+          const u = (r.fs + j)/(FIXLEN[r.fix]-1);
+          col = r.fix === "body" ? bodyCol(u,t) : leafCol(u,t);
+        }
+      }
+      g.fillStyle = col; g.fillRect(j,0,1,1);
+    }
+  });
+}
+function setState(s){
+  patchState = s;
+  document.querySelectorAll(".stbtn").forEach(b=>b.classList.toggle("on", b.dataset.st===s));
+  buildRopeA(); buildPatchBay();
+  const [cls, txt] = STATUS_TEXT[s];
+  for (const id of ["statusA","statusC"]){
+    const n = document.getElementById(id);
+    n.className = "statusline " + cls; n.textContent = txt;
+  }
+}
+
+/* ================= §3 rope vs plane — same shape, both declarations ================= */
+const N3 = {};   /* panel configs: id → {lamps, kind, bbox} */
+function n3Lamps_peach(){ return peachPts(198, 138, 66).all; }
+function n3Lamps_matrix(){
+  const x0=70, y0=42, cols=12, rows=8, cw=22, ch=22, out=[];
+  for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+    out.push([x0 + (j%2 ? cols-1-i : i)*cw, y0 + j*ch]);   /* serpentine = the wire */
+  return out;
+}
+/* opts.src = discrete source resolution (1D: cells, 2D: [cx, cy]); absent = continuous.
+   Continuous 2D renders a fine grid ("screen res"); discrete renders its own cells. */
+function buildN3Panel(id, lamps, kind, opts){
+  const svg = document.getElementById(id);
+  svg.innerHTML = "";
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for (const p of lamps){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+  x0-=12; y0-=12; x1+=12; y1+=12;
+  if (opts.art) refArt(198, 138, 66, svg);
+  const vis = el("g", { class: "n3vis", opacity: showVis?1:0 }, svg);
+  const q1 = w => opts.src ? (Math.floor(Math.min(w,.999)*opts.src)+.5)/opts.src : w;
+  const q2 = (u,v) => opts.src
+    ? [(Math.floor(Math.min(u,.999)*opts.src[0])+.5)/opts.src[0],
+       (Math.floor(Math.min(v,.999)*opts.src[1])+.5)/opts.src[1]]
+    : [u,v];
+  if (kind === "2D"){
+    const cols = opts.src ? opts.src[0] : 36;
+    const rows = opts.src ? opts.src[1] : Math.max(6, Math.round(36*(y1-y0)/(x1-x0)));
+    const cw=(x1-x0)/cols, ch=(y1-y0)/rows;
+    for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+      el("rect", { x: x0+i*cw, y: y0+j*ch, width: cw+(opts.src?0:.6), height: ch+(opts.src?0:.6),
+                   class: "n3cell", opacity: .85,
+                   "shape-rendering": opts.src ? "crispEdges" : "auto",
+                   stroke: opts.src ? "var(--terminal)" : "none", "stroke-width": opts.src ? 1 : 0,
+                   "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, vis);
+    el("rect", { x: x0, y: y0, width: x1-x0, height: y1-y0, fill: "none",
+                 stroke: "var(--border-strong)", "stroke-width": 1 }, vis);
+  } else if (!opts.src) {
+    for (let k=0;k<lamps.length-1;k++)
+      el("line", { x1: lamps[k][0], y1: lamps[k][1], x2: lamps[k+1][0], y2: lamps[k+1][1],
+                   "stroke-width": 8.5, "stroke-linecap": "round", class: "n3rope",
+                   "data-w": (k+.5)/(lamps.length-1), opacity: .85 }, vis);
+  } else {
+    /* discrete 1D: segments split exactly at cell boundaries, colors centered on cells,
+       dark border dot between segments */
+    const n = lamps.length, cellOf = w => Math.floor(Math.min(w,.999)*opts.src);
+    const marks = [];
+    for (let k=0;k<n-1;k++){
+      const wA = k/(n-1), wB = (k+1)/(n-1), cA = cellOf(wA), cB = cellOf(wB);
+      const seg = (p0, p1, c) => el("line", { x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1],
+        "stroke-width": 8.5, "stroke-linecap": "butt", class: "n3rope",
+        "data-w": (c+.5)/opts.src, opacity: .85 }, vis);
+      if (cA === cB) seg(lamps[k], lamps[k+1], cA);
+      else {
+        const t = (cB/opts.src - wA) / (wB - wA);
+        const P = [lerp(lamps[k][0], lamps[k+1][0], t), lerp(lamps[k][1], lamps[k+1][1], t)];
+        seg(lamps[k], P, cA); seg(P, lamps[k+1], cB); marks.push(P);
+      }
+    }
+    marks.forEach(P => el("circle", { cx: P[0], cy: P[1], r: 3, fill: "var(--terminal)",
+      stroke: "var(--border-strong)", "stroke-width": 1 }, vis));
+  }
+  const lampG = el("g", {}, svg);
+  lamps.forEach((p,k)=>{
+    const [su, sv] = q2((p[0]-x0)/(x1-x0), (p[1]-y0)/(y1-y0));
+    el("circle", { cx: p[0], cy: p[1], r: kind==="2D"&&opts.grid ? 4.2 : 3.3,
+      class: "n3lamp", "data-panel": id,
+      "data-w": q1(k/(lamps.length-1)), "data-u": su, "data-v": sv,
+      stroke: "rgba(0,0,0,.55)", "stroke-width": 1.4 }, lampG);
+  });
+  el("text", { x: 14, y: 250, fill: "var(--dim)", "font-size": 9.5 }, svg).textContent = opts.caption;
+  N3[id] = { kind };
+}
+function buildN3(){
+  buildN3Panel("n3-p1", n3Lamps_peach(), "1D", { art: true,
+    caption: "declared 1D — the visual rides the wire · presentation stays a peach" });
+  buildN3Panel("n3-p2", n3Lamps_peach(), "2D", { art: true,
+    caption: "declared 2D — same lamps sample positions on a plane" });
+  buildN3Panel("n3-m1", n3Lamps_matrix(), "1D", {
+    caption: "declared 1D — the serpentine wire, visible: a snake" });
+  buildN3Panel("n3-m2", n3Lamps_matrix(), "2D", { grid: true,
+    caption: "declared 2D — plane below the lamps (continuous source)" });
+  /* §3b — the parameterization axis (Q11) */
+  buildN3Panel("n3-c1", n3Lamps_peach(), "1D", { art: true,
+    caption: "continuous · float [0,1] — smooth along the wire" });
+  buildN3Panel("n3-d1", n3Lamps_peach(), "1D", { art: true, src: 12,
+    caption: "discrete · int [0,12) — segments centered on cells · integer scaling" });
+  buildN3Panel("n3-c2", n3Lamps_matrix(), "2D", {
+    caption: "continuous · vec2 — smooth plane at screen res" });
+  buildN3Panel("n3-d2", n3Lamps_matrix(), "2D", { src: [6,4],
+    caption: "discrete · ivec2 [0,6)×[0,4) — blocks; 4 lamps per cell" });
+}
+function toggleVis(){
+  showVis = !showVis;
+  document.getElementById("visbtn").classList.toggle("on", showVis);
+  document.querySelectorAll(".n3vis").forEach(n=>n.setAttribute("opacity", showVis?1:0));
+}
+
+/* ================= §4 project canvas: three layers ================= */
+/* local geometry (fixture space, origin 0,0) + a translate transform per fixture */
+const CV = {
+  layers: { reference: true, visual: true, fixture: true, output: false },
+  sel: "matrix",
+  fx: {
+    peach:  { x: 96,  y: 172, kind: "1D", proj: "radial",  showVis: true, out: "A", chans: "ch 0–55",
+              pts: peachPts(0, 0, 62).all, w: 130, h: 150, count: 56 },
+    matrix: { x: 300, y: 52,  kind: "2D", proj: "extrude", showVis: true, out: "B", chans: "ch 0–59",
+              cols: 10, rows: 6, cw: 21, chh: 21, w: 189, h: 105, count: 60 },
+    strip:  { x: 540, y: 218, kind: "1D", proj: "extrude", showVis: true, out: "A", chans: "ch 56–79",
+              pts: Array.from({length: 24}, (_,i)=>{ const u=i/23; return [200*u, -30*Math.sin(u*Math.PI)]; }),
+              w: 200, h: 40, count: 24 },
+  },
+};
+const PROJ_FN = {
+  extrude: (u,v)=>u,
+  radial:  (u,v)=>clamp(Math.hypot(u-.5, v-.5)*2, 0, 1),
+  angular: (u,v)=>Math.atan2(v-.5, u-.5)/TAU + .5,
+  mirror:  (u,v)=>u<.5 ? u*2 : 2-u*2,
+};
+function fxLamps(f){
+  if (f.pts) return f.pts;
+  const out = [];
+  for (let j=0;j<f.rows;j++) for (let i=0;i<f.cols;i++) out.push([i*f.cw, j*f.chh]);
+  return out;
+}
+function fxBBox(f){
+  const pts = fxLamps(f);
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for (const p of pts){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+  return { x0: x0-10, y0: y0-10, x1: x1+10, y1: y1+10 };
+}
+function buildCanvas(){
+  const svg = document.getElementById("canvasstage");
+  svg.innerHTML = "";
+  for (const name of Object.keys(CV.fx)){
+    const f = CV.fx[name];
+    const dimmed = (mode==="map" && name!==CV.sel) ? .25 : 1;
+    const g = el("g", { transform: `translate(${f.x},${f.y})`, opacity: dimmed,
+                        "data-fx": name, style: "cursor:" + (mode==="arrange"?"grab":"pointer") }, svg);
+    const bb = fxBBox(f);
+
+    /* layer 0 · reference art (the pain point: show it in this view) */
+    if (CV.layers.reference && name === "peach") refArt(0, 0, 62, g);
+
+    /* layer 1 · visual (native dimension, D26v) */
+    if (CV.layers.visual && f.showVis){
+      if (f.kind === "2D"){
+        const cols=12, rows=Math.max(4, Math.round(12*(bb.y1-bb.y0)/(bb.x1-bb.x0)));
+        const cw=(bb.x1-bb.x0)/cols, ch=(bb.y1-bb.y0)/rows;
+        const pg = el("g", {}, g);
+        for (let j=0;j<rows;j++) for (let i=0;i<cols;i++)
+          el("rect", { x: bb.x0+i*cw, y: bb.y0+j*ch, width: cw+.5, height: ch+.5,
+                       class: "cvcell", "data-fx": name,
+                       "data-u": (i+.5)/cols, "data-v": (j+.5)/rows }, pg);
+        el("rect", { x: bb.x0, y: bb.y0, width: bb.x1-bb.x0, height: bb.y1-bb.y0, fill: "none",
+                     stroke: "var(--border-strong)", "stroke-width": 1 }, g);
+        const pl = el("text", { x: bb.x0, y: bb.y0-5, fill: "var(--dim)", "font-size": 8.5 }, g);
+        pl.textContent = `in 2D by ${f.proj}`;
+      } else {
+        const pts = fxLamps(f);
+        for (let k=0;k<pts.length-1;k++)
+          el("line", { x1: pts[k][0], y1: pts[k][1], x2: pts[k+1][0], y2: pts[k+1][1],
+                       "stroke-width": 8, "stroke-linecap": "round", class: "cvrope",
+                       "data-fx": name, "data-u": (k+.5)/(pts.length-1), opacity: .8 }, g);
+      }
+    }
+
+    /* layer 2 · fixture (lamps + outline) */
+    if (CV.layers.fixture){
+      fxLamps(f).forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 2.9, class: "cvlamp",
+        "data-fx": name, "data-w": k/(f.count-1),
+        "data-u": (p[0]-bb.x0)/(bb.x1-bb.x0), "data-v": (p[1]-bb.y0)/(bb.y1-bb.y0),
+        stroke: "rgba(0,0,0,.5)", "stroke-width": 1 }, g));
+    }
+
+    /* layer 3 · output (the wire) */
+    if (CV.layers.output || mode === "patch"){
+      const pts = fxLamps(f);
+      const wcol = f.out === "A" ? "var(--fx-leaf)" : "var(--fx-body)";
+      for (let k=0;k<pts.length-1;k++)
+        el("line", { x1: pts[k][0], y1: pts[k][1], x2: pts[k+1][0], y2: pts[k+1][1],
+                     stroke: wcol, "stroke-width": 1.6, opacity: .8 }, g);
+      el("circle", { cx: pts[0][0], cy: pts[0][1], r: 5.5, fill: "none", stroke: "var(--uni)", "stroke-width": 1 }, g);
+      const wl = el("text", { x: pts[0][0]+8, y: pts[0][1]+3, fill: "var(--uni)", "font-size": 8.5 }, g);
+      wl.textContent = `${f.out}·${f.chans}`;
+    }
+
+    /* selection / arrange chrome */
+    if (CV.sel === name){
+      el("rect", { x: bb.x0-4, y: bb.y0-4, width: bb.x1-bb.x0+8, height: bb.y1-bb.y0+8, rx: 6,
+                   fill: "none", stroke: "var(--sel-border)", "stroke-width": 1,
+                   "stroke-dasharray": mode==="arrange" ? "4 4" : "none", opacity: .65 }, g);
+      if (mode === "arrange")
+        [[bb.x0-4,bb.y0-4],[bb.x1+4,bb.y0-4],[bb.x0-4,bb.y1+4],[bb.x1+4,bb.y1+4]].forEach(c =>
+          el("rect", { x: c[0]-3, y: c[1]-3, width: 6, height: 6, fill: "var(--sel-border)", opacity: .8 }, g));
+    }
+    const nm = el("text", { x: bb.x0, y: bb.y1+14, fill: CV.sel===name ? "var(--muted)" : "var(--dim)", "font-size": 9.5 }, g);
+    nm.textContent = `${name} · ${f.count} · ${f.kind}`;
+  }
+  if (mode === "map"){
+    const f = CV.fx[CV.sel];
+    const t = el("text", { x: 14, y: 20, fill: "var(--subtle)", "font-size": 10.5 }, svg);
+    t.textContent = `editing: ${CV.sel} — shape + wiring order (the existing map editor, in place)`;
+    fxLamps(f).forEach((p,k)=>{ if (k%4===0)
+      el("rect", { x: f.x+p[0]-2.6, y: f.y+p[1]-2.6, width: 5.2, height: 5.2,
+                   fill: "none", stroke: "var(--sel-border)", "stroke-width": 1 }, svg); });
+  }
+  if (mode === "patch"){
+    el("rect", { x: 588, y: 12, width: 160, height: 92, rx: 7, fill: "var(--card-subtle)",
+                 stroke: "var(--border)", "stroke-width": 1 }, svg);
+    const rows = [["out A (1)", "u0 · peach + shelf", "var(--fx-leaf)"],
+                  ["out B (2)", "u0 · matrix", "var(--fx-body)"],
+                  ["domain wall-rig", "valid ✓ no overlaps", "var(--good-text)"]];
+    rows.forEach((r,i)=>{
+      el("circle", { cx: 604, cy: 34+i*26, r: 4, fill: r[2] }, svg);
+      const t1 = el("text", { x: 616, y: 31+i*26, fill: "var(--muted)", "font-size": 10, "font-weight": 700 }, svg);
+      t1.textContent = r[0];
+      const t2 = el("text", { x: 616, y: 42+i*26, fill: "var(--dim)", "font-size": 8.5 }, svg);
+      t2.textContent = r[1];
+    });
+  }
+  wireCanvasInput();
+}
+/* drag-to-arrange + click-to-select */
+let drag = null;
+function wireCanvasInput(){
+  const svg = document.getElementById("canvasstage");
+  svg.onpointerdown = ev => {
+    const g = ev.target.closest("[data-fx]");
+    if (!g) return;
+    const name = g.getAttribute("data-fx");
+    const pt = svgPoint(svg, ev);
+    drag = { name, sx: pt.x, sy: pt.y, ox: CV.fx[name].x, oy: CV.fx[name].y, moved: false };
+    svg.setPointerCapture(ev.pointerId);
+  };
+  svg.onpointermove = ev => {
+    if (!drag || mode !== "arrange") return;
+    const svgN = document.getElementById("canvasstage");
+    const pt = svgPoint(svgN, ev);
+    const dx = pt.x - drag.sx, dy = pt.y - drag.sy;
+    if (Math.hypot(dx,dy) > 3) drag.moved = true;
+    if (drag.moved){
+      CV.fx[drag.name].x = drag.ox + dx; CV.fx[drag.name].y = drag.oy + dy;
+      const g = svgN.querySelector(`g[data-fx="${drag.name}"]`);
+      if (g) g.setAttribute("transform", `translate(${CV.fx[drag.name].x},${CV.fx[drag.name].y})`);
+    }
+  };
+  svg.onpointerup = ev => {
+    if (!drag) return;
+    if (!drag.moved){ CV.sel = drag.name; buildCanvas(); buildProps(); }
+    else buildCanvas();
+    drag = null;
+  };
+}
+function svgPoint(svg, ev){
+  const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+  return { x: (ev.clientX - r.left) / r.width * vb.width, y: (ev.clientY - r.top) / r.height * vb.height };
+}
+/* per-fixture object properties: the #399 dimensionality section, reachable on the canvas */
+function buildProps(){
+  const f = CV.fx[CV.sel], host = document.getElementById("propspanel");
+  const projRow = f.kind === "2D" || true ? `
+    <div style="margin:10px 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim)">
+      ${f.kind==="2D" ? "show 1D sources by" : "if shown in 2D, by"}</div>
+    <div style="display:flex; gap:5px; flex-wrap:wrap">
+      ${["extrude","radial","angular","mirror"].map(p=>`
+        <button onclick="setProj('${p}')" class="chip" style="cursor:pointer; ${p===f.proj
+          ? "border-color:var(--accent-border); color:var(--accent); background:var(--good-bg)" : ""}">${p}</button>`).join("")}
+    </div>` : "";
+  host.innerHTML = `
+    <div class="phead"><b>${CV.sel}</b><span class="kind">fixture · object properties</span></div>
+    <div class="pbody">
+      <div style="font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); margin-bottom:4px">dimensionality</div>
+      <span class="seg">
+        <button onclick="setKind('1D')" class="${f.kind==='1D'?'on':''}">1D</button>
+        <button onclick="setKind('2D')" class="${f.kind==='2D'?'on':''}">2D</button>
+        <button disabled style="opacity:.4">3D soon</button>
+      </span>
+      ${projRow}
+      <label style="display:flex; gap:7px; align-items:center; margin-top:12px; font-size:12px; color:var(--muted); cursor:pointer">
+        <input type="checkbox" ${f.showVis?"checked":""} onchange="CV.fx[CV.sel].showVis=this.checked; buildCanvas()"
+               style="accent-color:var(--accent)"> show visual on canvas</label>
+      <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border-muted); font: 10.5px var(--mono); color:var(--subtle)">
+        patch: out ${f.out} · u0 · ${f.chans}<br>consumes: bus:visual.out (1D aurora)</div>
+    </div>`;
+}
+function setKind(k){ CV.fx[CV.sel].kind = k; buildCanvas(); buildProps(); }
+function setProj(p){ CV.fx[CV.sel].proj = p; buildCanvas(); buildProps(); }
+function setLayer(l, on){ CV.layers[l] = on; buildCanvas(); }
+const MODE_HINT = {
+  arrange: "ground state — drag fixtures in presentation space; nothing here changes sampling or channels",
+  map: "drill into the selected fixture's shape (the existing editor, in place)",
+  patch: "the wire layer over the whole domain — assign, reverse, see conflicts",
+};
+function setMode(m){
+  mode = m;
+  document.querySelectorAll("#modeseg button").forEach(b=>b.classList.toggle("on", b.dataset.m===m));
+  document.getElementById("modehint").textContent = MODE_HINT[m];
+  buildCanvas(); buildSidebar();
+}
+function buildSidebar(){
+  const sb = document.getElementById("sidebar");
+  const ttl = document.getElementById("sbtitle"), knd = document.getElementById("sbkind");
+  const dot = c => `<span class="dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--fx-${c});margin-right:6px"></span>`;
+  const sel = n => n===CV.sel ? "color:var(--strong)" : "color:var(--subtle)";
+  const pick = n => `onclick="CV.sel='${n}';buildCanvas();buildProps();buildSidebar()" style="cursor:pointer"`;
+  if (mode === "map"){
+    ttl.textContent = "fixtures"; knd.textContent = "fixture → object";
+    sb.innerHTML =
+      `<div ${pick("peach")}><span style="${sel('peach')}">${dot("body")}peach</span></div>` +
+      (CV.sel==="peach" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 body-1 · 22<br>02 leaves · 12<br>03 body-2 · 22</div>` : "") +
+      `<div ${pick("matrix")}><span style="${sel('matrix')}">${dot("matrix")}matrix</span></div>` +
+      (CV.sel==="matrix" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 grid 10×6</div>` : "") +
+      `<div ${pick("strip")}><span style="${sel('strip')}">${dot("strip")}shelf strip</span></div>` +
+      (CV.sel==="strip" ? `<div style="padding-left:18px; color:var(--dim); font-family:var(--mono); font-size:10px">01 path · 24</div>` : "");
+  } else if (mode === "patch"){
+    ttl.textContent = "outputs"; knd.textContent = "output → port";
+    sb.innerHTML =
+      `<div style="color:var(--muted); font-weight:700">out A</div>` +
+      `<div style="padding-left:12px; font-family:var(--mono); font-size:10px; color:var(--dim)">port 1 · ${dot("body")}peach + ${dot("strip")}shelf</div>` +
+      `<div style="color:var(--muted); font-weight:700">out B</div>` +
+      `<div style="padding-left:12px; font-family:var(--mono); font-size:10px; color:var(--dim)">port 1 · ${dot("matrix")}matrix</div>` +
+      `<div style="margin-top:6px; font-size:10px; color:var(--good-text)">domain wall-rig · valid ✓</div>`;
+  } else {
+    ttl.textContent = "fixtures"; knd.textContent = "arrange";
+    sb.innerHTML = ["peach","matrix","strip"].map(n =>
+      `<div ${pick(n)}><span style="${sel(n)}">${dot(n==="peach"?"body":n)}${n==="strip"?"shelf strip":n}</span></div>`).join("");
+  }
+}
+
+/* live shape-cards */
+function buildCards(){
+  const host = document.getElementById("livecards");
+  const mk = (name, sub, build) => {
+    const d = document.createElement("div"); d.className = "pcard";
+    d.innerHTML = `<div class="art"></div><div class="nm">${name} <span>${sub}</span></div>`;
+    const svg = el("svg", { viewBox: "0 0 140 90", width: "140", height: "90" });
+    d.querySelector(".art").appendChild(svg); build(svg); host.appendChild(d);
+  };
+  mk("peach", "56 lamps", svg => {
+    const g = peachPts(70, 46, 24);
+    refArt(70, 46, 24, svg);
+    g.all.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 1.7, class: "card-peach", "data-k": k }, svg));
+  });
+  mk("dragon", "212 lamps", svg => {
+    // serpentine dragon-ish curve
+    const pts = Array.from({length: 60}, (_,i)=>{ const u=i/59;
+      return [12+116*u, 45 + 26*Math.sin(u*9.4) * (1-u*.55) ]; });
+    pts.forEach((p,k)=> el("circle", { cx: p[0], cy: p[1], r: 1.6, class: "card-dragon", "data-k": k }, svg));
+  });
+  mk("dome", "1.5k lamps", svg => {
+    for (let ring=0;ring<3;ring++){
+      const n = 6+ring*6, r = 12+ring*13;
+      for (let i=0;i<n;i++){
+        const a = i/n*TAU;
+        el("circle", { cx: 70+r*Math.cos(a), cy: 48+r*.62*Math.sin(a), r: 1.7,
+                       class: "card-dome", "data-u": (ring*n+i)/(3*18) }, svg);
+      }
+    }
+  });
+}
+
+/* ================= §5 zook-mini: one path, 5-way symmetry ================= */
+const ZOOK = { sectors: [1,5,4,3,2].map(p => ({ port: p })), sel: -1 };  // as-built plugging
+const PORT_COLORS = ["#7be0b2", "#f0b97a", "#9cc8ee", "#f0dc7a", "#e88fb0"];
+function zookSectorPts(k){
+  const cx=310, cy=200, sy=.8, rows=5, cols=6, out=[];
+  for (let r=0;r<rows;r++){
+    const rad = 42 + r*27;
+    for (let c=0;c<cols;c++){
+      const cc = r%2 ? cols-1-c : c;
+      const a = (-90 + k*72 - 26 + 52*(cc+.5)/cols) * Math.PI/180;
+      out.push([cx + rad*Math.cos(a), cy + rad*sy*Math.sin(a)]);
+    }
+  }
+  return out;
+}
+function buildDome(){
+  const svg = document.getElementById("domestage");
+  svg.innerHTML = "";
+  document.getElementById("portchips").innerHTML = PORT_COLORS.map((c,i)=>
+    `<span class="chip" style="margin-left:4px"><span class="dot" style="background:${c}"></span>p${i+1}</span>`).join("");
+  for (let k=0;k<5;k++){
+    const s = ZOOK.sectors[k], pts = zookSectorPts(k), col = PORT_COLORS[s.port-1];
+    const g = el("g", { "data-i": k, style: "cursor:pointer" }, svg);
+    // sector hit wedge
+    const wp = [];
+    const a0=(-90+k*72-30)*Math.PI/180, a1=(-90+k*72+30)*Math.PI/180, sy=.8, cx=310, cy=200;
+    wp.push([cx+26*Math.cos(a0), cy+26*sy*Math.sin(a0)], [cx+186*Math.cos(a0), cy+186*sy*Math.sin(a0)],
+            [cx+186*Math.cos(a1), cy+186*sy*Math.sin(a1)], [cx+26*Math.cos(a1), cy+26*sy*Math.sin(a1)]);
+    el("polygon", { points: wp.map(q=>q.map(v=>v.toFixed(1)).join(",")).join(" "),
+      fill: ZOOK.sel===k ? "rgba(214,218,224,.05)" : "transparent",
+      stroke: ZOOK.sel===k ? "var(--sel-border)" : "var(--border-muted)",
+      "stroke-width": ZOOK.sel===k ? 1.4 : 1, "stroke-dasharray": "3 4", "data-i": k }, g);
+    // the strut path, in port color
+    for (let i=0;i<pts.length-1;i++)
+      el("line", { x1: pts[i][0], y1: pts[i][1], x2: pts[i+1][0], y2: pts[i+1][1],
+        stroke: col, "stroke-width": 2, opacity: .55, "data-i": k, class: "zwire" }, g);
+    pts.forEach((p,i)=> el("circle", { cx: p[0], cy: p[1], r: 2.3, class: "zooklamp",
+      "data-u": i/(pts.length-1), "data-s": k, "data-i": k }, g));
+    const la = (-90+k*72)*Math.PI/180;
+    const lt = el("text", { x: 310+196*Math.cos(la), y: 200+196*.8*Math.sin(la)+3,
+      "text-anchor": "middle", "font-size": 9.5, fill: col }, g);
+    lt.textContent = `S${k+1} → p${s.port}`;
+    lt.style.pointerEvents = "none";
+  }
+  svg.onclick = ev => {
+    const i = ev.target.getAttribute("data-i");
+    if (i === null) return;
+    const s = ZOOK.sectors[+i];
+    if (ZOOK.sel === +i) s.port = s.port % 5 + 1;
+    ZOOK.sel = +i;
+    buildDome();
+    document.getElementById("domestatus").textContent =
+      `sector S${+i+1} → port ${s.port} · 30 lamps · ch 0–29 on that port · click again to cycle · ⟳ rotate = offset by 6 (strut stride) · ◀ reverse`;
+  };
+  // port readout — anchor-and-reflow per port; 2 sectors on one port = contested channels
+  const byPort = [[],[],[],[],[]];
+  ZOOK.sectors.forEach((s,k)=> byPort[s.port-1].push(k));
+  document.getElementById("domefrags").innerHTML = byPort.map((list,pi)=>{
+    const c = PORT_COLORS[pi];
+    if (!list.length) return `<span style="color:${c}">p${pi+1}</span> · <span style="color:var(--dim)">empty — 30 lamps dark on the wall</span>`;
+    if (list.length === 1) return `<span style="color:${c}">p${pi+1}</span> · S${list[0]+1} · 30 lamps · ch 0–29`;
+    return `<span style="color:${c}">p${pi+1}</span> · <span style="color:var(--err-text)">⚠ ${list.map(k=>"S"+(k+1)).join(" + ")} — ch 0–29 contested</span>`;
+  }).join("<br>") +
+  `<br><span style="color:var(--dim)">as-built: sector k → port (1,5,4,3,2)[k]</span>`;
+}
+
+/* ================= animation loop ================= */
+function toggleAnim(){
+  animating = !animating;
+  const b = document.getElementById("animbtn");
+  b.classList.toggle("on", animating);
+  b.textContent = animating ? "animating ▶" : "paused ⏸";
+  if (animating) requestAnimationFrame(frame);
+}
+let lastF = 0;
+function frame(now){
+  if (!animating) return;
+  if (now - lastF < 33){ requestAnimationFrame(frame); return; }
+  lastF = now;
+  const t = (now - T0) / 1000;
+  const owners = wireInfo(patchState);
+  const flash = performance.now() < flashUntil && Math.sin(now/90) > 0;
+
+  // §1
+  document.querySelectorAll(".l1today").forEach((n,k)=> n.setAttribute("fill", bodyCol(k/(N_WIRE-1), t)));
+  document.querySelectorAll(".l1shape").forEach((n,k)=>{
+    const c = lampColor(k, wireInfo("patched"), t); n.setAttribute("fill", c.col);
+  });
+
+  // §2 concept A lamps + segments
+  document.querySelectorAll("#ropeA .a2cell").forEach(n=>{
+    const fx = n.getAttribute("data-fx");
+    n.setAttribute("fill", (fx === "body" ? body2dCol : leaf2dCol)(
+      +n.getAttribute("data-u"), +n.getAttribute("data-v"), t));
+  });
+  document.querySelectorAll("#ropeA .lamp").forEach(n=>{
+    const k = +n.getAttribute("data-k");
+    const c = colorForLamp(k, owners, t);
+    let col = c.col;
+    if (flash && flashRanges.some(r => k>=r.ws && k<r.ws+r.len)) col = "#fffaf0";
+    n.setAttribute("fill", col);
+    n.setAttribute("r", c.status==="clash" ? 4.6+Math.sin(t*5)*0.8 : 3.4);
+  });
+  document.querySelectorAll("#ropeA .seg").forEach(n=>{
+    const fx = n.getAttribute("data-fx"), fc = +n.getAttribute("data-fc");
+    const clash = owners[+n.getAttribute("data-ka")].length > 1
+               || owners[+n.getAttribute("data-kb")].length > 1;
+    const u = (fc+.5)/(FIXLEN[fx]-1);
+    n.setAttribute("stroke", clash ? "#a03c3e" : (fx === "body" ? bodyCol(u,t) : leafCol(u,t)));
+    n.setAttribute("opacity", .8);
+  });
+  bayFrame(t);
+
+  // §3 — 2×2: same shape, both declarations
+  document.querySelectorAll(".n3cell").forEach(n=>{
+    n.setAttribute("fill", plasmaCol(+n.getAttribute("data-u")*3, +n.getAttribute("data-v")*3, t));
+  });
+  document.querySelectorAll(".n3rope").forEach(n=>{
+    n.setAttribute("stroke", auroraCol(+n.getAttribute("data-w"), t));
+  });
+  document.querySelectorAll(".n3lamp").forEach(n=>{
+    const kind = N3[n.getAttribute("data-panel")].kind;
+    n.setAttribute("fill", kind === "1D"
+      ? auroraCol(+n.getAttribute("data-w"), t)
+      : plasmaCol(+n.getAttribute("data-u")*3, +n.getAttribute("data-v")*3, t));
+  });
+
+  // §4 canvas: all fixtures consume the same 1D aurora bus
+  document.querySelectorAll("#canvasstage .cvcell").forEach(n=>{
+    const f = CV.fx[n.getAttribute("data-fx")];
+    const p = PROJ_FN[f.proj](+n.getAttribute("data-u"), +n.getAttribute("data-v"));
+    n.setAttribute("fill", auroraCol(p, t));
+  });
+  document.querySelectorAll("#canvasstage .cvrope").forEach(n=>{
+    n.setAttribute("stroke", auroraCol(+n.getAttribute("data-u"), t));
+  });
+  document.querySelectorAll("#canvasstage .cvlamp").forEach(n=>{
+    const f = CV.fx[n.getAttribute("data-fx")];
+    const col = f.kind === "1D"
+      ? auroraCol(+n.getAttribute("data-w"), t)
+      : auroraCol(PROJ_FN[f.proj](+n.getAttribute("data-u"), +n.getAttribute("data-v")), t);
+    n.setAttribute("fill", col);
+  });
+  document.querySelectorAll(".card-peach").forEach(n=>{
+    n.setAttribute("fill", lampColor(+n.getAttribute("data-k"), wireInfo("patched"), t*0.9).col);
+  });
+  document.querySelectorAll(".card-dragon").forEach(n=>{
+    n.setAttribute("fill", auroraCol(+n.getAttribute("data-k")/59, t*1.1));
+  });
+  document.querySelectorAll(".card-dome").forEach(n=>{
+    n.setAttribute("fill", heatColor(.35+.6*Math.abs(Math.sin(t*.9 + (+n.getAttribute("data-u"))*5))));
+  });
+
+  // §5 zook lamps — one pattern, five sectors, phase-shifted per port
+  document.querySelectorAll(".zooklamp").forEach(n=>{
+    n.setAttribute("fill", auroraCol(+n.getAttribute("data-u"), t + (+n.getAttribute("data-s"))*.37));
+  });
+
+  requestAnimationFrame(frame);
+}
+
+/* ---------- boot ---------- */
+buildRopeA(); buildPatchBay();
+setState(STATES[location.hash.slice(1)] ? location.hash.slice(1) : "patched");
+if (location.hash.includes("2d")) toggleProd();
+buildN3(); buildCanvas(); setMode("arrange"); buildProps(); buildCards(); buildDome();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

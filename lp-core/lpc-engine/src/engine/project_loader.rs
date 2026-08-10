@@ -57,7 +57,7 @@ use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
-use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode};
+use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode, FixturePatchSource};
 #[cfg(feature = "node-playlist")]
 use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
 
@@ -841,6 +841,26 @@ impl ProjectLoader {
                         if let Some(source) = map2d_source {
                             fixture = fixture.with_map2d_source(source);
                         }
+                        match resolve_fixture_patch(fs, registry, node, &config) {
+                            Ok(Some((source, error))) => {
+                                fixture = fixture.with_patch_source(source);
+                                if let Some(error) = error {
+                                    fixture = fixture.with_patch_error(error);
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                let message = error.to_string();
+                                mark_node_load_error(
+                                    runtime,
+                                    node.id,
+                                    frame,
+                                    &node_label(node),
+                                    message,
+                                );
+                                continue;
+                            }
+                        }
                         runtime
                             .attach_runtime_node(node.id, Box::new(fixture), frame)
                             .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -1171,6 +1191,49 @@ fn resolve_fixture_mapping(
         // form — Studio edits individual lamps there.
         other => Ok((FixtureMapping::Slots(other.clone()), None)),
     }
+}
+
+/// Read and parse the fixture's patch document, when it authored one.
+///
+/// Parsed here and RESOLVED by the node: resolution is fixture-relative, and
+/// the lamp count belongs to the mapping, which a live edit can change under
+/// a running project.
+///
+/// A DANGLING reference fails the load, exactly as a dangling mapping does —
+/// a project pointing at a file that is not there is broken, not degraded. A
+/// document that is there but this build cannot read attaches anyway, with no
+/// placement and the reason on the node: the strand keeps lighting in wire
+/// order while its author fixes the document, which is the difference between
+/// a bad patch and a dark show.
+#[cfg(feature = "node-fixture")]
+fn resolve_fixture_patch(
+    fs: &dyn LpFs,
+    registry: &mut ProjectRegistry,
+    node: &ProjectedNode,
+    config: &FixtureDef,
+) -> Result<Option<(FixturePatchSource, Option<String>)>, ProjectLoadError> {
+    if config.patch.value().source().is_none() {
+        return Ok(None);
+    }
+    let text = materialize_node_text_asset(
+        fs,
+        registry,
+        node,
+        AssetContentType::FixturePatch,
+        "fixture patch document",
+    )?;
+    let (doc, error) = match lpc_mapping::PatchDoc::from_json(&text.text) {
+        Ok(doc) => (Some(doc), None),
+        Err(e) => (None, Some(format!("parse fixture patch document: {e}"))),
+    };
+    Ok(Some((
+        FixturePatchSource {
+            location: text.location,
+            revision: text.revision,
+            doc,
+        },
+        error,
+    )))
 }
 
 fn node_kind_name(

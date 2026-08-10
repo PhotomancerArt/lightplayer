@@ -402,6 +402,11 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         power: fixture_power(sections),
         space: node_space_section::fixture_space_section(&rows),
         shape_presets: node_space_section::fixture_shape_presets(&rows),
+        // The bay's fixture side is probe state (which runs of this
+        // fixture reached which wire), filled by the project controller's
+        // `apply_patch_bays` pass — the same provenance rule the output
+        // face's board facts follow.
+        patch: None,
     })
 }
 
@@ -1243,6 +1248,9 @@ fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
         total_lamps: None,
         span_boundaries: Vec::new(),
         board: None,
+        // And by `apply_patch_bays`, for the same reason: the runs a wire
+        // is cut into ride the published-frame probe.
+        patch: None,
     })
 }
 

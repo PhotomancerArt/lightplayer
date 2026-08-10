@@ -20,6 +20,6 @@ pub use project_read::{
     ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
     WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
-    WireProjectionShape, WireScopeRef, WireVisualSpace,
+    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
+    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
 };

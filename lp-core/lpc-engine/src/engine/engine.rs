@@ -8,10 +8,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lp_collection::VecSet;
 use lpc_model::{
-    ChannelName, ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision,
-    SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment,
-    SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision,
-    advance_revision, lookup_slot_data_and_shape,
+    ChannelName, ControlDisplayLayout, ControlProduct, NodeDef, NodeDefLocation, NodeDefState,
+    NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath,
+    SlotPathSegment, SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath,
+    WithRevision, advance_revision, lookup_slot_data_and_shape,
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
@@ -1441,6 +1441,26 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.render_node_control(product, request, target)
     }
 
+    /// Read the producing node's resolved patch.
+    ///
+    /// Deliberately silent when the node is missing or mid-execution: this
+    /// answers "how is this producer patched", and "we could not ask right
+    /// now" means auto-flow, not a dead frame. A node whose patch failed to
+    /// parse keeps its last good placement and reports the failure as its own
+    /// runtime status.
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+    ) -> Option<Vec<crate::node::PatchedRun>> {
+        let entry = self.tree.get(product.node())?;
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            return None;
+        };
+        node.control_patch_placement()
+            .map(|runs| runs.to_vec())
+            .filter(|runs| !runs.is_empty())
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: crate::resource::RuntimeBufferId,
@@ -2360,27 +2380,40 @@ fn control_display_layout_result(
                     ),
                 });
             };
-            let revision = layout.revision();
-            match request {
-                ControlDisplayLayoutRead::IfChanged {
-                    known_revision: Some(known),
-                } if known == revision => {
-                    Ok(ControlDisplayLayoutProbeResult::Unchanged { revision })
-                }
-                _ => {
-                    let layout_len = lpc_wire::ser_write_json_len(&layout);
-                    if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
-                        return Ok(ControlDisplayLayoutProbeResult::Unsupported {
-                            reason: alloc::format!(
-                                "display layout is {layout_len} bytes serialized, over the \
-                                 {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
-                                 large need chunked streaming (not yet implemented)"
-                            ),
-                        });
-                    }
-                    Ok(ControlDisplayLayoutProbeResult::Layout(layout))
-                }
+            Ok(gate_display_layout(layout, request))
+        }
+    }
+}
+
+/// Apply the read's revision gate and the wire budget to a layout that is
+/// already in hand.
+///
+/// Split out of [`control_display_layout_result`] because the published-frame
+/// read builds its layout rather than asking one node for it — an output's
+/// geometry is N producers' layouts rebased through the fragments that placed
+/// them — and the gate must be the same gate either way.
+pub(crate) fn gate_display_layout(
+    layout: ControlDisplayLayout,
+    request: ControlDisplayLayoutRead,
+) -> ControlDisplayLayoutProbeResult {
+    let revision = layout.revision();
+    match request {
+        ControlDisplayLayoutRead::None => ControlDisplayLayoutProbeResult::Omitted,
+        ControlDisplayLayoutRead::IfChanged {
+            known_revision: Some(known),
+        } if known == revision => ControlDisplayLayoutProbeResult::Unchanged { revision },
+        _ => {
+            let layout_len = lpc_wire::ser_write_json_len(&layout);
+            if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
+                return ControlDisplayLayoutProbeResult::Unsupported {
+                    reason: alloc::format!(
+                        "display layout is {layout_len} bytes serialized, over the \
+                         {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
+                         large need chunked streaming (not yet implemented)"
+                    ),
+                };
             }
+            ControlDisplayLayoutProbeResult::Layout(layout)
         }
     }
 }

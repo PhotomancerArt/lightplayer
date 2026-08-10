@@ -10,7 +10,12 @@
 //!   known" is first class: the section simply is not there, and a quiet line
 //!   in the channels section says where the pins are edited instead;
 //! - the **channels** section is one row per wire — key, pin, lamp count —
-//!   over a caption carrying the wire's slice and resolved GPIO.
+//!   over a caption carrying the wire's slice and resolved GPIO;
+//! - the **patch** section is the wire's own picture: one row per port,
+//!   with a bordered, live-pixel cell for each producer run landing on it
+//!   (D34a). It is the OUTPUT half of a two-sided bay whose other half
+//!   rides each fixture card, showing the same cells in the fixture's own
+//!   order. Read-only: the patch document is edited as text.
 //!
 //! Every edit here is an ORDINARY slot op against the addresses the DTO
 //! carries ([`crate::app::node::slot_edit_actions`]): the pin picker writes
@@ -32,6 +37,7 @@ use lpa_studio_core::{
     UiOutputFace as UiOutputFaceData, UiOutputPin, UiSlotFieldState,
 };
 
+use crate::app::node::face::PatchBaySection;
 use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_remove_value_action, slot_set_value_action,
 };
@@ -86,10 +92,16 @@ pub fn OutputFace(
             }
         }
         OutputChannels {
-            face,
+            face: face.clone(),
             first: channels_first,
             pin_picker_open,
             on_action,
+        }
+        // The patch, under the wires that carry it: what each port is
+        // actually driving, cell by cell (D34a). Read-only — the document
+        // is edited as text.
+        if let Some(bay) = face.patch.clone() {
+            PatchBaySection { bay }
         }
     }
 }

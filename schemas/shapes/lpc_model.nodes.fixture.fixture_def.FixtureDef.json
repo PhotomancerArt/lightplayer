@@ -245,6 +245,53 @@
         }
       },
       {
+        "name": "patch",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "Unset",
+                "shape": {
+                  "unit": {
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "File",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "source",
+                        "shape": {
+                          "custom": {
+                            "codec": 2355797192,
+                            "meta": {},
+                            "shape": {
+                              "value": {
+                                "shape": {
+                                  "editor": "plain",
+                                  "id": 177956922,
+                                  "meta": {},
+                                  "ty": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
         "name": "strip_order_meaningful",
         "shape": {
           "value": {

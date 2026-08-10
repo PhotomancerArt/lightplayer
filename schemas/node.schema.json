@@ -1497,6 +1497,66 @@
             }
           ]
         },
+        "patch": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Unset"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "File"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "$path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "$path"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "power": {
           "additionalProperties": false,
           "description": "Lamp type and supply budget used to limit output current.",

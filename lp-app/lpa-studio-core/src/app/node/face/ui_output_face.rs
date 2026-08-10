@@ -59,6 +59,16 @@ pub struct UiOutputFace {
     /// The running device's board, when Studio knows which board it is.
     /// `None` = "no board known" — the first-class fallback state.
     pub board: Option<UiOutputBoardFacts>,
+    /// The patch bay's output side (D34a): one row per port, cells laid
+    /// along the wire, each labelled with the fixture it came from.
+    ///
+    /// Filled by the project controller's `apply_patch_bays` pass — the
+    /// placements and the published frame both ride the output-frame probe,
+    /// which this node's sections cannot see (same provenance rule as
+    /// [`Self::board`]). `None` when no frame has arrived: the bay is a
+    /// picture of a LIVE wire, and there is nothing honest to draw for a
+    /// project that has not run.
+    pub patch: Option<crate::UiPatchBay>,
 }
 
 impl UiOutputFace {

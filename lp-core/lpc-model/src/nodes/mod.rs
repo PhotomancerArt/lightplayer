@@ -24,7 +24,7 @@ pub use clock::{
 pub use fixture::{
     Brightness, ColorOrder, ConsumerCell2, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
     FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig,
-    PathSpec, VisualConsumerSpace,
+    PatchConfig, PathSpec, VisualConsumerSpace,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use module::{ChannelMetaDef, ChannelMetaDefView, ModuleDef, ModuleDefView};
@@ -55,8 +55,8 @@ pub use shader::{
     shader_panel_step, slot_bytes_estimate, validate_shader_slot_budget,
 };
 pub use starter::{
-    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_ref,
-    set_node_def_asset_ref, starter_def_for_kind, starter_for_kind,
+    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_refs,
+    rewrite_node_def_asset_refs, starter_def_for_kind, starter_for_kind,
 };
 pub use starter_project::starter_project_files;
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

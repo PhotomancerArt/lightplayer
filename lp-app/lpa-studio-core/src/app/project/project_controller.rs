@@ -983,6 +983,32 @@ impl ProjectController {
         Some(lpc_wire::WireScopeRef::Module { owner })
     }
 
+    /// The frame published by an OUTPUT node this scope owns, when it has one
+    /// worth drawing.
+    ///
+    /// Direct children only: "owns an output" is the question, and an output
+    /// two scopes down belongs to the module that holds it. A frame whose
+    /// geometry the engine refused (dome scale, over the wire budget) is not
+    /// worth drawing — the lens has no synthesis to stand in, and a card
+    /// saying "no display layout" is worse than the mirror it displaced — so
+    /// that scope keeps the ordinary two-channel hero.
+    fn scope_output_frame(
+        &self,
+        children: &[crate::UiNodeChild],
+    ) -> Option<crate::UiControlProductPreview> {
+        let sync = self.sync.as_ref()?;
+        children
+            .iter()
+            .filter(|child| child.kind == OUTPUT_KIND_LABEL)
+            .find_map(|child| {
+                let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+                let node = self.node(&address)?;
+                sync.output_frame(node.target().node_id)
+                    .filter(|frame| frame.display_layout.is_some())
+                    .cloned()
+            })
+    }
+
     /// The product a scope's named channel resolved to, when it resolved to
     /// one at all. Strictly scoped — a channel of the same name one scope
     /// out is a different channel.
@@ -2339,6 +2365,9 @@ impl ProjectController {
         // Same shape, one card kind over: the shader face's per-space
         // preview stack is probe state the section DTOs cannot carry.
         self.apply_face_preview_spaces(&mut nodes);
+        // Both sides of the patch bay, in one pass over output AND fixture
+        // faces: they show the same cells, so they are derived together.
+        self.apply_patch_bays(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -3273,6 +3302,86 @@ impl ProjectController {
         }
     }
 
+    /// Attach both sides of the patch bay (D34a): the output face's
+    /// per-port rows and every fixture face's own-space row.
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one —
+    /// the runs a wire is cut into ride the published-frame probe, and a
+    /// face builder deriving from section DTOs cannot see them. It has to
+    /// be ONE pass over both kinds: the two faces show the SAME cells, so
+    /// deriving them apart is how they would come to disagree.
+    ///
+    /// Runs first, faces second. The wires' channel rows are read out of
+    /// the output faces before anything is written back, because the
+    /// fixture cells name the port they land on — a fixture card cannot be
+    /// filled until every output's ports are known.
+    fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
+        use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
+
+        let Some(sync) = self.sync.as_ref() else {
+            return;
+        };
+        // (node, label, channels) for every output card in the tree.
+        let mut wires: Vec<(lpc_model::NodeId, String, Vec<crate::UiOutputChannelRow>)> =
+            Vec::new();
+        walk_faces(nodes, &mut |path, face| {
+            let crate::UiNodeFace::Output(output) = face else {
+                return;
+            };
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            wires.push((
+                node.target().node_id,
+                node.label().to_string(),
+                output.channels.clone(),
+            ));
+        });
+        if wires.is_empty() {
+            return;
+        }
+        let wires: Vec<OutputWire<'_>> = wires
+            .iter()
+            .map(|(node, label, channels)| OutputWire {
+                node: *node,
+                label,
+                placements: sync.output_placements(*node),
+                frame: sync.output_frame(*node),
+                channels,
+            })
+            .collect();
+        let producer = |id: lpc_model::NodeId| {
+            self.node_by_runtime_id(id)
+                .map(|node| (node.label().to_string(), node.address().to_string()))
+        };
+
+        walk_faces(nodes, &mut |path, face| {
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            let id = node.target().node_id;
+            match face {
+                crate::UiNodeFace::Output(output) => {
+                    let Some(wire) = wires.iter().find(|wire| wire.node == id) else {
+                        return;
+                    };
+                    let bay = output_bay(wire, &producer);
+                    output.patch = (!bay.is_empty()).then_some(bay);
+                }
+                crate::UiNodeFace::Fixture(fixture) => {
+                    fixture.patch = fixture_patch(id, &wires, &producer);
+                }
+                _ => {}
+            }
+        });
+    }
+
     /// One wire phasor row → its trace cards, one per downstream READING
     /// (clock-face v2; the flattening the G2 gate converged on).
     ///
@@ -3415,6 +3524,18 @@ impl ProjectController {
         // so one pass per level clears the whole tree.
         groups.retain(|group| !group.is_empty());
 
+        // A scope that OWNS an output heroes the WIRE that output composes:
+        // every producer's lamps, patched into one strand (G1 round 3 — "the
+        // root module isn't showing control output, just the peach body
+        // visual.out"). It outranks both bus channels because it is the only
+        // honest answer for such a scope: the peach's root `control.out`
+        // carries a fragments MAP of two fixtures, so it resolves to no
+        // single product at all, and its `visual.out` is one CHILD's mirror —
+        // a picture of half the project standing in for the whole of it.
+        // Scopes with no output are untouched and keep the two-channel pick
+        // below, which is why the peach's `body/` and `leaf/` submodules go
+        // on showing their own visuals.
+        let scope_output = self.scope_output_frame(children);
         // The hero: whichever of the scope's two primary products the card's
         // preference names, defaulting to `control.out` — a fixture
         // project's output IS the lamps, and the raster behind them is the
@@ -3428,14 +3549,22 @@ impl ProjectController {
         let scope_control = self
             .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
             .filter(|product| matches!(product, UiProductRef::Control { .. }));
-        // Only a scope resolving BOTH offers a choice; anything else has one
-        // hero and no toggle to draw.
-        let hero_choice =
-            (scope_visual.is_some() && scope_control.is_some()).then_some(hero_product);
+        // Only a scope with BOTH a control side and a visual one offers a
+        // choice; anything else has one hero and no toggle to draw. An
+        // output's composed frame is the control side for this purpose — the
+        // toggle still flips to the mirror, which is how a viewer gets back
+        // to the raster the fixtures are sampling.
+        let has_control = scope_output.is_some() || scope_control.is_some();
+        let hero_choice = (scope_visual.is_some() && has_control).then_some(hero_product);
+        let control_first = hero_product == crate::ModuleHeroProduct::Control
+            || (hero_product == crate::ModuleHeroProduct::Visual && scope_visual.is_none());
         let chosen = match hero_product {
             crate::ModuleHeroProduct::Control => scope_control.or(scope_visual),
             crate::ModuleHeroProduct::Visual => scope_visual.or(scope_control),
         };
+        // The composed wire has no `UiProductRef` to re-home onto, so it is
+        // resolved as a preview outright rather than through `chosen`.
+        let output_hero = control_first.then_some(scope_output).flatten();
 
         // The R7 mirror ROW supplies identity and meta, but its bytes ride
         // the scope's resolved product: the mirror's own product ref is
@@ -3444,7 +3573,9 @@ impl ProjectController {
         // hero renders black while the shader card below it is live.
         let mut preview =
             super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
-        if preview.is_none() && matches!(chosen, Some(UiProductRef::Control { .. })) {
+        if preview.is_none()
+            && (output_hero.is_some() || matches!(chosen, Some(UiProductRef::Control { .. })))
+        {
             // The asymmetry control-first exposes: the R7 mirror is a
             // VISUAL row, so a module publishing no mirror at all would get
             // NO hero even though its scope drives lamps — "control-first"
@@ -3465,7 +3596,18 @@ impl ProjectController {
                 ))
             });
         }
-        if let Some(hero) = preview.as_mut() {
+        if let (Some(hero), Some(frame)) = (preview.as_mut(), output_hero) {
+            // The composed wire, drawn straight from the published frame.
+            // There is no `UiProductRef` to borrow bytes through — an output
+            // node is a sink and publishes no product — so the row carries
+            // the preview and no product identity. It is always `Tracking`:
+            // the probe rides every read of a project that drives an output,
+            // so there is no unfocused state to be honest about.
+            hero.kind = crate::UiProductKind::Control;
+            hero.tracking = crate::UiProductTrackingState::Tracking;
+            hero.product = None;
+            hero.preview = crate::UiProductPreview::ControlNative(frame);
+        } else if let Some(hero) = preview.as_mut() {
             match chosen {
                 Some(product @ UiProductRef::Visual { .. }) => {
                     if let Some(bytes) = self
@@ -5695,8 +5837,9 @@ impl ProjectController {
         logs.extend(read.logs);
         let def_bytes = read.data;
 
-        // Assets: the def's own sibling reference, resolved exactly the way
-        // the server resolves it (the same resolution the inline editor's
+        // Assets: every sibling the def references (a fixture has two — its
+        // mapping document and its patch), resolved exactly the way the
+        // server resolves them (the same resolution the inline editor's
         // Apply targets).
         let mut assets = Vec::new();
         // Parse through the MODEL's static registry, not the synced
@@ -5704,12 +5847,13 @@ impl ProjectController {
         // and carries no creatable factories, so it cannot read an authored
         // node def back ("slot shape is not creatable"). Writing still goes
         // through the synced registry, exactly as `create_node` does.
-        let asset_ref = core::str::from_utf8(&def_bytes)
+        let asset_refs = core::str::from_utf8(&def_bytes)
             .ok()
             .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
             .as_ref()
-            .and_then(lpc_model::node_def_asset_ref);
-        if let Some(source) = asset_ref {
+            .map(lpc_model::node_def_asset_refs)
+            .unwrap_or_default();
+        for source in asset_refs {
             match self.resolve_node_asset_artifact_from(&def_artifact, &source) {
                 Some(artifact) => {
                     let read = server
@@ -5719,7 +5863,7 @@ impl ProjectController {
                     assets.push((source.clone(), read.data));
                 }
                 None => {
-                    log::warn!("copy {label}: cannot resolve asset {source}; copying def only");
+                    log::warn!("copy {label}: cannot resolve asset {source}; skipping it");
                 }
             }
         }
@@ -5782,23 +5926,28 @@ impl ProjectController {
             None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
         };
 
-        // Re-home the def's asset (at most one today — see
-        // `lpc_model::node_def_asset_ref`) onto the free name, and rewrite
-        // the reference to match.
+        // Re-home EVERY asset the envelope carries (a fixture brings its
+        // mapping document and its patch) onto the free name, and rewrite the
+        // references to match. Each keeps its own compound suffix, so the two
+        // siblings stay distinguishable — see `asset_extension`.
         let mut asset_paths = std::collections::BTreeMap::new();
         let mut body = envelope
             .body_text()
             .ok_or_else(|| UiError::Project("the pasted node body is not text".to_string()))?
             .as_bytes()
             .to_vec();
-        if let Some((source_path, _)) = envelope.assets.iter().next() {
-            let target = format!("./{name}{}", asset_extension(source_path));
-            asset_paths.insert(source_path.clone(), target.clone());
+        if !envelope.assets.is_empty() {
+            for (source_path, _) in envelope.assets.iter() {
+                let target = format!("./{name}{}", asset_extension(source_path));
+                asset_paths.insert(source_path.clone(), target);
+            }
             let body_text = core::str::from_utf8(&body)
                 .map_err(|_| UiError::Project("the pasted node body is not text".to_string()))?;
             match lpc_model::NodeDef::from_json_str(body_text) {
                 Ok(mut def) => {
-                    lpc_model::set_node_def_asset_ref(&mut def, &target);
+                    lpc_model::rewrite_node_def_asset_refs(&mut def, |current| {
+                        asset_paths.get(current).cloned()
+                    });
                     body = def
                         .write_json(&self.slot_shapes)
                         .map_err(|err| {
@@ -6826,6 +6975,15 @@ pub struct ProjectEditRun {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// Compound suffixes that identify a document FORMAT rather than a file type.
+///
+/// `sign.map2d.json` renamed to `pasted.json` would still parse as JSON and
+/// still be found by name — and would silently stop being recognizable as a
+/// mapping document by every filename-dispatching surface in the app. A
+/// fixture's two documents would also collide on one pasted name. These
+/// suffixes travel with the file.
+const COMPOUND_ASSET_SUFFIXES: &[&str] = &[".map2d.json", ".patch.json"];
+
 /// A pasted asset's extension, INCLUDING the dot (`""` when it has none).
 ///
 /// Split the file NAME, never the whole path: `"./orbit"` has no
@@ -6834,6 +6992,12 @@ pub struct ProjectEditRun {
 /// `./name./orbit`.
 fn asset_extension(source_path: &str) -> String {
     let file_name = source_path.rsplit('/').next().unwrap_or(source_path);
+    if let Some(suffix) = COMPOUND_ASSET_SUFFIXES
+        .iter()
+        .find(|suffix| file_name.len() > suffix.len() && file_name.ends_with(*suffix))
+    {
+        return (*suffix).to_string();
+    }
     match file_name.rsplit_once('.') {
         // A leading-dot name (`.hidden`) is not an extension either.
         Some((stem, ext)) if !stem.is_empty() => format!(".{ext}"),
@@ -6998,6 +7162,9 @@ fn count_nodes(node: &NodeController) -> usize {
 /// The card kind label module nodes wear (`node_kind_label`: `module`,
 /// `project`, and `show` all read as one kind).
 const MODULE_KIND_LABEL: &str = "Module";
+
+/// The card kind label output nodes wear (`node_kind_label`).
+const OUTPUT_KIND_LABEL: &str = "Output";
 
 /// The name every module's output row wears — the R7 mirror's slot name,
 /// reused when a control-first hero has to be synthesized without one.
@@ -7491,6 +7658,32 @@ fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
 /// An action dispatched to the project controller itself.
 fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
+}
+
+/// Visit every face in a finished node tree with its owner's address path.
+///
+/// Both halves of the tree carry faces — a root card's `header.path` and a
+/// nested card's `detail` are the same address in two DTO shapes — so a
+/// pass that only walked one of them would silently skip every fixture in
+/// the project (they are all nested cards).
+fn walk_faces(nodes: &mut [UiNodeView], visit: &mut impl FnMut(&str, &mut crate::UiNodeFace)) {
+    fn walk_children(
+        children: &mut [crate::UiNodeChild],
+        visit: &mut impl FnMut(&str, &mut crate::UiNodeFace),
+    ) {
+        for child in children {
+            if let Some(face) = child.face.as_mut() {
+                visit(&child.detail, face);
+            }
+            walk_children(&mut child.children, visit);
+        }
+    }
+    for node in nodes {
+        if let Some(face) = node.face.as_mut() {
+            visit(&node.header.path, face);
+        }
+        walk_children(&mut node.children, visit);
+    }
 }
 
 fn clear_node_focus(nodes: &mut [NodeController]) {
@@ -8210,6 +8403,20 @@ mod asset_extension_tests {
     #[test]
     fn only_the_last_extension_counts() {
         assert_eq!(asset_extension("./orbit.tar.gz"), ".gz");
+    }
+
+    /// …except for the compound suffixes that ARE the document's identity.
+    /// A pasted fixture whose `sign.map2d.json` landed as `copy.json` would
+    /// stop being a mapping document to every filename-dispatching surface,
+    /// and its patch would collide with it on the same name.
+    #[test]
+    fn document_suffixes_travel_whole() {
+        assert_eq!(asset_extension("./sign.map2d.json"), ".map2d.json");
+        assert_eq!(asset_extension("nested/sign.patch.json"), ".patch.json");
+        // Not a compound suffix, just a `.json` file.
+        assert_eq!(asset_extension("./settings.json"), ".json");
+        // The suffix alone is a dotfile-ish name, not a stem plus suffix.
+        assert_eq!(asset_extension(".patch.json"), ".json");
     }
 }
 

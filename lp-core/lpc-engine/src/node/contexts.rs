@@ -30,6 +30,7 @@ use lpfs::LpFs;
 
 use super::ScopeRef;
 use super::node_error::NodeError;
+use super::node_runtime::PatchedRun;
 
 /// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
 ///
@@ -338,6 +339,18 @@ impl<'r> TickContext<'r> {
         self.resolver
             .render_control(product, request, target)
             .map_err(|e| NodeError::msg(alloc::format!("render control: {}", e.message)))
+    }
+
+    /// Where a control product's producer says its lamps land on the wire, or
+    /// `None` for auto-flow placement.
+    ///
+    /// The output asks this once per producer per frame, between resolving
+    /// its input (which ticks the producer) and rendering.
+    pub fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+    ) -> Option<alloc::vec::Vec<PatchedRun>> {
+        self.resolver.control_patch_placement(product)
     }
 
     /// Publishes this node's timebase for the current tick.
