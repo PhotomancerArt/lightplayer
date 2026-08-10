@@ -325,6 +325,17 @@ impl ProjectSync {
         self.output_frames.frame(node)
     }
 
+    /// How one output's wire is cut — the runs behind the published frame,
+    /// in the output's own planning order. The patch bay's data (D34a).
+    pub fn output_placements(&self, node: lpc_model::NodeId) -> &[lpc_wire::WireOutputPlacement] {
+        self.output_frames.placements(node)
+    }
+
+    /// Every output node that has answered the published-frame probe.
+    pub fn published_outputs(&self) -> impl Iterator<Item = lpc_model::NodeId> + '_ {
+        self.output_frames.outputs()
+    }
+
     /// Whether the mirror carries any output node.
     ///
     /// The probe has no node selector — it answers for every output at once —

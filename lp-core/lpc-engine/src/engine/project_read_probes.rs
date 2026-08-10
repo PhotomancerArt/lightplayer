@@ -37,6 +37,10 @@ use crate::products::visual::{
     VisualSpace, resolve_1d_to_2d_with_origin,
 };
 
+/// Samples per RGB lamp — the same unit the output node plans fragments in
+/// (`lpc_engine`'s `output_node`: "a lamp is three samples").
+const SAMPLES_PER_LAMP: u32 = 3;
+
 /// One output node found by the published-frame tree walk, snapshotted so the
 /// layout pass can take `&mut Engine` without holding a tree borrow.
 struct PublishedOutputCandidate {
@@ -471,6 +475,11 @@ impl Engine {
                 },
                 sample_layout: candidate.sample_layout.unwrap_or_default(),
                 display_layout,
+                placements: candidate
+                    .fragments
+                    .iter()
+                    .map(wire_output_placement)
+                    .collect(),
                 bytes,
             });
         }
@@ -642,6 +651,25 @@ fn wire_phasor_origin(key: &crate::dataflow::timebase::PhasorKey) -> WirePhasorO
                 channel: alloc::string::ToString::to_string(&channel.0),
             }
         }
+    }
+}
+
+/// One planned fragment as the wire states it: **lamps**, not samples.
+///
+/// The engine plans in samples because that is what it renders into; every
+/// surface downstream of the probe — the patch document, the output's channel
+/// counts, the bay's cells — counts lamps, and converting once here keeps the
+/// division from being repeated (and mis-rounded) by each of them. A run is
+/// always a whole number of lamps: fragments are cut from lamp ranges.
+fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlacement {
+    lpc_wire::WireOutputPlacement {
+        node: fragment.product.node(),
+        output: fragment.product.output(),
+        source_lamp: fragment.source_offset_samples / SAMPLES_PER_LAMP,
+        source_lamps: fragment.product.preferred_extent().sample_count() / SAMPLES_PER_LAMP,
+        wire_lamp: fragment.offset_samples / SAMPLES_PER_LAMP,
+        lamps: fragment.len_samples / SAMPLES_PER_LAMP,
+        reversed: fragment.reversed,
     }
 }
 

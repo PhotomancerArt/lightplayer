@@ -33,6 +33,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 17: the wire's CUT reaches the read — `OutputFrameEntry` (and its
+///   chunk header) gain `placements: Vec<WireOutputPlacement>`, one
+///   `(fixture span ↔ wire span)` run per producer, in lamps. Required
+///   fields on existing structs: an old peer's entry cannot decode against
+///   the new shape, which is what earns the bump. This is the only
+///   description of which fixture owns which stretch of a strand — the
+///   patch bay's data (D34a), and unavailable to a client that would
+///   otherwise have to re-derive auto-flow ordering from the project.
 /// - 16: output fragments — `SlotMerge` gains a `fragments` variant and
 ///   `OutputDef::input` declares it, so every project read now ships a slot
 ///   shape carrying `"merge": "fragments"`. `SlotSemantics.merge` rides the
@@ -127,7 +135,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 16;
+pub const WIRE_PROTO_VERSION: u32 = 17;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

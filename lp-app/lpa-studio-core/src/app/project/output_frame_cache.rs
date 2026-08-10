@@ -38,7 +38,7 @@ use std::rc::Rc;
 use lpc_model::{ControlDisplayLayout, ControlExtent, NodeId, Revision};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
-    WireChannelSampleFormat,
+    WireChannelSampleFormat, WireOutputPlacement,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -58,6 +58,16 @@ struct OutputFrameEntryState {
     layout_refused: bool,
     /// The newest frame, as the renderer consumes it.
     frame: Option<UiControlProductPreview>,
+    /// How the newest frame was CUT: one run per producer placed on this
+    /// wire. Kept beside the frame rather than folded into it because it is
+    /// not something the lamp renderer reads — it is what the patch bay
+    /// draws, and the only description of which fixture owns which stretch
+    /// of the strand (D34a).
+    ///
+    /// Replaced on every probe answer, including one whose revision
+    /// repeated: a patch edit re-cuts the wire without republishing bytes,
+    /// which is the same reason the layout is refreshed below.
+    placements: Vec<WireOutputPlacement>,
 }
 
 /// Published output frames for the lens, keyed by output node.
@@ -70,6 +80,20 @@ impl OutputFrameCache {
     /// The newest frame one output published, if a read has carried one.
     pub fn frame(&self, node: NodeId) -> Option<&UiControlProductPreview> {
         self.outputs.get(&node)?.frame.as_ref()
+    }
+
+    /// How that output's wire is cut — its runs, in planning order. Empty
+    /// for an output that has not answered, or has not planned yet.
+    pub fn placements(&self, node: NodeId) -> &[WireOutputPlacement] {
+        self.outputs
+            .get(&node)
+            .map_or(&[], |output| output.placements.as_slice())
+    }
+
+    /// Every output that has answered a probe, in node order — the set the
+    /// patch bay walks (a fixture's cells may be on any of them).
+    pub fn outputs(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.outputs.keys().copied()
     }
 
     /// What the next read should ask for.
@@ -116,6 +140,11 @@ impl OutputFrameCache {
 
     fn apply_entry(&mut self, entry: &OutputFrameEntry) {
         let output = self.outputs.entry(entry.node).or_default();
+        // The cut, always: it is small, ungated, and moves under a repeated
+        // frame revision whenever a patch is edited.
+        if output.placements != entry.placements {
+            output.placements = entry.placements.clone();
+        }
         match &entry.display_layout {
             ControlDisplayLayoutProbeResult::Layout(layout) => {
                 output.layout_revision = Some(layout.revision());
@@ -254,6 +283,26 @@ mod tests {
         assert_eq!(layout.revision, Revision::new(12));
     }
 
+    /// A patch edit re-cuts the wire without moving the frame's bytes — the
+    /// same repeated-revision case the layout has to survive. The bay reads
+    /// the cut, so it has to land whether or not the frame did.
+    #[test]
+    fn a_recut_wire_reaches_a_frame_whose_revision_did_not_move() {
+        let mut cache = OutputFrameCache::default();
+        cache.apply(&[entry(4, 5, vec![1, 0, 2, 0, 3, 0])]);
+        assert_eq!(cache.placements(NodeId::new(4)).len(), 1);
+
+        let mut repatched = entry(4, 5, vec![1, 0, 2, 0, 3, 0]);
+        repatched.placements[0].reversed = true;
+        cache.apply(&[repatched]);
+
+        assert!(
+            cache.placements(NodeId::new(4))[0].reversed,
+            "the re-cut arrives under an unchanged frame revision"
+        );
+        assert_eq!(cache.outputs().collect::<Vec<_>>(), vec![NodeId::new(4)]);
+    }
+
     #[test]
     fn a_refused_layout_stops_the_asking() {
         let mut cache = OutputFrameCache::default();
@@ -308,6 +357,17 @@ mod tests {
                 }],
             },
             display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            // One auto-flowed producer (a fixture, not the output itself)
+            // taking the whole wire — the shape of an unpatched project.
+            placements: vec![WireOutputPlacement {
+                node: NodeId::new(node + 100),
+                output: 0,
+                source_lamp: 0,
+                source_lamps: (bytes.len() / 6) as u32,
+                wire_lamp: 0,
+                lamps: (bytes.len() / 6) as u32,
+                reversed: false,
+            }],
             bytes,
         }
     }

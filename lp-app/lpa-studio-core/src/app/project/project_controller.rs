@@ -2332,6 +2332,9 @@ impl ProjectController {
         // Same shape, one card kind over: the shader face's per-space
         // preview stack is probe state the section DTOs cannot carry.
         self.apply_face_preview_spaces(&mut nodes);
+        // Both sides of the patch bay, in one pass over output AND fixture
+        // faces: they show the same cells, so they are derived together.
+        self.apply_patch_bays(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -3264,6 +3267,86 @@ impl ProjectController {
             walk(self, node.face.as_mut());
             walk_children(self, &mut node.children);
         }
+    }
+
+    /// Attach both sides of the patch bay (D34a): the output face's
+    /// per-port rows and every fixture face's own-space row.
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one —
+    /// the runs a wire is cut into ride the published-frame probe, and a
+    /// face builder deriving from section DTOs cannot see them. It has to
+    /// be ONE pass over both kinds: the two faces show the SAME cells, so
+    /// deriving them apart is how they would come to disagree.
+    ///
+    /// Runs first, faces second. The wires' channel rows are read out of
+    /// the output faces before anything is written back, because the
+    /// fixture cells name the port they land on — a fixture card cannot be
+    /// filled until every output's ports are known.
+    fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
+        use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
+
+        let Some(sync) = self.sync.as_ref() else {
+            return;
+        };
+        // (node, label, channels) for every output card in the tree.
+        let mut wires: Vec<(lpc_model::NodeId, String, Vec<crate::UiOutputChannelRow>)> =
+            Vec::new();
+        walk_faces(nodes, &mut |path, face| {
+            let crate::UiNodeFace::Output(output) = face else {
+                return;
+            };
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            wires.push((
+                node.target().node_id,
+                node.label().to_string(),
+                output.channels.clone(),
+            ));
+        });
+        if wires.is_empty() {
+            return;
+        }
+        let wires: Vec<OutputWire<'_>> = wires
+            .iter()
+            .map(|(node, label, channels)| OutputWire {
+                node: *node,
+                label,
+                placements: sync.output_placements(*node),
+                frame: sync.output_frame(*node),
+                channels,
+            })
+            .collect();
+        let producer = |id: lpc_model::NodeId| {
+            self.node_by_runtime_id(id)
+                .map(|node| (node.label().to_string(), node.address().to_string()))
+        };
+
+        walk_faces(nodes, &mut |path, face| {
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            let id = node.target().node_id;
+            match face {
+                crate::UiNodeFace::Output(output) => {
+                    let Some(wire) = wires.iter().find(|wire| wire.node == id) else {
+                        return;
+                    };
+                    let bay = output_bay(wire, &producer);
+                    output.patch = (!bay.is_empty()).then_some(bay);
+                }
+                crate::UiNodeFace::Fixture(fixture) => {
+                    fixture.patch = fixture_patch(id, &wires, &producer);
+                }
+                _ => {}
+            }
+        });
     }
 
     /// One wire phasor row → its trace cards, one per downstream READING
@@ -7542,6 +7625,32 @@ fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
 /// An action dispatched to the project controller itself.
 fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
+}
+
+/// Visit every face in a finished node tree with its owner's address path.
+///
+/// Both halves of the tree carry faces — a root card's `header.path` and a
+/// nested card's `detail` are the same address in two DTO shapes — so a
+/// pass that only walked one of them would silently skip every fixture in
+/// the project (they are all nested cards).
+fn walk_faces(nodes: &mut [UiNodeView], visit: &mut impl FnMut(&str, &mut crate::UiNodeFace)) {
+    fn walk_children(
+        children: &mut [crate::UiNodeChild],
+        visit: &mut impl FnMut(&str, &mut crate::UiNodeFace),
+    ) {
+        for child in children {
+            if let Some(face) = child.face.as_mut() {
+                visit(&child.detail, face);
+            }
+            walk_children(&mut child.children, visit);
+        }
+    }
+    for node in nodes {
+        if let Some(face) = node.face.as_mut() {
+            visit(&node.header.path, face);
+        }
+        walk_children(&mut node.children, visit);
+    }
 }
 
 fn clear_node_focus(nodes: &mut [NodeController]) {
