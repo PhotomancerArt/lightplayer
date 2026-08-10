@@ -3804,8 +3804,8 @@ mod tests {
             panic!("expected preview with refused display layout, got {results:?}");
         };
         assert!(
-            reason.contains("wire budget"),
-            "reason names the wire budget: {reason}"
+            reason.contains("byte budget") && reason.contains("bytes serialized"),
+            "reason names the link budget and the measured size: {reason}"
         );
     }
 

@@ -250,7 +250,9 @@ mod tests {
         // 8 spans of 256 — a multi-strand install's worth of span overhead.
         let mut state = 0x2545_F491_4F6C_DD1Du64;
         let mut scatter = move || {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             (state >> 40) as f32 / 16_777_216.0
         };
         let lamps: Vec<ControlLamp2d> = (0..LAMPS)

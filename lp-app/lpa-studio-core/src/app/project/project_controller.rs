@@ -31,12 +31,11 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay,
-    FromLpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect,
-    MutationOp, MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter,
-    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
-    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
-    resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
+    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
+    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
+    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
