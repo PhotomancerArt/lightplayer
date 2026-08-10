@@ -652,3 +652,110 @@ fn apply_asset_change(
         .apply_project_changes(fs, registry, &changes)
         .expect("apply asset change");
 }
+
+/// The layout gate reads the LINK's declared budget, not a compile-time
+/// constant: the same published layout is refused on a link too small for
+/// it (with both numbers in the reason) and answered without limit on a
+/// link that declared none. Radiance-scale geometry never rides the
+/// embedded serial frame — it rides links like these.
+#[test]
+fn the_declared_link_budget_gates_the_published_layout() {
+    let (mut engine, registry) = settled(&project_fs(false));
+
+    engine.set_display_layout_budget(Some(64));
+    let refused = display_layout_answer(&mut engine, &registry);
+    let ControlDisplayLayoutProbeResult::Unsupported { reason } = refused else {
+        panic!("a 64-byte link cannot carry this layout: {refused:?}");
+    };
+    assert!(
+        reason.contains("64"),
+        "the refusal names the link budget: {reason}"
+    );
+    assert!(
+        reason.contains("bytes"),
+        "the refusal names the measured size: {reason}"
+    );
+
+    engine.set_display_layout_budget(None);
+    assert!(
+        matches!(
+            display_layout_answer(&mut engine, &registry),
+            ControlDisplayLayoutProbeResult::Layout(_)
+        ),
+        "an unbounded link answers the same layout"
+    );
+}
+
+/// The frame-probe header carries EVERY output's layout in one unchunked
+/// event, so the budget is a header TOTAL: outputs whose layouts each fit
+/// individually degrade to `Unsupported` once the header is spent — and
+/// their frames still flow.
+#[test]
+fn the_header_total_gates_layouts_across_outputs() {
+    // Three outputs on the same control bus: three published frames, three
+    // layouts of identical size in one header.
+    let fs = project_fs(false);
+    fs.write_file(
+        "/module.json".as_path(),
+        br#"{ "kind": "Module", "nodes": {
+  "body": { "ref": "./body.json" },
+  "leaf": { "ref": "./leaf.json" },
+  "output": { "ref": "./output.json" },
+  "output2": { "ref": "./output2.json" },
+  "output3": { "ref": "./output3.json" }
+} }"#,
+    )
+    .expect("module.json");
+    for (name, endpoint) in [("output2", "D11"), ("output3", "D12")] {
+        fs.write_file(
+            format!("/{name}.json").as_path(),
+            format!(
+                r#"{{
+  "kind": "Output",
+  "channels": {{ "0": {{ "endpoint": "ws281x:local:{endpoint}" }} }},
+  "bindings": {{ "input": {{ "source": "bus:control.out" }} }}
+}}"#
+            )
+            .as_bytes(),
+        )
+        .expect("extra output");
+    }
+    let (mut engine, registry) = settled(&fs);
+
+    // Measure one layout as the wire would, then declare a budget that
+    // holds two of them but not three.
+    let one = match display_layout_answer(&mut engine, &registry) {
+        ControlDisplayLayoutProbeResult::Layout(layout) => lpc_wire::ser_write_json_len(&layout),
+        other => panic!("expected a layout to measure: {other:?}"),
+    };
+    engine.set_display_layout_budget(Some(one * 2 + one / 2));
+
+    let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
+        &registry,
+        OutputFrameProbeRequest {
+            display_layout: ControlDisplayLayoutRead::Always,
+        },
+    );
+    assert_eq!(outputs.len(), 3, "all three frames flow regardless");
+    let answered = outputs
+        .iter()
+        .filter(|entry| matches!(entry.display_layout, ControlDisplayLayoutProbeResult::Layout(_)))
+        .count();
+    let refused: Vec<_> = outputs
+        .iter()
+        .filter_map(|entry| match &entry.display_layout {
+            ControlDisplayLayoutProbeResult::Unsupported { reason } => Some(reason.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        (answered, refused.len()),
+        (2, 1),
+        "two layouts fit the header, the third degrades: {refused:?}"
+    );
+    assert!(
+        refused[0].contains("header already carries"),
+        "the refusal explains the header total: {}",
+        refused[0]
+    );
+}

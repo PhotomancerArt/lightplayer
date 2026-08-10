@@ -11,7 +11,7 @@ pub use project_read::{
     OutputFrameEntry, OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
-    PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest, ProjectProbeResult,
+    PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest, ProjectProbeResult,
     ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent,
     ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ProjectReadResourceEvent,
     ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest,
