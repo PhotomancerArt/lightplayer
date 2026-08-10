@@ -62,6 +62,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 label: "out_a".to_string(),
                 name: Some("1".to_string()),
                 address: None,
+                name_assign: None,
                 bay: UiPatchBay {
                     ports: vec![
                         port(0, "IO18", 0, 39, vec![sector2, door0]),
@@ -93,6 +94,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 label: "out_b".to_string(),
                 name: Some("Box 2".to_string()),
                 address: None,
+                name_assign: None,
                 bay: UiPatchBay {
                     ports: vec![
                         port(
@@ -125,6 +127,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 label: "dome".to_string(),
                 address: None,
                 mapping_artifact: None,
+                patch_artifact: None,
                 mapping_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 150,
@@ -155,6 +158,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 label: "doors".to_string(),
                 address: None,
                 mapping_artifact: None,
+                patch_artifact: None,
                 mapping_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 27,
@@ -183,6 +187,7 @@ fn peach_surface() -> UiPatchSurface {
             label: "output".to_string(),
             name: None,
             address: None,
+            name_assign: None,
             bay: UiPatchBay {
                 ports: vec![port(
                     0,
@@ -210,6 +215,7 @@ fn peach_surface() -> UiPatchSurface {
                 label: "peach_body".to_string(),
                 address: None,
                 mapping_artifact: None,
+                patch_artifact: None,
                 mapping_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 44,
@@ -228,6 +234,7 @@ fn peach_surface() -> UiPatchSurface {
                 label: "peach_leaf".to_string(),
                 address: None,
                 mapping_artifact: None,
+                patch_artifact: None,
                 mapping_loaded: true,
                 patch: UiFixturePatch {
                     lamps: 12,

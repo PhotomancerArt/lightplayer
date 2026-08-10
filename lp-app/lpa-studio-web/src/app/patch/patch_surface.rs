@@ -16,11 +16,152 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControlDisplayLayout, ProjectController, ProjectEditorOp, ProjectEditorView, UiAction,
+    ControlDisplayLayout, PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject,
+    PatchVerbWindow, ProjectController, ProjectEditorOp, ProjectEditorView, UiAction,
     UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
 };
 
 use crate::app::node::HoveredPatchCell;
+
+/// Every fixture's write-target facts, for the verb ops.
+fn verb_fixtures(surface: &UiPatchSurface) -> Vec<PatchVerbFixture> {
+    surface
+        .fixtures
+        .iter()
+        .filter_map(|fixture| {
+            Some(PatchVerbFixture {
+                node: fixture.node,
+                patch_artifact: fixture.patch_artifact.clone()?,
+                mapping_artifact: fixture.mapping_artifact.clone(),
+                lamp_count: fixture.patch.lamps,
+            })
+        })
+        .collect()
+}
+
+/// The verb subject for the current selection: an instance path, a cell's
+/// range (or its instance, when one covers it), or the whole fixture.
+fn verb_subject(
+    surface: &UiPatchSurface,
+    selection: &UiPatchTarget,
+) -> Option<(lpa_studio_core::NodeId, PatchVerbSubject, u32)> {
+    match selection {
+        UiPatchTarget::Instance { node, path } => {
+            let fixture = surface.fixtures.iter().find(|f| f.node == *node)?;
+            let stride = fixture
+                .instances
+                .iter()
+                .find(|instance| instance.path == *path)
+                .map(|instance| instance.stride)
+                .unwrap_or(1);
+            Some((
+                *node,
+                PatchVerbSubject {
+                    path: Some(path.clone()),
+                    range: None,
+                },
+                stride,
+            ))
+        }
+        UiPatchTarget::Fixture { node } => Some((
+            *node,
+            PatchVerbSubject {
+                path: None,
+                range: None,
+            },
+            1,
+        )),
+        UiPatchTarget::Cell { id } => {
+            // Cell ids are `node:output:source:wire` (the bay's format).
+            let node: u32 = id.split(':').next()?.parse().ok()?;
+            let node = lpa_studio_core::NodeId::new(node);
+            let fixture = surface.fixtures.iter().find(|f| f.node == node)?;
+            let cell = fixture.patch.cells.iter().find(|cell| cell.id == *id)?;
+            // Prefer the instance covering the cell — path entries match by
+            // path, and the instance's stride is the honest rotation step.
+            if let Some(instance) = fixture.instances.iter().find(|instance| {
+                cell.source_start >= instance.start
+                    && cell.source_start < instance.start + instance.lamps
+            }) {
+                return Some((
+                    node,
+                    PatchVerbSubject {
+                        path: Some(instance.path.clone()),
+                        range: None,
+                    },
+                    instance.stride,
+                ));
+            }
+            Some((
+                node,
+                PatchVerbSubject {
+                    path: None,
+                    range: Some((cell.source_start, Some(cell.lamps))),
+                },
+                1,
+            ))
+        }
+        UiPatchTarget::Output { .. } | UiPatchTarget::Port { .. } => None,
+    }
+}
+
+/// Dispatch one verb over the current selection.
+fn dispatch_verb(
+    on_action: &EventHandler<UiAction>,
+    surface: &UiPatchSurface,
+    selection: &Option<UiPatchTarget>,
+    verb: PatchVerbKind,
+) {
+    let subject = selection
+        .as_ref()
+        .and_then(|selection| verb_subject(surface, selection));
+    let (subject_fixture, subject) = match (&verb, subject) {
+        // Undo/redo and port verbs need no subject.
+        (
+            PatchVerbKind::Undo
+            | PatchVerbKind::Redo
+            | PatchVerbKind::SwapPorts { .. }
+            | PatchVerbKind::ShiftPort { .. },
+            resolved,
+        ) => (
+            resolved.map(|(node, _, _)| node),
+            PatchVerbSubject::default(),
+        ),
+        (_, Some((node, subject, _))) => (Some(node), subject),
+        (_, None) => return,
+    };
+    on_action.call(UiAction::from_op(
+        ProjectController::NODE_ID,
+        PatchVerbOp {
+            subject_fixture,
+            subject,
+            fixtures: verb_fixtures(surface),
+            assign_output_name: None,
+            verb,
+        },
+    ));
+}
+
+/// The selection's rotation stride (1 when it has none).
+fn selection_stride(surface: &UiPatchSurface, selection: &Option<UiPatchTarget>) -> u32 {
+    selection
+        .as_ref()
+        .and_then(|selection| verb_subject(surface, selection))
+        .map(|(_, _, stride)| stride)
+        .unwrap_or(1)
+}
+
+/// The next free wire lamp on a port (after its last occupied cell).
+fn port_next_free(output: &UiPatchSurfaceOutput, port_key: u32) -> Option<u32> {
+    let port = output.bay.ports.iter().find(|port| port.key == port_key)?;
+    let last = port
+        .cells
+        .iter()
+        .map(|cell| cell.wire_start + cell.lamps)
+        .max()
+        .unwrap_or(port.start);
+    Some(last.max(port.start))
+}
 
 /// Dispatch a selection change to the core.
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
@@ -72,21 +213,191 @@ pub fn PatchSurfacePage(view: ProjectEditorView, on_action: EventHandler<UiActio
             }
         };
     };
+    let mut help_open = use_signal(|| false);
+    // The swap verb's second target: `s` arms it from the selected port,
+    // the next port click completes the exchange.
+    let mut armed_swap = use_signal(|| Option::<PatchVerbWindow>::None);
+    let port_window = |output: &UiPatchSurfaceOutput, key: u32| {
+        output
+            .bay
+            .ports
+            .iter()
+            .find(|port| port.key == key)
+            .map(|port| PatchVerbWindow {
+                output_name: output.name.clone(),
+                start: port.start,
+                lamps: port.lamps,
+            })
+    };
+    let on_port_click = {
+        let surface = surface.clone();
+        let selection = selection.clone();
+        let on_action = on_action;
+        move |(output_index, port_key): (usize, u32)| {
+            let Some(output) = surface.outputs.get(output_index) else {
+                return;
+            };
+            // An armed swap completes on the next port click.
+            let armed = armed_swap.peek().clone();
+            if let Some(a) = armed {
+                if let Some(b) = port_window(output, port_key) {
+                    armed_swap.set(None);
+                    dispatch_verb(
+                        &on_action,
+                        &surface,
+                        &selection,
+                        PatchVerbKind::SwapPorts { a, b },
+                    );
+                }
+                return;
+            }
+            // With a fixture-side selection, a port click ASSIGNS it there
+            // (spike §5's grammar); otherwise it selects the port.
+            let has_subject = selection
+                .as_ref()
+                .and_then(|selection| verb_subject(&surface, selection))
+                .is_some();
+            if has_subject {
+                let Some(lamp) = port_next_free(output, port_key) else {
+                    return;
+                };
+                let mut op_ready = PatchVerbKind::Assign {
+                    output_name: output.name.clone(),
+                    lamp,
+                };
+                // An unnamed output gets its numeric default alongside the
+                // write (D39) — the DTO prebuilt it.
+                if output.name.is_none()
+                    && let Some((_, name)) = output.name_assign.clone()
+                {
+                    op_ready = PatchVerbKind::Assign {
+                        output_name: Some(name),
+                        lamp,
+                    };
+                }
+                let assign_name = output.name_assign.clone();
+                let subject = selection
+                    .as_ref()
+                    .and_then(|selection| verb_subject(&surface, selection));
+                if let Some((node, subject, _)) = subject {
+                    on_action.call(UiAction::from_op(
+                        ProjectController::NODE_ID,
+                        PatchVerbOp {
+                            subject_fixture: Some(node),
+                            subject,
+                            fixtures: verb_fixtures(&surface),
+                            assign_output_name: assign_name,
+                            verb: op_ready,
+                        },
+                    ));
+                }
+            } else {
+                select(
+                    &on_action,
+                    Some(UiPatchTarget::Port {
+                        node: output.node,
+                        port: port_key,
+                    }),
+                );
+            }
+        }
+    };
     rsx! {
         section {
             class: "tw:grid tw:grid-cols-[minmax(200px,260px)_minmax(0,1fr)] tw:gap-3.5 tw:content-start tw:max-[880px]:grid-cols-1",
-            // Escape clears the selection — the first rung of the ladder
-            // (P6 extends it). Root is focusable for the keyboard grammar.
+            // The keyboard grammar (map-editor root-onkeydown precedent):
+            // r reverse · ;/' rotate ∓/± stride · s arm swap · Escape
+            // ladder · ⌘Z/⌘⇧Z undo/redo · ? help.
             tabindex: 0,
             onkeydown: {
                 let on_action = on_action;
+                let surface = surface.clone();
+                let selection = selection.clone();
                 move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape {
-                        select(&on_action, None);
+                    let meta = event.modifiers().meta() || event.modifiers().ctrl();
+                    match event.key() {
+                        Key::Escape => {
+                            // The ladder: drop the armed swap first, then
+                            // the selection.
+                            if armed_swap.peek().is_some() {
+                                armed_swap.set(None);
+                            } else {
+                                select(&on_action, None);
+                            }
+                        }
+                        Key::Character(key) => match key.as_str() {
+                            "r" => dispatch_verb(
+                                &on_action,
+                                &surface,
+                                &selection,
+                                PatchVerbKind::Reverse,
+                            ),
+                            ";" => {
+                                let stride = selection_stride(&surface, &selection);
+                                dispatch_verb(
+                                    &on_action,
+                                    &surface,
+                                    &selection,
+                                    PatchVerbKind::Rotate { steps: -1, stride },
+                                );
+                            }
+                            "'" => {
+                                let stride = selection_stride(&surface, &selection);
+                                dispatch_verb(
+                                    &on_action,
+                                    &surface,
+                                    &selection,
+                                    PatchVerbKind::Rotate { steps: 1, stride },
+                                );
+                            }
+                            "s" => {
+                                // Arm the swap from the selected port.
+                                if let Some(UiPatchTarget::Port { node, port }) = &selection
+                                    && let Some(output) =
+                                        surface.outputs.iter().find(|output| output.node == *node)
+                                    && let Some(window) = port_window(output, *port)
+                                {
+                                    armed_swap.set(Some(window));
+                                }
+                            }
+                            "z" if meta => {
+                                let verb = if event.modifiers().shift() {
+                                    PatchVerbKind::Redo
+                                } else {
+                                    PatchVerbKind::Undo
+                                };
+                                dispatch_verb(&on_action, &surface, &selection, verb);
+                            }
+                            "?" => {
+                                let open = *help_open.peek();
+                                help_open.set(!open);
+                            }
+                            _ => {}
+                        },
+                        _ => {}
                     }
                 }
             },
-            PatchSidebar { surface: surface.clone(), selection: selection.clone(), on_action }
+            if *help_open.read() {
+                div { class: "tw:fixed tw:bottom-4 tw:right-4 tw:z-50 tw:rounded-lg tw:border tw:border-white/20 tw:bg-black/90 tw:p-4 tw:text-xs tw:leading-relaxed",
+                    div { class: "tw:font-semibold tw:mb-1", "Patch keys" }
+                    div { "click port — assign selection · click cell — select" }
+                    div { "r — reverse · ; / ' — rotate ∓/± stride" }
+                    div { "s — arm swap (then click the other port)" }
+                    div { "⌘Z / ⌘⇧Z — undo / redo · Esc — back out · ? — close" }
+                }
+            }
+            if armed_swap.read().is_some() {
+                div { class: "tw:fixed tw:top-4 tw:right-4 tw:z-50 tw:rounded tw:border tw:border-white/30 tw:bg-black/80 tw:px-3 tw:py-1.5 tw:text-xs",
+                    "Swap armed — click the other port (Esc cancels)"
+                }
+            }
+            PatchSidebar {
+                surface: surface.clone(),
+                selection: selection.clone(),
+                on_action,
+                on_port_click,
+            }
             div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
                 for output in surface.outputs.clone() {
                     PatchOutputSection {
@@ -117,11 +428,12 @@ fn PatchSidebar(
     surface: UiPatchSurface,
     selection: Option<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
+    on_port_click: EventHandler<(usize, u32)>,
 ) -> Element {
     rsx! {
         nav { class: "tw:grid tw:content-start tw:gap-1 tw:text-sm",
             h2 { class: "tw:text-base tw:font-semibold tw:mb-1", "Patch" }
-            for output in surface.outputs.clone() {
+            for (output_index, output) in surface.outputs.clone().into_iter().enumerate() {
                 {
                     let target = UiPatchTarget::Output { node: output.node };
                     let selected = is_selected(&selection, &target);
@@ -155,11 +467,11 @@ fn PatchSidebar(
                                 } else {
                                     "tw:flex tw:items-baseline tw:gap-2 tw:rounded tw:pl-6 tw:pr-2 tw:py-0.5 tw:cursor-pointer hover:tw:bg-white/5"
                                 };
-                                let on_action = on_action;
+                                let _ = target;
                                 rsx! {
                                     div {
                                         class: "{row_class}",
-                                        onclick: move |_| select(&on_action, Some(target.clone())),
+                                        onclick: move |_| on_port_click.call((output_index, port.key)),
                                         span { "port {port.key}" }
                                         span { class: "tw:text-xs tw:opacity-60", "{port.pin_label}" }
                                         span { class: "tw:text-xs tw:opacity-60", "{port.lamps} lamps" }

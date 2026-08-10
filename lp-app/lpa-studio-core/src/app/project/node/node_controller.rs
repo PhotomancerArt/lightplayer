@@ -816,8 +816,15 @@ fn embed_asset_editors_in_slots(
     for slot in slots {
         match &mut slot.body {
             UiConfigSlotBody::Asset(asset) => {
+                // Patch documents ride the Text kind (a deliberate slot-
+                // controller decision) but still need their editor DATA on
+                // the face: the patch surface's verbs write through it
+                // (slice 2 P6). Other text assets stay data-less.
+                let editable = asset.editor.supports_editor()
+                    || (asset.editor == crate::UiAssetEditorKind::Text
+                        && asset.source.to_ascii_lowercase().ends_with(".patch.json"));
                 if asset.inline_editor.is_none()
-                    && asset.editor.supports_editor()
+                    && editable
                     && asset.content.is_none()
                     && let Some(editor) = resolve(asset)
                 {

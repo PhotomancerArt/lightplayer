@@ -399,6 +399,7 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         preview,
         brightness,
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
+        patch_editor: inline_text_editor_for_suffix(sections, ".patch.json"),
         power: fixture_power(sections),
         space: node_space_section::fixture_space_section(&rows),
         shape_presets: node_space_section::fixture_shape_presets(&rows),
@@ -502,6 +503,32 @@ fn glsl_inline_editor(sections: &[UiNodeSection]) -> Option<UiAssetEditor> {
 /// First inline editor of `kind` anywhere in the asset/config slot rows
 /// (records searched recursively) — the face derives from section DTOs,
 /// never from controller state.
+fn inline_text_editor_for_suffix(
+    sections: &[UiNodeSection],
+    suffix: &str,
+) -> Option<UiAssetEditor> {
+    fn in_slots(slots: &[UiConfigSlot], suffix: &str) -> Option<UiAssetEditor> {
+        slots.iter().find_map(|slot| match &slot.body {
+            UiConfigSlotBody::Asset(asset)
+                if asset
+                    .inline_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.source.ends_with(suffix)) =>
+            {
+                asset.inline_editor.clone()
+            }
+            UiConfigSlotBody::Record(record) => in_slots(&record.fields, suffix),
+            _ => None,
+        })
+    }
+    sections.iter().find_map(|section| match section {
+        UiNodeSection::AssetSlots(slots)
+        | UiNodeSection::ConfigSlots(slots)
+        | UiNodeSection::DebugSlots(slots) => in_slots(slots, suffix),
+        _ => None,
+    })
+}
+
 fn inline_editor_of_kind(
     sections: &[UiNodeSection],
     kind: UiAssetEditorKind,

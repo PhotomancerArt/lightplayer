@@ -53,6 +53,11 @@ pub struct UiPatchSurfaceOutput {
     pub name: Option<String>,
     /// The node's address path, for focus/navigation.
     pub address: Option<String>,
+    /// Prebuilt name auto-assign for an UNNAMED output: the `name.some`
+    /// slot address plus the next free numeric default — what the first
+    /// verb naming this output applies alongside its patch write (D39).
+    /// `None` when the output already has a name.
+    pub name_assign: Option<(crate::ProjectSlotAddress, String)>,
     /// Ports + cells + frame — the same derivation the face bay renders.
     pub bay: UiPatchBay,
 }
@@ -81,6 +86,10 @@ pub struct UiPatchSurfaceFixture {
     /// dispatches [`crate::AssetContentFetchOp`] against to resolve the
     /// instance table below.
     pub mapping_artifact: Option<lpc_model::ArtifactLocation>,
+    /// The fixture's `{stem}.patch.json` artifact — the P6 verbs' write
+    /// target. A fixture without one cannot be patched from the surface
+    /// (the verbs say so rather than inventing a file).
+    pub patch_artifact: Option<lpc_model::ArtifactLocation>,
     /// The map2d body was resolvable at build time. False = the fetch has
     /// not landed yet; the page dispatches it and the table fills on the
     /// next snapshot.
