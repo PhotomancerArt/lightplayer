@@ -376,6 +376,8 @@ pub fn EditorCanvas(
         let ghost_doc = lpc_mapping::Map2dDoc {
             objects: vec![lpc_mapping::Map2dObject {
                 name: String::new(),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Path(lpc_mapping::PathShape {
                     points: draft_points.clone(),
                     count,

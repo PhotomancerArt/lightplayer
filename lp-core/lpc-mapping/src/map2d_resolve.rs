@@ -14,8 +14,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use crate::map2d_doc::{
-    GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathShape, RepeatShape, RingDir,
-    RingOrder, RingShape,
+    GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape, PolygonShape,
+    RepeatShape, RingDir, RingOrder, RingShape,
 };
 use crate::map2d_error::Map2dError;
 
@@ -160,6 +160,7 @@ fn resolve_shape(
         Map2dShape::Grid(grid) => resolve_grid(grid, invalid)?,
         Map2dShape::Ring(ring) => resolve_ring(ring, invalid)?,
         Map2dShape::Path(path) => resolve_path(path, invalid)?,
+        Map2dShape::Polygon(polygon) => resolve_polygon(polygon, invalid)?,
         Map2dShape::Repeat(repeat) => return resolve_repeat(repeat, invalid),
     };
     let strands = alloc::vec![positions.len() as u32];
@@ -367,6 +368,111 @@ fn resolve_path(
         positions.push(point_at_active_distance(&points, &inert, distance));
     }
     Ok(positions)
+}
+
+/// `count` lamps evenly spaced along a closed outline's perimeter.
+///
+/// The outline closes implicitly (last point → first point is a real
+/// segment), the walk wraps instead of doubling an endpoint, and lamp 0
+/// sits exactly on `points[0]` — so spacing is `perimeter / count`, and a
+/// triangle of 9 lamps over equal sides carries exactly 3 per side with
+/// lamps 0/3/6 on the corners. That per-side regularity is the polygon's
+/// intrinsic rotation stride ([`shape_stride`]).
+fn resolve_polygon(
+    polygon: &PolygonShape,
+    invalid: &impl Fn(&str) -> Map2dError,
+) -> Result<Vec<[f32; 2]>, Map2dError> {
+    if polygon.count == 0 {
+        return Err(invalid("polygon count must be at least 1"));
+    }
+    if polygon.points.len() < 3 {
+        return Err(invalid("polygon needs at least 3 points"));
+    }
+    let mut points = polygon.points.clone();
+    points.push(polygon.points[0]);
+    let perimeter = active_length(&points, &[]);
+    if perimeter <= f32::EPSILON {
+        return Err(invalid("polygon has zero perimeter"));
+    }
+    let positions = (0..polygon.count)
+        .map(|lamp| {
+            let distance = perimeter * (lamp as f32 / polygon.count as f32);
+            point_at_active_distance(&points, &[], distance)
+        })
+        .collect();
+    Ok(positions)
+}
+
+/// The rotation-stride hint an object's UI steps `offset` by, in lamps.
+///
+/// An explicit [`Map2dObject::stride`] override wins; otherwise the stride
+/// derives from the shape kind — see [`shape_stride`]. Never zero.
+#[must_use]
+pub fn object_stride(object: &Map2dObject) -> u32 {
+    object
+        .stride
+        .filter(|stride| *stride > 0)
+        .unwrap_or_else(|| shape_stride(&object.shape))
+}
+
+/// The derived rotation stride of one shape kind, in lamps. Never zero.
+///
+/// - Grid: one row (`cols`).
+/// - Ring: the **outer** count — inner rings derive their own counts
+///   ([`derived_ring_count`]), so no single number is honest for every
+///   ring; the outer count is the closest thing and override territory
+///   beyond it.
+/// - Path: 1 (no intrinsic period).
+/// - Polygon: lamps per side (`count / points.len()`) when the perimeter
+///   divides evenly, else 1 (override territory) — a triangular door of 9
+///   lamps rotates by 3, one side at a time.
+/// - Repeat: the inner shape's whole lamp count — rotating a repeat-object
+///   entry by its stride steps one instance.
+#[must_use]
+pub fn shape_stride(shape: &Map2dShape) -> u32 {
+    match shape {
+        Map2dShape::Grid(grid) => grid.cols.max(1),
+        Map2dShape::Ring(ring) => ring.outer_count.max(1),
+        Map2dShape::Path(_) => 1,
+        Map2dShape::Polygon(polygon) => {
+            let sides = polygon.points.len() as u32;
+            if sides > 0 && polygon.count % sides == 0 {
+                (polygon.count / sides).max(1)
+            } else {
+                1
+            }
+        }
+        Map2dShape::Repeat(repeat) => shape_lamp_count(&repeat.shape).max(1),
+    }
+}
+
+/// The lamp count one shape resolves to, by pure parameter arithmetic.
+///
+/// Mirrors [`resolve`] exactly (the ring case reuses the same
+/// [`derived_ring_count`] derivation); a test pins the two together over
+/// every shape kind, so a resolver change that moved a count would fail
+/// loudly rather than skew stride math.
+#[must_use]
+pub fn shape_lamp_count(shape: &Map2dShape) -> u32 {
+    match shape {
+        Map2dShape::Grid(grid) => grid.cols * grid.rows,
+        Map2dShape::Ring(ring) => {
+            let mut total = 0;
+            for ring_index in 0..ring.rings {
+                let radius = ring.radius * (ring.rings - ring_index) as f32 / ring.rings as f32;
+                total += ring
+                    .counts
+                    .get(ring_index as usize)
+                    .copied()
+                    .filter(|count| *count > 0)
+                    .unwrap_or_else(|| derived_ring_count(ring.outer_count, radius, ring.radius));
+            }
+            total
+        }
+        Map2dShape::Path(path) => path.count,
+        Map2dShape::Polygon(polygon) => polygon.count,
+        Map2dShape::Repeat(repeat) => repeat.count * shape_lamp_count(&repeat.shape),
+    }
 }
 
 /// Per-segment inert flags, already mapped into walk order.
@@ -664,6 +770,162 @@ mod tests {
         assert_eq!(with_junk.positions(), clean.positions());
     }
 
+    // ---- polygon ---------------------------------------------------------
+
+    /// The polygon closes implicitly and wraps instead of doubling an
+    /// endpoint: 9 lamps over an equilateral-perimeter triangle land 3 per
+    /// side with lamps 0/3/6 exactly on the corners — the per-side
+    /// regularity the intrinsic stride reads off.
+    #[test]
+    fn polygon_distributes_lamps_around_the_closed_perimeter() {
+        // A 3-4-5-ish right triangle scaled so all sides sum to 36:
+        // use an equilateral-by-length layout instead — three 12-unit sides.
+        let resolved = resolve_shape(Map2dShape::Polygon(triangle_12()));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions.len(), 9);
+        // Lamp 0 on vertex 0; lamps 3 and 6 on the other corners.
+        assert_eq!(positions[0], [0.0, 0.0]);
+        assert!(close(positions[3], [12.0, 0.0]), "{:?}", positions[3]);
+        assert!(close(positions[6], [6.0, 10.392305]), "{:?}", positions[6]);
+        // Even 4-unit spacing along the first side, no doubled endpoint.
+        assert!(close(positions[1], [4.0, 0.0]));
+        assert!(close(positions[2], [8.0, 0.0]));
+        // The last lamp sits one step short of wrapping back onto vertex 0.
+        assert!(positions[8] != positions[0]);
+        // One strand, exactly `count` lamps.
+        assert_eq!(resolved.spans.len(), 1);
+        assert_eq!(resolved.spans[0].count, 9);
+    }
+
+    #[test]
+    fn degenerate_polygons_are_invalid() {
+        for (shape, needle) in [
+            (
+                Map2dShape::Polygon(PolygonShape {
+                    points: vec![[0.0, 0.0], [1.0, 0.0]],
+                    count: 3,
+                }),
+                "at least 3 points",
+            ),
+            (
+                Map2dShape::Polygon(PolygonShape {
+                    points: vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
+                    count: 0,
+                }),
+                "count",
+            ),
+            (
+                Map2dShape::Polygon(PolygonShape {
+                    points: vec![[2.0, 2.0], [2.0, 2.0], [2.0, 2.0]],
+                    count: 3,
+                }),
+                "zero perimeter",
+            ),
+        ] {
+            let doc = Map2dDoc {
+                objects: vec![object(shape)],
+                ..Map2dDoc::new()
+            };
+            let error = resolve(&doc).unwrap_err();
+            assert!(
+                matches!(&error, Map2dError::InvalidObject { reason, .. } if reason.contains(needle)),
+                "wanted {needle:?} in {error:?}"
+            );
+        }
+    }
+
+    // ---- stride hints ----------------------------------------------------
+
+    /// The derived stride per shape kind (D41): the number the UI steps a
+    /// rotation offset by.
+    #[test]
+    fn shape_stride_derives_per_kind() {
+        // Grid: one row.
+        assert_eq!(
+            shape_stride(&Map2dShape::Grid(GridShape {
+                origin: [0.0, 0.0],
+                cols: 16,
+                rows: 4,
+                pitch: 10.0,
+                routing: GridRouting::Snake,
+                start_corner: GridCorner::Tl,
+            })),
+            16
+        );
+        // Ring: the outer count (inner counts derive per ring — the outer
+        // number is the honest single stride).
+        assert_eq!(shape_stride(&Map2dShape::Ring(button_rings())), 16);
+        // Path: no intrinsic period.
+        assert_eq!(shape_stride(&Map2dShape::Path(square_corner_path())), 1);
+        // Polygon, evenly divisible: lamps per side (the radiance door).
+        assert_eq!(shape_stride(&Map2dShape::Polygon(triangle_12())), 3);
+        // Polygon, not divisible: 1 — override territory.
+        assert_eq!(
+            shape_stride(&Map2dShape::Polygon(PolygonShape {
+                points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
+                count: 10,
+            })),
+            1
+        );
+        // Repeat: the inner shape's whole lamp count — one instance per step.
+        assert_eq!(shape_stride(&repeated_sector(5)), 4);
+    }
+
+    /// An explicit object-level `stride` beats the derivation; zero is
+    /// nonsense and falls back.
+    #[test]
+    fn object_stride_prefers_the_authored_override() {
+        let mut object = object(Map2dShape::Polygon(triangle_12()));
+        assert_eq!(object_stride(&object), 3);
+        object.stride = Some(5);
+        assert_eq!(object_stride(&object), 5);
+        object.stride = Some(0);
+        assert_eq!(object_stride(&object), 3);
+    }
+
+    /// `shape_lamp_count` mirrors the resolver by construction; this pin
+    /// makes the mirror a tested contract over every shape kind, nesting
+    /// and derived ring counts included.
+    #[test]
+    fn shape_lamp_count_matches_the_resolver_for_every_kind() {
+        let shapes = [
+            Map2dShape::Grid(GridShape {
+                origin: [0.0, 0.0],
+                cols: 7,
+                rows: 3,
+                pitch: 5.0,
+                routing: GridRouting::Snake,
+                start_corner: GridCorner::Tl,
+            }),
+            Map2dShape::Ring(button_rings()),
+            Map2dShape::Path(square_corner_path()),
+            Map2dShape::Polygon(triangle_12()),
+            repeated_sector(5),
+            Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(repeated_sector(2)),
+                center: [100.0, 100.0],
+                count: 3,
+            }),
+        ];
+        for shape in shapes {
+            let expected = resolve_shape(shape.clone()).lamps.len() as u32;
+            assert_eq!(shape_lamp_count(&shape), expected, "{shape:?}");
+        }
+    }
+
+    fn close(a: [f32; 2], b: [f32; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3
+    }
+
+    /// An equilateral triangle with 12-unit sides (36-unit perimeter) and 9
+    /// lamps — the mini-dome door archetype: 3 lamps per side, stride 3.
+    fn triangle_12() -> PolygonShape {
+        PolygonShape {
+            points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
+            count: 9,
+        }
+    }
+
     // ---- rotational repeat ----------------------------------------------
 
     /// The rotation itself, read off a shape whose quarter turns are exact
@@ -924,6 +1186,8 @@ mod tests {
         let doc = Map2dDoc {
             objects: vec![Map2dObject {
                 name: String::from("bad"),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Path(PathShape {
                     points: vec![[0.0, 0.0]],
                     count: 2,
@@ -957,6 +1221,8 @@ mod tests {
     fn object(shape: Map2dShape) -> Map2dObject {
         Map2dObject {
             name: String::new(),
+            id: None,
+            stride: None,
             shape,
         }
     }

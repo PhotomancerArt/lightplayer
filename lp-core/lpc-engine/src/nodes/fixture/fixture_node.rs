@@ -4823,6 +4823,8 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             objects: alloc::vec![
                 Map2dObject {
                     name: String::new(),
+                    id: None,
+                    stride: None,
                     shape: Map2dShape::Ring(RingShape {
                         center: [0.5, 0.5],
                         radius: 0.4,
@@ -4836,6 +4838,8 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                 },
                 Map2dObject {
                     name: String::new(),
+                    id: None,
+                    stride: None,
                     shape: Map2dShape::Path(PathShape {
                         points: alloc::vec![[0.0, 1.0], [1.0, 1.0]],
                         count: 2,
@@ -5535,6 +5539,8 @@ mod mapping_representation_differential {
     fn object(shape: Map2dShape) -> Map2dObject {
         Map2dObject {
             name: alloc::string::String::new(),
+            id: None,
+            stride: None,
             shape,
         }
     }
