@@ -241,7 +241,7 @@ impl PatchedRange {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PatchResolveContext<'a> {
     /// The fixture's total lamp count (what format-1 ranges resolve
-    /// against, and the reflow's universe).
+    /// against, and the domain the reflow fills).
     pub fixture_lamp_count: u32,
     /// Per-strand instance spans from the fixture's resolved mapping
     /// ([`crate::object_instance_spans`]); empty for shape-less strips.

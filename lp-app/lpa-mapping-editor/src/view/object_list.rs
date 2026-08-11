@@ -12,30 +12,13 @@ use lpc_mapping::{Map2dShape, resolve};
 
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::shape_path::{ShapePath, structural_child, structural_child_count};
-use crate::editor_core::view_geometry::LAMPS_PER_UNIVERSE;
 use crate::view::editor_canvas::object_color;
 use crate::view::properties_popover::shape_kind_label;
 
-/// Wiring range annotated per universe: `"1:1-23"`, and across a boundary
-/// `"1:148-170 2:1-7"` (universe:within-universe lamp numbers, 1-based).
+/// Wiring range as 1-based chain lamp numbers: `"1-23"`.
 #[must_use]
-pub fn universe_range_label(start: u32, count: u32) -> String {
-    let mut parts = Vec::new();
-    let mut lamp = start;
-    let end = start + count;
-    while lamp < end {
-        let universe = lamp / LAMPS_PER_UNIVERSE;
-        let universe_end = (universe + 1) * LAMPS_PER_UNIVERSE;
-        let segment_end = end.min(universe_end);
-        parts.push(format!(
-            "{}:{}-{}",
-            universe + 1,
-            lamp % LAMPS_PER_UNIVERSE + 1,
-            (segment_end - 1) % LAMPS_PER_UNIVERSE + 1
-        ));
-        lamp = segment_end;
-    }
-    parts.join(" ")
+pub fn chain_range_label(start: u32, count: u32) -> String {
+    format!("{}-{}", start + 1, start + count)
 }
 
 #[component]
@@ -119,7 +102,7 @@ pub fn ObjectList(
                                         span { class: "lpme-rail-badge", "×{count}" }
                                     }
                                     if let Some((start, count)) = row.span {
-                                        span { class: "lpme-rail-range", "{universe_range_label(start, count)}" }
+                                        span { class: "lpme-rail-range", "{chain_range_label(start, count)}" }
                                     }
                                     if is_root {
                                         span { class: "lpme-rail-move",
@@ -227,11 +210,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ranges_annotate_universes_and_split_at_boundaries() {
-        assert_eq!(universe_range_label(0, 23), "1:1-23");
-        assert_eq!(universe_range_label(23, 25), "1:24-48");
-        // fyeah p7: lamps 148..=177 global → crosses into universe 2.
-        assert_eq!(universe_range_label(147, 30), "1:148-170 2:1-7");
-        assert_eq!(universe_range_label(170, 50), "2:1-50");
+    fn ranges_annotate_chain_lamp_numbers() {
+        assert_eq!(chain_range_label(0, 23), "1-23");
+        assert_eq!(chain_range_label(23, 25), "24-48");
+        assert_eq!(chain_range_label(147, 30), "148-177");
+        assert_eq!(chain_range_label(170, 50), "171-220");
     }
 }

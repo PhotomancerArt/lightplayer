@@ -2,10 +2,10 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
     CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet,
-    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers,
-    Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay,
-    MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
+    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Lightbulb, Link2,
+    Link2Off, ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick,
+    Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal,
+    Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -76,7 +76,6 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Shrink => rsx! { Minimize2 { size } },
         StudioIconName::MapNumbers => rsx! { Hash { size } },
         StudioIconName::MapArrows => rsx! { Route { size } },
-        StudioIconName::MapUniverses => rsx! { Layers { size } },
         StudioIconName::MapLive => rsx! { Activity { size } },
         StudioIconName::Console => rsx! { SquareTerminal { size } },
         StudioIconName::Cue => rsx! { Flag { size } },
@@ -169,8 +168,6 @@ pub enum StudioIconName {
     MapNumbers,
     /// Route: wiring-direction arrows on the mapping lamp view.
     MapArrows,
-    /// Layers: DMX-universe coloring on the mapping lamp view.
-    MapUniverses,
     /// Activity: live output colors on the mapping lamp view.
     MapLive,
     /// Duplicate/fork-a-copy affordances.

@@ -9,8 +9,7 @@
 //! costs one JS call regardless of lamp count.
 //!
 //! View mode is a product display, not a wiring tool — no numbers, no
-//! universe colors, no arrows. Those are authoring instruments and live in
-//! the mapping editor.
+//! arrows. Those are authoring instruments and live in the mapping editor.
 //!
 //! Upgrade path: the software rasterizer's per-frame fill is the cost that
 //! scales, and at Radiance scale this component grows a WebGL/instanced
