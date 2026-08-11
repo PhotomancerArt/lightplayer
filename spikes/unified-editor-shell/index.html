@@ -177,8 +177,9 @@
             overflow: hidden; border: 1px solid var(--border-muted); flex: 1; min-width: 0; }
   .pcell { position: absolute; top: 1px; bottom: 1px; border-radius: 2px;
            display: flex; align-items: center; justify-content: center; overflow: hidden;
-           font-family: var(--mono); font-size: 8px; color: rgba(0,0,0,.72);
-           font-weight: 600; cursor: pointer; border: 1px solid rgba(0,0,0,.3); }
+           font-family: var(--mono); font-size: 8px; color: var(--muted);
+           font-weight: 600; cursor: pointer; border: 1px solid var(--border-strong);
+           background: var(--raised-strong); }
   .pcell.sel { outline: 2px solid var(--sel); outline-offset: 0; z-index: 2; }
   .pcell.contested { background: repeating-linear-gradient(45deg, #874b4b 0 5px, #5d3234 5px 10px) !important;
                      color: var(--err-text); border-color: var(--err-border); }
@@ -220,6 +221,52 @@
                color: var(--subtle); }
   .decisions p { margin: 8px 0 0; }
   .decisions b { color: var(--muted); }
+  /* walk-up assignment walkthrough */
+  .wt { border: 1px solid var(--border-strong); border-radius: var(--r-md); overflow: hidden;
+        background: var(--bg); margin-top: 10px; }
+  .wt-narr { display: flex; align-items: center; gap: 12px; padding: 9px 14px;
+             background: var(--surface-muted); border-bottom: 1px solid var(--border-strong); }
+  .wt-narr .step { font-family: var(--mono); font-size: 10.5px; color: var(--dim); flex: none; }
+  .wt-narr .txt { flex: 1; font-size: 12.5px; color: var(--muted); }
+  .wt-narr .txt b { color: var(--strong); }
+  .wt-narr .txt kbd { font-family: var(--mono); font-size: 10px; color: var(--text);
+                      border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; }
+  .wt-narr button { background: var(--surface-muted); color: var(--muted); font: inherit;
+                    font-size: 12px; border: 1px solid var(--border-subtle);
+                    border-radius: var(--r-xs); padding: 3px 12px; cursor: pointer; flex: none; }
+  .wt-narr button:hover { color: var(--strong); }
+  .wt-body { display: flex; height: 480px; }
+  .wt-rail { width: 218px; flex: none; overflow-y: auto; background: var(--surface); }
+  .wt-rail.l { border-right: 1px solid var(--border-strong); }
+  .wt-rail.r { border-left: 1px solid var(--border-strong); width: 250px; }
+  .wt-canvas { flex: 1; min-width: 0; background: var(--terminal); position: relative; }
+  .wt-canvas svg { display: block; width: 100%; height: 100%; }
+  .mapstat { font-family: var(--mono); font-size: 9px; border-radius: 4px; padding: 0 4px;
+             flex: none; }
+  .mapstat.un { color: var(--dim); border: 1px dashed var(--border-strong); }
+  .mapstat.tent { color: var(--warn-text); border: 1px solid var(--warn-text); }
+  .mapstat.done { color: var(--muted); border: 1px solid var(--border-subtle);
+                  background: var(--track); }
+  @keyframes wt-pulse { 0%,100% { opacity: .25; } 50% { opacity: .9; } }
+  .wt-pulse { animation: wt-pulse 1.1s ease-in-out infinite; }
+  @keyframes wt-chase { 0% { opacity: .25; } 12% { opacity: 1; } 30% { opacity: .3; }
+                        100% { opacity: .25; } }
+  .wt-chase { animation: wt-chase 1.6s linear infinite; }
+  .pcell.pulse { background: #d8dde3; color: #23282e; border-color: #f2f0e8;
+                 animation: wt-pulse 1.1s ease-in-out infinite; }
+  .pcell.tent { border-color: var(--warn-text); color: var(--warn-text); }
+  .fracstrip { padding: 8px 12px 10px; border-top: 1px solid var(--border); }
+  .fracstrip .cap { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+                    color: var(--subtle); margin-bottom: 6px; font-weight: 600; }
+  .fracwrap { position: relative; height: 34px; }
+  .fracwrap .cellrow { position: absolute; left: 0; right: 0; top: 8px; height: 18px;
+                       display: flex; gap: 1px; }
+  .fracwrap .cellrow i { flex: 1; border-radius: 1px; }
+  .fracwrap .tick { position: absolute; top: 2px; bottom: 2px; width: 1px;
+                    background: var(--border-strong); }
+  .fracwrap .tick.strong { top: 0; bottom: 0; background: var(--subtle); }
+  .fracwrap .tlab { position: absolute; top: -4px; font-family: var(--mono); font-size: 8px;
+                    color: var(--dim); transform: translateX(-50%); }
   .densewrap { display: flex; gap: 16px; align-items: flex-start; }
   .phones { display: flex; gap: 18px; flex-wrap: wrap; }
   .phone { width: 320px; height: 600px; border: 2px solid var(--border-strong);
@@ -291,7 +338,19 @@
 </p>
 <div class="shell" id="shellD"></div>
 
-<h2>2 · Outputs rail at radiance density</h2>
+<h2>2 · Assignment — the walk-up loop (lp2014's flow, re-housed)</h2>
+<p class="thesis">
+  The distilled lp2014 gesture (see <code>docs/design/walk-up-patching.md</code>): select a
+  <b>group of lamps</b> on a port → the hardware <b>pulses them white</b> → look at the piece,
+  <b>click the object that's pulsing</b> → a tentative assignment with start/end markers and a
+  chase → adjust (<kbd>r</kbd> flip · <kbd>;</kbd>/<kbd>'</kbd> rotate coarse ·
+  <kbd>k</kbd>/<kbd>l</kbd> fine · <kbd>[</kbd>/<kbd>]</kbd> shift · <kbd>-</kbd>/<kbd>=</kbd>
+  grow) → <b>finish auto-advances</b> to the next free chunk. The tree is the guide: mapped vs
+  unmapped is always visible. Step through below — the pulsing sector is clickable at step 3.
+</p>
+<div class="wt" id="wt"></div>
+
+<h2>3 · Outputs rail at radiance density</h2>
 <p class="thesis">
   Round-2 feedback: ports go <b>one per line</b> — pin · strip · used/total. The radiance dome
   is <b>10 control boxes × 32 outputs</b>, so the rail must stay legible at ~320 ports: the
@@ -311,7 +370,7 @@
   </div>
 </div>
 
-<h2>3 · Mobile first — the rails become tabs</h2>
+<h2>4 · Mobile first — the rails become tabs</h2>
 <p class="thesis">
   Phones can't hold three panes; the shell folds to <b>one pane at a time</b>: the project tabs
   stay on top, a segmented control picks <b>Fixtures · Space · Outputs</b>, and the verb strip
@@ -321,7 +380,7 @@
 </p>
 <div class="phones" id="phones"></div>
 
-<h2>4 · Rail &amp; chip anatomy</h2>
+<h2>5 · Rail &amp; chip anatomy</h2>
 <div class="duo">
   <div class="anno">
     <h3>fixtures-rail chips</h3>
@@ -333,14 +392,14 @@
   </div>
   <div class="anno">
     <h3>outputs-rail cells</h3>
-    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:70%; background:var(--obj-0);">sector/2</span><span class="pcell" style="left:74%; width:24%; background:var(--obj-1);">door/0</span></span></span> cells coloured by fixture object, labelled by path</div>
-    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell sel" style="left:2%; width:70%; background:var(--obj-0);">sector/2</span></span></span> selection is the same blue everywhere</div>
-    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell contested" style="left:2%; width:56%;">2 claims</span><span class="pcell" style="left:60%; width:38%; background:var(--obj-1);">door/0</span></span></span> contested span — red hatch on the port strip</div>
-    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:40%; background:var(--obj-2);">door/1</span><span class="pgap" style="left:46%; width:52%;"></span></span></span> gap: dashed void, warn not error</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:70%;">sector/2</span><span class="pcell" style="left:74%; width:24%;">door/0</span></span></span> neutral cells, labelled by path (fixture hues cut, round 4)</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell sel" style="left:2%; width:70%;">sector/2</span></span></span> selection is the same blue everywhere</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell contested" style="left:2%; width:56%;">2 claims</span><span class="pcell" style="left:60%; width:38%;">door/0</span></span></span> contested span — red hatch on the port strip</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:40%;">door/1</span><span class="pgap" style="left:46%; width:52%;"></span></span></span> gap: dashed void, warn not error</div>
   </div>
 </div>
 
-<h2>5 · Decisions</h2>
+<h2>6 · Decisions</h2>
 <div class="decisions">
   <p><b>C “Install” closest, A's frames kept</b> (Yona, round 2): the shared single space wins,
      but its geometry is the <b>authored conceptual arrangement</b> (EditorMeta), not the output
@@ -353,6 +412,15 @@
      ports (section 2). <b>Chips ratified.</b></p>
   <p><b>Deferred:</b> the assign gesture (next round, lp2014 inspiration) · discrete shaders
      (continuous only for now) · icon/preview derivation from the arrangement.</p>
+  <p><b>Round-3 rulings (Yona):</b> <b>fixture hues cut from output cells too</b> ("still
+     looks messy") — cells are neutral, path-labelled; colour now appears ONLY on canvas
+     geometry + tree swatches · occupancy glyphs ratified · <b>round 4 = the assignment flow</b>
+     (design doc <code>docs/design/walk-up-patching.md</code>, distilled from lp2014's
+     mapping.ts — addressMap keyed one-entry-per-group, auto-map on shape click, debugChannels
+     white pulse, offset 0..1 + reversed, swap mode, universe flip utilities) · <b>OPEN GATE
+     QUESTION: can an object's mapping split?</b> (lean: no — one object, one contiguous wire
+     window; splits happen at the object level; range-grain entries stay the manual escape
+     hatch).</p>
   <p><b>Round-2 rulings (Yona):</b> D “Arrange” ratified · <b>port hues CUT</b> ("I fear it'll
      just get too busy" — port identity = text + position; object colour stays the one colour
      language) · collapsed boxes drop cell previews for an <b>occupancy glyph</b> (n divisions,
@@ -585,7 +653,7 @@ function portRow(out, port, opts = {}) {
     const left = (c.at / port.lamps) * 100, width = (c.n / port.lamps) * 100;
     const label = width > 22 ? c.path.slice(1) + (rotOf(c) ? ' +' + rotOf(c) : '') + (c.rev ? ' ‹' : '') : '';
     strip += `<span class="pcell ${cSel ? 'sel' : ''} ${contested ? 'contested' : ''}"
-                style="left:${left}%; width:${width}%; background:${c.color || fxColor(c.fx)};"
+                style="left:${left}%; width:${width}%;"
                 onclick="event.stopPropagation(); setSel('${c.fx}:${c.path}')"
                 title="${c.fx}${c.path} → ${c.pin} lamp ${c.at + 1}">${label}</span>`;
   }
@@ -626,8 +694,7 @@ function denseRail() {
     const segs = 2 + (i % 2);
     for (let s = 0; s < segs; s++) {
       const n = [34, 28, 22][(i + s) % 3];
-      cells.push({ fx:'radiance', path:`/strut/${(i * 3 + s) % 61}`, at, n,
-                   color: OBJ_RAW[(i + s) % 6] });
+      cells.push({ fx:'radiance', path:`/strut/${(i * 3 + s) % 61}`, at, n });
       at += n + ((i + s) % 3 === 0 ? 4 : 0);
     }
     h += portRow({ name:'Box 3' }, { pin: String(i + 1), lamps: 90 }, { cells });
@@ -706,6 +773,7 @@ function phonesHTML() {
       <div class="pbody">${outputsRail()}</div>${verbs}</div>`;
 }
 function render() {
+  wtRender();
   document.getElementById('phones').innerHTML = phonesHTML();
   document.getElementById('shellD').innerHTML = tabsHTML() + headerHTML() + `
     <div class="ebody">
@@ -775,11 +843,191 @@ function resetAll()  { S.mode = 'patch'; S.sel = 'dome:/sector/1'; S.ribbon = fa
                        S.visual = false; S.rot = {}; S.edits = 0; selIdx = 1;
                        S.meta = { dome:{x:355,y:205,r:0}, doors:{x:545,y:430,r:0},
                                   ribbon:{x:165,y:445,r:0} }; render(); }
-// headless-capture affordance: #map / #ribbon / #rot / #visual set an initial state
+
+/* =========================================================
+   Section 2 — the walk-up assignment walkthrough
+   Dome only (fixture in focus), one output "1": IO18 x90 + IO13 x60.
+   WIRE TRUTH (what the physical cabling turns out to be):
+   IO18@0->s3  IO18@30->s1  IO18@60->s4  IO13@0->s0  IO13@30->s2
+   ========================================================= */
+const WT_PORTS = [ { pin:'IO18', lamps:90 }, { pin:'IO13', lamps:60 } ];
+const WT_STEPS = [
+  { txt: `<b>Start.</b> Nothing is patched: every sector reads <i>unmapped</i> in the tree, the
+      canvas is dim, and the port gaps are chopped into ~sector-size groups (30 — inferred from
+      the next unmapped object, manual override kept).`,
+    assigned: [], pulse: null, tent: null },
+  { txt: `<b>Select a group.</b> First free group on IO18 selected — the hardware <b>pulses
+      those 30 lamps white</b> at low brightness (a group, never one lamp: one lamp is
+      invisible from across a field).`,
+    assigned: [], pulse: { pin:'IO18', at:0 }, tent: null },
+  { txt: `<b>Look at the piece, click what pulses.</b> It's the sector one over, one down —
+      <b>/sector/3</b> (click it on the canvas). The assignment is created but NOT final.`,
+    assigned: [], pulse: { pin:'IO18', at:0, sector:3, clickable:true }, tent: null },
+  { txt: `<b>Adjust.</b> /sector/3 is tentative: start marker ▸ end marker ▪, a chase runs
+      along the wire order. <kbd>r</kbd> flip · <kbd>;</kbd>/<kbd>'</kbd> rotate by a side ·
+      <kbd>k</kbd>/<kbd>l</kbd> one lamp · <kbd>[</kbd>/<kbd>]</kbd> shift on the wire ·
+      <kbd>-</kbd>/<kbd>=</kbd> grow/shrink. The fraction strip (below the tree) sets phase by
+      clicking a lamp — lp2014's ½ ⅓ ¼ ticks.`,
+    assigned: [], pulse: null, tent: { pin:'IO18', at:0, sector:3, rev:false, rot:10 } },
+  { txt: `<b>Finish → auto-advance.</b> <kbd>enter</kbd> commits /sector/3 and selection jumps
+      to the <b>next free chunk</b> (IO18@30), already pulsing. Repeat.`,
+    assigned: [ {sector:3, pin:'IO18', at:0, rot:10} ],
+    pulse: { pin:'IO18', at:30 }, tent: null },
+  { txt: `<b>The tree is the guide.</b> Three sectors in, the mapped/unmapped split navigates
+      the physical piece: "I just did that one; the pulsing one is next to it." Live product
+      colours (or unique debug colour per object) fill the mapped geometry.`,
+    assigned: [ {sector:3, pin:'IO18', at:0, rot:10}, {sector:1, pin:'IO18', at:30},
+                {sector:4, pin:'IO18', at:60} ],
+    pulse: { pin:'IO13', at:0 }, tent: null, live: true },
+  { txt: `<b>Swap.</b> Sectors 1 and 4 turn out to be backwards. <kbd>s</kbd> arms swap on
+      /sector/1; clicking /sector/4 exchanges the two placements — ten seconds, not five
+      minutes of re-mapping.`,
+    assigned: [ {sector:3, pin:'IO18', at:0, rot:10}, {sector:4, pin:'IO18', at:30},
+                {sector:1, pin:'IO18', at:60} ],
+    pulse: null, tent: null, live: true, swapNote: true },
+  { txt: `<b>Everything stays editable.</b> All five mapped. Selecting any assignment reopens
+      the same adjust state — fixture-side (flip / rotate / size) AND output-side (position on
+      the wire). Manual direction too: click the object FIRST, then pick the port location.
+      <kbd>u</kbd> unmaps.`,
+    assigned: [ {sector:3, pin:'IO18', at:0, rot:10}, {sector:4, pin:'IO18', at:30},
+                {sector:1, pin:'IO18', at:60}, {sector:0, pin:'IO13', at:0},
+                {sector:2, pin:'IO13', at:30} ],
+    pulse: null, tent: null, live: true, editSel: 2 },
+];
+let wtStep = 0;
+const WT_LIVE = ['#5aa9e6','#7be0b2','#e4c065','#c792ea','#f0913b'];
+
+function wtAssignFor(step, sector) {
+  if (step.tent && step.tent.sector === sector) return { ...step.tent, tent: true };
+  return step.assigned.find(a => a.sector === sector) || null;
+}
+function wtCanvas(step) {
+  let s = `<svg viewBox="0 0 560 470">
+    <text x="18" y="26" class="tile-label">dome · in focus</text>
+    <text x="18" y="40" class="tile-sub">the piece, as the person at the keyboard sees the app</text>`;
+  GEO.dome.instances.forEach((pts, k) => {
+    const a = wtAssignFor(step, k);
+    const pulsing = step.pulse && step.pulse.sector === k;
+    const clickable = step.pulse && step.pulse.clickable && step.pulse.sector === k;
+    let g = `<g ${clickable ? `style="cursor:pointer" onclick="wtNext()"` : ''}>`;
+    pts.forEach(([x, y], i) => {
+      const cx = (x * 1.15 + 280).toFixed(1), cy = (y * 1.15 + 235).toFixed(1);
+      let fill = 'var(--gap)', cls = '', extra = '';
+      if (pulsing) { fill = '#e8ecf0'; cls = 'wt-pulse'; }
+      else if (a) {
+        fill = step.live ? WT_LIVE[k] : 'var(--obj-0)';
+        if (a.tent) { cls = 'wt-chase'; extra = `style="animation-delay:${(i * 0.05).toFixed(2)}s"`; }
+      }
+      if (a && a.tent && i === 0)
+        extra += ` stroke="var(--sel)" stroke-width="2"`;
+      if (a && a.tent && i === pts.length - 1)
+        extra += ` stroke="var(--err-text)" stroke-width="2"`;
+      g += `<circle cx="${cx}" cy="${cy}" r="3.6" fill="${fill}" class="${cls}" ${extra}/>`;
+    });
+    const [lx, ly] = pts[15];
+    g += `<text x="${(lx * 1.15 + 280).toFixed(0)}" y="${(ly * 1.15 + 235).toFixed(0)}"
+          text-anchor="middle" class="tile-sub" ${clickable ? 'style="fill:var(--strong)"' : ''}>s${k}</text>`;
+    s += g + '</g>';
+  });
+  if (step.pulse && step.pulse.clickable)
+    s += `<text x="280" y="452" text-anchor="middle" class="park-label"
+          style="fill:var(--warn-text)">▲ that one is pulsing — click it</text>`;
+  return s + '</svg>';
+}
+function wtFixturesRail(step) {
+  let h = `<div class="rhead">fixtures · dome</div>`;
+  for (let k = 0; k < 5; k++) {
+    const a = wtAssignFor(step, k);
+    const isEdit = step.editSel === k;
+    const stat = a
+      ? (a.tent ? `<span class="mapstat tent">IO18:1-30 ~</span>`
+                : `<span class="mapstat done">${a.pin}:${a.at + 1}-${a.at + 30}${a.rot ? ' +' + a.rot : ''}</span>`)
+      : `<span class="mapstat un">unmapped</span>`;
+    h += `<div class="frow inst2 ${isEdit || (a && a.tent) ? 'sel' : ''}">
+            <span class="chev">·</span>
+            <span class="nm" style="font-family:var(--mono); font-size:11px;">/sector/${k}</span>
+            ${stat}</div>`;
+  }
+  if (step.tent) {
+    let cells = '';
+    for (let i = 0; i < 30; i++) {
+      const phase = (i + (step.tent.rot || 0)) % 30;
+      cells += `<i style="background:${step.live ? WT_LIVE[step.tent.sector] : 'var(--obj-0)'};
+                opacity:${0.35 + 0.65 * (phase / 30)}"></i>`;
+    }
+    h += `<div class="fracstrip"><div class="cap">phase · click a lamp to set start</div>
+      <div class="fracwrap"><div class="cellrow">${cells}</div>
+        <span class="tick strong" style="left:0%"></span>
+        <span class="tick strong" style="left:50%"></span><span class="tlab" style="left:50%">1/2</span>
+        <span class="tick" style="left:25%"></span><span class="tlab" style="left:25%">1/4</span>
+        <span class="tick" style="left:75%"></span><span class="tlab" style="left:75%">3/4</span>
+        <span class="tick" style="left:33.3%"></span>
+        <span class="tick" style="left:66.6%"></span>
+        <span class="tick strong" style="left:100%"></span>
+      </div></div>`;
+  }
+  if (step.swapNote)
+    h += `<div class="note"><b style="color:var(--warn-text)">swap:</b> /sector/1 ⇄ /sector/4
+          exchanged placements (s, then click the other).</div>`;
+  return h;
+}
+function wtOutputsRail(step) {
+  let h = `<div class="rhead">outputs · "1"</div>`;
+  for (const port of WT_PORTS) {
+    let strip = '', used = 0;
+    const cellsHere = [];
+    for (const a of step.assigned)
+      if (a.pin === port.pin) cellsHere.push({ ...a });
+    if (step.tent && step.tent.pin === port.pin) cellsHere.push({ ...step.tent, tent: true });
+    for (const c of cellsHere) {
+      used += 30;
+      strip += `<span class="pcell ${c.tent ? 'tent' : ''}"
+        style="left:${(c.at / port.lamps) * 100}%; width:${(30 / port.lamps) * 100}%;">
+        s${c.sector}${c.rot ? ' +' + c.rot : ''}${c.tent ? ' ~' : ''}</span>`;
+    }
+    if (step.pulse && step.pulse.pin === port.pin)
+      strip += `<span class="pcell pulse"
+        style="left:${(step.pulse.at / port.lamps) * 100}%; width:${(30 / port.lamps) * 100}%;">pulse</span>`;
+    // remaining gap groups of 30
+    for (let at = 0; at + 30 <= port.lamps; at += 30) {
+      const occupied = cellsHere.some(c => c.at === at) ||
+        (step.pulse && step.pulse.pin === port.pin && step.pulse.at === at);
+      if (!occupied)
+        strip += `<span class="pgap" style="left:${(at / port.lamps) * 100 + 0.5}%;
+                  width:${(30 / port.lamps) * 100 - 1}%;"></span>`;
+    }
+    h += `<div class="port2"><span class="pin">${port.pin}</span>
+          <span class="ptrack" style="height:20px;">${strip}</span>
+          <span class="cnt">${used}/${port.lamps}</span></div>`;
+  }
+  h += `<div class="note">gap groups are chopped to the next unmapped object's size (30) —
+        lp2014's group-size number, now inferred, still overridable.</div>`;
+  return h;
+}
+function wtRender() {
+  const step = WT_STEPS[wtStep];
+  document.getElementById('wt').innerHTML = `
+    <div class="wt-narr">
+      <button onclick="wtPrev()">‹ prev</button>
+      <span class="step">${wtStep + 1}/${WT_STEPS.length}</span>
+      <span class="txt">${step.txt}</span>
+      <button onclick="wtNext()">next ›</button>
+    </div>
+    <div class="wt-body">
+      <div class="wt-rail l">${wtFixturesRail(step)}</div>
+      <div class="wt-canvas">${wtCanvas(step)}</div>
+      <div class="wt-rail r">${wtOutputsRail(step)}</div>
+    </div>`;
+}
+function wtNext() { wtStep = Math.min(wtStep + 1, WT_STEPS.length - 1); wtRender(); }
+function wtPrev() { wtStep = Math.max(wtStep - 1, 0); wtRender(); }
+
+// headless-capture affordance: #map / #ribbon / #rot / #visual / #wtN set an initial state
 if (location.hash.includes('map'))    S.mode = 'map';
 if (location.hash.includes('ribbon')) S.ribbon = true;
 if (location.hash.includes('rot'))    { S.rot['dome:/sector/2'] = 10; S.edits = 2; }
 if (location.hash.includes('visual')) S.visual = true;
+{ const m = location.hash.match(/wt(\d+)/); if (m) wtStep = Math.min(parseInt(m[1]), WT_STEPS.length - 1); }
 render();
 </script>
 </body>
