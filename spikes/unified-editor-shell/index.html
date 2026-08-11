@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Unified mapping/patching editor shell — design spike</title>
+<title>Unified mapping/patching editor shell — design spike (round 2)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -48,14 +48,14 @@
   }
   h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
        text-transform: uppercase; margin: 0 0 6px; }
-  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 900px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 920px; }
   p.hint b { color: var(--muted); }
   h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
        text-transform: uppercase; margin: 42px 0 4px; }
-  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 900px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 920px; }
   p.thesis b { color: var(--muted); }
   code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
-  .leannote { max-width: 900px; border: 1px solid var(--border); background: var(--surface-muted);
+  .leannote { max-width: 920px; border: 1px solid var(--border); background: var(--surface-muted);
               border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
               margin: 14px 0 0; }
   .leannote b { color: var(--muted); }
@@ -81,48 +81,7 @@
   .xcontrols button.on { color: var(--good); border-color: rgba(63,214,142,.4);
                          background: rgba(63,214,142,.1); }
 
-  /* =========================================================
-     TODAY strip — faithful, static, compact
-     ========================================================= */
-  .today { display: flex; gap: 16px; flex-wrap: wrap; }
-  .today .frame { border: 1px solid var(--border); border-radius: var(--r-md);
-                  background: var(--surface-subtle); overflow: hidden; flex: 1;
-                  min-width: 380px; max-width: 560px; }
-  .today .frame > .cap { padding: 5px 10px; font-size: 10px; letter-spacing: .1em;
-                         text-transform: uppercase; color: var(--subtle);
-                         border-bottom: 1px solid var(--border-muted); }
-  .mini { display: flex; height: 240px; font-size: 11px; }
-  .mini .mcanvas { flex: 1; background: var(--terminal); position: relative; }
-  .mini .mrail { width: 150px; border-left: 1px solid var(--border-strong);
-                 background: var(--surface); padding: 4px; }
-  .mini .mrail .h { font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
-                    font-weight: 600; color: var(--subtle); padding: 4px 6px;
-                    border-bottom: 1px solid var(--border); margin-bottom: 3px; }
-  .mini .mrow { display: flex; align-items: center; gap: 5px; padding: 3px 6px;
-                border-radius: 5px; font-size: 10.5px; }
-  .mini .mrow .sw { width: 7px; height: 7px; border-radius: 2px; flex: none; }
-  .mini .mrow .nm { flex: 1; color: var(--text); }
-  .mini .mrow .rg { font-family: var(--mono); font-size: 9px; color: var(--subtle); }
-  .mini .mhead { display: flex; gap: 5px; align-items: center; padding: 5px 8px;
-                 border-bottom: 1px solid var(--border-strong); background: var(--surface);
-                 font-size: 10px; }
-  .mini .mhead .t { letter-spacing: .12em; text-transform: uppercase; font-weight: 600;
-                    color: var(--subtle); }
-  .mini .mbtn { border: 1px solid var(--border-strong); border-radius: 5px;
-                padding: 1px 7px; font-size: 10px; color: var(--subtle); }
-  .mini .mbtn.on { color: var(--good); background: rgba(63,214,142,.1);
-                   border-color: rgba(63,214,142,.4); }
-  .mini2 { height: 240px; overflow: hidden; padding: 8px 10px; font-size: 10.5px; }
-  .mini2 .sect { color: var(--strong); font-weight: 600; font-size: 12px; margin: 4px 0 2px; }
-  .mini2 .strip { height: 14px; border-radius: 4px; background: var(--track);
-                  position: relative; margin: 3px 0 8px; overflow: hidden; }
-  .mini2 .strip i { position: absolute; top: 0; bottom: 0; background: var(--raised-strong);
-                    border-right: 1px solid var(--border); }
-  .mini2 .plab { font-family: var(--mono); font-size: 9px; color: var(--subtle); }
-
-  /* =========================================================
-     THE SHELL — shared chrome for concepts A/B/C
-     ========================================================= */
+  /* ---- shell chrome ---- */
   .shell { border: 1px solid var(--border-strong); border-radius: var(--r-md);
            overflow: hidden; background: var(--bg); margin-top: 10px; }
   .tabs { display: flex; align-items: center; gap: 2px; background: var(--surface-muted);
@@ -157,10 +116,10 @@
   .ebtn kbd { font-family: var(--mono); font-size: 9.5px; color: var(--dim);
               border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
 
-  .ebody { display: flex; min-height: 0; height: 560px; }
+  .ebody { display: flex; min-height: 0; height: 600px; }
   .rail { width: 236px; flex: none; overflow-y: auto; background: var(--surface); }
   .rail.left  { border-right: 1px solid var(--border-strong); }
-  .rail.right { border-left: 1px solid var(--border-strong); width: 258px; }
+  .rail.right { border-left: 1px solid var(--border-strong); width: 264px; }
   .rail .rhead { padding: 7px 10px 5px; font-size: 10px; letter-spacing: .12em;
                  text-transform: uppercase; font-weight: 600; color: var(--subtle);
                  border-bottom: 1px solid var(--border); position: sticky; top: 0;
@@ -169,7 +128,7 @@
                  overflow: hidden; }
   .canvas-zone svg { display: block; width: 100%; height: 100%; }
 
-  /* fixtures rail rows (grown from .lpme-rail-row) */
+  /* fixtures rail rows */
   .frow { display: flex; align-items: center; gap: 7px; padding: 4px 8px;
           font-size: 12px; cursor: pointer; border-radius: 6px; margin: 1px 4px; }
   .frow:hover { background: rgba(255,255,255,.04); }
@@ -182,11 +141,9 @@
   .frow .rg { font-family: var(--mono); font-size: 10px; color: var(--subtle); flex: none; }
   .frow.fxhead { padding-top: 7px; }
   .frow.fxhead .nm { font-weight: 600; color: var(--strong); }
-  .frow.fxhead .rg { color: var(--dim); }
   .frow.inst { padding-left: 26px; }
   .frow.inst2 { padding-left: 40px; }
   .frow .chev { color: var(--dim); font-size: 9px; width: 10px; flex: none; text-align: center; }
-  /* the channel box: port-coloured wire chip on an instance row */
   .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono);
           font-size: 9.5px; padding: 1px 5px; border-radius: 4px; flex: none;
           background: var(--track); border: 1px solid var(--border-subtle);
@@ -199,53 +156,57 @@
   .frow .auto { font-family: var(--mono); font-size: 9px; color: var(--dim);
                 border: 1px dashed var(--border-strong); border-radius: 4px;
                 padding: 0 4px; flex: none; }
-  .frow .err { color: var(--err-text); }
 
-  /* outputs rail: port strips with fixture-coloured cells */
-  .orow-out { display: flex; align-items: baseline; gap: 7px; padding: 8px 10px 2px;
+  /* outputs rail — COMPACT one-line port rows (round-2 feedback: dense is good) */
+  .orow-out { display: flex; align-items: baseline; gap: 7px; padding: 8px 10px 3px;
               cursor: pointer; }
   .orow-out .nm { font-weight: 600; color: var(--strong); font-size: 12.5px; }
   .orow-out .node { font-family: var(--mono); font-size: 10px; color: var(--dim); }
   .orow-out .tot { margin-left: auto; font-family: var(--mono); font-size: 10px;
                    color: var(--subtle); }
-  .port { padding: 3px 10px 7px; cursor: pointer; border-radius: 6px; margin: 0 4px; }
-  .port:hover { background: rgba(255,255,255,.03); }
-  .port.sel { background: var(--sel-bg); }
-  .port .plab { display: flex; gap: 6px; align-items: center; font-family: var(--mono);
-                font-size: 10px; color: var(--subtle); margin-bottom: 3px; }
-  .port .plab i { width: 7px; height: 7px; border-radius: 2px; }
-  .port .plab .cnt { margin-left: auto; color: var(--dim); }
-  .ptrack { position: relative; height: 22px; border-radius: 4px; background: var(--track);
-            overflow: hidden; border: 1px solid var(--border-muted); }
-  .pcell { position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
+  .port2 { display: flex; align-items: center; gap: 6px; padding: 2px 10px;
+           cursor: pointer; border-radius: 5px; margin: 0 4px; }
+  .port2:hover { background: rgba(255,255,255,.03); }
+  .port2.sel { background: var(--sel-bg); }
+  .port2 .pin { display: flex; gap: 4px; align-items: center; font-family: var(--mono);
+                font-size: 9.5px; color: var(--subtle); width: 46px; flex: none; }
+  .port2 .pin i { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+  .port2 .cnt { font-family: var(--mono); font-size: 9px; color: var(--dim);
+                width: 40px; flex: none; text-align: right; }
+  .ptrack { position: relative; height: 16px; border-radius: 3px; background: var(--track);
+            overflow: hidden; border: 1px solid var(--border-muted); flex: 1; min-width: 0; }
+  .pcell { position: absolute; top: 1px; bottom: 1px; border-radius: 2px;
            display: flex; align-items: center; justify-content: center; overflow: hidden;
-           font-family: var(--mono); font-size: 8.5px; color: rgba(0,0,0,.72);
-           font-weight: 600; letter-spacing: .01em; cursor: pointer;
-           border: 1px solid rgba(0,0,0,.3); }
+           font-family: var(--mono); font-size: 8px; color: rgba(0,0,0,.72);
+           font-weight: 600; cursor: pointer; border: 1px solid rgba(0,0,0,.3); }
   .pcell.sel { outline: 2px solid var(--sel); outline-offset: 0; z-index: 2; }
   .pcell.contested { background: repeating-linear-gradient(45deg, #874b4b 0 5px, #5d3234 5px 10px) !important;
                      color: var(--err-text); border-color: var(--err-border); }
-  .pgap { position: absolute; top: 8px; bottom: 8px; border-radius: 2px;
+  .pgap { position: absolute; top: 6px; bottom: 6px; border-radius: 2px;
           background: repeating-linear-gradient(90deg, var(--gap) 0 3px, transparent 3px 7px); }
   .rail .note { padding: 6px 10px; font-size: 10.5px; color: var(--dim); }
   .rail .note b { color: var(--err-text); font-weight: 600; }
+  .obox-collapsed { display: flex; align-items: center; gap: 7px; padding: 4px 10px;
+                    margin: 1px 4px; border-radius: 5px; cursor: pointer; }
+  .obox-collapsed:hover { background: rgba(255,255,255,.03); }
+  .obox-collapsed .nm { font-size: 11.5px; color: var(--muted); font-weight: 600; width: 52px; flex: none; }
+  .obox-collapsed .mini { flex: 1; height: 8px; border-radius: 2px; background: var(--track);
+                          position: relative; overflow: hidden; }
+  .obox-collapsed .mini i { position: absolute; top: 0; bottom: 0; }
+  .obox-collapsed .tot { font-family: var(--mono); font-size: 9px; color: var(--dim); flex: none; }
 
-  /* concept B filmstrip */
-  .filmstrip { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; z-index: 5; }
-  .film { width: 84px; height: 60px; border: 1px solid var(--border-strong); border-radius: 6px;
-          background: rgba(16,18,22,.92); cursor: pointer; position: relative; overflow: hidden; }
-  .film:hover { border-color: var(--subtle); }
-  .film.on { border-color: var(--sel); }
-  .film .fl { position: absolute; left: 5px; bottom: 3px; font-size: 9px; color: var(--muted); }
-  .film svg { width: 100%; height: 100%; }
-
-  /* canvas overlay labels */
+  /* canvas frames + labels */
+  .fx-frame { fill: none; stroke: var(--border-strong); stroke-width: 1; rx: 8; }
+  .fx-frame.sel { stroke: var(--sel); }
+  .fx-tag { font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase;
+            fill: var(--subtle); }
+  .fx-tag-sub { font: 9px var(--mono); fill: var(--dim); }
   .tile-label { font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase;
                 fill: var(--subtle); }
   .tile-sub { font: 9.5px var(--mono); fill: var(--dim); }
   .park-label { font: 10px var(--mono); fill: var(--dim); }
 
-  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1200px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1220px; }
   @media (max-width: 1000px) { .duo { grid-template-columns: 1fr; } }
   .anno { border: 1px solid var(--border); border-radius: var(--r-md);
           background: var(--surface-subtle); padding: 12px 14px; }
@@ -254,19 +215,30 @@
   .anno .row { display: flex; gap: 10px; align-items: center; padding: 5px 0; font-size: 11.5px;
                color: var(--subtle); }
   .anno .row .demo { flex: none; width: 190px; }
+  .decisions { max-width: 920px; border: 1px solid var(--border); border-radius: var(--r-md);
+               background: var(--surface-muted); padding: 4px 14px 10px; font-size: 11.5px;
+               color: var(--subtle); }
+  .decisions p { margin: 8px 0 0; }
+  .decisions b { color: var(--muted); }
+  .densewrap { display: flex; gap: 16px; align-items: flex-start; }
+  .densecol { width: 300px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+              background: var(--surface); overflow: hidden; }
 </style>
 </head>
 <body>
 
-<h1>Unified mapping/patching editor shell</h1>
+<h1>Unified mapping/patching editor shell — round 2</h1>
 <p class="hint">
-  G1 ruled: the standalone <code>/patch</code> page is the wrong shell — patching belongs
-  <b>inside the mapping editor</b>, which already has the real selection/tree/canvas architecture.
-  This spike explores the unified shell: project tabs (<b>Nodes · Mapping · Patching</b>), the
-  wiring-order rail grown into a project-scope <b>Fixtures</b> tree (with the channel boxes),
-  a facing <b>Outputs</b> rail (the tree the other way), and one mode switch. The open question
-  is <b>canvas geometry at project scope</b> — three concepts below. Data is the real mini-dome
-  permutation <code>(1,5,4,3,2)</code> plus an unmapped ribbon for the range-grain case.
+  Round-2 convergence: <b>concept D “Arrange”</b> — the canvas is a <b>conceptual arrangement</b>
+  of every fixture (subway-map honesty: related to reality, not a survey of it). Each node carries
+  <b>editor layout data</b> — <code>editor: { "mapping": { transform: {t, r} } }</code>, keyed by
+  surface type so a future node-graph view gets its own slot — used <i>only</i> to place the
+  node's own doc-space geometry on editing surfaces. Never a sampling input. It becomes the
+  project's canonical visual language (icon, preview). <b>Drag fixtures to arrange them</b>;
+  select one and toggle <b>show visual</b> to see the incoming product under it (2D plane; a 1D
+  strip snakes its colours along the wire — continuous shaders only, discrete postponed).
+  <b>Out of scope this round:</b> the assign gesture (object ↔ output association) — chrome and
+  layout first, lp2014 as inspiration next round.
 </p>
 
 <div class="xcontrols">
@@ -279,100 +251,47 @@
     <button onclick="setSel(null)">clear</button>
   </span>
   <span class="grp"><b>states</b>
+    <button id="xvisual" onclick="toggleVisual()">show visuals</button>
     <button id="xribbon" onclick="toggleRibbon()">+ unpatched ribbon (overlap)</button>
-    <button onclick="rotateSel()">rotate selection</button>
+    <button onclick="rotateSel()">rotate patch</button>
+    <button onclick="rotateMeta()">⟳ arrange-rotate fixture</button>
   </span>
   <span class="grp"><b>reset</b><button onclick="resetAll()">reset</button></span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
-<h2>0 · Today, for contrast</h2>
+<h2>1 · Concept D — “Arrange”: the conceptual space (EditorMeta)</h2>
 <p class="thesis">
-  Left: the mapping editor as shipped — one fixture, one document, the <b>wiring order</b> rail,
-  per-universe wire annotations. Right: the interim <code>/patch</code> page from slice 2 —
-  correct machinery, but a parallel mini-app: its own sidebar, its own selection, no tree,
-  no editor feel. The rest of this spike merges the right into the left.
+  One shared canvas. Every fixture renders <b>its own map2d geometry</b> (the ribbon its honest
+  range bar), placed by its <b>editor-layout transform</b> — drag any fixture; the frame + name
+  tag came from concept A, the single shared space from C, minus C's dependence on the output
+  layout wire. Arrangement is authored, conceptual, and persists with the project. Patching mode
+  tints lamps by port; mapping mode by object; <b>show visuals</b> puts the incoming product
+  under the geometry (plane for 2D, colour-snake along the wire for 1D).
 </p>
-<div class="today">
-  <div class="frame">
-    <div class="cap">mapping editor today — fixture scope</div>
-    <div class="mini">
-      <div style="flex:1; display:flex; flex-direction:column;">
-        <div class="mhead">
-          <span class="t">mapping</span>
-          <span style="font-family:var(--mono); color:var(--subtle);">dome.map2d.json <span style="color:var(--dirty)">●</span></span>
-          <span style="flex:1"></span>
-          <span class="mbtn on">select</span><span class="mbtn">grid</span>
-          <span class="mbtn">ring</span><span class="mbtn">path</span>
-        </div>
-        <div class="mcanvas"><svg id="today-canvas" viewBox="0 0 300 200"></svg></div>
-      </div>
-      <div class="mrail">
-        <div class="h">wiring order</div>
-        <div class="mrow" style="background:var(--sel-bg);"><span class="sw" style="background:var(--obj-0)"></span><span class="nm">sector</span><span class="badge" style="font-family:var(--mono);font-size:9px;color:var(--subtle);border:1px solid var(--border);border-radius:4px;padding:0 3px;">×5</span><span class="rg">1:1-150</span></div>
-        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side a</span><span class="rg">10</span></div>
-        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side b</span><span class="rg">10</span></div>
-        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side c</span><span class="rg">10</span></div>
-        <div style="padding:6px 6px 2px; font-size:9px; color:var(--dim); font-family:var(--mono);">↑ ranges say "1:1-150" — universes, pre-D45</div>
-      </div>
-    </div>
-  </div>
-  <div class="frame">
-    <div class="cap">interim /patch page (slice 2, being replaced)</div>
-    <div class="mini2">
-      <div class="sect" style="font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--subtle);">Patch</div>
-      <div style="color:var(--muted); font-size:11px; margin:2px 0;">1 <span style="color:var(--dim); font-size:10px;">— port 0 · IO18 · 39 lamps, port 1 · IO13 · 30, port 2 · IO2 · 39</span></div>
-      <div class="strip"><i style="left:0%; width:28%; background:var(--raised-strong)"></i><i style="left:28%; width:8%;"></i><i style="left:36%; width:28%;"></i><i style="left:64%; width:28%;"></i><i style="left:92%; width:8%;"></i></div>
-      <div style="color:var(--muted); font-size:11px; margin:2px 0;">Box 2 <span style="color:var(--dim); font-size:10px;">— port 0 · IO14 · 39, port 1 · IO16 · 30</span></div>
-      <div class="strip"><i style="left:0%; width:43%;"></i><i style="left:43%; width:13%;"></i><i style="left:56%; width:44%;"></i></div>
-      <div class="sect">Dome <span style="font-weight:400; color:var(--dim); font-size:10px;">150 lamps</span></div>
-      <div><span class="mbtn" style="border:1px solid var(--border-strong); border-radius:5px; padding:1px 7px; font-size:10px; color:var(--muted); margin-right:4px;">sector 0</span><span class="mbtn" style="border:1px solid var(--border-strong); border-radius:5px; padding:1px 7px; font-size:10px; color:var(--muted); margin-right:4px;">sector 1</span><span style="font-size:10px; color:var(--dim);">… flat chips, no tree, no canvas selection</span></div>
-      <div class="plab" style="margin-top:10px; color:var(--dim);">✕ own sidebar · ✕ own selection · ✕ no editor tools · ✓ bay cells (kept below)</div>
-    </div>
+<div class="shell" id="shellD"></div>
+
+<h2>2 · Outputs rail at radiance density</h2>
+<p class="thesis">
+  Round-2 feedback: ports go <b>one per line</b> — pin · strip · used/total. The radiance dome
+  is <b>10 control boxes × 32 outputs</b>, so the rail must stay legible at ~320 ports: the
+  active box expands to port rows; the others collapse to a name + aggregate strip line. Below,
+  a standalone rail column at that scale (Box 3 expanded, boxes 4–10 collapsed).
+</p>
+<div class="densewrap">
+  <div class="densecol" id="denseRail"></div>
+  <div class="decisions" style="flex:1; max-width:600px;">
+    <p><b>Row anatomy (compact):</b> pin swatch + name (46px) · strip (flex) · used/total.
+       Cells keep fixture-object colour + path label; labels drop first under 40px cell width,
+       hover/tooltip keeps the fact.</p>
+    <p><b>Collapsed box row:</b> name · aggregate strip (every port's cells crushed to one line,
+       contested spans still read red) · total. Click expands.</p>
+    <p><b>Scale math:</b> expanded box ≈ 32 × 21px ≈ 670px scroll; 9 collapsed boxes ≈ 190px.
+       One box expanded at a time keeps the whole rail under ~900px for the real dome.</p>
   </div>
 </div>
 
-<h2>1 · Concept A — “Atlas”: every fixture in its own map space, tiled</h2>
-<p class="thesis">
-  The canvas shows <b>each fixture's own map2d space in a framed tile</b> — the dome's authored
-  geometry, the doors' authored geometry — laid out side by side (auto-packed, not meaningful
-  positions). The unmapped ribbon docks as a range bar: it has lamps but no geometry, and the
-  atlas says so instead of hiding it. Mapping tools operate inside whichever tile the selection
-  lives in. <b>Claim:</b> honest about what a map2d is (per-fixture space), no fake install
-  layout, and the whole project is visible at once.
-</p>
-<div class="shell" id="shellA"></div>
-
-<h2>2 · Concept B — “Focus”: one fixture's space at a time, tree-driven</h2>
-<p class="thesis">
-  The canvas is <b>exactly today's editor</b> — one fixture's map full-bleed — and project scope
-  comes from the rails: clicking another fixture in the tree (or the filmstrip, bottom-left)
-  swaps the canvas. The ribbon's “canvas” is an honest range strip. <b>Claim:</b> zero new
-  canvas semantics, mapping tools keep full fidelity, cheapest to build; the cost is that
-  cross-fixture patching is felt through the rails, never seen spatially.
-</p>
-<div class="shell" id="shellB"></div>
-
-<h2>3 · Concept C — “Install”: lamps at output-layout positions</h2>
-<p class="thesis">
-  The canvas shows the <b>installed arrangement</b> — lamp dots at the positions the output
-  layout system computed (what the interim /patch page drew, and what the sim shows). Doors sit
-  between the dome sectors they interrupt, because that is where they hang. The ribbon parks in
-  a “no layout” strip. <b>Claim:</b> this is the space a re-plug session happens in — you look
-  at the wall, not at doc coordinates. The cost: it is <i>not</i> the space mapping tools edit
-  in, so mapping mode either switches back to doc space (modal geometry!) or goes read-only here.
-</p>
-<div class="shell" id="shellC"></div>
-
-<h2>4 · Rail anatomy — the two trees and their cells</h2>
-<p class="thesis">
-  Shared by every concept. The <b>Fixtures</b> rail is the wiring-order rail grown up: fixture →
-  object → instance, with a <b>channel chip</b> per instance — port hue, port-local lamp range,
-  rotation and reverse markers. The <b>Outputs</b> rail is the same facts inverted: output →
-  port → cells coloured by <i>fixture object</i>, so “what is on IO14” and “where did sector 3
-  go” are both one glance. Wire annotations are port-named (<code>IO18:1-30</code>) — the D45
-  replacement for today's per-universe <code>1:1-23</code>.
-</p>
+<h2>3 · Rail &amp; chip anatomy</h2>
 <div class="duo">
   <div class="anno">
     <h3>fixtures-rail chips</h3>
@@ -391,14 +310,28 @@
   </div>
 </div>
 
+<h2>4 · Round-1 decisions</h2>
+<div class="decisions">
+  <p><b>C “Install” closest, A's frames kept</b> (Yona, round 2): the shared single space wins,
+     but its geometry is the <b>authored conceptual arrangement</b> (EditorMeta), not the output
+     layout wire — the layout wire stays the sim's business.</p>
+  <p><b>B “Focus” rejected</b> as the project canvas (per-fixture focus survives as behaviour:
+     mapping tools operate on the selected fixture inside the arranged space).
+     <b>A “Atlas” rejected</b> as auto-packed tiles — but its fixture frames + name tags moved
+     into D.</p>
+  <p><b>Rails ratified</b> (Fixtures left / Outputs right) with one change: compact one-line
+     ports (section 2). <b>Chips ratified.</b></p>
+  <p><b>Deferred:</b> the assign gesture (next round, lp2014 inspiration) · discrete shaders
+     (continuous only for now) · icon/preview derivation from the arrangement.</p>
+</div>
+
 <p class="leannote" id="lean">
-  <b>Lean:</b> ship <b>B (“Focus”) as the v1 canvas</b> inside the full shell — it is today's
-  editor with project rails, zero new geometry semantics, and everything patching needs is
-  carried by the rails + selection sync. Keep <b>C (“Install”)</b> as the declared follow-up
-  <i>patching-mode view toggle</i> once fixture transforms exist (it is the space a re-plug
-  actually happens in), and treat <b>A (“Atlas”)</b> as the eventual arrange-mode substrate
-  rather than a v1 target. The rails and chips (section 4) are common to all three and can be
-  planned immediately.
+  <b>Lean:</b> EditorMeta lives per node as <code>editor: { "&lt;surface&gt;": … }</code> with
+  <code>"mapping"</code> the first surface; transform = translate + rotate + uniform scale (no
+  shear — subway maps don't shear). Unarranged fixtures auto-pack in a row at the bottom (the
+  ribbon spawns there) until first dragged, so the surface never blocks on arrangement. Mapping
+  tools edit the fixture's doc space <i>through</i> the transform (affine, invertible); the
+  arrangement itself is edited by plain drag in any mode — no separate arrange mode until 3D.
 </p>
 
 <script>
@@ -408,23 +341,24 @@
 const PORT_COLORS = { IO18: 'var(--port-io18)', IO13: 'var(--port-io13)', IO2: 'var(--port-io2)',
                       IO14: 'var(--port-io14)', IO16: 'var(--port-io16)' };
 const OBJ = ['var(--obj-0)','var(--obj-1)','var(--obj-2)','var(--obj-3)','var(--obj-4)','var(--obj-5)'];
+const OBJ_RAW = ['#5aa9e6','#3fd68e','#e4c065','#c792ea','#f0913b','#64d8cb'];
 
-// state
-const S = { mode: 'patch', sel: 'dome:/sector/1', ribbon: false, rot: {}, focus: 'dome', edits: 0 };
+const S = { mode: 'patch', sel: 'dome:/sector/1', ribbon: false, visual: false,
+            rot: {}, edits: 0,
+            meta: { dome:   { x: 355, y: 205, r: 0 },
+                    doors:  { x: 545, y: 430, r: 0 },
+                    ribbon: { x: 165, y: 445, r: 0 } } };
 const SEL_CYCLE = ['dome:/sector/0','dome:/sector/1','dome:/sector/2','doors:/door/1',
-                   'out:1:IO18','ribbon:', null];
+                   'fx:dome','ribbon:', null];
 let selIdx = 1;
 
-// fixtures: dome (sector ×5 ×30, stride 10), doors (door ×3 ×9, stride 3), ribbon (range grain)
 const FIXTURES = [
-  { id:'dome',  name:'dome',  lamps:150, color:0,
+  { id:'dome',  name:'dome',  lamps:150, color:0, dim:2,
     objects:[ { id:'sector', n:5, per:30, stride:10 } ] },
-  { id:'doors', name:'doors', lamps:27,  color:1,
+  { id:'doors', name:'doors', lamps:27,  color:1, dim:2,
     objects:[ { id:'door', n:3, per:9, stride:3 } ] },
-  { id:'ribbon', name:'ribbon-west-canopy', lamps:24, color:2, rangeOnly:true, objects:[] },
+  { id:'ribbon', name:'ribbon-west-canopy', lamps:24, color:2, dim:1, rangeOnly:true, objects:[] },
 ];
-
-// outputs & the shipped patch: [fixture, path, port, portStart(0-based), lamps, rev, rot]
 const OUTPUTS = [
   { name:'1',     node:'out_a', ports:[ {pin:'IO18', lamps:39}, {pin:'IO13', lamps:30}, {pin:'IO2', lamps:39} ] },
   { name:'Box 2', node:'out_b', ports:[ {pin:'IO14', lamps:39}, {pin:'IO16', lamps:30} ] },
@@ -440,149 +374,122 @@ const PLACE = [
   { fx:'dome',  path:'/sector/3', out:'Box 2', pin:'IO16', at:0,  n:30 },
 ];
 
-function fxColor(fxId, objIndex=0) {
-  const fx = FIXTURES.find(f => f.id === fxId);
-  return OBJ[(fx ? fx.color : 0) + objIndex];
-}
+function fxColor(fxId) { const fx = FIXTURES.find(f => f.id === fxId); return OBJ[fx ? fx.color : 0]; }
 function placement(fxId, path) { return PLACE.find(p => p.fx === fxId && p.path === path); }
 function rotOf(p) { return (p.rot || 0) + (S.rot[p.fx + ':' + p.path] || 0); }
 
 /* =========================================================
-   Geometry — dome ring, door triangles, install layout
+   Geometry — per-fixture DOC SPACE, local origin
    ========================================================= */
-function sectorPts(k, cx, cy, r) {           // 30 dots: arc of 60° starting at k*72°
+function sectorPts(k, r) {
   const pts = [], a0 = (k * 72 - 90 - 28) * Math.PI/180, a1 = (k * 72 - 90 + 28) * Math.PI/180;
   for (let i = 0; i < 30; i++) {
     const t = i / 29, a = a0 + (a1 - a0) * t;
-    const rr = r + 14 * Math.sin(t * Math.PI);   // gentle ridge bulge
-    pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]);
+    const rr = r + 14 * Math.sin(t * Math.PI);
+    pts.push([rr * Math.cos(a), rr * Math.sin(a)]);
   }
   return pts;
 }
-function doorPts(k, cx, cy, spread) {        // 9 dots: small triangle
-  const pts = [], base = [[-8,7],[8,7],[0,-8]];
+function doorPts(k, spread) {
+  const pts = [], base = [[-9,8],[9,8],[0,-9]];
   for (let s = 0; s < 3; s++) {
     const [x1,y1] = base[s], [x2,y2] = base[(s+1)%3];
     for (let i = 0; i < 3; i++) {
       const t = i / 3;
-      pts.push([cx + (k-1)*spread + x1 + (x2-x1)*t, cy + y1 + (y2-y1)*t]);
+      pts.push([(k-1)*spread + x1 + (x2-x1)*t, y1 + (y2-y1)*t]);
     }
   }
   return pts;
 }
-function domeDoc(cx, cy, r)  { return [0,1,2,3,4].map(k => sectorPts(k, cx, cy, r)); }
-function doorsDoc(cx, cy, s) { return [0,1,2].map(k => doorPts(k, cx, cy, s)); }
-function installLayout(cx, cy, r) {          // doors interleave the dome perimeter
-  return { dome: domeDoc(cx, cy, r),
-           doors: [0,1,2].map(k => {
-             const a = (k * 72 + 36 - 90) * Math.PI/180;     // in the gaps
-             return doorPts(1, cx + (r + 26) * Math.cos(a), cy + (r + 26) * Math.sin(a), 0);
-           }) };
-}
+const GEO = {
+  dome:  { instances: [0,1,2,3,4].map(k => sectorPts(k, 118)), bbox: [-148,-148,296,296] },
+  doors: { instances: [0,1,2].map(k => doorPts(k, 52)),        bbox: [-78,-50,156,76]  },
+  ribbon:{ instances: null,                                     bbox: [-95,-48,190,72]  },
+};
 
 /* =========================================================
-   SVG builders
+   Concept D canvas — conceptual space, draggable fixtures
    ========================================================= */
-function lampDots(pts, { fxId, path, objIndex = 0, portPin = null, contestedUpTo = -1 }) {
-  const selKey = fxId + ':' + path;
-  const isSel = S.sel === selKey;
-  const fill = S.mode === 'patch'
-    ? (portPin ? PORT_COLORS[portPin] : 'var(--gap)')
-    : fxColor(fxId, objIndex);
-  let s = `<g data-sel="${selKey}" style="cursor:pointer" onclick="setSel('${selKey}')">`;
-  pts.forEach(([x, y], i) => {
-    const contested = S.mode === 'patch' && i < contestedUpTo;
-    s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.1"
-           fill="${contested ? '#c76a6a' : fill}" ${isSel ? 'stroke="var(--sel)" stroke-width="1.6"' : ''}/>`;
-  });
-  return s + '</g>';
+function snakeColor(t) {           // the incoming 1D visual, sampled along the wire
+  const stops = [[123,224,178],[90,169,230],[199,146,234],[240,145,59]];
+  const x = t * (stops.length - 1), i = Math.min(Math.floor(x), stops.length - 2), f = x - i;
+  const c = stops[i].map((v, j) => Math.round(v + (stops[i+1][j] - v) * f));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
-function fixtureLampGroups(fxId, geo) {      // geo: array of instance point arrays
-  const fx = FIXTURES.find(f => f.id === fxId);
-  let s = '';
-  geo.forEach((pts, k) => {
-    const path = `/${fx.objects[0].id}/${k}`;
-    const p = placement(fxId, path);
-    const contestedUpTo = (S.ribbon && p && p.pin === 'IO18' && p.fx === 'dome') ? 24 : -1;
-    s += lampDots(pts, { fxId, path, portPin: p ? p.pin : null, contestedUpTo });
-  });
-  return s;
-}
-function rangeStripSVG(x, y, w, fxId, label) {   // the ribbon's honest range bar
-  const fx = FIXTURES.find(f => f.id === fxId);
-  const selKey = fxId + ':';
-  const isSel = S.sel === selKey;
-  const fill = S.mode === 'patch' ? (S.ribbon ? '#c76a6a' : 'var(--gap)') : fxColor(fxId);
-  let s = `<g style="cursor:pointer" onclick="setSel('${selKey}')">`;
-  s += `<rect x="${x}" y="${y}" width="${w}" height="18" rx="4" fill="var(--track)"
-        stroke="${isSel ? 'var(--sel)' : 'var(--border-strong)'}" stroke-dasharray="${isSel ? '' : '4 3'}"/>`;
-  for (let i = 0; i < fx.lamps; i++)
-    s += `<circle cx="${x + 8 + i * (w - 16) / (fx.lamps - 1)}" cy="${y + 9}" r="2.4" fill="${fill}"/>`;
-  s += `<text x="${x}" y="${y - 5}" class="park-label">${label}</text></g>`;
-  return s;
-}
-
-function canvasA() {                          // tiled fixture spaces
-  const dome = domeDoc(230, 210, 118), doors = doorsDoc(560, 330, 70);
-  let s = `<svg viewBox="0 0 760 460">`;
-  s += `<rect x="60" y="52" width="345" height="330" rx="8" fill="var(--surface-muted)" stroke="var(--border)"/>
-        <text x="74" y="74" class="tile-label">dome</text>
-        <text x="74" y="88" class="tile-sub">dome.map2d.json · 150 lamps</text>`;
-  s += fixtureLampGroups('dome', dome);
-  s += `<rect x="440" y="250" width="240" height="132" rx="8" fill="var(--surface-muted)" stroke="var(--border)"/>
-        <text x="454" y="272" class="tile-label">doors</text>
-        <text x="454" y="286" class="tile-sub">doors.map2d.json · 27 lamps</text>`;
-  s += fixtureLampGroups('doors', doors);
-  s += rangeStripSVG(440, 120, 240, 'ribbon', 'ribbon-west-canopy · no map2d · 24 lamps');
-  return s + '</svg>';
-}
-function canvasB() {                          // focused fixture
-  let s = `<svg viewBox="0 0 760 460">`;
-  if (S.focus === 'dome') {
-    s += fixtureLampGroups('dome', domeDoc(380, 232, 150));
-    s += `<text x="20" y="30" class="tile-label">dome</text>
-          <text x="20" y="44" class="tile-sub">dome.map2d.json · 150 lamps · grid 12u</text>`;
-  } else if (S.focus === 'doors') {
-    s += fixtureLampGroups('doors', doorsDoc(380, 230, 150));
-    s += `<text x="20" y="30" class="tile-label">doors</text>
-          <text x="20" y="44" class="tile-sub">doors.map2d.json · 27 lamps</text>`;
-  } else {
-    s += rangeStripSVG(120, 220, 520, 'ribbon', 'ribbon-west-canopy · no map2d — range grain only');
-    s += `<text x="20" y="30" class="tile-label">ribbon-west-canopy</text>
-          <text x="20" y="44" class="tile-sub">24 lamps · no spatial document</text>`;
+function fixtureGroup(fx) {
+  const meta = S.meta[fx.id], geo = GEO[fx.id];
+  const selKey = 'fx:' + fx.id;
+  const fxSelected = S.sel === selKey;
+  const [bx, by, bw, bh] = geo.bbox;
+  let inner = '';
+  // the incoming visual, under the lamps
+  if (S.visual) {
+    if (fx.id === 'dome')
+      inner += `<circle cx="0" cy="0" r="140" fill="url(#viz-sky)" opacity="0.35"/>`;
+    if (fx.id === 'doors')
+      inner += `<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="8"
+                fill="url(#viz-warm)" opacity="0.4"/>`;
   }
-  return s + '</svg>';
+  // frame + name tag (concept A's keeper)
+  inner += `<rect class="fx-frame ${fxSelected ? 'sel' : ''}" x="${bx}" y="${by}"
+            width="${bw}" height="${bh}" rx="8"
+            ${fxSelected ? '' : 'stroke-dasharray="none" opacity="0.55"'} />`;
+  inner += `<text class="fx-tag" x="${bx + 10}" y="${by + 16}">${fx.name}</text>`;
+  inner += `<text class="fx-tag-sub" x="${bx + 10}" y="${by + 28}">${
+      fx.rangeOnly ? 'no map2d · ' + fx.lamps + ' lamps' : fx.id + '.map2d.json · ' + fx.lamps + ' lamps'}</text>`;
+  // lamps
+  if (geo.instances) {
+    geo.instances.forEach((pts, k) => {
+      const path = `/${fx.objects[0].id}/${k}`;
+      const p = placement(fx.id, path);
+      const selInst = S.sel === fx.id + ':' + path;
+      const contestedUpTo = (S.ribbon && p && p.pin === 'IO18' && p.fx === 'dome') ? 24 : -1;
+      const fill = S.mode === 'patch' ? (p ? PORT_COLORS[p.pin] : 'var(--gap)') : fxColor(fx.id);
+      let g = `<g style="cursor:pointer" onclick="event.stopPropagation(); setSel('${fx.id}:${path}')">`;
+      pts.forEach(([x, y], i) => {
+        const contested = S.mode === 'patch' && i < contestedUpTo;
+        g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.1"
+              fill="${contested ? '#c76a6a' : fill}"
+              ${selInst ? 'stroke="var(--sel)" stroke-width="1.6"' : ''}/>`;
+      });
+      inner += g + '</g>';
+    });
+  } else {
+    // range-grain strip: dots along a bar; visuals snake along the wire
+    const selInst = S.sel === fx.id + ':';
+    let g = `<g style="cursor:pointer" onclick="event.stopPropagation(); setSel('${fx.id}:')">`;
+    g += `<rect x="${bx + 6}" y="-9" width="${bw - 12}" height="18" rx="4" fill="var(--track)"
+          stroke="${selInst ? 'var(--sel)' : 'var(--border-strong)'}"
+          ${selInst ? '' : 'stroke-dasharray="4 3"'}/>`;
+    for (let i = 0; i < fx.lamps; i++) {
+      const x = bx + 14 + i * (bw - 28) / (fx.lamps - 1);
+      const fill = S.visual ? snakeColor(i / (fx.lamps - 1))
+                 : S.mode === 'patch' ? (S.ribbon ? '#c76a6a' : 'var(--gap)') : fxColor(fx.id);
+      g += `<circle cx="${x.toFixed(1)}" cy="0" r="2.6" fill="${fill}"/>`;
+    }
+    inner += g + '</g>';
+  }
+  return `<g transform="translate(${meta.x},${meta.y}) rotate(${meta.r})"
+            data-fx="${fx.id}" class="fx-group"
+            onpointerdown="dragStart(event,'${fx.id}')"
+            onclick="setSel('fx:${fx.id}')">${inner}</g>`;
 }
-function filmSVG(fxId) {
-  if (fxId === 'dome')  return `<svg viewBox="0 0 84 60">` +
-    domeDoc(42, 30, 17).map(pts => pts.map(([x,y]) =>
-      `<circle cx="${x}" cy="${y}" r="1" fill="${fxColor('dome')}"/>`).join('')).join('') + '</svg>';
-  if (fxId === 'doors') return `<svg viewBox="0 0 84 60">` +
-    doorsDoc(42, 30, 24).map(pts => pts.map(([x,y]) =>
-      `<circle cx="${x}" cy="${y}" r="1" fill="${fxColor('doors')}"/>`).join('')).join('') + '</svg>';
-  return `<svg viewBox="0 0 84 60"><rect x="10" y="26" width="64" height="8" rx="3"
-          fill="none" stroke="var(--border-strong)" stroke-dasharray="3 2"/></svg>`;
-}
-function canvasC() {                          // install space
-  const geo = installLayout(360, 225, 132);
-  let s = `<svg viewBox="0 0 760 460">`;
-  s += fixtureLampGroups('dome', geo.dome);
-  s += fixtureLampGroups('doors', geo.doors);
-  s += `<text x="20" y="30" class="tile-label">install · output layout</text>
-        <text x="20" y="44" class="tile-sub">positions from the layout wire — the sim's view</text>`;
-  s += `<rect x="518" y="398" width="222" height="42" rx="6" fill="none"
-        stroke="var(--border-strong)" stroke-dasharray="4 3"/>
-        <text x="530" y="415" class="park-label">no layout position:</text>`;
-  s += rangeStripSVG(530, 420, 198, 'ribbon', '');
-  if (S.mode === 'map')
-    s += `<rect x="0" y="0" width="760" height="460" fill="rgba(12,17,20,.55)"/>
-          <text x="380" y="235" text-anchor="middle" class="tile-label"
-           style="fill:var(--warn-text)">mapping tools edit doc space — switch fixture focus or accept read-only here</text>`;
+function canvasD() {
+  let s = `<svg id="dsvg" viewBox="0 0 780 560">
+    <defs>
+      <radialGradient id="viz-sky"><stop offset="0%" stop-color="#9cc8ee"/>
+        <stop offset="70%" stop-color="#3c5c78"/><stop offset="100%" stop-color="#142330"/></radialGradient>
+      <linearGradient id="viz-warm" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#f0b97a"/><stop offset="100%" stop-color="#79482a"/></linearGradient>
+    </defs>
+    <text x="20" y="28" class="tile-label">project space · conceptual</text>
+    <text x="20" y="42" class="tile-sub">editor:{"mapping":{transform}} per node — drag to arrange · never a sampling input</text>`;
+  for (const fx of FIXTURES) s += fixtureGroup(fx);
   return s + '</svg>';
 }
 
 /* =========================================================
-   Rails + header (shared chrome)
+   Rails (fixtures unchanged from round 1; outputs compact)
    ========================================================= */
 function chipHTML(p, contested) {
   if (!p) return `<span class="auto" title="unpatched — auto-flows on the default output">auto</span>`;
@@ -593,12 +500,11 @@ function chipHTML(p, contested) {
       (p.rev ? ` <span class="rev">‹rev</span>` : '') +
       (rot ? ` <span class="rot">+${rot}</span>` : '') + `</span>`;
 }
-function fixturesRail(shell) {
+function fixturesRail() {
   let h = `<div class="rhead">fixtures</div>`;
   for (const fx of FIXTURES) {
-    if (fx.rangeOnly && !S.ribbon && shell !== 'A') { /* still show; parked */ }
-    const selKey = fx.id + ':';
-    h += `<div class="frow fxhead ${S.sel === selKey ? 'sel' : ''}" onclick="setSel('${selKey}');setFocus('${fx.id}')">
+    const selKey = 'fx:' + fx.id;
+    h += `<div class="frow fxhead ${S.sel === selKey ? 'sel' : ''}" onclick="setSel('${selKey}')">
             <span class="sw" style="background:${fxColor(fx.id)}"></span>
             <span class="nm">${fx.name}</span>
             ${fx.rangeOnly ? `<span class="badge" title="no map2d — range grain">range</span>` : ''}
@@ -613,15 +519,15 @@ function fixturesRail(shell) {
         const path = `/${obj.id}/${k}`, selK = fx.id + ':' + path;
         const p = placement(fx.id, path);
         const contested = S.ribbon && p && p.pin === 'IO18' && fx.id === 'dome';
-        h += `<div class="frow inst2 ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}');setFocus('${fx.id}')">
+        h += `<div class="frow inst2 ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}')">
                 <span class="chev">·</span><span class="nm" style="font-family:var(--mono); font-size:11px;">${path}</span>
                 ${S.mode === 'patch' ? chipHTML(p, contested) : `<span class="rg">${obj.per}</span>`}
               </div>`;
       }
     }
     if (fx.rangeOnly) {
-      const contested = S.ribbon;
-      h += `<div class="frow inst2 ${S.sel === selKey ? 'sel' : ''}" onclick="setSel('${selKey}')">
+      const selK = fx.id + ':', contested = S.ribbon;
+      h += `<div class="frow inst2 ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}')">
               <span class="chev">·</span><span class="nm" style="font-family:var(--mono); font-size:11px;">0..${fx.lamps}</span>
               ${S.mode === 'patch'
                 ? (contested ? `<span class="chip contested"><i style="background:${PORT_COLORS.IO18}"></i>IO18:1-24 ⚠</span>`
@@ -629,10 +535,36 @@ function fixturesRail(shell) {
                 : `<span class="rg">${fx.lamps}</span>`}
             </div>`;
       if (S.mode === 'patch' && contested)
-        h += `<div class="note"><b>24 contested lamps</b> on output 1 — ribbon auto-flowed onto IO18 under /sector/2. Contested lamps render dark; assign the ribbon a free port.</div>`;
+        h += `<div class="note"><b>24 contested lamps</b> on output 1 — ribbon auto-flowed onto IO18 under /sector/2.</div>`;
     }
   }
   return h;
+}
+function portRow(out, port, opts = {}) {
+  const selK = 'out:' + out.name + ':' + port.pin;
+  const cells = opts.cells || PLACE.filter(p => p.out === out.name && p.pin === port.pin);
+  let strip = '';
+  for (const c of cells) {
+    const cSel = S.sel === c.fx + ':' + c.path;
+    const contested = S.ribbon && c.pin === 'IO18' && c.fx === 'dome';
+    const left = (c.at / port.lamps) * 100, width = (c.n / port.lamps) * 100;
+    const label = width > 22 ? c.path.slice(1) + (rotOf(c) ? ' +' + rotOf(c) : '') + (c.rev ? ' ‹' : '') : '';
+    strip += `<span class="pcell ${cSel ? 'sel' : ''} ${contested ? 'contested' : ''}"
+                style="left:${left}%; width:${width}%; background:${c.color || fxColor(c.fx)};"
+                onclick="event.stopPropagation(); setSel('${c.fx}:${c.path}')"
+                title="${c.fx}${c.path} → ${c.pin} lamp ${c.at + 1}">${label}</span>`;
+  }
+  if (S.ribbon && port.pin === 'IO18' && !opts.cells)
+    strip += `<span class="pcell contested" style="left:0%; width:${(24 / port.lamps) * 100}%;"
+               onclick="event.stopPropagation(); setSel('ribbon:')">ribbon ⚠</span>`;
+  const used = cells.reduce((a, c) => a + c.n, 0);
+  if (used < port.lamps)
+    strip += `<span class="pgap" style="left:${(used / port.lamps) * 100}%; width:${((port.lamps - used) / port.lamps) * 100}%;"></span>`;
+  return `<div class="port2 ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}')">
+            <span class="pin"><i style="background:${PORT_COLORS[port.pin] || 'var(--gap)'}"></i>${port.pin}</span>
+            <span class="ptrack">${strip}</span>
+            <span class="cnt">${used}/${port.lamps}</span>
+          </div>`;
 }
 function outputsRail() {
   let h = `<div class="rhead">outputs</div>`;
@@ -640,36 +572,47 @@ function outputsRail() {
     const total = out.ports.reduce((a, p) => a + p.lamps, 0);
     h += `<div class="orow-out"><span class="nm">${out.name}</span>
           <span class="node">${out.node}</span><span class="tot">${total} lamps</span></div>`;
-    for (const port of out.ports) {
-      const selK = 'out:' + out.name + ':' + port.pin;
-      const cells = PLACE.filter(p => p.out === out.name && p.pin === port.pin);
-      let strip = '';
-      for (const c of cells) {
-        const cSel = S.sel === c.fx + ':' + c.path;
-        const contested = S.ribbon && c.pin === 'IO18' && c.fx === 'dome';
-        const left = (c.at / port.lamps) * 100, width = (c.n / port.lamps) * 100;
-        strip += `<span class="pcell ${cSel ? 'sel' : ''} ${contested ? 'contested' : ''}"
-                    style="left:${left}%; width:${width}%; background:${fxColor(c.fx)};"
-                    onclick="event.stopPropagation(); setSel('${c.fx}:${c.path}')"
-                    title="${c.fx}${c.path} → ${c.pin} lamp ${c.at + 1}">${c.path.slice(1)}${rotOf(c) ? ' +' + rotOf(c) : ''}${c.rev ? ' ‹' : ''}</span>`;
-      }
-      if (S.ribbon && port.pin === 'IO18')
-        strip += `<span class="pcell contested" style="left:0%; width:${(24 / port.lamps) * 100}%;"
-                   onclick="event.stopPropagation(); setSel('ribbon:')">ribbon ⚠</span>`;
-      const used = cells.reduce((a, c) => a + c.n, 0);
-      if (used < port.lamps && !(S.ribbon && port.pin === 'IO18'))
-        strip += `<span class="pgap" style="left:${(used / port.lamps) * 100}%; width:${((port.lamps - used) / port.lamps) * 100}%;"></span>`;
-      h += `<div class="port ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}')">
-              <div class="plab"><i style="background:${PORT_COLORS[port.pin]}"></i>
-                ${port.pin}<span class="cnt">${used}/${port.lamps}</span></div>
-              <div class="ptrack">${strip}</div>
-            </div>`;
-    }
+    for (const port of out.ports) h += portRow(out, port);
     if (S.ribbon && out.name === '1')
-      h += `<div class="note"><b>overlap on IO18</b> — 2 producers claim lamps 1–24 (degrade-and-report)</div>`;
+      h += `<div class="note"><b>overlap on IO18</b> — 2 producers claim lamps 1–24</div>`;
   }
   return h;
 }
+
+/* radiance-density standalone rail (section 2) */
+function denseRail() {
+  let h = `<div class="rhead">outputs · radiance scale</div>`;
+  // Box 3 expanded: 32 numbered ports, deterministic fake cells
+  h += `<div class="orow-out"><span class="nm">Box 3</span><span class="node">out_c</span>
+        <span class="tot">2880 lamps</span></div>`;
+  for (let i = 0; i < 32; i++) {
+    const cells = [];
+    let at = 0;
+    const segs = 2 + (i % 2);
+    for (let s = 0; s < segs; s++) {
+      const n = [34, 28, 22][(i + s) % 3];
+      cells.push({ fx:'radiance', path:`/strut/${(i * 3 + s) % 61}`, at, n,
+                   color: OBJ_RAW[(i + s) % 6] });
+      at += n + ((i + s) % 3 === 0 ? 4 : 0);
+    }
+    h += portRow({ name:'Box 3' }, { pin: String(i + 1), lamps: 90 }, { cells });
+  }
+  // boxes 4..10 collapsed
+  for (let b = 4; b <= 10; b++) {
+    let mini = '';
+    for (let s = 0; s < 10; s++)
+      mini += `<i style="left:${s * 10 + 1}%; width:8%; background:${OBJ_RAW[(b + s) % 6]}"></i>`;
+    if (b === 7) mini += `<i style="left:41%; width:8%; background:repeating-linear-gradient(45deg,#874b4b 0 3px,#5d3234 3px 6px)"></i>`;
+    h += `<div class="obox-collapsed"><span class="nm">Box ${b}</span>
+          <span class="mini">${mini}</span><span class="tot">32 · 2880</span></div>`;
+  }
+  h += `<div class="note">1 box expanded at a time; 10 × 32 ports stays under one screen.</div>`;
+  return h;
+}
+
+/* =========================================================
+   Chrome + assembly
+   ========================================================= */
 function headerHTML() {
   const mapTools = `
     <button class="ebtn on">select</button><button class="ebtn">grid</button>
@@ -688,6 +631,8 @@ function headerHTML() {
         ${S.edits ? `<span class="dirty"> ●</span>` : ''}</span>
       <span class="sep"></span>
       ${S.mode === 'map' ? mapTools : patchTools}
+      <span class="sep"></span>
+      <button class="ebtn ${S.visual ? 'on' : ''}" onclick="toggleVisual()">show visual</button>
       <span class="sp"></span>
       <span class="status">${S.edits ? S.edits + ' edit' + (S.edits > 1 ? 's' : '') + ' · ⌘Z' : ''}</span>
       <button class="ebtn">save</button>
@@ -696,76 +641,86 @@ function headerHTML() {
 function tabsHTML() {
   return `<div class="tabs">
       <span class="brand"><b>Light</b>Player</span>
-      <span class="tab dis" title="the node workspace (today's editor page)">Nodes</span>
+      <span class="tab dis" title="the node workspace">Nodes</span>
       <span class="tab ${S.mode === 'map' ? 'on' : ''}" onclick="setMode('map')">Mapping</span>
       <span class="tab ${S.mode === 'patch' ? 'on' : ''}" onclick="setMode('patch')">Patching</span>
       <span class="proj">mini-dome · simulator ●</span>
     </div>`;
 }
-
-/* =========================================================
-   Assembly + state
-   ========================================================= */
-function shellHTML(concept) {
-  const canvas = concept === 'A' ? canvasA() : concept === 'B' ? canvasB() : canvasC();
-  const filmstrip = concept === 'B' ? `
-    <div class="filmstrip">
-      ${FIXTURES.map(fx => `
-        <div class="film ${S.focus === fx.id ? 'on' : ''}" onclick="setFocus('${fx.id}')">
-          ${filmSVG(fx.id)}<span class="fl">${fx.id === 'ribbon' ? 'ribbon' : fx.name}</span>
-        </div>`).join('')}
-    </div>` : '';
-  return tabsHTML() + headerHTML() + `
+function render() {
+  document.getElementById('shellD').innerHTML = tabsHTML() + headerHTML() + `
     <div class="ebody">
-      <div class="rail left">${fixturesRail(concept)}</div>
-      <div class="canvas-zone">${canvas}${filmstrip}</div>
+      <div class="rail left">${fixturesRail()}</div>
+      <div class="canvas-zone">${canvasD()}</div>
       <div class="rail right">${outputsRail()}</div>
     </div>`;
-}
-function render() {
-  document.getElementById('shellA').innerHTML = shellHTML('A');
-  document.getElementById('shellB').innerHTML = shellHTML('B');
-  document.getElementById('shellC').innerHTML = shellHTML('C');
+  document.getElementById('denseRail').innerHTML = denseRail();
   document.getElementById('xm-map').classList.toggle('on', S.mode === 'map');
   document.getElementById('xm-patch').classList.toggle('on', S.mode === 'patch');
   document.getElementById('xribbon').classList.toggle('on', S.ribbon);
+  document.getElementById('xvisual').classList.toggle('on', S.visual);
   document.getElementById('xstatus').textContent =
-    `mode=${S.mode} · sel=${S.sel || '—'}${S.ribbon ? ' · OVERLAP live' : ''}`;
-  drawToday();
+    `mode=${S.mode} · sel=${S.sel || '—'}${S.visual ? ' · visuals' : ''}${S.ribbon ? ' · OVERLAP live' : ''}`;
 }
-function drawToday() {
-  const svg = document.getElementById('today-canvas');
-  if (!svg) return;
-  let s = '';
-  domeDoc(150, 105, 62).forEach((pts, k) => {
-    pts.forEach(([x, y]) => {
-      s += `<circle cx="${x}" cy="${y}" r="2" fill="${OBJ[0]}"
-            ${k === 1 ? 'stroke="var(--sel)" stroke-width="1"' : ''}/>`;
-    });
-  });
-  svg.innerHTML = s;
+
+/* drag-to-arrange (EditorMeta live) */
+let drag = null;
+function dragStart(evt, fxId) {
+  evt.preventDefault();
+  const svg = document.getElementById('dsvg');
+  const rect = svg.getBoundingClientRect();
+  const scale = 780 / rect.width;
+  drag = { fxId, sx: evt.clientX, sy: evt.clientY, scale,
+           ox: S.meta[fxId].x, oy: S.meta[fxId].y, moved: false };
+  window.addEventListener('pointermove', dragMove);
+  window.addEventListener('pointerup', dragEnd);
 }
+function dragMove(evt) {
+  if (!drag) return;
+  const dx = (evt.clientX - drag.sx) * drag.scale, dy = (evt.clientY - drag.sy) * drag.scale;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  S.meta[drag.fxId].x = drag.ox + dx;
+  S.meta[drag.fxId].y = drag.oy + dy;
+  const g = document.querySelector(`#dsvg g[data-fx="${drag.fxId}"]`);
+  if (g) g.setAttribute('transform',
+    `translate(${S.meta[drag.fxId].x},${S.meta[drag.fxId].y}) rotate(${S.meta[drag.fxId].r})`);
+}
+function dragEnd() {
+  window.removeEventListener('pointermove', dragMove);
+  window.removeEventListener('pointerup', dragEnd);
+  if (drag && drag.moved) { S.edits += 1; render(); }
+  drag = null;
+}
+
 function setMode(m)  { S.mode = m; render(); }
-function setSel(k)   { S.sel = k; if (k && !k.startsWith('out:')) {
-                         const fx = k.split(':')[0]; if (fx) S.focus = fx; } render(); }
-function setFocus(f) { S.focus = f; render(); }
+function setSel(k)   { S.sel = k; render(); }
+function toggleVisual() { S.visual = !S.visual; render(); }
 function toggleRibbon() { S.ribbon = !S.ribbon; if (S.ribbon) S.mode = 'patch'; render(); }
 function cycleSel()  { selIdx = (selIdx + 1) % SEL_CYCLE.length; setSel(SEL_CYCLE[selIdx]); }
 function rotateSel() {
-  if (!S.sel || S.sel.startsWith('out:')) return;
-  const [fx, path] = [S.sel.split(':')[0], S.sel.slice(S.sel.indexOf(':') + 1)];
+  if (!S.sel || !S.sel.includes(':/')) return;
+  const fx = S.sel.split(':')[0], path = S.sel.slice(S.sel.indexOf(':') + 1);
   const p = placement(fx, path);
   if (!p) return;
-  const stride = fx === 'dome' ? 10 : 3;
-  S.rot[fx + ':' + path] = (S.rot[fx + ':' + path] || 0) + stride;
+  S.rot[fx + ':' + path] = (S.rot[fx + ':' + path] || 0) + (fx === 'dome' ? 10 : 3);
   S.edits += 1; S.mode = 'patch'; render();
 }
+function rotateMeta() {
+  const fxId = S.sel && S.sel.startsWith('fx:') ? S.sel.slice(3)
+             : S.sel && S.sel.includes(':') ? S.sel.split(':')[0] : 'dome';
+  if (!S.meta[fxId]) return;
+  S.meta[fxId].r = (S.meta[fxId].r + 15) % 360;
+  S.edits += 1; render();
+}
 function resetAll()  { S.mode = 'patch'; S.sel = 'dome:/sector/1'; S.ribbon = false;
-                       S.rot = {}; S.focus = 'dome'; S.edits = 0; selIdx = 1; render(); }
-// headless-capture affordance: #map / #ribbon / #rot set an initial state
+                       S.visual = false; S.rot = {}; S.edits = 0; selIdx = 1;
+                       S.meta = { dome:{x:355,y:205,r:0}, doors:{x:545,y:430,r:0},
+                                  ribbon:{x:165,y:445,r:0} }; render(); }
+// headless-capture affordance: #map / #ribbon / #rot / #visual set an initial state
 if (location.hash.includes('map'))    S.mode = 'map';
 if (location.hash.includes('ribbon')) S.ribbon = true;
 if (location.hash.includes('rot'))    { S.rot['dome:/sector/2'] = 10; S.edits = 2; }
+if (location.hash.includes('visual')) S.visual = true;
 render();
 </script>
 </body>
