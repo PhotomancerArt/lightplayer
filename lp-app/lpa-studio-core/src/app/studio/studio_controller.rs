@@ -27,11 +27,12 @@ use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, ModuleExportOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp,
     NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp,
-    PanelWriteOp, PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun,
-    ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
-    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
-    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    PanelWriteOp, PatchPulseOp, PlaylistActivateOp, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
+    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
+    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate,
+    UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -3396,6 +3397,10 @@ impl StudioController {
                 let op = action.into_op::<NodeClearDebugOp>()?;
                 return self.execute_node_clear_debug_op(op).await;
             }
+            if action.op_as::<PatchPulseOp>().is_some() {
+                let op = action.into_op::<PatchPulseOp>()?;
+                return self.execute_patch_pulse_op(op).await;
+            }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
                 return self.execute_playlist_activate_op(op).await;
@@ -5489,6 +5494,16 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.clear_node_debug_edits(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Patch-subject pulse (Q27): the selection's lamps blink on the live
+    /// sim/hardware via each involved output's `highlight` Debug slot.
+    async fn execute_patch_pulse_op(&mut self, op: PatchPulseOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.apply_patch_pulse(server, op).await
         };
         self.record_project_edit_run(run)
     }
