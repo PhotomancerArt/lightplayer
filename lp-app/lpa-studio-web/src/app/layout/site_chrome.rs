@@ -363,6 +363,28 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
     }
 }
 
+/// The patch-surface toggle (D36, slice 2): a plain link to the `/patch`
+/// variant of the current project route — the same session, the patching
+/// zoom. Same non-tab treatment as [`PlayToggle`], for the same reason.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn PatchToggle(href: String, patching: bool) -> Element {
+    let class = if patching {
+        NAV_TAB_ACTIVE
+    } else {
+        NAV_TAB_IDLE
+    };
+    let label = if patching { "Exit patch" } else { "Patch" };
+    rsx! {
+        a {
+            class: "{class}",
+            href: "{href}",
+            title: if patching { "Back to the editor" } else { "Patch mode: ports, cells, instances" },
+            "{label}"
+        }
+    }
+}
+
 /// One nav tab. Active: heading color + accent underline; inactive: subtle
 /// text that brightens on hover. `secondary` is the lighter family
 /// treatment (reduced weight, dimmer at rest, full strength on

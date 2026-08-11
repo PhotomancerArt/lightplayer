@@ -133,14 +133,22 @@ pub struct FixtureNode {
     /// patch edit does.
     patch_version: Revision,
     /// The patch resolved against the current lamp count, and the
-    /// `(patch_version, mapping_version)` it was resolved under.
+    /// `(patch_version, mapping_version, output_topology_revision)` it was
+    /// resolved under. The topology revision is in the key so a
+    /// late-registering output name clears a transient dangling report
+    /// without a patch edit.
     ///
     /// An unpatched fixture leaves this `None` forever and the output
     /// auto-flows it. A patched one that fails to RESOLVE (a range past the
     /// end of a fixture that shrank) also leaves it `None` — auto-flow is the
     /// honest fallback, since the alternative is placing lamps the document
     /// no longer describes — and says so in `patch_error`.
-    resolved_patch: Option<(Revision, Revision, alloc::vec::Vec<PatchedRun>)>,
+    resolved_patch: Option<((Revision, Revision, Revision), alloc::vec::Vec<PatchedRun>)>,
+    /// Per-strand instance addresses from the resolved map2d document
+    /// ([`lpc_mapping::object_instance_spans`]) — what `/sector/2`-style
+    /// patch entries lower through. Empty for shape-less strips and
+    /// non-map2d mappings.
+    object_spans: alloc::vec::Vec<lpc_mapping::ObjectInstanceSpan>,
     /// Keep-last-good, like `mapping_error`: a patch that stops parsing keeps
     /// the last good placement lighting and surfaces the failure as status.
     patch_error: Option<alloc::string::String>,
@@ -202,6 +210,7 @@ impl FixtureNode {
             patch_source: None,
             patch_version: mapping_version,
             resolved_patch: None,
+            object_spans: alloc::vec::Vec::new(),
             patch_error: None,
             input_error: None,
             def_view: None,
@@ -258,6 +267,16 @@ impl FixtureNode {
     /// first `produce` (and every one after a mapping or patch change) does
     /// it. A patch that cannot resolve degrades to auto-flow and reports.
     #[must_use]
+    /// Seed the per-strand instance-address table computed at load
+    /// ([`lpc_mapping::object_instance_spans`]); asset refresh recomputes it.
+    pub fn with_object_spans(
+        mut self,
+        spans: alloc::vec::Vec<lpc_mapping::ObjectInstanceSpan>,
+    ) -> Self {
+        self.object_spans = spans;
+        self
+    }
+
     pub fn with_patch_source(mut self, source: FixturePatchSource) -> Self {
         self.patch_source = Some(source);
         self
@@ -277,7 +296,7 @@ impl FixtureNode {
     ///
     /// Cheap and idempotent: an unpatched fixture returns immediately, and a
     /// patched one re-resolves only when its document or its mapping changed.
-    fn ensure_patch_resolved(&mut self) {
+    fn ensure_patch_resolved(&mut self, ctx: &TickContext<'_>) {
         let Some(source) = &self.patch_source else {
             self.resolved_patch = None;
             return;
@@ -291,31 +310,63 @@ impl FixtureNode {
             self.resolved_patch = None;
             return;
         };
-        let key = (self.patch_version, self.mapping_version);
-        if let Some((patch_ver, mapping_ver, _)) = &self.resolved_patch
-            && (*patch_ver, *mapping_ver) == key
+        let (known_outputs, topology_revision) = ctx.known_output_names();
+        let key = (self.patch_version, self.mapping_version, topology_revision);
+        if let Some((resolved_key, _)) = &self.resolved_patch
+            && *resolved_key == key
         {
             return;
         }
         // The same count the control product is sized from, and the same one
         // the patch document's ranges are written against.
         let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
-        match lpc_mapping::resolve_patch(lamp_count, doc) {
+        // No `allowed_outputs` and no `default_output`: a dangling name must
+        // degrade per RUN, not refuse the whole document (checked below),
+        // and which output is the default is the ENGINE's routing question —
+        // the kernel groups entries that name it explicitly as their own
+        // wire, which only matters for reflow docs mixing an explicit
+        // default-output anchor with unanchored lamps.
+        let resolve_ctx = lpc_mapping::PatchResolveContext {
+            fixture_lamp_count: lamp_count,
+            object_spans: &self.object_spans,
+            allowed_outputs: None,
+            default_output: None,
+        };
+        match lpc_mapping::resolve_patch(&resolve_ctx, doc) {
             Ok(ranges) => {
-                self.resolved_patch = Some((
-                    key.0,
-                    key.1,
-                    ranges
-                        .into_iter()
-                        .map(|range| PatchedRun {
+                // Degrade-and-report for dangling output names: the run is
+                // UNPLACED (no output would ever match it), the rest of the
+                // document stands, and the error names the fix. Skipped
+                // while no output has registered a name yet — the topology
+                // revision in the cache key re-runs this once one does.
+                let mut dangling: Option<alloc::string::String> = None;
+                let runs: alloc::vec::Vec<PatchedRun> = ranges
+                    .into_iter()
+                    .filter_map(|range| {
+                        if let Some(name) = &range.output
+                            && !known_outputs.is_empty()
+                            && !known_outputs.iter().any(|known| known == name)
+                        {
+                            dangling.get_or_insert_with(|| name.clone());
+                            return None;
+                        }
+                        Some(PatchedRun {
                             start: range.start,
                             count: range.count,
-                            channel: range.channel,
+                            lamp: range.lamp,
                             reversed: range.reversed,
+                            offset: range.offset,
+                            output: range.output,
                         })
-                        .collect(),
-                ));
-                self.patch_error = None;
+                    })
+                    .collect();
+                self.resolved_patch = Some((key, runs));
+                self.patch_error = dangling.map(|name| {
+                    format!(
+                        "fixture patch places lamps on output {name:?}, but no output is \
+                         named {name:?}; those lamps are unplaced"
+                    )
+                });
             }
             Err(error) => {
                 // No last-good placement to keep here — the document IS
@@ -599,7 +650,7 @@ impl NodeRuntime for FixtureNode {
         // After the mapping settles and before the control product is
         // published: the output reads this placement in the same tick, right
         // after the resolve that ran us.
-        self.ensure_patch_resolved();
+        self.ensure_patch_resolved(ctx);
         let width = render_size.width;
         let height = render_size.height;
 
@@ -757,11 +808,20 @@ impl NodeRuntime for FixtureNode {
         let resolved = lpc_mapping::Map2dDoc::from_json(&text.text)
             .map_err(|e| format!("parse fixture map2d document: {e}"))
             .and_then(|doc| {
-                mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
-                    .map_err(|e| format!("resolve fixture map2d document: {e}"))
+                let mapping =
+                    mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
+                        .map_err(|e| format!("resolve fixture map2d document: {e}"))?;
+                // The per-strand instance-address table `/sector/2`-style
+                // patch entries lower through, kept in lockstep with the
+                // mapping it derives from (same doc, same resolve).
+                let spans = lpc_mapping::resolve(&doc)
+                    .map(|resolved| lpc_mapping::object_instance_spans(&doc, &resolved))
+                    .unwrap_or_default();
+                Ok((mapping, spans))
             });
         match resolved {
-            Ok(mapping) => {
+            Ok((mapping, spans)) => {
+                self.object_spans = spans;
                 self.mapping = FixtureMapping::Compact(mapping);
                 self.mapping_version = ctx.revision();
                 if let Some(source) = &mut self.map2d_source {
@@ -788,7 +848,7 @@ impl NodeRuntime for FixtureNode {
     fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
         self.resolved_patch
             .as_ref()
-            .map(|(_, _, runs)| runs.as_slice())
+            .map(|(_, runs)| runs.as_slice())
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -2224,7 +2284,7 @@ fn fixture_path_spans(config: MappingRef<'_>) -> Vec<FixturePathSpan> {
         // empty strands skipped, so `palette_index` stays a running index
         // over the spans that actually have lamps. A repeated document
         // therefore yields one honest span per instance. Studio's wiring
-        // arrows and universe coloring read these.
+        // arrows read these.
         MappingRef::Compact(compact) => {
             let mut spans = Vec::new();
             for span in &compact.spans {
@@ -4823,6 +4883,8 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             objects: alloc::vec![
                 Map2dObject {
                     name: String::new(),
+                    id: None,
+                    stride: None,
                     shape: Map2dShape::Ring(RingShape {
                         center: [0.5, 0.5],
                         radius: 0.4,
@@ -4836,6 +4898,8 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                 },
                 Map2dObject {
                     name: String::new(),
+                    id: None,
+                    stride: None,
                     shape: Map2dShape::Path(PathShape {
                         points: alloc::vec![[0.0, 1.0], [1.0, 1.0]],
                         count: 2,
@@ -5535,6 +5599,8 @@ mod mapping_representation_differential {
     fn object(shape: Map2dShape) -> Map2dObject {
         Map2dObject {
             name: alloc::string::String::new(),
+            id: None,
+            stride: None,
             shape,
         }
     }
@@ -5682,7 +5748,7 @@ mod mapping_representation_differential {
                 "{at}: sample coords"
             );
 
-            // 3. Path spans — studio wiring arrows and universe coloring.
+            // 3. Path spans — studio wiring arrows.
             assert_eq!(path_spans(slots), path_spans(compact), "{at}: path spans");
 
             // 4. The published 2D display layout.

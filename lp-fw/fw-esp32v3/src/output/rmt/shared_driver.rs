@@ -40,14 +40,14 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 
 /// A frame that has not completed within this long has hung; abort it and
 /// report rather than spinning forever. The longest frame the output provider
-/// can ask for (`WS281X_MAX_LEDS_PER_CHANNEL` = 1024 LEDs) is ~31 ms on the
+/// can ask for (`WS281X_MAX_LEDS_PER_PORT` = 1024 LEDs) is ~31 ms on the
 /// wire, so a healthy frame always finishes inside this deadline — which
 /// matters more now that the wait is deferred to the next frame's write: the
 /// deadline still runs from `start`, and by wait time most of it has already
 /// elapsed in wall-clock terms. In the dual-core shape `start` is a mailbox
 /// post and a queued second-wave frame begins a wave (~9 ms at 300 LEDs)
 /// late by design — still comfortably inside the budget; re-derive both
-/// margins if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
+/// margins if `WS281X_MAX_LEDS_PER_PORT` ever grows.
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.

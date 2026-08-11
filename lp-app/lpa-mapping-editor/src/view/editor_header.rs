@@ -5,9 +5,7 @@
 
 use base64::Engine as _;
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{
-    CircleDashed, Grid3x3, Hash, Image, Layers, MousePointer, Route, Scan, Spline,
-};
+use dioxus_icons::lucide::{CircleDashed, Grid3x3, Hash, Image, MousePointer, Route, Scan, Spline};
 use lpc_mapping::{Map2dDoc, corpus, resolve};
 
 use crate::editor_core::editor_session::MapEditorSession;
@@ -38,12 +36,11 @@ pub fn EditorHeader(
     reference_ops: Option<ReferenceOps>,
 ) -> Element {
     let opts = view_opts();
-    let (lamp_count, universe_count, dirty, doc_json) = {
+    let (lamp_count, dirty, doc_json) = {
         let session_read = session.read();
         let resolved = resolve(session_read.doc()).ok();
         (
             resolved.as_ref().map_or(0, |r| r.lamps.len()),
-            resolved.as_ref().map_or(0, |r| r.universe_count()),
             session_read.is_dirty(),
             session_read.doc().to_json_pretty(),
         )
@@ -72,7 +69,7 @@ pub fn EditorHeader(
         header { class: "lpme-header",
             span { class: "lpme-title", "mapping" }
             span { class: "lpme-status",
-                "{lamp_count} lamps · {universe_count} u"
+                "{lamp_count} lamps"
                 if dirty {
                     span { class: "lpme-dirty", title: "unsaved changes", " ●" }
                 }
@@ -194,12 +191,6 @@ pub fn EditorHeader(
                     title: "wiring arrows (A)",
                     onclick: move |_| view_opts.write().arrows = !opts.arrows,
                     Route { size: 13 }
-                }
-                button {
-                    class: toggle_class(opts.universes),
-                    title: "universe colors, 170 lamps each (U)",
-                    onclick: move |_| view_opts.write().universes = !opts.universes,
-                    Layers { size: 13 }
                 }
                 button {
                     class: toggle_class(opts.fit_preview),

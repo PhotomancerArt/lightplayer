@@ -203,7 +203,7 @@ fn authored_endpoints(text: &str) -> Vec<String> {
     else {
         panic!("the generated output.json is an Output node");
     };
-    let mut channels: Vec<_> = output.channels.entries.iter().collect();
+    let mut channels: Vec<_> = output.ports.entries.iter().collect();
     channels.sort_by_key(|(key, _)| **key);
     channels
         .into_iter()

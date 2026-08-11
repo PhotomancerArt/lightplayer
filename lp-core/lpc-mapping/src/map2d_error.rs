@@ -8,6 +8,9 @@ pub enum Map2dError {
     Parse(String),
     /// The document's `format` is zero or newer than this crate supports.
     UnsupportedFormat { found: u32, supported: u32 },
+    /// Two objects claim the same stable id — patch entries addressing it
+    /// would be ambiguous, so the document is refused whole.
+    DuplicateObjectId { id: String },
     /// One object's parameters are invalid; `object` is its wiring-order
     /// index and `name` its authored name (may be empty).
     InvalidObject {
@@ -27,6 +30,9 @@ impl core::fmt::Display for Map2dError {
                 f,
                 "unsupported map2d format {found} (this build reads up to {supported})"
             ),
+            Self::DuplicateObjectId { id } => {
+                write!(f, "map2d document claims object id {id:?} more than once")
+            }
             Self::InvalidObject {
                 object,
                 name,

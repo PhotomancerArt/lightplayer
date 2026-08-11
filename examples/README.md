@@ -14,9 +14,9 @@ survive a load → write round trip byte-for-byte
 
 ## In the Studio gallery
 
-Ten are compiled into the app and listed in the gallery's *Examples*
+Eleven are compiled into the app and listed in the gallery's *Examples*
 section — `fyeah-sign`, `plasma`, `meteor`, `comet`, `palette-waves`,
-`fire2012`, `plasma-duo`, `zook-dome`, `peach-1d`, `peach-2d`.
+`fire2012`, `plasma-duo`, `zook-dome`, `mini-dome`, `peach-1d`, `peach-2d`.
 Their file lists live in
 `lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
 (`include_bytes!` against this directory), so a change here reaches
@@ -41,6 +41,7 @@ authored binding to a bus channel
 | `fire2012` | `speed`, `reach`, `sparks`, `palette` | a fire climbing a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }`. Ported from WLED — but *stateless*: the per-cell heat simulation is not ported, the closed form writes down what it settles into |
 | `peach-1d` | `speed`, `glow` (one set per submodule) | the patching example: two fixtures (body + leaves), each in its own submodule (`body/`, `leaf/`), sharing ONE 56-lamp wire, placed by hand-authored `.patch.json` files — the body claims two discontiguous ranges and its second range is `reversed`. Both fixtures run `render_1d` shaders along the strand (`strip_order_meaningful`), which is how this art runs on WLED today |
 | `peach-2d` | `speed`, `glow` (one set per submodule) | the same artwork, the same wiring, the *byte-identical* patch files, declared 2D: `render_2d` planes sampled at the lamps' mapped positions. The pair is the whole mapping-and-patching argument — presentation and sampling are separate questions. See [the peach](../docs/user-guide/the-peach.md) |
+| `mini-dome` | `speed`, `bands`, `warmth` (per submodule) | the patching archetype at install scale: a 5-way repeated dome (map2d format 3 stable ids) and three always-lit triangular polygon door panels scattered across TWO named outputs ("1", "Box 2") with shared ports — many-to-many. The `.patch.json` files are format-2 path-identity rows (`/sector/2`) carrying the as-built permutation, one sector reversed, one rotated, one door turned by a side. See [patching the dome](../docs/user-guide/patching-the-dome.md) |
 | `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
 | `button` | — | input nodes and playlist triggering |
 | `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |

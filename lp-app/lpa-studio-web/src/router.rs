@@ -187,6 +187,9 @@ pub(crate) enum StudioRoute {
         /// `/p/prj…`.
         slug: Option<String>,
         play: bool,
+        /// Render the project's PATCH SURFACE (D36, slice 2) instead of
+        /// the workspace — the `/patch` suffix, same-session like `play`.
+        patch: bool,
     },
     /// The editor as a lens on this device's runtime session (`dev…`
     /// uid). Reload connects the granted port (M1) and attaches.
@@ -264,8 +267,9 @@ impl StudioRoute {
             // with no well-formed `prj…` uid in it reads as the landing,
             // never as a guess.
             Some("p") => match (segments.next(), segments.next(), segments.next()) {
-                (Some(link), None, _) => project_route(link, false),
-                (Some(link), Some("play"), None) => project_route(link, true),
+                (Some(link), None, _) => project_route(link, false, false),
+                (Some(link), Some("play"), None) => project_route(link, true, false),
+                (Some(link), Some("patch"), None) => project_route(link, false, true),
                 _ => StudioRoute::Home,
             },
             // `/home` is a kept alias for the root — old links stay
@@ -340,9 +344,20 @@ impl StudioRoute {
             StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
             StudioRoute::Account => "/account".to_string(),
-            StudioRoute::Project { uid, slug, play } => {
+            StudioRoute::Project {
+                uid,
+                slug,
+                play,
+                patch,
+            } => {
                 let path = share_link::canonical_path(slug.as_deref().unwrap_or_default(), *uid);
-                if *play { format!("{path}/play") } else { path }
+                if *play {
+                    format!("{path}/play")
+                } else if *patch {
+                    format!("{path}/patch")
+                } else {
+                    path
+                }
             }
             StudioRoute::Device { uid, play: false } => format!("/device/{uid}"),
             StudioRoute::Device { uid, play: true } => format!("/device/{uid}/play"),
@@ -400,12 +415,29 @@ impl StudioRoute {
 
     /// This route with play mode on/off; anything but a lens route is
     /// returned unchanged (nothing else has a play zoom).
-    pub(crate) fn with_play(&self, play: bool) -> StudioRoute {
+    /// This route with the patch surface on/off (project lens only — the
+    /// surface is project-scoped, so a device route returns unchanged).
+    pub(crate) fn with_patch(&self, patch: bool) -> StudioRoute {
         match self {
             StudioRoute::Project { uid, slug, .. } => StudioRoute::Project {
                 uid: *uid,
                 slug: slug.clone(),
+                play: false,
+                patch,
+            },
+            other => other.clone(),
+        }
+    }
+
+    pub(crate) fn with_play(&self, play: bool) -> StudioRoute {
+        match self {
+            // Entering or leaving play exits the patch view — the two are
+            // exclusive zooms on one session.
+            StudioRoute::Project { uid, slug, .. } => StudioRoute::Project {
+                uid: *uid,
+                slug: slug.clone(),
                 play,
+                patch: false,
             },
             StudioRoute::Device { uid, .. } => StudioRoute::Device {
                 uid: uid.clone(),
@@ -443,12 +475,13 @@ impl StudioRoute {
         reason = "reached through parse from the wasm URL plumbing; host builds only run the unit tests"
     )
 )]
-fn project_route(link: &str, play: bool) -> StudioRoute {
+fn project_route(link: &str, play: bool, patch: bool) -> StudioRoute {
     match share_link::split_segment(link) {
         Some((slug, uid)) => StudioRoute::Project {
             uid,
             slug: (!slug.is_empty()).then_some(slug),
             play,
+            patch,
         },
         None => StudioRoute::Home,
     }
@@ -566,6 +599,7 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
                 uid,
                 slug: view.open_project_name.clone(),
                 play: false,
+                patch: false,
             })
         }
         UiLensRuntime::Device { uid } => uid
@@ -911,17 +945,20 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("2026-07-09-1421-basic".to_string()),
                 play: false,
+                patch: false,
             },
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("2026-07-09-1421-basic".to_string()),
                 play: true,
+                patch: false,
             },
             // the bare-uid form: no slug to re-emit
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: None,
                 play: false,
+                patch: false,
             },
             StudioRoute::Device {
                 uid: "devaaaaaaaaaaaaaaaa".to_string(),
@@ -1082,7 +1119,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
-                play: true
+                play: true,
+                patch: false
             }
         );
         // …and on the bare-uid form, which a chip link emits before the
@@ -1092,7 +1130,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: None,
-                play: true
+                play: true,
+                patch: false
             }
         );
         assert_eq!(
@@ -1152,6 +1191,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("Old-Name".to_string()),
                 play: false,
+                patch: false,
             }
         );
         // a bare uid carries no slug at all (not an empty one)
@@ -1161,6 +1201,7 @@ mod tests {
                 uid: share_uid(),
                 slug: None,
                 play: false,
+                patch: false,
             }
         );
     }
@@ -1201,6 +1242,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
                 play: false,
+                patch: false,
             }
         );
         assert_eq!(
@@ -1213,6 +1255,7 @@ mod tests {
                 uid: share_uid(),
                 slug: None,
                 play: false,
+                patch: false,
             }
         );
     }
@@ -1239,6 +1282,7 @@ mod tests {
             uid: share_uid(),
             slug: Some("basic".to_string()),
             play: false,
+            patch: false,
         };
         let playing = editing.with_play(true);
         assert_ne!(editing, playing);
@@ -1250,7 +1294,8 @@ mod tests {
         assert!(!playing.same_session(&StudioRoute::Project {
             uid: "prj0000000000000000".parse().expect("a project uid"),
             slug: Some("basic".to_string()),
-            play: true
+            play: true,
+            patch: false
         }));
         // and a device is never a project
         assert!(!playing.same_session(&StudioRoute::Device {
@@ -1276,7 +1321,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("basic".to_string()),
-                play: true
+                play: true,
+                patch: false
             }
             .project_matches_view(&view)
         );
@@ -1434,7 +1480,8 @@ mod tests {
             Some(StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("2026-07-09-1421-basic".to_string()),
-                play: false
+                play: false,
+                patch: false
             })
         );
         assert_eq!(
@@ -1490,6 +1537,7 @@ mod tests {
                 uid: share_uid(),
                 slug: slug.map(str::to_string),
                 play: false,
+                patch: false,
             };
             assert!(route.project_matches_view(&view), "{slug:?}");
         }
@@ -1497,7 +1545,8 @@ mod tests {
             !StudioRoute::Project {
                 uid: "prj0000000000000000".parse().expect("a project uid"),
                 slug: Some("2026-07-09-1421-basic".to_string()),
-                play: false
+                play: false,
+                patch: false
             }
             .project_matches_view(&view)
         );

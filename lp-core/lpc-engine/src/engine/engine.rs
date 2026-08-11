@@ -79,6 +79,22 @@ pub struct Engine {
     /// not be editable by the thing that broke it. Composed into every
     /// fixture's power scale via `min` in the fixture render.
     safe_output_clamp_q16: Option<u32>,
+    /// The authored NAMES of live output nodes (D39/D40), self-registered by
+    /// each output at the top of its `consume` — the engine cannot read
+    /// another node's def slots outside its tick, so identity flows the
+    /// same direction as everything else: from the node that owns it.
+    ///
+    /// A side store like `panel_writers` (must outlive
+    /// `apply_project_changes`), and the substrate for the two scatter
+    /// questions: which output does a run naming "Box 2" reach, and which
+    /// names exist at all (the fixture's dangling-entry report). Entries for
+    /// dead nodes are pruned on registration.
+    output_identities: alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
+    /// Bumped whenever [`Self::output_identities`] CHANGES, so a fixture's
+    /// cached patch resolution (keyed on it) re-runs when the topology
+    /// settles — a name registered one tick after the fixture resolved must
+    /// clear a transient dangling report without a patch edit.
+    output_identity_revision: Revision,
     /// The most bytes a serialized display layout may occupy in one
     /// project-read answer, declared by the EMBEDDER for its transport
     /// (`Engine::set_display_layout_budget`). `None` = unbounded. Defaults
@@ -116,6 +132,8 @@ impl Engine {
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
             timebases: crate::dataflow::timebase::TimebaseStore::new(),
             safe_output_clamp_q16: None,
+            output_identities: alloc::collections::BTreeMap::new(),
+            output_identity_revision: revision,
             display_layout_budget: Some(
                 lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
@@ -509,7 +527,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 9\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -661,6 +679,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -746,6 +766,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -786,6 +808,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -875,6 +899,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -932,6 +958,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -974,6 +1002,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1016,6 +1046,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1055,6 +1087,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1105,6 +1139,10 @@ struct EngineResolveHost<'a> {
     registry: &'a ProjectRegistry,
     panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
     timebases: &'a mut crate::dataflow::timebase::TimebaseStore,
+    /// The engine's output-name registry (D39/D40 scatter routing) and the
+    /// revision it last changed at — see the fields on [`Engine`].
+    output_identities: &'a mut alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
+    output_identity_revision: &'a mut Revision,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -1130,6 +1168,50 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
+    /// Is `consumer` the DEFAULT output for its bus channel — the target of
+    /// every unaddressed patch run and of auto-flow (D40)?
+    ///
+    /// The default is the first fragments-consuming output in attach order
+    /// (lowest [`NodeId`] — the loader attaches in module `nodes` key
+    /// order, the same determinism the provider walk leans on). **Fails
+    /// safe to `true`**: a consumer whose peer set cannot be determined
+    /// (no bus binding, an unscoped or single-consumer topology) behaves
+    /// exactly as every output did before scatter existed — that identity
+    /// is what keeps single-output projects byte-stable (A1).
+    fn is_default_fragments_consumer(&self, consumer: NodeId) -> bool {
+        use crate::dataflow::resolver::ResolveHost as _;
+        let bindings = self
+            .tree
+            .bindings_for_consumed_slot(consumer, &crate::nodes::output_input_path());
+        let Some(channel) = bindings.iter().find_map(|(_, entry)| match &entry.source {
+            crate::dataflow::binding::BindingSource::BusChannel(channel) => Some(channel.clone()),
+            _ => None,
+        }) else {
+            return true;
+        };
+        let peers = match self.tree.bus_read_scope(consumer) {
+            Some(scope) => self.tree.consumers_for_bus_in_scope(scope, &channel),
+            None => self.tree.consumers_for_bus(&channel),
+        };
+        let candidates: Vec<(NodeId, lpc_model::SlotPath)> = peers
+            .iter()
+            .filter_map(|(_, entry)| match &entry.target {
+                crate::dataflow::binding::BindingTarget::ConsumedSlot { node, slot } => {
+                    Some((*node, slot.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let first = candidates
+            .into_iter()
+            .filter(|(node, slot)| {
+                self.merge_policy_for_consumed_slot(*node, slot) == SlotMerge::Fragments
+            })
+            .map(|(node, _)| node)
+            .min();
+        first.is_none_or(|first| first == consumer)
+    }
+
     #[inline(never)]
     fn produce_produced_slot(
         &mut self,
@@ -1479,7 +1561,23 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.render_node_control(product, request, target)
     }
 
-    /// Read the producing node's resolved patch.
+    /// Read the producing node's resolved patch, AS `consumer` should see it
+    /// (D40, the scatter rule).
+    ///
+    /// The producer's runs carry output names; each consuming output
+    /// receives only the runs addressed to it — by name match, or, for
+    /// unaddressed runs, by being the DEFAULT output (the first
+    /// fragments-consuming output on the bus in attach order).
+    ///
+    /// The `Some(vec![])` / `None` distinction is load-bearing:
+    ///
+    /// - `None` = "auto-flow me" — the producer is unpatched (or its patch
+    ///   is empty), and `consumer` is the default output. The planner emits
+    ///   an auto-flow fragment.
+    /// - `Some(vec![])` = "patched, but nothing lands HERE" — either every
+    ///   run is addressed elsewhere, or the producer is unpatched and
+    ///   `consumer` is not the default. Zero runs is NOT a gap: the planner
+    ///   emits no fragment and no warning.
     ///
     /// Deliberately silent when the node is missing or mid-execution: this
     /// answers "how is this producer patched", and "we could not ask right
@@ -1489,14 +1587,81 @@ impl ResolveHost for EngineResolveHost<'_> {
     fn control_patch_placement(
         &self,
         product: ControlProduct,
+        consumer: NodeId,
     ) -> Option<Vec<crate::node::PatchedRun>> {
         let entry = self.tree.get(product.node())?;
         let NodeEntryState::Alive(node) = entry.state.value() else {
             return None;
         };
-        node.control_patch_placement()
-            .map(|runs| runs.to_vec())
-            .filter(|runs| !runs.is_empty())
+        let runs = node
+            .control_patch_placement()
+            .filter(|runs| !runs.is_empty());
+        let is_default = self.is_default_fragments_consumer(consumer);
+        let Some(runs) = runs else {
+            // Unpatched producer: auto-flow on the default output only.
+            return if is_default { None } else { Some(Vec::new()) };
+        };
+        let consumer_name = self.output_identities.get(&consumer).cloned().flatten();
+        let filtered: Vec<crate::node::PatchedRun> = runs
+            .iter()
+            .filter(|run| match &run.output {
+                None => is_default,
+                Some(name) => consumer_name.as_deref() == Some(name.as_str()),
+            })
+            .cloned()
+            .collect();
+        Some(filtered)
+    }
+
+    /// Register (or refresh) an output's authored name — called by the
+    /// output itself at the top of `consume`, the one place its def is
+    /// readable. Returns the name of a LIVE sibling already claiming the
+    /// same name, so the caller can surface the collision as its runtime
+    /// status (duplicate names make `at.output` ambiguous; routing stays
+    /// exact-match and reports rather than guessing).
+    fn register_output_identity(
+        &mut self,
+        node: NodeId,
+        name: Option<alloc::string::String>,
+        revision: Revision,
+    ) -> Option<alloc::string::String> {
+        // Prune the dead so a deleted output releases its name.
+        let dead: Vec<NodeId> = self
+            .output_identities
+            .keys()
+            .copied()
+            .filter(|id| {
+                self.tree
+                    .get(*id)
+                    .is_none_or(|entry| !matches!(entry.state.value(), NodeEntryState::Alive(_)))
+            })
+            .collect();
+        let mut changed = false;
+        for id in dead {
+            self.output_identities.remove(&id);
+            changed = true;
+        }
+        if self.output_identities.get(&node) != Some(&name) {
+            self.output_identities.insert(node, name.clone());
+            changed = true;
+        }
+        if changed {
+            *self.output_identity_revision = revision;
+        }
+        let name = name?;
+        self.output_identities
+            .iter()
+            .find(|(other, other_name)| **other != node && other_name.as_deref() == Some(&name))
+            .map(|_| name)
+    }
+
+    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
+        let names = self
+            .output_identities
+            .values()
+            .filter_map(|name| name.clone())
+            .collect();
+        (names, *self.output_identity_revision)
     }
 
     fn runtime_buffer_mut(
@@ -2850,6 +3015,8 @@ pub(crate) fn resolve_with_engine_host(
         registry,
         panel_writers: &eng.panel_writers,
         timebases: &mut eng.timebases,
+        output_identities: &mut eng.output_identities,
+        output_identity_revision: &mut eng.output_identity_revision,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2893,6 +3060,8 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         registry,
         panel_writers: &eng.panel_writers,
         timebases: &mut eng.timebases,
+        output_identities: &mut eng.output_identities,
+        output_identity_revision: &mut eng.output_identity_revision,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,

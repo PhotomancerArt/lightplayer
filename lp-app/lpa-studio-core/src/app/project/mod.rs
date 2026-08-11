@@ -32,6 +32,8 @@ pub mod node_card_ui_state;
 pub(crate) mod output_frame_cache;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_pulse;
+pub(crate) mod patch_verb_op;
+pub(crate) mod patch_verbs;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
@@ -51,6 +53,7 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 pub mod ui_affordance;
+pub(crate) mod ui_patch_surface;
 pub mod ui_pending_edit;
 
 pub use agent_support::AgentEngineStatus;
@@ -72,6 +75,9 @@ pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
 pub use patch_pulse::{PatchPulseOp, PatchPulseSubject};
+pub use patch_verb_op::{
+    PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
+};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
@@ -101,4 +107,7 @@ pub use slot::{
     SlotKind,
 };
 pub use ui_affordance::UiAffordance;
+pub use ui_patch_surface::{
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+};
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

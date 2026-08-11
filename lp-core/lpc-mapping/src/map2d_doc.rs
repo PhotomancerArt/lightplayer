@@ -23,6 +23,14 @@
 //!    content, and [`Map2dDoc::normalize_format`] stamps it. Removing a newer
 //!    construct drops the document back to the older format, so it becomes
 //!    readable by older builds again.
+//!
+//! Format history:
+//!
+//! | Format | Constructs that require it |
+//! |---|---|
+//! | 1 | grids, rings, plain paths |
+//! | 2 | [`PathShape::gaps`], [`RepeatShape`] |
+//! | 3 | [`Map2dObject::id`], [`Map2dObject::stride`], [`PolygonShape`] |
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -32,9 +40,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::map2d_error::Map2dError;
 use crate::map2d_fit::Bounds2d;
+use crate::map2d_object_id::Map2dObjectId;
 
 /// Newest document format this crate can read.
-pub const MAP2D_FORMAT: u32 = 2;
+pub const MAP2D_FORMAT: u32 = 3;
 
 /// The format every document using only the original constructs declares.
 /// [`Map2dDoc::required_format`] returns this unless the content needs more.
@@ -51,6 +60,18 @@ const MAP2D_FORMAT_PATH_GAPS: u32 = 2;
 /// would lose every lamp the object carries — so repeated documents declare
 /// this and old builds refuse them whole.
 const MAP2D_FORMAT_REPEAT: u32 = 2;
+
+/// The format a document needs once any object carries a stable
+/// [`Map2dObject::id`] or a [`Map2dObject::stride`] override. The fields are
+/// additive and a format-2 build would parse them away silently — but a
+/// document whose ids vanish on a round-trip breaks every patch entry that
+/// addresses them, so id-bearing documents declare this and old builds
+/// refuse them whole.
+const MAP2D_FORMAT_OBJECT_IDS: u32 = 3;
+
+/// The format a document needs once any object is a [`PolygonShape`] —
+/// an unknown variant, same reasoning as [`MAP2D_FORMAT_REPEAT`].
+const MAP2D_FORMAT_POLYGON: u32 = 3;
 
 /// Largest [`RepeatShape::count`] an editor may author. The resolver itself
 /// has no ceiling — a hand-authored document is the author's business — but a
@@ -86,6 +107,15 @@ pub struct Map2dDoc {
 pub struct Map2dObject {
     #[serde(default)]
     pub name: String,
+    /// Stable identity for patch entries (format 3): a sticky slug assigned
+    /// once ([`crate::ensure_object_ids`]) and untouched by rename. Absent
+    /// on documents nothing patches by object — presence stamps format 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Map2dObjectId>,
+    /// Rotation-stride override in lamps (format 3). When absent the stride
+    /// derives from the shape kind ([`crate::object_stride`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stride: Option<u32>,
     pub shape: Map2dShape,
 }
 
@@ -99,6 +129,7 @@ pub enum Map2dShape {
     Grid(GridShape),
     Ring(RingShape),
     Path(PathShape),
+    Polygon(PolygonShape),
     Repeat(RepeatShape),
 }
 
@@ -208,6 +239,24 @@ pub struct PathShape {
     pub gaps: Vec<u32>,
 }
 
+/// A closed outline through `points`, with `count` lamps distributed evenly
+/// along the perimeter by arc length (format 3).
+///
+/// The outline closes implicitly — the segment from the last point back to
+/// the first is part of the perimeter — and lamp 0 sits exactly on
+/// `points[0]`. Spacing is `perimeter / count` (no doubled endpoint: the
+/// walk wraps), so a triangle of 9 lamps over equal sides puts 3 on each —
+/// which is why the polygon is the shape with an *intrinsic* rotation
+/// stride: `count / points.len()` lamps per side when evenly divisible
+/// (see [`crate::shape_stride`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolygonShape {
+    /// Outline vertices in doc space, ≥ 3, closed implicitly.
+    pub points: Vec<[f32; 2]>,
+    /// Lamps distributed along the closed perimeter.
+    pub count: u32,
+}
+
 /// `count` rotated instances of an inner shape, equally spaced over a full
 /// circle around [`center`](Self::center).
 ///
@@ -277,7 +326,27 @@ impl Map2dDoc {
             serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
         format_gate(peek.format, MAP2D_FORMAT)?;
         let doc: Self = serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
+        doc.validate_object_ids()?;
         Ok(doc)
+    }
+
+    /// Refuse a document whose objects claim one id twice: patch entries
+    /// addressing that id would be ambiguous, and silently picking one
+    /// object masks the authoring mistake.
+    fn validate_object_ids(&self) -> Result<(), Map2dError> {
+        for (index, object) in self.objects.iter().enumerate() {
+            let Some(id) = &object.id else { continue };
+            let first_claim = self
+                .objects
+                .iter()
+                .position(|other| other.id.as_ref() == Some(id));
+            if first_claim != Some(index) {
+                return Err(Map2dError::DuplicateObjectId {
+                    id: id.as_str().to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// The lowest `format` that can represent this document's content.
@@ -293,6 +362,9 @@ impl Map2dDoc {
     pub fn required_format(&self) -> u32 {
         let mut required = MAP2D_FORMAT_BASE;
         for object in &self.objects {
+            if object.id.is_some() || object.stride.is_some() {
+                required = required.max(MAP2D_FORMAT_OBJECT_IDS);
+            }
             required = required.max(shape_required_format(&object.shape));
         }
         required
@@ -353,6 +425,8 @@ fn shape_required_format(shape: &Map2dShape) -> u32 {
         // The rotational repeat (format 2): an unknown variant cannot be
         // ignored — the whole object's lamps would vanish.
         Map2dShape::Repeat(repeat) => MAP2D_FORMAT_REPEAT.max(shape_required_format(&repeat.shape)),
+        // The closed polygon (format 3): unknown variant, same reasoning.
+        Map2dShape::Polygon(_) => MAP2D_FORMAT_POLYGON,
         _ => MAP2D_FORMAT_BASE,
     }
 }
@@ -389,6 +463,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "panel".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Grid(GridShape {
                 origin: [100.0, 80.0],
                 cols: 16,
@@ -424,9 +500,9 @@ mod tests {
     #[test]
     fn rejects_newer_and_zero_formats() {
         assert!(matches!(
-            Map2dDoc::from_json(r#"{"format":3}"#),
+            Map2dDoc::from_json(r#"{"format":4}"#),
             Err(Map2dError::UnsupportedFormat {
-                found: 3,
+                found: 4,
                 supported: MAP2D_FORMAT
             })
         ));
@@ -451,7 +527,7 @@ mod tests {
             Map2dDoc::from_json(newer),
             Err(Map2dError::UnsupportedFormat {
                 found: 99,
-                supported: 2
+                supported: MAP2D_FORMAT
             })
         );
     }
@@ -495,6 +571,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "sector".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Path(PathShape {
                 points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
                 count: 4,
@@ -555,6 +633,8 @@ mod tests {
         let nested = Map2dDoc {
             objects: vec![Map2dObject {
                 name: "nested".to_string(),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(Map2dShape::Repeat(RepeatShape {
                         shape: Box::new(plain_path(Vec::new())),
@@ -574,6 +654,8 @@ mod tests {
         let gapped_inner = Map2dDoc {
             objects: vec![Map2dObject {
                 name: "sector".to_string(),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(plain_path(vec![1])),
                     center: [0.0, 0.0],
@@ -607,6 +689,122 @@ mod tests {
         assert!(Map2dDoc::from_json(&doc.to_json()).is_ok());
     }
 
+    /// The format-3 object fields mirror the `gaps` precedent: a document
+    /// carrying an id (or a stride override) stamps 3, and removing the last
+    /// one drops it back so old builds can read it again.
+    #[test]
+    fn object_ids_and_strides_require_format_three_and_release_it() {
+        use crate::map2d_object_id::Map2dObjectId;
+        let mut doc = corpus::cat_ears();
+        assert_eq!(doc.required_format(), 1);
+
+        doc.objects[0].id = Some(Map2dObjectId::new("ear-left").unwrap());
+        assert_eq!(doc.required_format(), 3);
+        doc.normalize_format();
+        assert_eq!(doc.format, 3);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+
+        doc.objects[0].id = None;
+        doc.objects[1].stride = Some(4);
+        assert_eq!(doc.required_format(), 3);
+
+        doc.objects[1].stride = None;
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+    }
+
+    /// Byte-stability for the new fields: absent id/stride serialize to
+    /// nothing, so every pre-format-3 document round-trips byte-identically
+    /// through the current writer.
+    #[test]
+    fn documents_without_ids_serialize_without_the_new_fields() {
+        for doc in [corpus::cat_ears(), corpus::repeated_sector()] {
+            let json = doc.to_json();
+            assert!(!json.contains("\"id\""), "{json}");
+            assert!(!json.contains("\"stride\""), "{json}");
+        }
+    }
+
+    /// The polygon is the format-3 shape variant — unknown to older builds,
+    /// so it stamps 3 and a format-2 build refuses the whole document.
+    #[test]
+    fn a_polygon_requires_format_three_and_old_builds_refuse_it() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "door".to_string(),
+            id: None,
+            stride: None,
+            shape: Map2dShape::Polygon(PolygonShape {
+                points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 9.0]],
+                count: 9,
+            }),
+        });
+        assert_eq!(doc.required_format(), 3);
+        doc.normalize_format();
+        assert_eq!(doc.format, 3);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+        assert_eq!(
+            format_gate(doc.format, 2),
+            Err(Map2dError::UnsupportedFormat {
+                found: 3,
+                supported: 2
+            })
+        );
+    }
+
+    /// A polygon nested inside a repeat still stamps 3 — the doors fixture's
+    /// exact shape (`repeat{polygon}`).
+    #[test]
+    fn the_format_walk_sees_a_polygon_inside_a_repeat() {
+        let doc = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "door".to_string(),
+                id: None,
+                stride: None,
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Polygon(PolygonShape {
+                        points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 9.0]],
+                        count: 9,
+                    })),
+                    center: [50.0, 50.0],
+                    count: 3,
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(doc.required_format(), 3);
+    }
+
+    /// Two objects claiming one id are refused whole at parse: patch entries
+    /// addressing the id would be ambiguous, and picking one silently would
+    /// mask the mistake.
+    #[test]
+    fn duplicate_object_ids_refuse_the_whole_document() {
+        let json = r#"{"format":3,"objects":[
+            {"name":"a","id":"sector","shape":{"path":{"points":[[0,0],[1,0]],"count":2}}},
+            {"name":"b","id":"sector","shape":{"path":{"points":[[0,1],[1,1]],"count":2}}}
+        ]}"#;
+        assert_eq!(
+            Map2dDoc::from_json(json),
+            Err(Map2dError::DuplicateObjectId {
+                id: "sector".to_string()
+            })
+        );
+    }
+
+    /// Id charset violations are parse errors naming the rule — a doc whose
+    /// id could read as an instance index must never load.
+    #[test]
+    fn a_non_slug_object_id_is_a_parse_error() {
+        let json = r#"{"format":3,"objects":[
+            {"name":"a","id":"2sector","shape":{"path":{"points":[[0,0],[1,0]],"count":2}}}
+        ]}"#;
+        assert!(matches!(
+            Map2dDoc::from_json(json),
+            Err(Map2dError::Parse(reason)) if reason.contains("lowercase letter")
+        ));
+    }
+
     #[test]
     fn ignores_unknown_fields_for_additive_evolution() {
         let doc = Map2dDoc::from_json(
@@ -632,6 +830,8 @@ mod tests {
         Map2dDoc {
             objects: vec![Map2dObject {
                 name: "sector".to_string(),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(plain_path(Vec::new())),
                     center: [5.0, 5.0],

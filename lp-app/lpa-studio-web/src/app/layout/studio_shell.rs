@@ -39,6 +39,12 @@ pub fn StudioShell(
     /// surface.
     #[props(default = false)]
     play: bool,
+    /// The patch surface (D36, slice 2): the project-scoped patching home,
+    /// full-page in place of the workspace. Set by the `/patch` route
+    /// suffix; a session with no editor yet falls through to the normal
+    /// layout rather than showing an empty surface.
+    #[props(default = false)]
+    patch: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let UiStudioView {
@@ -93,6 +99,16 @@ pub fn StudioShell(
     // card — so it deliberately short-circuits the whole editor layout
     // below. `PlayModeSurface` wraps its own controls, which is what makes
     // the same mount usable on a phone.
+    // Patch mode (D36): the project-scoped patching surface, full width —
+    // no pane column, no workspace. Same-session like play.
+    if patch && let Some(editor) = project_editor.clone() {
+        return rsx! {
+            div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
+                crate::app::patch::PatchSurfacePage { view: editor, on_action }
+            }
+        };
+    }
+
     if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
         return rsx! {
             div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",

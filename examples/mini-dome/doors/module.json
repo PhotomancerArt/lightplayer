@@ -1,0 +1,19 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "door_warm": {
+      "ref": "./door_warm.json"
+    },
+    "doors": {
+      "ref": "./doors.json"
+    }
+  },
+  "exports": {
+    "control.out": "bus:control.out"
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

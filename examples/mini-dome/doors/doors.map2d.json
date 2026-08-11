@@ -1,0 +1,23 @@
+{
+  "format": 3,
+  "sample_diameter": 2.0,
+  "canvas": [0.0, 0.0, 120.0, 120.0],
+  "objects": [
+    {
+      "name": "door",
+      "id": "door",
+      "shape": {
+        "repeat": {
+          "shape": {
+            "polygon": {
+              "points": [[76.0, 16.0], [88.0, 28.0], [72.0, 32.0]],
+              "count": 9
+            }
+          },
+          "center": [60.0, 60.0],
+          "count": 3
+        }
+      }
+    }
+  ]
+}

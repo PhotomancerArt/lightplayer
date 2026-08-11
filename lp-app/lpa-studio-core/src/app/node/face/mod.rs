@@ -41,7 +41,7 @@ pub use ui_fixture_power::UiFixturePower;
 pub use ui_module_face::{UiExportsGroup, UiModuleExport, UiModuleFace};
 pub use ui_node_face::UiNodeFace;
 pub use ui_output_face::{
-    UiLedBudget, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiWireStatus,
+    UiLedBudget, UiOutputBoardFacts, UiOutputFace, UiOutputPin, UiOutputPortRow, UiWireStatus,
 };
 pub use ui_panel_control::{
     UiPanelControl, UiPanelEmit, UiPanelTarget, UiPanelWire, UiPanelWireRole,
