@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn authored_highlight_is_ignored() {
-        let json = r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:D10" } }, "highlight": "0-9" }"#;
+        let json = r#"{ "kind": "Output", "ports": { "0": { "endpoint": "ws281x:local:D10" } }, "highlight": "0-9" }"#;
 
         let def = NodeDef::read_json(&registry(), json).unwrap();
 
