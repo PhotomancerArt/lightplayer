@@ -246,7 +246,7 @@ pub fn PropertiesPopover(
                 {shape_fields(session, on_committed, index, selected_shape, base_depth)}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
-                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
+                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count}"
                     }
                 }
             } else {

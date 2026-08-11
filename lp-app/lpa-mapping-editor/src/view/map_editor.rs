@@ -47,7 +47,6 @@ pub struct ReferenceOps {
 pub struct EditorViewOptions {
     pub numbers: bool,
     pub arrows: bool,
-    pub universes: bool,
     /// Fill lamps from host-supplied live colors (`live_colors` prop);
     /// without a feed this falls back to the object palette.
     pub live: bool,
@@ -62,7 +61,6 @@ impl Default for EditorViewOptions {
         Self {
             numbers: true,
             arrows: true,
-            universes: false,
             live: false,
             fit_preview: false,
             reference: true,
@@ -398,7 +396,7 @@ fn HelpFloat() -> Element {
                 div { class: "lpme-help-title", "keyboard" }
                 for (keys, what) in [
                     ("V / G / R / P", "select · grid · ring · path tool"),
-                    ("N / A / U / L", "numbers · arrows · universes · live"),
+                    ("N / A / L", "numbers · arrows · live"),
                     ("F", "texture-frame preview"),
                     ("B", "reference image"),
                     ("0", "zoom to fit"),
@@ -507,10 +505,6 @@ fn handle_key(
                 "a" => {
                     let current = view_opts.peek().arrows;
                     view_opts.write().arrows = !current;
-                }
-                "u" => {
-                    let current = view_opts.peek().universes;
-                    view_opts.write().universes = !current;
                 }
                 "l" => {
                     let current = view_opts.peek().live;

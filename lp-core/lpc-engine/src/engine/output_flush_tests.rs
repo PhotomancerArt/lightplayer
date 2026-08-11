@@ -30,7 +30,7 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::output::{
-    MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+    MemoryOutputProvider, OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::TextureStorageFormat;
@@ -47,19 +47,19 @@ impl OutputProvider for RcMemoryOutput {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, lpc_hardware::OutputError> {
+    ) -> Result<OutputPortHandle, lpc_hardware::OutputError> {
         self.0.open(endpoint, byte_count, format, options)
     }
 
     fn write(
         &self,
-        handle: OutputChannelHandle,
+        handle: OutputPortHandle,
         data: &[u16],
     ) -> Result<(), lpc_hardware::OutputError> {
         self.0.write(handle, data)
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
+    fn close(&self, handle: OutputPortHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.close(handle)
     }
 
@@ -526,9 +526,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     rt.tick(&registry, 10)
         .expect("second tick reuses fixture render target");
 
-    let handle = mem
-        .get_handle_for_endpoint(&endpoint)
-        .expect("channel opened");
+    let handle = mem.get_handle_for_endpoint(&endpoint).expect("port opened");
     let got = mem.get_data(handle).expect("written");
     assert_eq!(got.len(), 3);
     assert_eq!(got[0], 65535);
