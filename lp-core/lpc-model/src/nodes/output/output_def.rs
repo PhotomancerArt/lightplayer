@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 use lp_collection::VecMap;
 
 use super::OutputChannelDef;
@@ -41,6 +43,21 @@ pub struct OutputDef {
     /// client that set it and dies on unload or reboot.
     #[slot(role = "debug")]
     pub test_pattern: ValueSlot<bool>,
+    /// Pulse a set of this output's wire lamps over the live frame, so the
+    /// lamps a patching selection is about to move are findable on the
+    /// physical rig ("which strand IS /sector/2?").
+    ///
+    /// Inclusive lamp ranges in the output's flat wire numbering — the same
+    /// numbering patch entries anchor with `at.lamp` — as text:
+    /// `"0-29,45,90-119"`. Empty means off. Unparseable segments are skipped,
+    /// never fatal: a diagnostic must not be able to stop an output pushing
+    /// pixels.
+    ///
+    /// A `Debug` slot like `test_pattern`, and unlike it an OVERLAY, not a
+    /// bypass: the graph keeps rendering and only the named lamps blink, so
+    /// the selection reads in the context of the running show.
+    #[slot(role = "debug")]
+    pub highlight: ValueSlot<String>,
 }
 
 impl OutputDef {
@@ -63,6 +80,7 @@ impl OutputDef {
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),
             test_pattern: ValueSlot::new(false),
+            highlight: ValueSlot::new(String::new()),
         }
     }
 
@@ -249,6 +267,36 @@ mod tests {
         };
         assert!(
             !*def.test_pattern.value(),
+            "a Debug slot never takes an authored value (D2)"
+        );
+    }
+
+    #[test]
+    fn highlight_is_a_debug_slot() {
+        let SlotShape::Record { fields, .. } = OutputDef::slot_shape() else {
+            panic!("output def is a record");
+        };
+
+        let field = fields
+            .iter()
+            .find(|field| field.name.as_str() == "highlight")
+            .expect("highlight field");
+
+        assert_eq!(field.role, SlotRole::Debug);
+        assert!(field.is_writable());
+    }
+
+    #[test]
+    fn authored_highlight_is_ignored() {
+        let json = r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:D10" } }, "highlight": "0-9" }"#;
+
+        let def = NodeDef::read_json(&registry(), json).unwrap();
+
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
+        assert!(
+            def.highlight.value().is_empty(),
             "a Debug slot never takes an authored value (D2)"
         );
     }

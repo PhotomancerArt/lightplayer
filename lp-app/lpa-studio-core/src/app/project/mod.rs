@@ -31,6 +31,7 @@ pub mod node;
 pub mod node_card_ui_state;
 pub(crate) mod output_frame_cache;
 pub(crate) mod patch_bay_derivation;
+pub mod patch_pulse;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
@@ -70,6 +71,7 @@ pub use node::{
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
+pub use patch_pulse::{PatchPulseOp, PatchPulseSubject};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
