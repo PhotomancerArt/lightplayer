@@ -92,6 +92,15 @@ pub const PAGES: &[DocPage] = &[
         ],
     },
     DocPage {
+        slug: "patching-the-dome",
+        title: "Patching the dome",
+        markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.md"),
+        sims: &[DocsSimSpec {
+            name: "main",
+            example_id: "examples/mini-dome",
+        }],
+    },
+    DocPage {
         slug: "brightness-and-smooth-fades",
         title: "Brightness & smooth fades",
         markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.md"),

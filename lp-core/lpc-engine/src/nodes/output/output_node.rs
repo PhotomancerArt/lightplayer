@@ -73,7 +73,7 @@ const SAMPLES_PER_LAMP: u32 = 3;
 /// One producer's placement inside an output's control sample buffer.
 ///
 /// The offset is in samples, flat: the buffer an output publishes is one
-/// sequence, and the wire split (`OutputChannelDef`) reads it that way. A
+/// sequence, and the wire split (`OutputPortDef`) reads it that way. A
 /// producer's own extent may be multi-row; its samples land here in row
 /// order, which is what `ControlExtent::sample_count` already means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +97,12 @@ pub struct OutputFragment {
     /// same product, laid into the output buffer end-first, which is what a
     /// strand plugged in at the far end needs.
     pub reversed: bool,
+    /// Rotate the placed lamps within the fragment's window, in SAMPLES
+    /// (always a whole number of lamps). Applied after `reversed` — the
+    /// kernel's canonical order (`lpc_mapping::patched_wire_lamp`): source
+    /// lamp `j` lands at window slot `(j' + k) mod N`. Rotation permutes
+    /// *within* the window, so coverage/collision math is untouched.
+    pub rotation_samples: u32,
 }
 
 impl OutputFragment {
@@ -150,6 +156,10 @@ pub struct OutputNode {
     /// never got as far as planning fragments leaves the previous report
     /// standing rather than blinking it away.
     fragment_status: Option<NodeRuntimeStatus>,
+    /// A name collision with a live sibling output (D39): duplicate names
+    /// make `at.output` ambiguous, so the engine keeps routing by exact
+    /// match and BOTH outputs wear this error until one is renamed.
+    identity_status: Option<NodeRuntimeStatus>,
     /// Interpretation metadata for the frame currently in the buffer,
     /// latched by the render that produced it.
     ///
@@ -189,6 +199,7 @@ impl OutputNode {
             control_samples: Vec::new(),
             def_view: None,
             fragment_status: None,
+            identity_status: None,
             published_sample_layout: None,
             published_fragments: Vec::new(),
             placement_revision: Revision::default(),
@@ -223,6 +234,26 @@ impl OutputNode {
             Err(error) => {
                 log::debug!("[output] test_pattern unavailable: {error}");
                 Ok(false)
+            }
+        }
+    }
+
+    /// The authored `name` slot, read through the effective def like
+    /// `test_pattern`. "Absent" (unset option, no def behind a bare
+    /// runtime output) quietly reads as `None` — an unnamed output is the
+    /// ordinary single-output state, not a fault.
+    fn authored_name(&mut self, ctx: &mut TickContext<'_>) -> Option<String> {
+        match ctx.resolve_static_consumed("name.some") {
+            Ok(production) => production
+                .value_leaf()
+                .and_then(|leaf| {
+                    <lpc_model::OutputName as lpc_model::FromLpValue>::from_lp_value(leaf.value())
+                        .ok()
+                })
+                .map(|name| String::from(name.as_str())),
+            Err(error) => {
+                log::debug!("[output] name unavailable: {}", error.message);
+                None
             }
         }
     }
@@ -336,6 +367,10 @@ impl OutputNode {
                 if fragment.reversed {
                     reverse_lamps(&mut self.control_samples[start..end]);
                 }
+                rotate_lamps(
+                    &mut self.control_samples[start..end],
+                    fragment.rotation_samples,
+                );
                 layout
             } else {
                 // A partial run: the producer renders whole (once per frame,
@@ -356,6 +391,10 @@ impl OutputNode {
                 if fragment.reversed {
                     reverse_lamps(&mut self.control_samples[start..end]);
                 }
+                rotate_lamps(
+                    &mut self.control_samples[start..end],
+                    fragment.rotation_samples,
+                );
                 rendered.layout.clone()
             };
             place_spans(&layout, fragment, &mut spans);
@@ -458,11 +497,15 @@ fn control_product(value: &LpValue) -> Result<ControlProduct, NodeError> {
 /// require patching the other four — so unpatched producers keep the
 /// running-sum rule among themselves and simply start past the highest
 /// anchored end.
+/// A producer whose run list is present but EMPTY contributes no fragment
+/// and no gap: its lamps are patched onto some other output (D40's
+/// zero-runs-here case), which is not the same thing as `None` — auto-flow
+/// me. The engine's placement query documents the distinction.
 fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
     let mut cursor = 0u32;
     for placement in placements {
         for range in placement.patch.iter().flatten() {
-            cursor = cursor.max(lamps_to_samples(range.channel_end()));
+            cursor = cursor.max(lamps_to_samples(range.lamp_end()));
         }
     }
 
@@ -474,9 +517,10 @@ fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
                     fragments.push(OutputFragment {
                         product: placement.product,
                         source_offset_samples: lamps_to_samples(range.start),
-                        offset_samples: lamps_to_samples(range.channel),
+                        offset_samples: lamps_to_samples(range.lamp),
                         len_samples: lamps_to_samples(range.count),
                         reversed: range.reversed,
+                        rotation_samples: lamps_to_samples(range.offset),
                     });
                 }
             }
@@ -488,6 +532,7 @@ fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
                     offset_samples: cursor,
                     len_samples: len,
                     reversed: false,
+                    rotation_samples: 0,
                 });
                 cursor = cursor.saturating_add(len);
             }
@@ -598,24 +643,61 @@ fn place_spans(layout: &ControlLayout, fragment: &OutputFragment, out: &mut Vec<
         let relative = clipped_start - source_start;
         let len = clipped_end - clipped_start;
         let start = place_offset(fragment, relative, len);
-        let encoding = if len == span.len {
-            span.encoding.clone()
-        } else {
-            match &span.encoding {
-                ControlHint::RgbPixels { color_order, .. } => ControlHint::RgbPixels {
-                    count: len / SAMPLES_PER_LAMP,
-                    color_order: *color_order,
-                },
-                other => other.clone(),
-            }
-        };
-        out.push(ControlSpan {
-            row: span.row,
-            start,
-            len,
-            encoding,
-        });
+        // A rotated span can wrap the fragment's window edge and come out
+        // as two runs; each piece keeps the span's encoding, resized.
+        for (start, len) in rotated_pieces(fragment, start, len) {
+            let encoding = if len == span.len {
+                span.encoding.clone()
+            } else {
+                match &span.encoding {
+                    ControlHint::RgbPixels { color_order, .. } => ControlHint::RgbPixels {
+                        count: len / SAMPLES_PER_LAMP,
+                        color_order: *color_order,
+                    },
+                    other => other.clone(),
+                }
+            };
+            out.push(ControlSpan {
+                row: span.row,
+                start,
+                len,
+                encoding,
+            });
+        }
     }
+}
+
+/// Apply a fragment's rotation to one placed run, splitting it where it
+/// wraps the window edge. `start` is absolute (buffer coordinates, already
+/// through [`place_offset`]); pieces come back absolute too. The unrotated
+/// case is the identity, one piece.
+fn rotated_pieces(
+    fragment: &OutputFragment,
+    start: u32,
+    len: u32,
+) -> impl Iterator<Item = (u32, u32)> {
+    let window = fragment.len_samples.max(1);
+    let rotation = fragment.rotation_samples % window;
+    let base = fragment.offset_samples;
+    let mut pieces = [(0u32, 0u32); 2];
+    let count;
+    if rotation == 0 || len == 0 {
+        pieces[0] = (start, len);
+        count = 1;
+    } else {
+        let relative = start.saturating_sub(base);
+        let rotated = (relative + rotation) % window;
+        if rotated + len <= window {
+            pieces[0] = (base + rotated, len);
+            count = 1;
+        } else {
+            let head = window - rotated;
+            pieces[0] = (base + rotated, head);
+            pieces[1] = (base, len - head);
+            count = 2;
+        }
+    }
+    pieces.into_iter().take(count)
 }
 
 /// Map one sample offset INSIDE a fragment's source run onto the output
@@ -662,13 +744,17 @@ fn place_display_lamps(
         if lamp.sample_start < source_start || lamp_end > source_end {
             continue;
         }
-        let start = place_offset(fragment, lamp.sample_start - source_start, SAMPLES_PER_LAMP);
-        lamps.push(ControlLamp2d {
-            lamp_index: start / SAMPLES_PER_LAMP,
-            sample_start: start,
-            center: lamp.center,
-            radius: lamp.radius,
-        });
+        let placed = place_offset(fragment, lamp.sample_start - source_start, SAMPLES_PER_LAMP);
+        // A lamp is one rotation piece by construction (rotation moves whole
+        // lamps), so the iterator yields exactly one placement.
+        for (start, _) in rotated_pieces(fragment, placed, SAMPLES_PER_LAMP) {
+            lamps.push(ControlLamp2d {
+                lamp_index: start / SAMPLES_PER_LAMP,
+                sample_start: start,
+                center: lamp.center,
+                radius: lamp.radius,
+            });
+        }
     }
 
     for path in &layout.paths {
@@ -680,11 +766,14 @@ fn place_display_lamps(
             continue;
         }
         let len = clipped_end - clipped_start;
-        let start = place_offset(fragment, clipped_start - source_start, len);
-        paths.push(ControlPathSpan2d {
-            first_lamp: start / SAMPLES_PER_LAMP,
-            lamp_count: len / SAMPLES_PER_LAMP,
-        });
+        let placed = place_offset(fragment, clipped_start - source_start, len);
+        // A rotated path span can wrap the window edge — two runs then.
+        for (start, len) in rotated_pieces(fragment, placed, len) {
+            paths.push(ControlPathSpan2d {
+                first_lamp: start / SAMPLES_PER_LAMP,
+                lamp_count: len / SAMPLES_PER_LAMP,
+            });
+        }
     }
 }
 
@@ -830,6 +919,21 @@ fn lamp_ranges(ranges: &[(u32, u32)]) -> String {
     text
 }
 
+/// Rotate a placed range's lamps right by `rotation_samples`, in place —
+/// the render-side application of the kernel's `(j' + k) mod N`: after the
+/// forward (and possibly reversed) layout put oriented lamp `j'` at window
+/// slot `j'`, a right-rotation by `k` lamps moves it to `(j' + k) mod N`.
+fn rotate_lamps(samples: &mut [u16], rotation_samples: u32) {
+    let len = samples.len();
+    if len == 0 {
+        return;
+    }
+    let rotation = (rotation_samples as usize) % len;
+    if rotation != 0 {
+        samples.rotate_right(rotation);
+    }
+}
+
 /// Reverse a placed range's lamps in place, keeping each lamp's channels in
 /// their own order.
 ///
@@ -877,6 +981,18 @@ impl NodeRuntime for OutputNode {
     }
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        // Identity first, resolve second: the fixtures this resolve ticks
+        // read the registered-name set for their dangling-entry checks, so
+        // this output's name must be on the books before they run.
+        let name = self.authored_name(ctx);
+        let collision = ctx.register_output_identity(name);
+        self.identity_status = collision.map(|name| {
+            NodeRuntimeStatus::Error(format!(
+                "two outputs are named {name:?}; patch entries naming it are ambiguous — \
+                 rename one"
+            ))
+        });
+
         // Bypass, not overwrite: while the Debug slot is on, the graph resolve
         // is skipped entirely, so upstream demand from this root stops. Other
         // outputs are unaffected. The frame the slot goes back to false we fall
@@ -926,7 +1042,9 @@ impl NodeRuntime for OutputNode {
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
-        self.fragment_status.clone()
+        self.identity_status
+            .clone()
+            .or_else(|| self.fragment_status.clone())
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
@@ -1163,7 +1281,11 @@ mod tests {
             })
         }
 
-        fn control_patch_placement(&self, product: ControlProduct) -> Option<Vec<PatchedRun>> {
+        fn control_patch_placement(
+            &self,
+            product: ControlProduct,
+            _consumer: NodeId,
+        ) -> Option<Vec<PatchedRun>> {
             self.patches
                 .iter()
                 .find(|(patched, _)| *patched == product)
@@ -1625,12 +1747,50 @@ mod tests {
         }
     }
 
-    fn run(start: u32, count: u32, channel: u32, reversed: bool) -> PatchedRun {
+    /// The display-rebase side of rotation: a placed run splits at the
+    /// window's wrap point, and lamp positions permute by the same mod
+    /// math the sample copy uses.
+    #[test]
+    fn rotated_pieces_split_at_the_window_wrap() {
+        let fragment = OutputFragment {
+            product: product(1, ControlExtent::new(1, 15)),
+            source_offset_samples: 0,
+            offset_samples: 30,
+            len_samples: 15, // five lamps
+            reversed: false,
+            rotation_samples: 6, // two lamps
+        };
+        // A run of the first three lamps (samples 30..39) rotated right two
+        // lamps: slots 2..5 — one piece, no wrap.
+        assert_eq!(
+            rotated_pieces(&fragment, 30, 9).collect::<Vec<_>>(),
+            vec![(36, 9)]
+        );
+        // A run of the LAST three lamps (samples 36..45) rotated right two:
+        // slots (2+2)%5=4 then wrapping to 0..2 — two pieces.
+        assert_eq!(
+            rotated_pieces(&fragment, 36, 9).collect::<Vec<_>>(),
+            vec![(42, 3), (30, 6)]
+        );
+        // No rotation: the identity, one piece.
+        let plain = OutputFragment {
+            rotation_samples: 0,
+            ..fragment
+        };
+        assert_eq!(
+            rotated_pieces(&plain, 36, 9).collect::<Vec<_>>(),
+            vec![(36, 9)]
+        );
+    }
+
+    fn run(start: u32, count: u32, lamp: u32, reversed: bool) -> PatchedRun {
         PatchedRun {
             start,
             count,
-            channel,
+            lamp,
             reversed,
+            offset: 0,
+            output: None,
         }
     }
 
@@ -1780,8 +1940,10 @@ mod tests {
             vec![PatchedRun {
                 start: 0,
                 count: 1,
-                channel: 9,
+                lamp: 9,
                 reversed: false,
+                offset: 0,
+                output: None,
             }],
         )];
         consume_at(&mut node, &mut resolver, Revision::new(3)).expect("repatched frame");
@@ -1808,6 +1970,7 @@ mod tests {
                 offset_samples: 0,
                 len_samples: 6,
                 reversed: true,
+                rotation_samples: 0,
             }],
         )
         .expect("render");
@@ -1838,6 +2001,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 6,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(2, TWO_LAMPS),
@@ -1845,6 +2009,7 @@ mod tests {
                     offset_samples: 6,
                     len_samples: 6,
                     reversed: true,
+                    rotation_samples: 0,
                 },
             ],
         )
@@ -1874,6 +2039,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 9,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 // Starts one lamp before the first one ends.
                 OutputFragment {
@@ -1882,6 +2048,7 @@ mod tests {
                     offset_samples: 6,
                     len_samples: 6,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ],
         )
@@ -1919,6 +2086,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
@@ -1926,6 +2094,7 @@ mod tests {
                     offset_samples: 9,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ],
         )
@@ -1954,6 +2123,7 @@ mod tests {
             offset_samples: 0,
             len_samples: 12,
             reversed: false,
+            rotation_samples: 0,
         }];
         render_fragments_at(&mut node, &mut resolver, Revision::new(1), &covered)
             .expect("full frame");
@@ -1969,6 +2139,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
@@ -1976,6 +2147,7 @@ mod tests {
                     offset_samples: 9,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ],
         )
@@ -2005,6 +2177,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
@@ -2012,6 +2185,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ],
         )
@@ -2040,6 +2214,7 @@ mod tests {
                 offset_samples: 0,
                 len_samples: 3,
                 reversed: false,
+                rotation_samples: 0,
             },
             OutputFragment {
                 product: product(2, ONE_LAMP),
@@ -2047,6 +2222,7 @@ mod tests {
                 offset_samples: 0,
                 len_samples: 3,
                 reversed: false,
+                rotation_samples: 0,
             },
         ];
         render_fragments_at(&mut node, &mut resolver, Revision::new(1), &overlapping)
@@ -2073,6 +2249,7 @@ mod tests {
                 offset_samples: 0,
                 len_samples: 6,
                 reversed: false,
+                rotation_samples: 0,
             },
             OutputFragment {
                 product: product(2, ONE_LAMP),
@@ -2080,6 +2257,7 @@ mod tests {
                 offset_samples: 3,
                 len_samples: 6,
                 reversed: false,
+                rotation_samples: 0,
             },
             OutputFragment {
                 product: product(3, ONE_LAMP),
@@ -2087,6 +2265,7 @@ mod tests {
                 offset_samples: 6,
                 len_samples: 6,
                 reversed: false,
+                rotation_samples: 0,
             },
             OutputFragment {
                 product: product(4, ONE_LAMP),
@@ -2094,6 +2273,7 @@ mod tests {
                 offset_samples: 15,
                 len_samples: 3,
                 reversed: false,
+                rotation_samples: 0,
             },
         ]);
 
@@ -2176,6 +2356,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 6,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(2, ONE_LAMP),
@@ -2183,6 +2364,7 @@ mod tests {
                     offset_samples: 6,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ]
         );
@@ -2206,6 +2388,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 6,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: body,
@@ -2213,6 +2396,7 @@ mod tests {
                     offset_samples: 30,
                     len_samples: 6,
                     reversed: true,
+                    rotation_samples: 0,
                 },
             ]
         );
@@ -2341,6 +2525,7 @@ mod tests {
                     offset_samples: 0,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
                 OutputFragment {
                     product: product(1, TWO_LAMPS),
@@ -2348,6 +2533,7 @@ mod tests {
                     offset_samples: 3,
                     len_samples: 3,
                     reversed: false,
+                    rotation_samples: 0,
                 },
             ],
         )

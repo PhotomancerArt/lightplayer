@@ -1,0 +1,23 @@
+{
+  "format": 3,
+  "sample_diameter": 2.0,
+  "canvas": [0.0, 0.0, 120.0, 120.0],
+  "objects": [
+    {
+      "name": "sector",
+      "id": "sector",
+      "shape": {
+        "repeat": {
+          "shape": {
+            "path": {
+              "points": [[60.0, 44.0], [55.0, 26.0], [64.0, 10.0]],
+              "count": 30
+            }
+          },
+          "center": [60.0, 60.0],
+          "count": 5
+        }
+      }
+    }
+  ]
+}

@@ -22,14 +22,32 @@
         }
       },
       {
-        "name": "channels",
+        "name": "name",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3219703103,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "ports",
         "shape": {
           "map": {
             "key": "u32",
             "meta": {},
             "value": {
               "ref": {
-                "id": 3125801182
+                "id": 441814542
               }
             }
           }

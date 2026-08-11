@@ -18,7 +18,7 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 10\n}\n");
     write_file(
         &mut fs,
         "/module.json",
@@ -62,7 +62,7 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
 fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 10\n}\n");
     write_file(
         &mut fs,
         "/module.json",

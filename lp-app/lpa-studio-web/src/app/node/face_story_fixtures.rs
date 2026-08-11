@@ -12,7 +12,7 @@ use lpa_studio_core::{
     UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor,
     UiAssetEditorKind, UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild,
     UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView,
-    UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit,
+    UiOutputBoardFacts, UiOutputFace, UiOutputPin, UiOutputPortRow, UiPanelControl, UiPanelEmit,
     UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
     UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
     UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
@@ -961,6 +961,7 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
     UiFixtureFace {
         preview: control_preview_product("output"),
         mapping_editor: None,
+        patch_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
@@ -1060,6 +1061,7 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
     UiFixtureFace {
         preview: map2d_control_preview_product("output", doc, (16, 16)),
         mapping_editor: None,
+        patch_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
@@ -1251,8 +1253,8 @@ fn output_slot_address(path: &str) -> ProjectSlotAddress {
 /// pin label, and the two edit addresses. `count: None` is the remainder
 /// channel, which by the same rule as the builder carries NO count address
 /// (an absent option has nothing to write to until it is included).
-pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutputChannelRow {
-    UiOutputChannelRow {
+pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutputPortRow {
+    UiOutputPortRow {
         wire_status: None,
         key,
         endpoint_display: format!("ws281x:local:{pin}"),
@@ -1261,15 +1263,15 @@ pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutpu
         count,
         resolved_count: count,
         slice_start: None,
-        endpoint_address: Some(output_slot_address(&format!("channels[{key}].endpoint"))),
-        count_address: count.map(|_| output_slot_address(&format!("channels[{key}].count.some"))),
+        endpoint_address: Some(output_slot_address(&format!("ports[{key}].endpoint"))),
+        count_address: count.map(|_| output_slot_address(&format!("ports[{key}].count.some"))),
     }
 }
 
 /// Hand the channels their slice starts exactly the way the builder's
 /// `resolve_authored_slices` does: a count advances the cursor, and the
 /// count-less wire takes the remainder.
-fn resolve_story_slices(channels: &mut [UiOutputChannelRow]) {
+fn resolve_story_slices(channels: &mut [UiOutputPortRow]) {
     let mut start = Some(0u32);
     for channel in channels {
         channel.slice_start = start;
@@ -1284,7 +1286,7 @@ fn resolve_story_slices(channels: &mut [UiOutputChannelRow]) {
 /// display manifest so a story cannot drift from the catalog: every
 /// output-eligible pin, RAILS AND SCREW TERMINALS alike (the terminals list
 /// is separate and easy to drop), with each channel's claim marked.
-fn output_board_facts(board_id: &str, channels: &[UiOutputChannelRow]) -> UiOutputBoardFacts {
+fn output_board_facts(board_id: &str, channels: &[UiOutputPortRow]) -> UiOutputBoardFacts {
     let board = lpa_boards::board_by_id(board_id).expect("board in the embedded catalog");
     let pins = board
         .pins()
@@ -1321,7 +1323,7 @@ fn output_board_facts(board_id: &str, channels: &[UiOutputChannelRow]) -> UiOutp
 /// remainder wire.
 pub(crate) fn output_face(
     board_id: Option<&str>,
-    mut channels: Vec<UiOutputChannelRow>,
+    mut channels: Vec<UiOutputPortRow>,
     total_lamps: Option<u32>,
     span_boundaries: Vec<u32>,
 ) -> UiOutputFace {
@@ -1337,9 +1339,10 @@ pub(crate) fn output_face(
         }
     }
     let mut face = UiOutputFace {
+        name: None,
         led_budget: None,
-        channels,
-        channels_address: Some(output_slot_address("channels")),
+        ports: channels,
+        ports_address: Some(output_slot_address("ports")),
         input_binding: Some("bus:show.control".to_string()),
         total_lamps: None,
         span_boundaries,
@@ -1421,14 +1424,14 @@ mod tests {
         );
 
         assert_eq!(
-            face.channels[0].gpio,
+            face.ports[0].gpio,
             Some(18),
             "IO18 resolves on the desk board"
         );
-        assert_eq!(face.channels[0].slice_start, Some(0));
-        assert_eq!(face.channels[1].slice_start, Some(280));
+        assert_eq!(face.ports[0].slice_start, Some(0));
+        assert_eq!(face.ports[1].slice_start, Some(280));
         assert_eq!(
-            face.channels[1].resolved_count,
+            face.ports[1].resolved_count,
             Some(1220),
             "the count-less wire takes what is left of the 1500"
         );
@@ -1461,9 +1464,6 @@ mod tests {
             Some(241),
             Vec::new(),
         );
-        assert!(
-            dig_uno.channels[0].gpio.is_some(),
-            "LED1 is an eligible pin"
-        );
+        assert!(dig_uno.ports[0].gpio.is_some(), "LED1 is an eligible pin");
     }
 }

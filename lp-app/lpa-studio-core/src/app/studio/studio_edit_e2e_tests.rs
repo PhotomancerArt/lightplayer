@@ -618,7 +618,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":9,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":10,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -747,7 +747,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":9,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":10,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2468,7 +2468,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
+    let endpoint = find_slot(&snapshot, "ports[0].endpoint");
     assert!(
         !endpoint.state.debug,
         "a channel endpoint is authored config, not debug"
@@ -2670,7 +2670,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2679,7 +2679,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2758,7 +2758,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 9\n}\n"),
+        ("project.json", "{\n  \"format\": 10\n}\n"),
         (
             "module.json",
             r#"{

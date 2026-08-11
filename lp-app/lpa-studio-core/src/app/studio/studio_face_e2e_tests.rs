@@ -2178,7 +2178,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2241,7 +2241,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2301,7 +2301,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2351,7 +2351,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     let output_json = format!(
         r#"{{
   "kind": "Output",
-  "channels": {{
+  "ports": {{
     "0": {{ "endpoint": "ws281x:local:D10" }}
   }},
   "bindings": {{
@@ -2406,7 +2406,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -2466,7 +2466,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2517,7 +2517,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2567,7 +2567,7 @@ fn palette_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2829,7 +2829,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2890,7 +2890,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2941,7 +2941,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2987,7 +2987,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -3041,7 +3041,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 9\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -3082,7 +3082,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:IO18", "count": 6 },
     "1": { "endpoint": "ws281x:local:IO16", "count": 4 },
     "2": { "endpoint": "ws281x:local:IO2" }
@@ -3159,15 +3159,15 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels.len(), 3, "one row per authored wire");
+    assert_eq!(face.ports.len(), 3, "one row per authored wire");
     let labels: Vec<&str> = face
-        .channels
+        .ports
         .iter()
         .map(|channel| channel.pin_label.as_str())
         .collect();
     assert_eq!(labels, ["IO18", "IO16", "IO2"], "in channel-key order");
     assert_eq!(
-        face.channels
+        face.ports
             .iter()
             .map(|channel| (channel.count, channel.slice_start))
             .collect::<Vec<_>>(),
@@ -3177,7 +3177,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     // count-less wire can finally say what it drives.
     assert_eq!(face.total_lamps, Some(16));
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(6),
         "the remainder is what the counted wires left"
     );
@@ -3186,18 +3186,18 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         "this harness has no device registry — 'no board known' is a normal state"
     );
     assert!(
-        face.channels.iter().all(|channel| channel.gpio.is_none()),
+        face.ports.iter().all(|channel| channel.gpio.is_none()),
         "and with no board, no pin resolves"
     );
     assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
 
     // The addresses are real: editing a count rides the ordinary slot path
     // and the whole slice plan re-derives from it.
-    let count_address = face.channels[0]
+    let count_address = face.ports[0]
         .count_address
         .clone()
         .expect("a present count is addressed");
-    assert_eq!(count_address.path.to_string(), "channels[0].count.some");
+    assert_eq!(count_address.path.to_string(), "ports[0].count.some");
     handle
         .tx
         .send(set_value_action(count_address, LpValue::U32(8)));
@@ -3205,14 +3205,14 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("the edit emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels[0].count, Some(8));
+    assert_eq!(face.ports[0].count, Some(8));
     assert_eq!(
-        face.channels[1].slice_start,
+        face.ports[1].slice_start,
         Some(8),
         "the following wires shift with it"
     );
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(4),
         "and the remainder shrinks by the same four lamps"
     );
@@ -3502,4 +3502,351 @@ fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
         panic!("fixture face present");
     };
     face.brightness
+}
+
+/// The patch surface (D36, slice 2), end to end at BOTH grains: on
+/// mini-dome (instance grain: two named outputs, sectors + doors,
+/// instance chips with strides) and on peach-1d (range grain: one unnamed
+/// output, NO instances — the surface must not invent an address grain
+/// the format cannot store). Selection round-trips through
+/// `ProjectEditorOp::PatchSelect` — the core-owned state the P6 verbs
+/// read.
+#[test]
+fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
+    use crate::UiPatchTarget;
+
+    for (id, expect_instances) in [("examples/mini-dome", true), ("examples/peach-1d", false)] {
+        let example = crate::app::home::embedded_example(id).expect("example embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        // Resolve the fixtures' map2d bodies (the page dispatches the same
+        // fetch on mount), then refresh so the instance tables fill in.
+        {
+            let editor = project_editor(&snapshot);
+            let surface = editor
+                .patch_surface
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+            for fixture in &surface.fixtures {
+                if let Some(artifact) = fixture.mapping_artifact.clone() {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().unwrap_or(snapshot);
+        let editor = project_editor(&snapshot);
+        let surface = editor
+            .patch_surface
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+
+        if expect_instances {
+            // The mini-dome: two named outputs, both fixtures at instance
+            // grain with the archetype's strides (sector 30, door side 3).
+            assert_eq!(surface.outputs.len(), 2, "{id}");
+            let names: Vec<&str> = surface
+                .outputs
+                .iter()
+                .map(|output| output.display_name())
+                .collect();
+            assert!(
+                names.contains(&"1") && names.contains(&"Box 2"),
+                "{names:?}"
+            );
+            let dome = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
+            assert_eq!(dome.instances.len(), 5, "{id}: five sector instances");
+            assert_eq!(dome.instances[2].path, "/sector/2");
+            // A path strut has no intrinsic period, so its instances step
+            // by 1 (fine rotation); the intrinsic stride belongs to the
+            // polygon doors below. G1 question 3 owns whether sectors
+            // should inherit an authored override instead.
+            assert_eq!(dome.instances[2].stride, 1);
+            let doors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("door"))
+                .unwrap_or_else(|| panic!("{id}: no doors fixture on the surface"));
+            assert_eq!(doors.instances.len(), 3, "{id}: three door panels");
+            assert_eq!(
+                doors.instances[1].stride, 3,
+                "{id}: a door rotates by one polygon side"
+            );
+        } else {
+            // The peach: one unnamed output; fixtures patch at range grain.
+            assert_eq!(surface.outputs.len(), 1, "{id}");
+            assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
+            assert!(
+                surface
+                    .fixtures
+                    .iter()
+                    .all(|fixture| fixture.instances.is_empty()),
+                "{id}: no ids, no instance grain"
+            );
+            assert!(
+                !surface.fixtures.is_empty(),
+                "{id}: the range-grain fixtures still show their runs"
+            );
+        }
+
+        // Selection round-trip: PatchSelect lands in the next snapshot.
+        let target = surface
+            .fixtures
+            .first()
+            .map(|fixture| UiPatchTarget::Fixture { node: fixture.node })
+            .expect("a fixture to select");
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                crate::ProjectEditorTarget::NodeTree.node_id(),
+                crate::ProjectEditorOp::PatchSelect {
+                    target: Some(target.clone()),
+                },
+            )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let mut latest = None;
+        while let Some(next) = view.try_recv() {
+            latest = Some(next);
+        }
+        let snapshot = latest.expect("selection emits a snapshot");
+        assert_eq!(
+            project_editor(&snapshot).patch_selection,
+            Some(target),
+            "{id}: the selection is core state, not view-local"
+        );
+    }
+}
+
+/// The G1 acceptance run, headless: author the mini-dome's as-built
+/// permutation LIVE through the verb ops — clear both fixtures, assign
+/// every sector and door to its port, reverse `/sector/1`, rotate
+/// `/sector/2` by ten lamps and `/door/1` by one SIDE — and the written
+/// documents equal the shipped hand-authored files **byte for byte**.
+/// Then undo walks the whole thing back to the cleared state.
+#[test]
+fn verbs_author_the_mini_dome_permutation_byte_identically() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let shipped: std::collections::BTreeMap<&str, &[u8]> = example
+        .files
+        .iter()
+        .map(|(path, bytes)| (*path, *bytes))
+        .collect();
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    // Fetch every fixture's patch + map2d bodies (what the page does).
+    let (dome, doors) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let by_label = |needle: &str| {
+            surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains(needle))
+                .unwrap_or_else(|| panic!("no {needle} fixture"))
+                .clone()
+        };
+        (by_label("dome"), by_label("door"))
+    };
+    // Fetch exactly what the page's mount prefetch would: bodies whose
+    // loaded flag is still false. If the DTO flags ever lie (claim loaded
+    // while the cache is cold), the verbs below block and this test fails —
+    // the live-surface contract, not a test-only shortcut.
+    for fixture in [&dome, &doors] {
+        let wanted = [
+            (fixture.patch_loaded, fixture.patch_artifact.clone()),
+            (fixture.mapping_loaded, fixture.mapping_artifact.clone()),
+        ];
+        for artifact in wanted
+            .into_iter()
+            .filter_map(|(loaded, artifact)| (!loaded).then_some(artifact))
+            .flatten()
+        {
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    crate::AssetContentFetchOp { artifact },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }
+    }
+
+    let fixtures = || {
+        [&dome, &doors]
+            .iter()
+            .map(|fixture| crate::PatchVerbFixture {
+                node: fixture.node,
+                patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
+                mapping_artifact: fixture.mapping_artifact.clone(),
+                lamp_count: fixture.patch.lamps,
+            })
+            .collect::<Vec<_>>()
+    };
+    macro_rules! verb {
+        ($subject_fixture:expr, $path:expr, $kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some($subject_fixture),
+                        subject: PatchVerbSubject {
+                            path: ($path as Option<&str>).map(str::to_string),
+                            range: None,
+                        },
+                        fixtures: fixtures(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+
+    // Clear both docs, then author the permutation in row order.
+    verb!(dome.node, None, PatchVerbKind::Clear);
+    verb!(doors.node, None, PatchVerbKind::Clear);
+    let assign = |name: &str, lamp: u32| PatchVerbKind::Assign {
+        output_name: Some(name.to_string()),
+        lamp,
+    };
+    verb!(dome.node, Some("/sector/0"), assign("1", 69));
+    verb!(dome.node, Some("/sector/1"), assign("Box 2", 0));
+    verb!(dome.node, Some("/sector/1"), PatchVerbKind::Reverse);
+    verb!(dome.node, Some("/sector/2"), assign("1", 0));
+    verb!(
+        dome.node,
+        Some("/sector/2"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 10,
+        }
+    );
+    verb!(dome.node, Some("/sector/3"), assign("Box 2", 39));
+    verb!(dome.node, Some("/sector/4"), assign("1", 39));
+    verb!(doors.node, Some("/door/0"), assign("1", 30));
+    verb!(doors.node, Some("/door/1"), assign("Box 2", 30));
+    verb!(
+        doors.node,
+        Some("/door/1"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 3
+        }
+    );
+    verb!(doors.node, Some("/door/2"), assign("1", 99));
+
+    // Persist the overlay so the authored bytes are on disk (the same
+    // save the user presses), then read them back.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+
+    // The authored bytes ARE the shipped bytes.
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let body_of = |artifact: &lpc_model::ArtifactLocation| {
+        let path = format!(
+            "{project_dir}/{}",
+            artifact.file_path().as_str().trim_start_matches('/')
+        );
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(path.as_str().as_path())
+            .unwrap_or_else(|_| panic!("no body at {path}"));
+        String::from_utf8(bytes).expect("utf8 patch doc")
+    };
+    assert_eq!(
+        body_of(dome.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["dome/dome.patch.json"]).to_string(),
+        "the dome's authored patch equals the hand-authored truth"
+    );
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["doors/doors.patch.json"]).to_string(),
+        "the doors' authored patch equals the hand-authored truth"
+    );
+
+    // Undo restores the exact prior bytes, one gesture at a time.
+    let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    verb!(doors.node, None, PatchVerbKind::Undo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    assert_ne!(before_undo, after_undo, "undo moved the document back");
+    verb!(doors.node, None, PatchVerbKind::Redo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        before_undo,
+        "redo restores the undone gesture byte-for-byte"
+    );
 }

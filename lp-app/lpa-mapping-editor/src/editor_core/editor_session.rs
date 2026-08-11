@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 
 use lpc_mapping::{
     Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape,
-    RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d, bounds_of_points,
-    resolve,
+    PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
+    bounds_of_points, resolve,
 };
 
 use crate::editor_core::map_selection::MapSelection;
@@ -392,6 +392,17 @@ impl MapEditorSession {
         });
     }
 
+    /// Assign stable ids to objects that lack them (one undo step) — sticky
+    /// slugs from names, per [`lpc_mapping::ensure_object_ids`]. The editor
+    /// never calls this spontaneously: callers (the patch surface entering
+    /// edit mode, an explicit action) invoke it, so documents nothing
+    /// patches by object stay at format ≤ 2.
+    pub fn ensure_object_ids(&mut self) {
+        self.edit(|doc| {
+            lpc_mapping::ensure_object_ids(doc);
+        });
+    }
+
     /// One-undo-step shape edit for property fields; values are sanitized.
     pub fn edit_object_shape(&mut self, index: usize, apply: impl FnOnce(&mut Map2dShape)) {
         self.edit_shape_at(&ShapePath::root(index), apply);
@@ -498,6 +509,8 @@ impl MapEditorSession {
                     .unwrap_or_else(|| bake_path(&instance_positions[instance as usize]));
                 Map2dObject {
                     name: format!("{name}-{}", instance + 1),
+                    id: None,
+                    stride: None,
                     shape,
                 }
             })
@@ -573,6 +586,8 @@ impl MapEditorSession {
         let origin = [at[0] - 3.5 * DEFAULT_PITCH, at[1] - 3.5 * DEFAULT_PITCH];
         self.create_object(Map2dObject {
             name: self.next_name("grid"),
+            id: None,
+            stride: None,
             shape: Map2dShape::Grid(GridShape {
                 origin,
                 cols: 8,
@@ -588,6 +603,8 @@ impl MapEditorSession {
     pub fn create_default_ring(&mut self, at: [f32; 2]) -> usize {
         self.create_object(Map2dObject {
             name: self.next_name("ring"),
+            id: None,
+            stride: None,
             shape: Map2dShape::Ring(RingShape {
                 center: at,
                 radius: 80.0,
@@ -652,6 +669,8 @@ impl MapEditorSession {
         let count = ((length / DEFAULT_PITCH).round() as u32).max(2);
         Some(self.create_object(Map2dObject {
             name: self.next_name("path"),
+            id: None,
+            stride: None,
             shape: Map2dShape::Path(PathShape {
                 points,
                 count,
@@ -665,10 +684,6 @@ impl MapEditorSession {
 
     pub fn lamp_count(&mut self) -> u32 {
         self.resolved().lamps.len() as u32
-    }
-
-    pub fn universe_count(&mut self) -> u32 {
-        self.resolved().universe_count()
     }
 
     // ---- internals -------------------------------------------------------
@@ -751,6 +766,11 @@ fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Optio
             reversed: path.reversed,
             gaps: path.gaps.clone(),
         }),
+        // A polygon carries its turn in its points, exactly like a path.
+        Map2dShape::Polygon(polygon) => Map2dShape::Polygon(PolygonShape {
+            points: polygon.points.iter().map(|p| rotation.apply(*p)).collect(),
+            count: polygon.count,
+        }),
         Map2dShape::Ring(ring) => Map2dShape::Ring(RingShape {
             center: rotation.apply(ring.center),
             radius: ring.radius,
@@ -799,6 +819,12 @@ fn translate_shape(shape: &mut Map2dShape, dx: f32, dy: f32) {
                 point[1] += dy;
             }
         }
+        Map2dShape::Polygon(polygon) => {
+            for point in &mut polygon.points {
+                point[0] += dx;
+                point[1] += dy;
+            }
+        }
         // Moving a repeat moves the whole wheel: the inner shape and the
         // center it turns about travel together, so the instances land where
         // they looked like they would.
@@ -828,6 +854,11 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
         }
         Map2dShape::Path(path) => {
             for point in &mut path.points {
+                *point = scale_point(*point);
+            }
+        }
+        Map2dShape::Polygon(polygon) => {
+            for point in &mut polygon.points {
                 *point = scale_point(*point);
             }
         }
@@ -874,6 +905,11 @@ fn sanitize_shape(shape: &mut Map2dShape) {
         Map2dShape::Path(path) => {
             path.count = path.count.max(1);
             sanitize_path_gaps(path);
+        }
+        // Fewer than 3 points cannot be clamped into a polygon; that stays a
+        // resolve-time error naming the object, same as a one-point path.
+        Map2dShape::Polygon(polygon) => {
+            polygon.count = polygon.count.max(1);
         }
         // `count` is bounded at both ends: 0 instances resolve to nothing, and
         // an unbounded count multiplies the whole inner shape — a typo in a
@@ -964,7 +1000,131 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_mapping::{RepeatShape, corpus};
+    use lpc_mapping::{Map2dObjectId, RepeatShape, corpus};
+
+    // ---- stable object ids (format 3) ------------------------------------
+
+    /// Ids ride the object struct, so structural edits that keep the object
+    /// keep the id: reorder, rename, shape edits, wrap-in-repeat, unwrap.
+    #[test]
+    fn session_ops_that_keep_an_object_keep_its_id() {
+        let mut session = MapEditorSession::new(corpus::cat_ears());
+        session.ensure_object_ids();
+        let ids: Vec<String> = session
+            .doc()
+            .objects
+            .iter()
+            .map(|object| object.id.as_ref().unwrap().as_str().to_string())
+            .collect();
+        assert_eq!(ids.len(), 3);
+
+        // Rename does NOT rewrite the id — the sticky-slug contract.
+        session.rename_object(0, "completely different".to_string());
+        assert_eq!(
+            session.doc().objects[0].id.as_ref().unwrap().as_str(),
+            ids[0]
+        );
+
+        // Reorder: ids travel with their objects.
+        session.reorder_object(0, 2);
+        let after: Vec<&str> = session
+            .doc()
+            .objects
+            .iter()
+            .map(|object| object.id.as_ref().unwrap().as_str())
+            .collect();
+        assert_eq!(
+            after,
+            vec![ids[1].as_str(), ids[2].as_str(), ids[0].as_str()]
+        );
+
+        // Shape edits leave identity alone.
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.count += 1;
+            }
+        });
+        assert_eq!(
+            session.doc().objects[0].id.as_ref().unwrap().as_str(),
+            ids[1]
+        );
+
+        // Wrap in a repeat and unwrap again: same object slot, same id.
+        session.repeat_object(0, 4);
+        assert_eq!(
+            session.doc().objects[0].id.as_ref().unwrap().as_str(),
+            ids[1]
+        );
+        session.unwrap_repeat(0);
+        assert_eq!(
+            session.doc().objects[0].id.as_ref().unwrap().as_str(),
+            ids[1]
+        );
+    }
+
+    /// `ensure_object_ids` is one undo step, and undo restores the exact
+    /// prior document (no ids).
+    #[test]
+    fn ensure_object_ids_is_one_undoable_step() {
+        let mut session = MapEditorSession::new(corpus::cat_ears());
+        let before = session.doc().to_json();
+        session.ensure_object_ids();
+        assert!(
+            session
+                .doc()
+                .objects
+                .iter()
+                .all(|object| object.id.is_some())
+        );
+        assert_eq!(session.doc().format, 3, "sanitize re-stamps to format 3");
+        session.undo();
+        assert_eq!(session.doc().to_json(), before);
+        // Idempotence: with ids present, the op is a no-op and pushes no
+        // undo step.
+        session.redo();
+        let undo_depth_marker = session.doc().to_json();
+        session.ensure_object_ids();
+        assert_eq!(session.doc().to_json(), undo_depth_marker);
+    }
+
+    /// Expanding a repeat replaces the object with N NEW objects: none of
+    /// them inherits the id (entries addressing `/sector/2` cannot survive
+    /// the object becoming five independent paths — they dangle and report,
+    /// never silently retarget).
+    #[test]
+    fn expand_repeat_does_not_clone_the_id_onto_instances() {
+        let mut session = MapEditorSession::new(corpus::repeated_sector());
+        session.ensure_object_ids();
+        assert!(session.doc().objects[0].id.is_some());
+        session.expand_repeat(0);
+        assert!(session.doc().objects.len() > 1);
+        assert!(
+            session
+                .doc()
+                .objects
+                .iter()
+                .all(|object| object.id.is_none()),
+            "expanded instances are new objects without identity"
+        );
+    }
+
+    /// A duplicate-producing edit must never clone an id: two objects with
+    /// one id would refuse the whole document at the next load.
+    #[test]
+    fn documents_the_session_writes_never_carry_duplicate_ids() {
+        let mut session = MapEditorSession::new(corpus::cat_ears());
+        session.ensure_object_ids();
+        // Round-trip through the session's own serialization the way the
+        // asset chain would.
+        let json = session.doc().to_json();
+        assert!(Map2dDoc::from_json(&json).is_ok());
+        // An explicit id collision through raw edit() is sanitized… by
+        // nothing — edit() trusts callers. The load path refuses instead.
+        let mut doc = session.doc().clone();
+        doc.objects[1].id =
+            Some(Map2dObjectId::new(doc.objects[0].id.as_ref().unwrap().as_str()).unwrap());
+        assert!(Map2dDoc::from_json(&doc.to_json()).is_err());
+    }
 
     // ---- tree navigation + write-through (selection/tree ADR) ------------
 
@@ -1526,6 +1686,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "pod".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(Map2dShape::Ring(RingShape {
                     center: [100.0, 40.0],
@@ -1566,6 +1728,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "tile".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(Map2dShape::Grid(GridShape {
                     origin: [100.0, 20.0],
@@ -1604,6 +1768,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "wheel".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(Map2dShape::Path(PathShape {
@@ -1710,6 +1876,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "channel".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Path(PathShape {
                 points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]],
                 count: 4,
@@ -1725,6 +1893,8 @@ mod tests {
         let mut doc = Map2dDoc::new();
         doc.objects.push(Map2dObject {
             name: "sector".to_string(),
+            id: None,
+            stride: None,
             shape: Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(Map2dShape::Path(PathShape {
                     points: vec![[100.0, 40.0], [100.0, 10.0], [130.0, 10.0], [130.0, 40.0]],

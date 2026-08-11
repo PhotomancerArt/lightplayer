@@ -117,7 +117,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_file(name, "project.json").as_path(),
-            b"{\n  \"format\": 9\n}\n",
+            b"{\n  \"format\": 10\n}\n",
         )
         .expect("write container manifest");
     server

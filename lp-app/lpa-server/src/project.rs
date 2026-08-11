@@ -12,7 +12,7 @@ use lpc_hardware::HwEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_shared::backtrace;
-use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     OutputFrameProbeRequest, OutputFrameProbeResult, WireCreateNodeRequest, WireCreateNodeResponse,
@@ -718,19 +718,19 @@ impl OutputProvider for SharedOutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, lpc_hardware::OutputError> {
+    ) -> Result<OutputPortHandle, lpc_hardware::OutputError> {
         self.0.borrow().open(endpoint, byte_count, format, options)
     }
 
     fn write(
         &self,
-        handle: OutputChannelHandle,
+        handle: OutputPortHandle,
         data: &[u16],
     ) -> Result<(), lpc_hardware::OutputError> {
         self.0.borrow().write(handle, data)
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
+    fn close(&self, handle: OutputPortHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.borrow().close(handle)
     }
 

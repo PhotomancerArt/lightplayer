@@ -33,8 +33,9 @@ pub use node_def::{
     NodeDefWriteError, resolve_artifact_specifier,
 };
 pub use output::{
-    OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
-    OutputDriverOptionsConfigView,
+    OUTPUT_NAME_MAX_LEN, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView, OutputName, OutputNameError, OutputPortDef, OutputPortDefView,
+    next_output_name,
 };
 pub use pattern_project::{
     PATTERN_EXPORT_FOLDER, pattern_project_files_1d, pattern_project_files_2d,

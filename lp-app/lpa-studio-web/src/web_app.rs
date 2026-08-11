@@ -25,7 +25,7 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    ChromeProjectMenu, CloudAccountControl, PlayToggle, SiteChrome, SiteSection,
+    ChromeProjectMenu, CloudAccountControl, PatchToggle, PlayToggle, SiteChrome, SiteSection,
     StudioSettingsPopover, VersionBadge,
 };
 use crate::app::share::{
@@ -425,7 +425,9 @@ pub fn App() -> Element {
                 // lens sync above never reads this rewrite as a move to
                 // some other document and never fights it.
                 let current = route.peek().clone();
-                if let StudioRoute::Project { uid, play, .. } = &current
+                if let StudioRoute::Project {
+                    uid, play, patch, ..
+                } = &current
                     && next.open_project_uid.as_deref() == Some(uid.to_string().as_str())
                 {
                     let canonical = StudioRoute::Project {
@@ -436,6 +438,7 @@ pub fn App() -> Element {
                             .map(share_link::slugify)
                             .filter(|slug| !slug.is_empty()),
                         play: *play,
+                        patch: *patch,
                     };
                     if canonical != current {
                         router::replace(&canonical);
@@ -761,9 +764,14 @@ pub fn App() -> Element {
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let play = current_route.is_play();
+    let patch = matches!(&current_route, StudioRoute::Project { patch: true, .. });
     let play_toggle = current_route
         .is_lens()
         .then(|| current_route.with_play(!play).path());
+    // The patch surface toggle (D36): project lens only — the surface is
+    // project-scoped.
+    let patch_toggle = matches!(&current_route, StudioRoute::Project { .. })
+        .then(|| current_route.with_patch(!patch).path());
 
     // Sharing administers THE project in the address bar (D1 — the address
     // bar IS the link), so both its doors exist only on a project route.
@@ -829,6 +837,11 @@ pub fn App() -> Element {
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
                 project_menu,
+                if let Some(href) = patch_toggle {
+                    // Same-session zoom like play: the route listener sees
+                    // no new document and only the shell swap happens.
+                    PatchToggle { href, patching: patch }
+                }
                 if let Some(href) = play_toggle {
                     // A plain hash link, like the nav tabs: the route
                     // listener picks it up, sees the same session, and
@@ -903,6 +916,7 @@ pub fn App() -> Element {
                         gallery: crate::app::layout::ShellGallery::Projects,
                         opening_frame,
                         play,
+                        patch,
                         on_action,
                     }
                 },
@@ -914,6 +928,7 @@ pub fn App() -> Element {
                         running: false,
                         opening_frame,
                         play,
+                        patch,
                         on_action,
                     }
                 },
