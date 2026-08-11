@@ -17,7 +17,7 @@ use lpc_hardware::OutputError;
 use lpc_hardware::{
     HardwareEndpointError, HardwareSystem, HwEndpointSpec, HwRegistry, Ws281xConfig, Ws281xOutput,
 };
-use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
 /// Syscall-based OutputProvider implementation
 ///
@@ -25,7 +25,7 @@ use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat,
 /// Output syscalls will be added later if needed.
 pub struct SyscallOutputProvider {
     hardware_system: Rc<HardwareSystem>,
-    channels: RefCell<BTreeMap<OutputChannelHandle, Box<dyn Ws281xOutput>>>,
+    ports: RefCell<BTreeMap<OutputPortHandle, Box<dyn Ws281xOutput>>>,
     next_handle: RefCell<u32>,
 }
 
@@ -43,7 +43,7 @@ impl SyscallOutputProvider {
     pub fn new_with_hardware_system(hardware_system: Rc<HardwareSystem>) -> Self {
         Self {
             hardware_system,
-            channels: RefCell::new(BTreeMap::new()),
+            ports: RefCell::new(BTreeMap::new()),
             next_handle: RefCell::new(1),
         }
     }
@@ -56,7 +56,7 @@ impl OutputProvider for SyscallOutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, OutputError> {
+    ) -> Result<OutputPortHandle, OutputError> {
         let _ = options;
         if byte_count == 0 {
             return Err(OutputError::InvalidConfig {
@@ -72,8 +72,8 @@ impl OutputProvider for SyscallOutputProvider {
         let output = self.open_ws281x_output(endpoint, byte_count, options)?;
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
-        let handle = OutputChannelHandle::new(handle_id as i32);
-        self.channels.borrow_mut().insert(handle, output);
+        let handle = OutputPortHandle::new(handle_id as i32);
+        self.ports.borrow_mut().insert(handle, output);
 
         println!(
             "[output] open: endpoint={}, bytes={}, format={:?}, handle={:?}",
@@ -83,9 +83,9 @@ impl OutputProvider for SyscallOutputProvider {
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
-        let mut channels = self.channels.borrow_mut();
-        let output = channels
+    fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
+        let mut ports = self.ports.borrow_mut();
+        let output = ports
             .get_mut(&handle)
             .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
@@ -97,8 +97,8 @@ impl OutputProvider for SyscallOutputProvider {
         Ok(())
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
-        self.channels
+    fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
+        self.ports
             .borrow_mut()
             .remove(&handle)
             .ok_or_else(|| OutputError::InvalidHandle {

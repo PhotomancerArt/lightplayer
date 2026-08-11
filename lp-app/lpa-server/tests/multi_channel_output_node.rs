@@ -98,7 +98,7 @@ fn one_output_node_drives_every_authored_channel() {
         "the channels must account for the whole buffer"
     );
     assert_eq!(
-        provider.open_channel_count(),
+        provider.open_port_count(),
         CHANNELS.len(),
         "one node authored {} channels and must open exactly that many wires",
         CHANNELS.len()

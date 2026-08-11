@@ -103,7 +103,7 @@ fn a_single_chain_drives_its_channel() {
         "the only chain flushed an all-black frame"
     );
     assert_eq!(
-        provider.open_channel_count(),
+        provider.open_port_count(),
         1,
         "a one-chain project must not open channels it did not author"
     );
