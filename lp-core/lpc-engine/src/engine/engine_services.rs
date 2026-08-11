@@ -13,11 +13,11 @@ use hashbrown::HashMap;
 use lpc_hardware::OutputError;
 use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
-    WS281X_MAX_LEDS_PER_CHANNEL, ws281x_capped_byte_count,
+    WS281X_MAX_LEDS_PER_PORT, ws281x_capped_byte_count,
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HwEndpointSpec, NodeId, Revision, TreePath};
-use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
@@ -25,23 +25,23 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 /// Every wire one output node drives from its single control buffer.
 ///
 /// The node renders one flat buffer and the wires take slices of it in
-/// ascending channel-key order, so the set — not the wire — owns everything
+/// ascending port-key order, so the set — not the wire — owns everything
 /// authored per node: the display options (shared by every wire, Q3) and the
 /// node identity every log and error carries.
 #[derive(Debug)]
 struct OutputSinkSet {
     node: NodeId,
     display_options: Option<OutputDriverOptions>,
-    /// Wires in ascending channel-key order.
+    /// Wires in ascending port-key order.
     ///
     /// Empty means "this output drives nothing": either it authors no
-    /// channels, or its channels could not be sliced (see
+    /// ports, or its ports could not be sliced (see
     /// [`remainder_offender`]). An empty set is silent from then on — the
     /// refusal is logged once, when the configuration is read.
     wires: Vec<OutputWire>,
 }
 
-/// One authored channel of an output node: a slice of the node's control
+/// One authored port of an output node: a slice of the node's control
 /// buffer, pushed to one hardware endpoint.
 ///
 /// The slice lives here rather than in the endpoint spec on purpose: an
@@ -49,23 +49,23 @@ struct OutputSinkSet {
 /// specs, and where each wire's pixels come from is the engine's business.
 #[derive(Debug)]
 struct OutputWire {
-    /// Authored channel key. Identifies the wire in logs and in the per-tick
+    /// Authored port key. Identifies the wire in logs and in the per-tick
     /// diff, which matches wires by key so an edit to one leaves the others —
     /// including their parking — untouched.
-    channel: u32,
+    port: u32,
     endpoint: HwEndpointSpec,
     /// First sample of the node's buffer this wire carries.
     start_samples: u32,
     /// Samples this wire carries, or `None` for "whatever is left".
     ///
-    /// Only the last wire may take the remainder, so a single-channel output
+    /// Only the last wire may take the remainder, so a single-port output
     /// with no authored count drives the whole buffer — exactly what every
-    /// output did before channels existed.
+    /// output did before ports existed.
     len_samples: Option<u32>,
-    channel_handle: Option<OutputChannelHandle>,
+    port_handle: Option<OutputPortHandle>,
     last_byte_count: Option<u32>,
     /// Hardware generation observed when this wire's last open attempt failed,
-    /// or `None` while the wire has an open channel or a retry is due.
+    /// or `None` while the wire has an open port or a retry is due.
     ///
     /// A wire whose endpoint does not exist on the board — a project authored
     /// for four strips loaded onto a one-strip board, say — can never open, and
@@ -84,7 +84,7 @@ struct OutputWire {
     ///
     /// Distinct from `truncated_at_samples`: that one fires when the buffer
     /// holds fewer samples than authored, this one fires when the wire wants
-    /// more samples than [`WS281X_MAX_LEDS_PER_CHANNEL`] ever grants, on host,
+    /// more samples than [`WS281X_MAX_LEDS_PER_PORT`] ever grants, on host,
     /// emulator, or device alike. Rate-limited the same way — loud once per
     /// shape, not once per frame.
     capped_at_samples: Option<u32>,
@@ -93,11 +93,11 @@ struct OutputWire {
 impl OutputWire {
     fn new(planned: PlannedWire<'_>) -> Self {
         Self {
-            channel: planned.channel,
+            port: planned.port,
             endpoint: planned.endpoint.clone(),
             start_samples: planned.start_samples,
             len_samples: planned.len_samples,
-            channel_handle: None,
+            port_handle: None,
             last_byte_count: None,
             parked_at_generation: None,
             truncated_at_samples: None,
@@ -106,18 +106,18 @@ impl OutputWire {
     }
 
     fn matches(&self, planned: PlannedWire<'_>) -> bool {
-        self.channel == planned.channel
+        self.port == planned.port
             && self.endpoint == *planned.endpoint
             && self.start_samples == planned.start_samples
             && self.len_samples == planned.len_samples
     }
 }
 
-/// One wire as the authored `channels` map describes it, before any runtime
+/// One wire as the authored `ports` map describes it, before any runtime
 /// extent is known.
 #[derive(Clone, Copy)]
 struct PlannedWire<'a> {
-    channel: u32,
+    port: u32,
     endpoint: &'a HwEndpointSpec,
     start_samples: u32,
     len_samples: Option<u32>,
@@ -126,7 +126,7 @@ struct PlannedWire<'a> {
 /// Failure while flushing one wire of a registered output sink.
 ///
 /// A flush attempts every wire of every sink, so this always names the node and
-/// the channel that failed: on a multi-channel board an unnamed error is
+/// the port that failed: on a multi-port board an unnamed error is
 /// unactionable, and the frame's other wires were flushed regardless.
 #[derive(Debug)]
 pub enum OutputFlushError {
@@ -136,14 +136,14 @@ pub enum OutputFlushError {
     },
     Provider {
         node: NodeId,
-        channel: u32,
+        port: u32,
         endpoint: HwEndpointSpec,
         error: OutputError,
     },
     /// The end-of-frame [`OutputProvider::flush`] barrier failed — a
     /// transmission begun by a `write` this frame did not complete. Carries no
     /// node: the barrier is frame-wide, and the provider's own log names the
-    /// channel.
+    /// port.
     Flush { error: OutputError },
 }
 
@@ -156,12 +156,12 @@ impl fmt::Display for OutputFlushError {
             ),
             Self::Provider {
                 node,
-                channel,
+                port,
                 endpoint,
                 error,
             } => write!(
                 f,
-                "output node {node} channel {channel} {endpoint}: {error}"
+                "output node {node} port {port} {endpoint}: {error}"
             ),
             Self::Flush { error } => write!(f, "output flush barrier: {error}"),
         }
@@ -281,8 +281,8 @@ impl EngineServices {
         self.radio_service.clone()
     }
 
-    /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush slices
-    /// them across `config`'s channels and writes each slice through [`OutputProvider`].
+    /// Register an output sink: fixture pushes u16 RGB samples into `buffer_id`; flush slices
+    /// them across `config`'s ports and writes each slice through [`OutputProvider`].
     ///
     /// Insert the backing [`crate::resource::RuntimeBuffer`] with
     /// [`WithRevision::new`](lpc_model::WithRevision::new)([`Revision::default`], …)
@@ -310,7 +310,7 @@ impl EngineServices {
     ///
     /// Called for every output on every tick, so the unchanged path — which is
     /// nearly every call — must not allocate. The comparison walks the authored
-    /// channels in key order against the wires already registered, borrowing
+    /// ports in key order against the wires already registered, borrowing
     /// each endpoint; only a genuine change pays for a copy of one.
     pub fn update_output_sink_config(
         &mut self,
@@ -370,20 +370,20 @@ impl EngineServices {
         result
     }
 
-    /// Rebuild a sink set's wires from its authored channels, keeping every
+    /// Rebuild a sink set's wires from its authored ports, keeping every
     /// wire the edit did not touch exactly as it was.
     ///
-    /// Only the changed path runs this, so it may allocate. Matching by channel
-    /// key is what keeps parking per wire: re-authoring channel 2 must not send
-    /// channel 0 back to the hardware, and must not un-park channel 1 into
+    /// Only the changed path runs this, so it may allocate. Matching by port
+    /// key is what keeps parking per wire: re-authoring port 2 must not send
+    /// port 0 back to the hardware, and must not un-park port 1 into
     /// another hopeless open attempt.
     fn reconcile_wires(&self, set: &mut OutputSinkSet, config: &OutputDef, force_reopen: bool) {
         let mut previous = core::mem::take(&mut set.wires);
 
         if let Some(offender) = remainder_offender(config) {
             log::warn!(
-                "EngineServices: output node {} channel {offender} omits `count` but is not its \
-                 last channel; only the highest-keyed channel may take the remainder. This output \
+                "EngineServices: output node {} port {offender} omits `count` but is not its \
+                 last port; only the highest-keyed port may take the remainder. This output \
                  drives no wires until it is re-authored.",
                 set.node
             );
@@ -408,14 +408,14 @@ impl EngineServices {
                 // the moment it is authored, whether or not a buffer has
                 // arrived yet to prove it at runtime. `wire_slice` enforces the
                 // actual grant every frame (it also covers the remainder
-                // channel, whose size is buffer-driven and unknowable here);
+                // port, whose size is buffer-driven and unknowable here);
                 // this is the config-time half of the same warning.
-                Some(count) if count > WS281X_MAX_LEDS_PER_CHANNEL as u32 => {
+                Some(count) if count > WS281X_MAX_LEDS_PER_PORT as u32 => {
                     log::warn!(
                         "EngineServices: output node {} port {key} ({}) authors {count} \
-                         lamps, above the shared {WS281X_MAX_LEDS_PER_CHANNEL}-lamp per-wire \
+                         lamps, above the shared {WS281X_MAX_LEDS_PER_PORT}-lamp per-wire \
                          cap; it registers capped and drives only the first \
-                         {WS281X_MAX_LEDS_PER_CHANNEL} lamps",
+                         {WS281X_MAX_LEDS_PER_PORT} lamps",
                         set.node,
                         port.endpoint(),
                     );
@@ -428,13 +428,13 @@ impl EngineServices {
         for planned in planned_wires(config) {
             let existing = previous
                 .iter()
-                .position(|wire| wire.channel == planned.channel);
+                .position(|wire| wire.port == planned.port);
             match existing {
                 Some(index) => {
                     let mut wire = previous.remove(index);
                     if force_reopen || !wire.matches(planned) {
                         // A re-sliced or re-pinned wire is a fresh question for
-                        // the hardware: the open channel is the wrong size or
+                        // the hardware: the open port is the wrong size or
                         // the wrong pin, and whatever the old one was waiting
                         // for no longer applies.
                         self.close_output_wire(&mut wire);
@@ -480,7 +480,7 @@ impl EngineServices {
         let Some(provider) = self.output_provider.as_deref() else {
             // No provider ever opened it; drop the stale handle so a later
             // provider does not inherit one it never issued.
-            wire.channel_handle = None;
+            wire.port_handle = None;
             return;
         };
         close_output_wire_with(provider, wire);
@@ -488,7 +488,7 @@ impl EngineServices {
 }
 
 fn close_output_wire_with(provider: &dyn OutputProvider, wire: &mut OutputWire) {
-    if let Some(handle) = wire.channel_handle.take() {
+    if let Some(handle) = wire.port_handle.take() {
         if let Err(error) = provider.close(handle) {
             log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
         }
@@ -501,13 +501,13 @@ impl Drop for EngineServices {
     }
 }
 
-/// Walk `channels` in ascending key order, deriving each wire's slice of the
+/// Walk `ports` in ascending key order, deriving each wire's slice of the
 /// node's control buffer.
 ///
-/// A channel's `count` is in lamps and a lamp is three samples; slices start
-/// where the previous one ended. A channel with no count takes the remainder,
+/// A port's `count` is in lamps and a lamp is three samples; slices start
+/// where the previous one ended. A port with no count takes the remainder,
 /// which only the last one may do — [`remainder_offender`] is the check, and
-/// this iterator assumes it has passed. Channels authoring zero lamps drive
+/// this iterator assumes it has passed. Ports authoring zero lamps drive
 /// nothing and are dropped here (the warning is issued once, on the changed
 /// path, not by this iterator — it runs per tick).
 ///
@@ -520,13 +520,13 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
         .ports
         .entries
         .iter()
-        .filter_map(move |(key, channel)| match channel.count() {
+        .filter_map(move |(key, port)| match port.count() {
             Some(0) => None,
             Some(count) => {
                 let len = count.saturating_mul(3);
                 let wire = PlannedWire {
-                    channel: *key,
-                    endpoint: channel.endpoint(),
+                    port: *key,
+                    endpoint: port.endpoint(),
                     start_samples: start,
                     len_samples: Some(len),
                 };
@@ -534,22 +534,22 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
                 Some(wire)
             }
             None => Some(PlannedWire {
-                channel: *key,
-                endpoint: channel.endpoint(),
+                port: *key,
+                endpoint: port.endpoint(),
                 start_samples: start,
                 len_samples: None,
             }),
         })
 }
 
-/// The key of the first channel that takes the remainder without being the
+/// The key of the first port that takes the remainder without being the
 /// last one, if any — the one authoring mistake that makes the slices
 /// undefined.
 ///
-/// Two channels with no count cannot both be "the rest of the buffer", and a
-/// count-less channel in the middle leaves everything after it without a
+/// Two ports with no count cannot both be "the rest of the buffer", and a
+/// count-less port in the middle leaves everything after it without a
 /// start. Rather than guess, the whole output is refused: a wrong strip lit is
-/// worse than a dark one, and the log names the channel to fix.
+/// worse than a dark one, and the log names the port to fix.
 fn remainder_offender(config: &OutputDef) -> Option<u32> {
     let mut remainder: Option<u32> = None;
     for wire in planned_wires(config) {
@@ -557,13 +557,13 @@ fn remainder_offender(config: &OutputDef) -> Option<u32> {
             return Some(previous);
         }
         if wire.len_samples.is_none() {
-            remainder = Some(wire.channel);
+            remainder = Some(wire.port);
         }
     }
     None
 }
 
-/// Do these wires already say exactly what the authored channels say?
+/// Do these wires already say exactly what the authored ports say?
 ///
 /// The per-tick hot path: walks both sequences in key order without allocating
 /// or cloning, and answers "nothing to do" for the overwhelming majority of
@@ -614,11 +614,11 @@ fn output_options_eq(
 
 /// Flush every wire of every dirty sink, then report the first failure.
 ///
-/// Wires are independent hardware channels and this map has no meaningful
+/// Wires are independent hardware ports and this map has no meaningful
 /// order, so a wire that fails to open or write must not cost the frame its
 /// siblings: returning early here made one unavailable endpoint look like a
-/// whole-project blackout, and which channels survived depended on hash order.
-/// Every failure is logged with its node and channel; the first is returned so
+/// whole-project blackout, and which ports survived depended on hash order.
+/// Every failure is logged with its node and port; the first is returned so
 /// the tick still reports an error.
 ///
 /// Each node's buffer is decoded **once**, into `samples`, and every wire of
@@ -735,32 +735,32 @@ fn flush_one_wire(
     };
     let byte_count = ((slice.len() / 3) * 3) as u32;
 
-    // Every provider refuses a write shorter than the channel it opened
+    // Every provider refuses a write shorter than the port it opened
     // (`DataLengthMismatch`), so a wire whose slice shrank — a re-authored
-    // count, a smaller upstream extent — must give the channel back and take a
+    // count, a smaller upstream extent — must give the port back and take a
     // right-sized one. Growth needs no reopen: providers resize upward on write.
     if let Some(last) = wire.last_byte_count
         && byte_count < last
-        && wire.channel_handle.is_some()
+        && wire.port_handle.is_some()
     {
         close_output_wire_with(provider, wire);
         wire.last_byte_count = None;
     }
 
-    ensure_channel_open(provider, wire, display_options, byte_count, generation).map_err(
+    ensure_port_open(provider, wire, display_options, byte_count, generation).map_err(
         |error| OutputFlushError::Provider {
             node,
-            channel: wire.channel,
+            port: wire.port,
             endpoint: wire.endpoint.clone(),
             error,
         },
     )?;
 
     let handle = wire
-        .channel_handle
+        .port_handle
         .ok_or_else(|| OutputFlushError::Provider {
             node,
-            channel: wire.channel,
+            port: wire.port,
             endpoint: wire.endpoint.clone(),
             error: OutputError::InvalidConfig {
                 reason: String::from("internal: missing output handle after open"),
@@ -771,7 +771,7 @@ fn flush_one_wire(
         .write(handle, slice)
         .map_err(|error| OutputFlushError::Provider {
             node,
-            channel: wire.channel,
+            port: wire.port,
             endpoint: wire.endpoint.clone(),
             error,
         })?;
@@ -789,11 +789,11 @@ fn flush_one_wire(
 /// do have pixels must still light — but it is said out loud, once per extent.
 ///
 /// A second, independent clamp applies after: no wire may carry more than
-/// [`WS281X_MAX_LEDS_PER_CHANNEL`] lamps, the shared bound every
+/// [`WS281X_MAX_LEDS_PER_PORT`] lamps, the shared bound every
 /// [`lpc_shared::output::OutputProvider`] is granted through this one seam.
 /// Applying it here — rather than leaving it to each provider — is what makes
 /// host, emulator, and device agree on the same byte count for the same
-/// authored channel; a provider is free to keep its own copy as defense in
+/// authored port; a provider is free to keep its own copy as defense in
 /// depth, but this is the one that decides.
 fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Option<&'a [u16]> {
     let available = samples.len() as u32;
@@ -807,10 +807,10 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
     if end < wanted_end {
         if wire.truncated_at_samples != Some(available) {
             log::warn!(
-                "EngineServices: output node {node} channel {} ({}) wants samples \
+                "EngineServices: output node {node} port {} ({}) wants samples \
                  {}..{wanted_end} but the control buffer holds {available}; \
                  driving {} sample(s) of it",
-                wire.channel,
+                wire.port,
                 wire.endpoint,
                 wire.start_samples,
                 end.saturating_sub(start),
@@ -829,10 +829,10 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
     if capped {
         if wire.capped_at_samples != Some(requested) {
             log::warn!(
-                "EngineServices: output node {node} channel {} ({}) wants {} lamp(s) but the \
-                 shared per-channel cap is {WS281X_MAX_LEDS_PER_CHANNEL} lamps; granting {} \
+                "EngineServices: output node {node} port {} ({}) wants {} lamp(s) but the \
+                 shared per-port cap is {WS281X_MAX_LEDS_PER_PORT} lamps; granting {} \
                  lamp(s) of it",
-                wire.channel,
+                wire.port,
                 wire.endpoint,
                 requested / 3,
                 len / 3,
@@ -860,18 +860,18 @@ fn decode_bytes_as_u16_le_into(bytes: &[u8], out: &mut Vec<u16>) {
     );
 }
 
-/// Open the wire's channel if it has none, parking it on failure.
+/// Open the wire's port if it has none, parking it on failure.
 ///
 /// `generation` is the provider's hardware generation sampled before any open
 /// this flush; a wire that fails records it and is skipped until it changes.
-fn ensure_channel_open(
+fn ensure_port_open(
     provider: &dyn OutputProvider,
     wire: &mut OutputWire,
     display_options: Option<&OutputDriverOptions>,
     byte_count: u32,
     generation: u64,
 ) -> Result<(), OutputError> {
-    if wire.channel_handle.is_some() {
+    if wire.port_handle.is_some() {
         return Ok(());
     }
 
@@ -895,7 +895,7 @@ fn ensure_channel_open(
             wire.endpoint
         );
     }
-    wire.channel_handle = Some(handle);
+    wire.port_handle = Some(handle);
     wire.last_byte_count = Some(bc);
     Ok(())
 }
@@ -912,7 +912,7 @@ mod tests {
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig, OutputPortDef};
     use lpc_model::{HwEndpointSpec, NodeId, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
-        MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
+        MemoryOutputProvider, OutputPortHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
 
@@ -920,7 +920,7 @@ mod tests {
     use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 
     #[test]
-    fn engine_services_drop_closes_open_output_channels() {
+    fn engine_services_drop_closes_open_output_ports() {
         let provider = Rc::new(MemoryOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -937,7 +937,7 @@ mod tests {
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
-            .expect("flush opens output channel");
+            .expect("flush opens output port");
         assert!(provider.is_endpoint_open(&endpoint));
         assert!(provider.is_pin_open(18));
 
@@ -951,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn output_sink_config_update_reopens_channel_on_next_flush() {
+    fn output_sink_config_update_reopens_port_on_next_flush() {
         let provider = Rc::new(MemoryOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -986,15 +986,15 @@ mod tests {
             .get_handle_for_endpoint(&endpoint)
             .expect("second handle");
         assert_ne!(first_handle, second_handle);
-        assert_eq!(provider.open_channel_count(), 1);
+        assert_eq!(provider.open_port_count(), 1);
     }
 
     /// Every tick re-reads every output's authored config, so the unchanged
-    /// case — which is nearly every one of them — must leave the channel
-    /// exactly as it found it. Reopening here would drop a live channel and
+    /// case — which is nearly every one of them — must leave the port
+    /// exactly as it found it. Reopening here would drop a live port and
     /// re-claim the pin sixty times a second.
     #[test]
-    fn re_applying_an_unchanged_config_leaves_the_channel_alone() {
+    fn re_applying_an_unchanged_config_leaves_the_port_alone() {
         let provider = Rc::new(CountingOutputProvider::new(MemoryOutputProvider::new()));
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
@@ -1005,11 +1005,11 @@ mod tests {
         services.register_output_sink(buffer_id, node(1), &config);
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
-            .expect("initial flush opens the channel");
+            .expect("initial flush opens the port");
         let handle = provider
             .inner()
             .get_handle_for_endpoint(&endpoint("ws281x:local:D10"))
-            .expect("channel handle");
+            .expect("port handle");
         let generation = provider.hardware_generation();
 
         for _ in 0..32 {
@@ -1068,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn unregister_output_sink_closes_open_channel() {
+    fn unregister_output_sink_closes_open_port() {
         let provider = Rc::new(MemoryOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1115,7 +1115,7 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(provider.open_channel_count(), 1);
+        assert_eq!(provider.open_port_count(), 1);
         assert!(provider.is_endpoint_open(&endpoint));
         assert!(provider.is_pin_open(18));
     }
@@ -1141,7 +1141,7 @@ mod tests {
             .expect_err("single RMT resource should allow only one output");
 
         assert!(err.to_string().contains("/rmt/ws281x0"));
-        assert_eq!(provider.open_channel_count(), 1);
+        assert_eq!(provider.open_port_count(), 1);
         assert_ne!(
             provider.is_endpoint_open(&first_endpoint),
             provider.is_endpoint_open(&second_endpoint)
@@ -1149,10 +1149,10 @@ mod tests {
         assert_ne!(provider.is_pin_open(18), provider.is_pin_open(19));
     }
 
-    /// One unopenable sink must not cost the frame its other channels.
+    /// One unopenable sink must not cost the frame its other ports.
     ///
     /// `output_sinks` is a `HashMap`, so before flushing was made per-sink the
-    /// surviving channels depended on where the bad one landed in hash order —
+    /// surviving ports depended on where the bad one landed in hash order —
     /// a four-strip project could go dark except for one strip, and a
     /// different strip on the next run.
     #[test]
@@ -1195,7 +1195,7 @@ mod tests {
                 "{spec} was skipped because another sink failed"
             );
         }
-        assert_eq!(provider.open_channel_count(), good.len());
+        assert_eq!(provider.open_port_count(), good.len());
     }
 
     /// An endpoint the board does not have can never open, so the flush seam
@@ -1353,7 +1353,7 @@ mod tests {
 
     // ---- one node, many wires -------------------------------------------
 
-    /// The whole point of channels: one node, one buffer, N wires, each
+    /// The whole point of ports: one node, one buffer, N wires, each
     /// carrying exactly its own lamps and nobody else's.
     #[test]
     fn one_node_slices_its_buffer_across_its_wires() {
@@ -1366,30 +1366,30 @@ mod tests {
         )))));
 
         let mut buffers = RuntimeBufferStore::new();
-        // Six lamps: 2 + 3 authored, and the last channel takes what is left.
+        // Six lamps: 2 + 3 authored, and the last port takes what is left.
         let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
-        services.register_output_sink(buffer_id, node(1), &triple_channel_output());
+        services.register_output_sink(buffer_id, node(1), &triple_port_output());
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("every wire opens and writes");
 
-        assert_eq!(provider.open_channel_count(), 3);
+        assert_eq!(provider.open_port_count(), 3);
         assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
         assert_eq!(wire_data(&provider, "ws281x:local:D9"), ramp(6, 9));
         assert_eq!(
             wire_data(&provider, "ws281x:local:D8"),
             ramp(15, 3),
-            "the highest-keyed channel omits its count, so it takes the remainder"
+            "the highest-keyed port omits its count, so it takes the remainder"
         );
     }
 
-    /// Two channels cannot both be "the rest of the buffer", and a count-less
-    /// channel in the middle leaves everything after it without a start. The
+    /// Two ports cannot both be "the rest of the buffer", and a count-less
+    /// port in the middle leaves everything after it without a start. The
     /// output is refused whole rather than lighting a guess — and it must not
     /// panic, because this is authored data.
     #[test]
-    fn an_output_with_two_remainder_channels_drives_nothing() {
+    fn an_output_with_two_remainder_ports_drives_nothing() {
         let provider = Rc::new(MemoryOutputProvider::new_permissive());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1409,17 +1409,17 @@ mod tests {
             .expect("a refused output is not a frame failure");
 
         assert_eq!(
-            provider.open_channel_count(),
+            provider.open_port_count(),
             0,
             "an output whose slices are undefined must not light a wire"
         );
 
         // And once the authoring is fixed, the very next tick drives it.
-        services.update_output_sink_config(buffer_id, node(1), &triple_channel_output());
+        services.update_output_sink_config(buffer_id, node(1), &triple_port_output());
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("the corrected output flushes");
-        assert_eq!(provider.open_channel_count(), 3);
+        assert_eq!(provider.open_port_count(), 3);
     }
 
     /// Counts are authored; the buffer is whatever the graph produced. When
@@ -1499,7 +1499,7 @@ mod tests {
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("a long buffer must not fail the frame");
 
-        assert_eq!(provider.open_channel_count(), 2);
+        assert_eq!(provider.open_port_count(), 2);
         assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
         assert_eq!(
             wire_data(&provider, "ws281x:local:D9"),
@@ -1508,7 +1508,7 @@ mod tests {
         );
     }
 
-    /// …and a remainder channel GROWS with the buffer, which is what makes
+    /// …and a remainder port GROWS with the buffer, which is what makes
     /// "add a second strand to this output" work with no re-authoring at all:
     /// the last wire simply carries more lamps.
     #[test]
@@ -1547,11 +1547,11 @@ mod tests {
         );
     }
 
-    /// Every provider refuses a write shorter than the channel it opened, so a
-    /// wire whose slice shrank must give the channel back and take a
+    /// Every provider refuses a write shorter than the port it opened, so a
+    /// wire whose slice shrank must give the port back and take a
     /// right-sized one. Without the reopen this fails every frame, forever.
     #[test]
-    fn a_shrunken_slice_reopens_the_channel() {
+    fn a_shrunken_slice_reopens_the_port() {
         let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
             lpc_hardware::default_esp32s3_hardware_manifest(),
         ));
@@ -1593,16 +1593,16 @@ mod tests {
         let second = provider
             .get_handle_for_endpoint(&endpoint("ws281x:local:D10"))
             .expect("second handle");
-        assert_ne!(first, second, "a narrower slice must reopen the channel");
+        assert_ne!(first, second, "a narrower slice must reopen the port");
         assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
         assert_eq!(
             wire_data(&provider, "ws281x:local:D9"),
             ramp(6, 12),
-            "the remainder wire grew to cover what channel 0 gave up"
+            "the remainder wire grew to cover what port 0 gave up"
         );
     }
 
-    /// Parking is per wire, exactly as it was per sink: a channel the board
+    /// Parking is per wire, exactly as it was per sink: a port the board
     /// cannot give must not take its siblings down, and must not re-ask every
     /// frame either.
     #[test]
@@ -1630,8 +1630,8 @@ mod tests {
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect_err("the missing pin is still reported");
         assert!(
-            err.to_string().contains("node 1 channel 0"),
-            "the error must name the node and the channel, got: {err}"
+            err.to_string().contains("node 1 port 0"),
+            "the error must name the node and the port, got: {err}"
         );
         assert_eq!(
             wire_data(provider.inner(), "ws281x:local:D10"),
@@ -1656,7 +1656,7 @@ mod tests {
         );
     }
 
-    /// Re-authoring one channel asks the hardware about that channel only. The
+    /// Re-authoring one port asks the hardware about that port only. The
     /// sink used to park as a unit, so editing any field un-parked every wire
     /// and paid for a full enumeration per hopeless endpoint all over again.
     #[test]
@@ -1691,7 +1691,7 @@ mod tests {
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
         assert_eq!(provider.open_calls(), 2, "both wires had their one attempt");
 
-        // Fix channel 1 only.
+        // Fix port 1 only.
         services.update_output_sink_config(
             buffer_id,
             node(1),
@@ -1702,7 +1702,7 @@ mod tests {
         assert_eq!(
             provider.open_calls(),
             3,
-            "only the re-authored wire asked again; channel 0 is still parked"
+            "only the re-authored wire asked again; port 0 is still parked"
         );
         assert!(
             provider
@@ -1711,14 +1711,14 @@ mod tests {
         );
     }
 
-    // ---- shared per-channel cap (P3) --------------------------------------
+    // ---- shared per-port cap (P3) --------------------------------------
 
     /// The headline parity claim: a wire that wants more than the shared
     /// 1024-lamp cap is truncated to exactly `1024*3` bytes, on the plain
     /// memory provider — no protocol-specific behavior involved, just the
     /// engine seam every provider goes through.
     #[test]
-    fn a_1500_lamp_channel_truncates_to_the_shared_cap_on_the_memory_provider() {
+    fn a_1500_lamp_port_truncates_to_the_shared_cap_on_the_memory_provider() {
         let provider = Rc::new(MemoryOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1736,7 +1736,7 @@ mod tests {
 
         assert_eq!(
             wire_data(&provider, "ws281x:local:D10"),
-            ramp(0, super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3),
+            ramp(0, super::WS281X_MAX_LEDS_PER_PORT as u32 * 3),
             "only the first 1024 lamps reach the memory provider"
         );
     }
@@ -1756,7 +1756,7 @@ mod tests {
     /// same capped byte count, so the guarantee does not depend on what the
     /// provider does with it.
     #[test]
-    fn a_1500_lamp_channel_truncates_identically_through_a_non_capping_provider() {
+    fn a_1500_lamp_port_truncates_identically_through_a_non_capping_provider() {
         let provider = Rc::new(RecordingOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedRecordingProvider(Rc::clone(
@@ -1772,7 +1772,7 @@ mod tests {
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("a capped wire still opens and writes");
 
-        let cap_bytes = super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3;
+        let cap_bytes = super::WS281X_MAX_LEDS_PER_PORT as u32 * 3;
         assert_eq!(
             provider.opens(),
             vec![cap_bytes],
@@ -1788,8 +1788,8 @@ mod tests {
     /// 375 and 1024 lamps both sit at or under the cap, so neither is
     /// truncated — the DOD's explicit "uncapped everywhere" boundary case.
     #[test]
-    fn channels_at_or_under_the_cap_open_uncapped() {
-        for lamps in [375u32, super::WS281X_MAX_LEDS_PER_CHANNEL as u32] {
+    fn ports_at_or_under_the_cap_open_uncapped() {
+        for lamps in [375u32, super::WS281X_MAX_LEDS_PER_PORT as u32] {
             let provider = Rc::new(MemoryOutputProvider::new());
             let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
             services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1808,7 +1808,7 @@ mod tests {
             assert_eq!(
                 wire_data(&provider, "ws281x:local:D10"),
                 ramp(0, lamps * 3),
-                "a {lamps}-lamp channel must not be truncated"
+                "a {lamps}-lamp port must not be truncated"
             );
         }
     }
@@ -1818,7 +1818,7 @@ mod tests {
     /// uncapped, with the offsets undisturbed by capping logic that never
     /// fires.
     #[test]
-    fn a_five_channel_dome_shaped_project_opens_every_wire_uncapped() {
+    fn a_five_port_dome_shaped_project_opens_every_wire_uncapped() {
         let provider = Rc::new(MemoryOutputProvider::new_permissive());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1842,26 +1842,26 @@ mod tests {
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("every strand opens and writes");
 
-        assert_eq!(provider.open_channel_count(), 5);
+        assert_eq!(provider.open_port_count(), 5);
         for i in 0..5u32 {
             let spec = HwEndpointSpec::parse(&alloc::format!("ws281x:local:D{i}")).expect("spec");
             let handle = provider
                 .get_handle_for_endpoint(&spec)
-                .unwrap_or_else(|| panic!("channel {i} never opened"));
+                .unwrap_or_else(|| panic!("port {i} never opened"));
             assert_eq!(
                 provider.get_data(handle),
                 Some(ramp(i * 900, 900)),
-                "channel {i} must carry exactly its own 300 lamps, uncapped"
+                "port {i} must carry exactly its own 300 lamps, uncapped"
             );
         }
     }
 
-    /// A channel authoring more than the cap must not corrupt where its
+    /// A port authoring more than the cap must not corrupt where its
     /// siblings start: the cap only trims what reaches the provider, the
-    /// buffer offsets downstream channels are computed from stay the full
+    /// buffer offsets downstream ports are computed from stay the full
     /// authored count.
     #[test]
-    fn a_capped_channel_does_not_shift_its_siblings_offset() {
+    fn a_capped_port_does_not_shift_its_siblings_offset() {
         let provider = Rc::new(MemoryOutputProvider::new_permissive());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
@@ -1869,8 +1869,8 @@ mod tests {
         )))));
 
         let mut buffers = RuntimeBufferStore::new();
-        // Channel 0 authors 1500 lamps (over the cap); channel 1 takes the
-        // remainder — 3 lamps — starting where channel 0's *authored* extent
+        // Port 0 authors 1500 lamps (over the cap); port 1 takes the
+        // remainder — 3 lamps — starting where port 0's *authored* extent
         // ends, at sample 4500, not where its *capped* write ended.
         let buffer_id = ramp_buffer(&mut buffers, 1503, Revision::new(1));
         let config = OutputDef::with_ports([
@@ -1888,13 +1888,13 @@ mod tests {
 
         assert_eq!(
             wire_data(&provider, "ws281x:local:D0"),
-            ramp(0, super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3),
-            "channel 0 is capped to its first 1024 lamps"
+            ramp(0, super::WS281X_MAX_LEDS_PER_PORT as u32 * 3),
+            "port 0 is capped to its first 1024 lamps"
         );
         assert_eq!(
             wire_data(&provider, "ws281x:local:D1"),
             ramp(1500 * 3, 9),
-            "channel 1 still starts after channel 0's full 1500-lamp authored extent"
+            "port 1 still starts after port 0's full 1500-lamp authored extent"
         );
     }
 
@@ -1907,7 +1907,7 @@ mod tests {
     }
 
     /// Three wires over one buffer: 2 lamps, 3 lamps, and the remainder.
-    fn triple_channel_output() -> OutputDef {
+    fn triple_port_output() -> OutputDef {
         OutputDef::with_ports([
             (
                 0,
@@ -2002,16 +2002,16 @@ mod tests {
             byte_count: u32,
             format: OutputFormat,
             options: Option<OutputDriverOptions>,
-        ) -> Result<OutputChannelHandle, OutputError> {
+        ) -> Result<OutputPortHandle, OutputError> {
             self.0.open_calls.set(self.0.open_calls.get() + 1);
             self.0.inner.open(endpoint, byte_count, format, options)
         }
 
-        fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+        fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
             self.0.inner.write(handle, data)
         }
 
-        fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+        fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
             self.0.inner.close(handle)
         }
 
@@ -2034,15 +2034,15 @@ mod tests {
             byte_count: u32,
             format: OutputFormat,
             options: Option<OutputDriverOptions>,
-        ) -> Result<OutputChannelHandle, OutputError> {
+        ) -> Result<OutputPortHandle, OutputError> {
             self.0.open(endpoint, byte_count, format, options)
         }
 
-        fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+        fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
             self.0.write(handle, data)
         }
 
-        fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+        fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
             self.0.close(handle)
         }
 
@@ -2055,7 +2055,7 @@ mod tests {
     /// asked to open and write and applies no bound of its own, unlike
     /// `MemoryOutputProvider` (which at least validates length on write) or
     /// `Esp32OutputProvider` (which keeps its own backstop). See
-    /// `a_1500_lamp_channel_truncates_identically_through_a_non_capping_provider`
+    /// `a_1500_lamp_port_truncates_identically_through_a_non_capping_provider`
     /// for why this stands in for `fw-emu`'s `SyscallOutputProvider`.
     struct RecordingOutputProvider {
         opens: core::cell::RefCell<Vec<u32>>,
@@ -2090,20 +2090,20 @@ mod tests {
             byte_count: u32,
             format: OutputFormat,
             _options: Option<OutputDriverOptions>,
-        ) -> Result<OutputChannelHandle, OutputError> {
+        ) -> Result<OutputPortHandle, OutputError> {
             assert_eq!(format, OutputFormat::Ws2811);
             self.0.opens.borrow_mut().push(byte_count);
             let handle = self.0.next_handle.get();
             self.0.next_handle.set(handle + 1);
-            Ok(OutputChannelHandle::new(handle))
+            Ok(OutputPortHandle::new(handle))
         }
 
-        fn write(&self, _handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+        fn write(&self, _handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
             self.0.writes.borrow_mut().push(data.len());
             Ok(())
         }
 
-        fn close(&self, _handle: OutputChannelHandle) -> Result<(), OutputError> {
+        fn close(&self, _handle: OutputPortHandle) -> Result<(), OutputError> {
             Ok(())
         }
 

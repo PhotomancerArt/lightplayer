@@ -1,5 +1,5 @@
 use crate::output::provider::{
-    OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+    OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
 use alloc::boxed::Box;
 use alloc::format;
@@ -21,8 +21,8 @@ enum EndpointValidation {
     Permissive,
 }
 
-/// Channel state for in-memory provider
-struct ChannelState {
+/// Per-port state for the in-memory provider
+struct PortState {
     endpoint: HwEndpointSpec,
     #[allow(
         dead_code,
@@ -37,13 +37,13 @@ struct ChannelState {
 
 /// Internal state for memory provider (wrapped in RefCell for interior mutability)
 struct MemoryOutputProviderState {
-    channels: VecMap<OutputChannelHandle, ChannelState>,
+    ports: VecMap<OutputPortHandle, PortState>,
     next_handle: i32,
 }
 
 /// In-memory output provider for testing
 ///
-/// Tracks opened channels, prevents duplicate opens on the same pin,
+/// Tracks opened ports, prevents duplicate opens on the same pin,
 /// and stores written data for verification.
 pub struct MemoryOutputProvider {
     hardware_system: Rc<HardwareSystem>,
@@ -93,27 +93,27 @@ impl MemoryOutputProvider {
             hardware_system,
             endpoint_validation,
             state: RefCell::new(MemoryOutputProviderState {
-                channels: VecMap::new(),
+                ports: VecMap::new(),
                 next_handle: 0,
             }),
         }
     }
 
-    /// Get the 16-bit data written to a channel (for testing)
-    pub fn get_data(&self, handle: OutputChannelHandle) -> Option<Vec<u16>> {
+    /// Get the 16-bit data written to a port (for testing)
+    pub fn get_data(&self, handle: OutputPortHandle) -> Option<Vec<u16>> {
         self.state
             .borrow()
-            .channels
+            .ports
             .get(&handle)
             .map(|state| state.data.clone())
     }
 
-    /// Get the number of open channels
-    pub fn open_channel_count(&self) -> usize {
-        self.state.borrow().channels.len()
+    /// Get the number of open ports
+    pub fn open_port_count(&self) -> usize {
+        self.state.borrow().ports.len()
     }
 
-    /// Check if a GPIO pin is currently claimed by an opened channel.
+    /// Check if a GPIO pin is currently claimed by an opened port.
     pub fn is_pin_open(&self, pin: u32) -> bool {
         self.hardware_system
             .registry()
@@ -129,10 +129,10 @@ impl MemoryOutputProvider {
     pub fn get_handle_for_endpoint(
         &self,
         endpoint: &HwEndpointSpec,
-    ) -> Option<OutputChannelHandle> {
+    ) -> Option<OutputPortHandle> {
         let state = self.state.borrow();
-        for (handle, channel_state) in state.channels.iter() {
-            if channel_state.endpoint == *endpoint {
+        for (handle, port_state) in state.ports.iter() {
+            if port_state.endpoint == *endpoint {
                 return Some(*handle);
             }
         }
@@ -140,8 +140,8 @@ impl MemoryOutputProvider {
     }
 
     /// Get all open handles (for testing)
-    pub fn get_all_handles(&self) -> Vec<OutputChannelHandle> {
-        self.state.borrow().channels.keys().copied().collect()
+    pub fn get_all_handles(&self) -> Vec<OutputPortHandle> {
+        self.state.borrow().ports.keys().copied().collect()
     }
 }
 
@@ -152,7 +152,7 @@ impl OutputProvider for MemoryOutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, OutputError> {
+    ) -> Result<OutputPortHandle, OutputError> {
         // Validate byte_count
         if byte_count == 0 {
             return Err(OutputError::InvalidConfig {
@@ -170,15 +170,15 @@ impl OutputProvider for MemoryOutputProvider {
         let mut state = self.state.borrow_mut();
 
         // Create handle
-        let handle = OutputChannelHandle::new(state.next_handle);
+        let handle = OutputPortHandle::new(state.next_handle);
         state.next_handle += 1;
 
         // num_leds = byte_count/3 (8-bit output size), 16-bit input = num_leds*3 u16s
         let num_leds = (byte_count / 3) as usize;
         let u16_count = num_leds * 3;
 
-        // Create channel state
-        let channel_state = ChannelState {
+        // Create port state
+        let port_state = PortState {
             endpoint: endpoint.clone(),
             byte_count,
             format,
@@ -187,33 +187,33 @@ impl OutputProvider for MemoryOutputProvider {
         };
 
         // Store state
-        state.channels.insert(handle, channel_state);
+        state.ports.insert(handle, port_state);
 
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+    fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
         let mut state = self.state.borrow_mut();
 
         // Check if handle exists and get mutable reference
-        let channel_state =
+        let port_state =
             state
-                .channels
+                .ports
                 .get_mut(&handle)
                 .ok_or_else(|| OutputError::InvalidHandle {
                     handle: handle.as_i32(),
                 })?;
 
-        let expected_len = channel_state.data.len();
+        let expected_len = port_state.data.len();
 
-        // Resize channel if data is larger (matches ESP32 provider behavior)
+        // Resize the port if data is larger (matches ESP32 provider behavior)
         if data.len() > expected_len {
             let new_len = (data.len() / 3) * 3; // round down to full LEDs
-            channel_state.data.resize(new_len, 0);
-            channel_state.byte_count = new_len as u32;
-            channel_state
+            port_state.data.resize(new_len, 0);
+            port_state.byte_count = new_len as u32;
+            port_state
                 .output
-                .resize(Ws281xConfig::new(channel_state.byte_count))?;
+                .resize(Ws281xConfig::new(port_state.byte_count))?;
         } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
@@ -221,24 +221,24 @@ impl OutputProvider for MemoryOutputProvider {
             });
         }
 
-        let mut raw = Vec::with_capacity(channel_state.data.len());
-        render_rgb8(data, channel_state.data.len(), &mut raw);
-        channel_state.output.write(&raw)?;
+        let mut raw = Vec::with_capacity(port_state.data.len());
+        render_rgb8(data, port_state.data.len(), &mut raw);
+        port_state.output.write(&raw)?;
 
         // Store data
-        let len = channel_state.data.len();
-        channel_state.data.copy_from_slice(&data[..len]);
+        let len = port_state.data.len();
+        port_state.data.copy_from_slice(&data[..len]);
 
         Ok(())
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+    fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
         let mut state = self.state.borrow_mut();
 
-        // Remove channel from channels
-        let _channel =
+        // Remove the port from the open set
+        let _port =
             state
-                .channels
+                .ports
                 .remove(&handle)
                 .ok_or_else(|| OutputError::InvalidHandle {
                     handle: handle.as_i32(),
@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn test_memory_provider_creation() {
         let provider = MemoryOutputProvider::new();
-        assert_eq!(provider.open_channel_count(), 0);
+        assert_eq!(provider.open_port_count(), 0);
     }
 
     #[test]
@@ -388,8 +388,8 @@ mod tests {
     }
 
     /// The generation is what tells a parked caller to try again, so it must
-    /// move when a channel claims or frees hardware — and must not move when
-    /// the channel is merely being written to, which happens every frame.
+    /// move when a port claims or frees hardware — and must not move when
+    /// the port is merely being written to, which happens every frame.
     #[test]
     fn hardware_generation_tracks_claims_not_writes() {
         let provider = MemoryOutputProvider::new();
