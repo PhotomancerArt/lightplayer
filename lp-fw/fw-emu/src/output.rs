@@ -17,7 +17,7 @@ use lpc_hardware::OutputError;
 use lpc_hardware::{
     HardwareEndpointError, HardwareSystem, HwEndpointSpec, HwRegistry, Ws281xConfig, Ws281xOutput,
 };
-use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 
 /// Syscall-based OutputProvider implementation
 ///

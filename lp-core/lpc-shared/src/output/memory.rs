@@ -1,5 +1,5 @@
 use crate::output::provider::{
-    OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+    OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider,
 };
 use alloc::boxed::Box;
 use alloc::format;
@@ -126,10 +126,7 @@ impl MemoryOutputProvider {
     }
 
     /// Get the handle for a given endpoint (for testing)
-    pub fn get_handle_for_endpoint(
-        &self,
-        endpoint: &HwEndpointSpec,
-    ) -> Option<OutputPortHandle> {
+    pub fn get_handle_for_endpoint(&self, endpoint: &HwEndpointSpec) -> Option<OutputPortHandle> {
         let state = self.state.borrow();
         for (handle, port_state) in state.ports.iter() {
             if port_state.endpoint == *endpoint {
@@ -236,13 +233,12 @@ impl OutputProvider for MemoryOutputProvider {
         let mut state = self.state.borrow_mut();
 
         // Remove the port from the open set
-        let _port =
-            state
-                .ports
-                .remove(&handle)
-                .ok_or_else(|| OutputError::InvalidHandle {
-                    handle: handle.as_i32(),
-                })?;
+        let _port = state
+            .ports
+            .remove(&handle)
+            .ok_or_else(|| OutputError::InvalidHandle {
+                handle: handle.as_i32(),
+            })?;
 
         Ok(())
     }

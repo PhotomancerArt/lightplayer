@@ -30,7 +30,7 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::output::{
-    MemoryOutputProvider, OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+    MemoryOutputProvider, OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::TextureStorageFormat;
@@ -526,9 +526,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     rt.tick(&registry, 10)
         .expect("second tick reuses fixture render target");
 
-    let handle = mem
-        .get_handle_for_endpoint(&endpoint)
-        .expect("port opened");
+    let handle = mem.get_handle_for_endpoint(&endpoint).expect("port opened");
     let got = mem.get_data(handle).expect("written");
     assert_eq!(got.len(), 3);
     assert_eq!(got[0], 65535);
