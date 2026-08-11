@@ -313,7 +313,9 @@ Per the deferred-decision convention, these are indexed in
   way; both satisfy the same contract. `DebugSlotsSection` is not dead —
   `OutputDef::test_pattern` remains its one occupant, which is the good
   outcome the taxonomy predicted: Debug holding exactly the diagnostics
-  it describes.
+  it describes. *2026-08-10 amendment: it gained a second occupant,
+  `OutputDef::highlight` — the patch-selection pulse
+  (`2026-08-10-patch-selection-pulse.md`), again pure diagnostics.*
 - **(b) Debug indication on preview/play surfaces.** D8 covered the workspace
   (chip, card, section) only; a running installation showing a test pattern
   has no indication outside the editor. **Revisit when** the panels/play-mode

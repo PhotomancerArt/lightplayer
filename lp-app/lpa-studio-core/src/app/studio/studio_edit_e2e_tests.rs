@@ -2448,8 +2448,8 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
             section,
             UiNodeSection::DebugSlots(_)
         )),
-        vec!["Test pattern"],
-        "the output's one Debug field renders in the Debug section"
+        vec!["Test pattern", "Highlight"],
+        "the output's Debug fields render in the Debug section"
     );
     assert!(
         !section_slot_labels(&sections, |section| matches!(
