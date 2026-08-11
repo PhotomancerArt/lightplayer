@@ -5,9 +5,7 @@
 
 use base64::Engine as _;
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{
-    CircleDashed, Grid3x3, Hash, Image, MousePointer, Route, Scan, Spline,
-};
+use dioxus_icons::lucide::{CircleDashed, Grid3x3, Hash, Image, MousePointer, Route, Scan, Spline};
 use lpc_mapping::{Map2dDoc, corpus, resolve};
 
 use crate::editor_core::editor_session::MapEditorSession;

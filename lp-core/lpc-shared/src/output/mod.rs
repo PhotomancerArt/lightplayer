@@ -2,4 +2,4 @@ pub mod memory;
 pub mod provider;
 
 pub use memory::MemoryOutputProvider;
-pub use provider::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+pub use provider::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};

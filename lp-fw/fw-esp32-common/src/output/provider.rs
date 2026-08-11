@@ -13,11 +13,11 @@ use lp_collection::VecMap;
 
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_PORT,
-    Ws281xConfig, Ws281xOutput, ws281x_capped_byte_count,
+    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_PORT, Ws281xConfig,
+    Ws281xOutput, ws281x_capped_byte_count,
 };
 use lpc_shared::DisplayPipeline;
-use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 const FRAME_INTERVAL_US: u64 = 16_667;
 const MID_FRAME_US: u64 = 8_333;
 
@@ -341,7 +341,7 @@ mod tests {
     use lpc_hardware::{
         HardwareSystem, HwManifest, HwRegistry, OutputError, WS281X_MAX_LEDS_PER_PORT,
     };
-    use lpc_shared::output::{OutputPortHandle, OutputFormat, OutputProvider};
+    use lpc_shared::output::{OutputFormat, OutputPortHandle, OutputProvider};
 
     use super::Esp32OutputProvider;
 
@@ -427,9 +427,9 @@ mod tests {
             let handle = open_ws281x(&provider, byte_count);
 
             let exact = vec![0u16; byte_count as usize];
-            provider.write(handle, &exact).unwrap_or_else(|error| {
-                panic!("{lamps}-lamp port should not be capped: {error}")
-            });
+            provider
+                .write(handle, &exact)
+                .unwrap_or_else(|error| panic!("{lamps}-lamp port should not be capped: {error}"));
         }
     }
 
@@ -476,7 +476,7 @@ mod concurrent_flush_tests {
         HwEndpointKind, HwEndpointSpec, HwManifest, HwRegistry, OutputError, Ws281xConfig,
         Ws281xDriver, Ws281xOutput,
     };
-    use lpc_shared::output::{OutputPortHandle, OutputFormat, OutputProvider};
+    use lpc_shared::output::{OutputFormat, OutputPortHandle, OutputProvider};
 
     use super::Esp32OutputProvider;
 

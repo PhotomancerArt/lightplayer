@@ -17,7 +17,7 @@ use lpc_hardware::{
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HwEndpointSpec, NodeId, Revision, TreePath};
-use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
@@ -159,10 +159,7 @@ impl fmt::Display for OutputFlushError {
                 port,
                 endpoint,
                 error,
-            } => write!(
-                f,
-                "output node {node} port {port} {endpoint}: {error}"
-            ),
+            } => write!(f, "output node {node} port {port} {endpoint}: {error}"),
             Self::Flush { error } => write!(f, "output flush barrier: {error}"),
         }
     }
@@ -426,9 +423,7 @@ impl EngineServices {
 
         let mut wires = Vec::with_capacity(config.port_count());
         for planned in planned_wires(config) {
-            let existing = previous
-                .iter()
-                .position(|wire| wire.port == planned.port);
+            let existing = previous.iter().position(|wire| wire.port == planned.port);
             match existing {
                 Some(index) => {
                     let mut wire = previous.remove(index);
@@ -747,25 +742,23 @@ fn flush_one_wire(
         wire.last_byte_count = None;
     }
 
-    ensure_port_open(provider, wire, display_options, byte_count, generation).map_err(
-        |error| OutputFlushError::Provider {
+    ensure_port_open(provider, wire, display_options, byte_count, generation).map_err(|error| {
+        OutputFlushError::Provider {
             node,
             port: wire.port,
             endpoint: wire.endpoint.clone(),
             error,
-        },
-    )?;
+        }
+    })?;
 
-    let handle = wire
-        .port_handle
-        .ok_or_else(|| OutputFlushError::Provider {
-            node,
-            port: wire.port,
-            endpoint: wire.endpoint.clone(),
-            error: OutputError::InvalidConfig {
-                reason: String::from("internal: missing output handle after open"),
-            },
-        })?;
+    let handle = wire.port_handle.ok_or_else(|| OutputFlushError::Provider {
+        node,
+        port: wire.port,
+        endpoint: wire.endpoint.clone(),
+        error: OutputError::InvalidConfig {
+            reason: String::from("internal: missing output handle after open"),
+        },
+    })?;
 
     provider
         .write(handle, slice)
@@ -912,8 +905,7 @@ mod tests {
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig, OutputPortDef};
     use lpc_model::{HwEndpointSpec, NodeId, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
-        MemoryOutputProvider, OutputPortHandle, OutputDriverOptions, OutputFormat,
-        OutputProvider,
+        MemoryOutputProvider, OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider,
     };
 
     use super::EngineServices;

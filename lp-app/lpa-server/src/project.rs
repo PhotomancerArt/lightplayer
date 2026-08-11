@@ -12,7 +12,7 @@ use lpc_hardware::HwEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_shared::backtrace;
-use lpc_shared::output::{OutputPortHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     OutputFrameProbeRequest, OutputFrameProbeResult, WireCreateNodeRequest, WireCreateNodeResponse,
