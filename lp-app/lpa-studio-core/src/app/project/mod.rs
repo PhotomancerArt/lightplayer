@@ -31,6 +31,7 @@ pub mod node;
 pub mod node_card_ui_state;
 pub(crate) mod output_frame_cache;
 pub(crate) mod patch_bay_derivation;
+pub mod patch_pulse;
 pub(crate) mod patch_verb_op;
 pub(crate) mod patch_verbs;
 pub mod project_connect_result;
@@ -73,6 +74,7 @@ pub use node::{
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
+pub use patch_pulse::{PatchPulseOp, PatchPulseSubject};
 pub use patch_verb_op::{
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
 };
