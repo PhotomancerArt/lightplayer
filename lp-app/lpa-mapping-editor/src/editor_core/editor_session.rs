@@ -686,10 +686,6 @@ impl MapEditorSession {
         self.resolved().lamps.len() as u32
     }
 
-    pub fn universe_count(&mut self) -> u32 {
-        self.resolved().universe_count()
-    }
-
     // ---- internals -------------------------------------------------------
 
     fn create_object(&mut self, object: Map2dObject) -> usize {

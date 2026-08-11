@@ -13,36 +13,36 @@ use lp_collection::VecMap;
 
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_CHANNEL,
-    Ws281xConfig, Ws281xOutput, ws281x_capped_byte_count,
+    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_PORT, Ws281xConfig,
+    Ws281xOutput, ws281x_capped_byte_count,
 };
 use lpc_shared::DisplayPipeline;
-use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
 const FRAME_INTERVAL_US: u64 = 16_667;
 const MID_FRAME_US: u64 = 8_333;
 
-/// Channels reserved up front in [`Esp32OutputProvider::channels`].
+/// Ports reserved up front in [`Esp32OutputProvider::ports`].
 ///
 /// A **reservation, not a limit** — `VecMap` still grows past it. It exists so
-/// that opening the Nth channel does not reallocate and memcpy the previous
-/// N-1 `ChannelState`s while they are live, which is a transient peak of twice
+/// that opening the Nth port does not reallocate and memcpy the previous
+/// N-1 `PortState`s while they are live, which is a transient peak of twice
 /// the steady-state size on the one path that runs when the heap is already at
 /// its high-water mark.
 ///
 /// 8 is the widest RMT TX slot count in the family (the classic's eight,
 /// before the block plan absorbs slots into wider windows). At today's
-/// `ChannelState` size this reservation costs well under a kilobyte.
+/// `PortState` size this reservation costs well under a kilobyte.
 ///
 /// ⚠️ Historical note worth keeping: this used to matter enormously.
-/// `ChannelState` carried a 3,084-byte inline white-point LUT, so the same
+/// `PortState` carried a 3,084-byte inline white-point LUT, so the same
 /// growth asked for 12,864 contiguous bytes and OOM'd the classic ESP32 with
 /// 11,228 free — `docs/defects/2026-08-01-classic-rmt-open-fault.md`. The LUT
 /// is gone; this guard remains because the growth pattern is what turned a
 /// tight heap into a hard fault, and it will do so again for whatever the next
-/// large per-channel field is.
-const RESERVED_CHANNELS: usize = 8;
+/// large per-port field is.
+const RESERVED_PORTS: usize = 8;
 
-struct ChannelState {
+struct PortState {
     /// ⚠️ Declared before `frame` on purpose: fields drop in declaration
     /// order, and the output's own `Drop` is what stops an in-flight
     /// transmission that may still be reading `frame`'s bytes. Swapping these
@@ -50,13 +50,13 @@ struct ChannelState {
     output: Box<dyn Ws281xOutput>,
     byte_count: u32,
     pipeline: DisplayPipeline,
-    /// The channel's own rendered frame, alive between writes.
+    /// The port's own rendered frame, alive between writes.
     ///
     /// It used to be a `Vec` allocated inside every `write`, which is fine
     /// while one handle is written at a time. It is not fine for a concurrent
-    /// transmission, where every channel's bytes must stay alive from its
+    /// transmission, where every port's bytes must stay alive from its
     /// `start` until its `wait_complete` — so the storage belongs to the
-    /// channel, not to the call. Sized from the channel's granted
+    /// port, not to the call. Sized from the port's granted
     /// `byte_count`, so this is the same memory the per-write allocation held,
     /// just held for longer.
     frame: Vec<u8>,
@@ -65,7 +65,7 @@ struct ChannelState {
 /// ESP32 OutputProvider implementation.
 pub struct Esp32OutputProvider {
     hardware_system: Rc<HardwareSystem>,
-    channels: RefCell<VecMap<i32, ChannelState>>,
+    ports: RefCell<VecMap<i32, PortState>>,
     next_handle: RefCell<i32>,
 }
 
@@ -73,7 +73,7 @@ impl Esp32OutputProvider {
     pub fn new(hardware_system: Rc<HardwareSystem>) -> Self {
         Self {
             hardware_system,
-            channels: RefCell::new(VecMap::with_capacity(RESERVED_CHANNELS)),
+            ports: RefCell::new(VecMap::with_capacity(RESERVED_PORTS)),
             next_handle: RefCell::new(1),
         }
     }
@@ -86,7 +86,7 @@ impl OutputProvider for Esp32OutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, OutputError> {
+    ) -> Result<OutputPortHandle, OutputError> {
         let options = options.unwrap_or_default();
         log::debug!(
             "Esp32OutputProvider::open: endpoint={endpoint}, byte_count={byte_count}, format={format:?}"
@@ -109,7 +109,7 @@ impl OutputProvider for Esp32OutputProvider {
         if truncated {
             log::warn!(
                 "Esp32OutputProvider::open: endpoint={endpoint} asked for more than \
-                 {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {byte_count} bytes"
+                 {WS281X_MAX_LEDS_PER_PORT} LEDs; truncating to {byte_count} bytes"
             );
         }
         let output = self
@@ -124,18 +124,18 @@ impl OutputProvider for Esp32OutputProvider {
 
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
-        let handle = OutputChannelHandle::new(handle_id);
+        let handle = OutputPortHandle::new(handle_id);
 
         log::info!(
-            "Esp32OutputProvider::open: Opened channel handle={handle_id}, endpoint={endpoint}, byte_count={byte_count}"
+            "Esp32OutputProvider::open: Opened port handle={handle_id}, endpoint={endpoint}, byte_count={byte_count}"
         );
 
         let mut frame = Vec::new();
         frame.resize(((byte_count / 3) * 3) as usize, 0);
 
-        self.channels.borrow_mut().insert(
+        self.ports.borrow_mut().insert(
             handle_id,
-            ChannelState {
+            PortState {
                 output,
                 byte_count,
                 pipeline,
@@ -156,10 +156,10 @@ impl OutputProvider for Esp32OutputProvider {
             .and_then(|limits| limits.total_leds.as_ref())
         {
             let total_leds: u32 = self
-                .channels
+                .ports
                 .borrow()
                 .iter()
-                .map(|(_, channel)| channel.byte_count / 3)
+                .map(|(_, port)| port.byte_count / 3)
                 .sum();
             if total_leds > budget.value {
                 log::warn!(
@@ -175,7 +175,7 @@ impl OutputProvider for Esp32OutputProvider {
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+    fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
         let handle_id = handle.as_i32();
         log::debug!(
             "Esp32OutputProvider::write: handle={}, data_len={}",
@@ -183,23 +183,23 @@ impl OutputProvider for Esp32OutputProvider {
             data.len()
         );
 
-        let mut channels = self.channels.borrow_mut();
-        let channel = channels.get_mut(&handle_id).ok_or_else(|| {
+        let mut ports = self.ports.borrow_mut();
+        let port = ports.get_mut(&handle_id).ok_or_else(|| {
             log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
             OutputError::InvalidHandle { handle: handle_id }
         })?;
 
         // The previous frame may still be on the wire — `start` below returns
-        // without waiting, and the transmitter keeps reading `channel.frame`
+        // without waiting, and the transmitter keeps reading `port.frame`
         // until it finishes. Wait it out before anything below touches state
         // it may still be reading (the resize moves the frame's bytes; the
         // pipeline overwrites them). In the steady state a whole render has
         // passed since the frame started, so this returns without spinning;
         // it only actually waits when a frame hung, in which case it aborts
         // and reports rather than staging over a live transmission.
-        channel.output.wait_complete()?;
+        port.output.wait_complete()?;
 
-        let mut num_leds = (channel.byte_count / 3) as usize;
+        let mut num_leds = (port.byte_count / 3) as usize;
         let expected_len = num_leds * 3;
 
         if data.len() > expected_len {
@@ -207,17 +207,17 @@ impl OutputProvider for Esp32OutputProvider {
             // A frame past the cap keeps `data.len() > expected_len` true forever;
             // only act (and warn) when the granted size actually changes, so the
             // steady state neither re-resizes nor logs per frame.
-            if new_byte_count != channel.byte_count {
+            if new_byte_count != port.byte_count {
                 if truncated {
                     log::warn!(
                         "Esp32OutputProvider::write: handle={handle_id} grew past \
-                         {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {new_byte_count} bytes"
+                         {WS281X_MAX_LEDS_PER_PORT} LEDs; truncating to {new_byte_count} bytes"
                     );
                 }
-                channel.output.resize(Ws281xConfig::new(new_byte_count))?;
-                channel.pipeline.resize(new_byte_count / 3);
-                channel.byte_count = new_byte_count;
-                num_leds = (channel.byte_count / 3) as usize;
+                port.output.resize(Ws281xConfig::new(new_byte_count))?;
+                port.pipeline.resize(new_byte_count / 3);
+                port.byte_count = new_byte_count;
+                num_leds = (port.byte_count / 3) as usize;
             }
         } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
@@ -226,18 +226,18 @@ impl OutputProvider for Esp32OutputProvider {
             });
         }
 
-        // The channel owns its frame storage, so a resize is the only time
+        // The port owns its frame storage, so a resize is the only time
         // this allocates and a steady-state write allocates nothing at all.
-        channel.frame.resize(num_leds * 3, 0);
+        port.frame.resize(num_leds * 3, 0);
 
-        channel.pipeline.write_frame(0, data);
-        channel.pipeline.write_frame(FRAME_INTERVAL_US, data);
-        let ChannelState {
+        port.pipeline.write_frame(0, data);
+        port.pipeline.write_frame(FRAME_INTERVAL_US, data);
+        let PortState {
             output,
             pipeline,
             frame,
             ..
-        } = channel;
+        } = port;
         pipeline.tick(MID_FRAME_US, frame);
 
         // Start the transmission and return without waiting for it. Handles
@@ -246,20 +246,20 @@ impl OutputProvider for Esp32OutputProvider {
         // them — and the wait happens in [`OutputProvider::flush`], the
         // frame-wide barrier the engine calls after the last write.
         //
-        // SAFETY: `frame` is heap storage owned by this channel's entry in
-        // `self.channels`, so its bytes stay in place when the map grows or
-        // the `ChannelState` moves. Every path that mutates or moves those
+        // SAFETY: `frame` is heap storage owned by this port's entry in
+        // `self.ports`, so its bytes stay in place when the map grows or
+        // the `PortState` moves. Every path that mutates or moves those
         // bytes — this function's resize and staging above — first calls
         // `wait_complete`, and dropping the entry drops `output` (which stops
         // the transmission) before `frame` (see the field-order note on
-        // `ChannelState`). That is exactly the lifetime `start`'s contract
+        // `PortState`). That is exactly the lifetime `start`'s contract
         // asks for.
         unsafe { output.start(frame) }
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+    fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
         let handle_id = handle.as_i32();
-        self.channels
+        self.ports
             .borrow_mut()
             .remove(&handle_id)
             .ok_or_else(|| OutputError::InvalidHandle { handle: handle_id })?;
@@ -268,7 +268,7 @@ impl OutputProvider for Esp32OutputProvider {
 
     /// Wait out the frame's transmissions — for the outputs that need it.
     ///
-    /// Two modes per channel, decided by [`Ws281xOutput::background_tx_safe`]:
+    /// Two modes per port, decided by [`Ws281xOutput::background_tx_safe`]:
     ///
     /// * **Barrier** (the default, and every output that has not proven
     ///   otherwise): the wire time is spent here, inside a quiet spin, not
@@ -281,12 +281,12 @@ impl OutputProvider for Esp32OutputProvider {
     ///   dedicated APP core): the wait is skipped and the wire time overlaps
     ///   the next render. The frame-lifetime guarantee does not move an inch
     ///   — `write`'s wait-before-stage above waits the previous frame out
-    ///   before anything touches the channel's storage, and that wait is
+    ///   before anything touches the port's storage, and that wait is
     ///   mandatory in both modes. The hang detector also rides that deferred
     ///   wait: `FRAME_TIMEOUT` (50 ms) runs from `start`, and by the next
     ///   write a ~33 ms frame interval plus ≤ ~31 ms of worst-case wire time
     ///   can exceed it only for frames far past dome scale — worth
-    ///   re-checking if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
+    ///   re-checking if `WS281X_MAX_LEDS_PER_PORT` ever grows.
     ///
     /// The engine calls this once per frame regardless of modes — the
     /// barrier-call-count test and the wrapper-forwarding guard from the
@@ -294,11 +294,11 @@ impl OutputProvider for Esp32OutputProvider {
     /// logged with its handle; the first is returned.
     fn flush(&self) -> Result<(), OutputError> {
         let mut first_error: Option<OutputError> = None;
-        for (handle_id, channel) in self.channels.borrow_mut().iter_mut() {
-            if channel.output.background_tx_safe() {
+        for (handle_id, port) in self.ports.borrow_mut().iter_mut() {
+            if port.output.background_tx_safe() {
                 continue;
             }
-            if let Err(error) = channel.output.wait_complete() {
+            if let Err(error) = port.output.wait_complete() {
                 log::warn!("Esp32OutputProvider::flush: handle={handle_id}: {error}");
                 first_error.get_or_insert(error);
             }
@@ -332,16 +332,16 @@ mod tests {
     //! Defense-in-depth backstop, tested directly: the engine seam
     //! (`lpc-engine`'s `wire_slice`) is what guarantees parity across
     //! providers now (P3), but `Esp32OutputProvider` keeps its own
-    //! `WS281X_MAX_LEDS_PER_CHANNEL` check on top, and that check gets its
+    //! `WS281X_MAX_LEDS_PER_PORT` check on top, and that check gets its
     //! own coverage here, at the raised 1024-lamp bound.
 
     use alloc::rc::Rc;
     use alloc::vec;
 
     use lpc_hardware::{
-        HardwareSystem, HwManifest, HwRegistry, OutputError, WS281X_MAX_LEDS_PER_CHANNEL,
+        HardwareSystem, HwManifest, HwRegistry, OutputError, WS281X_MAX_LEDS_PER_PORT,
     };
-    use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+    use lpc_shared::output::{OutputFormat, OutputPortHandle, OutputProvider};
 
     use super::Esp32OutputProvider;
 
@@ -350,7 +350,7 @@ mod tests {
         Esp32OutputProvider::new(Rc::new(HardwareSystem::with_virtual_drivers(registry)))
     }
 
-    fn open_ws281x(provider: &Esp32OutputProvider, byte_count: u32) -> OutputChannelHandle {
+    fn open_ws281x(provider: &Esp32OutputProvider, byte_count: u32) -> OutputPortHandle {
         provider
             .open(
                 &lpc_hardware::HwEndpointSpec::from_static("ws281x:local:D10"),
@@ -361,8 +361,8 @@ mod tests {
             .expect("ws281x:local:D10 opens on the virtual single-RMT board")
     }
 
-    /// A channel authored for 1500 lamps must grant exactly the shared cap —
-    /// `WS281X_MAX_LEDS_PER_CHANNEL * 3` bytes, 1024 lamps now that P3 raised
+    /// A port authored for 1500 lamps must grant exactly the shared cap —
+    /// `WS281X_MAX_LEDS_PER_PORT * 3` bytes, 1024 lamps now that P3 raised
     /// it from 256 — never the full request. Proven by capacity, not by
     /// reaching into the opaque `Box<dyn Ws281xOutput>`: a write one lamp
     /// short of the granted size must still be rejected as a length
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn open_caps_a_request_above_the_shared_bound_to_exactly_1024_lamps() {
         let provider = provider();
-        let cap_bytes = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        let cap_bytes = (WS281X_MAX_LEDS_PER_PORT * 3) as u32;
         let handle = open_ws281x(&provider, 1500 * 3);
 
         let short = vec![0u16; (cap_bytes - 3) as usize];
@@ -379,7 +379,7 @@ mod tests {
                 provider.write(handle, &short),
                 Err(OutputError::DataLengthMismatch { expected, .. }) if expected == cap_bytes
             ),
-            "the channel must be sized to exactly the capped byte count, not the requested one"
+            "the port must be sized to exactly the capped byte count, not the requested one"
         );
 
         let exact = vec![0u16; cap_bytes as usize];
@@ -421,25 +421,25 @@ mod tests {
     /// exactly what was asked, with no truncation.
     #[test]
     fn open_grants_the_full_request_at_or_under_the_shared_bound() {
-        for lamps in [375u32, WS281X_MAX_LEDS_PER_CHANNEL as u32] {
+        for lamps in [375u32, WS281X_MAX_LEDS_PER_PORT as u32] {
             let provider = provider();
             let byte_count = lamps * 3;
             let handle = open_ws281x(&provider, byte_count);
 
             let exact = vec![0u16; byte_count as usize];
-            provider.write(handle, &exact).unwrap_or_else(|error| {
-                panic!("{lamps}-lamp channel should not be capped: {error}")
-            });
+            provider
+                .write(handle, &exact)
+                .unwrap_or_else(|error| panic!("{lamps}-lamp port should not be capped: {error}"));
         }
     }
 
     /// The write-time grow path caps identically to the open-time path: a
-    /// channel that opened small and then receives a larger frame is capped
+    /// port that opened small and then receives a larger frame is capped
     /// to the same 1024-lamp bound, not the frame's own size.
     #[test]
     fn write_caps_a_grown_frame_above_the_shared_bound_to_exactly_1024_lamps() {
         let provider = provider();
-        let cap_bytes = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        let cap_bytes = (WS281X_MAX_LEDS_PER_PORT * 3) as u32;
         let handle = open_ws281x(&provider, 3);
 
         let grown = vec![0u16; (1500 * 3) as usize];
@@ -453,7 +453,7 @@ mod tests {
                 provider.write(handle, &short),
                 Err(OutputError::DataLengthMismatch { expected, .. }) if expected == cap_bytes
             ),
-            "the channel must have grown to exactly the capped byte count, not the frame's own size"
+            "the port must have grown to exactly the capped byte count, not the frame's own size"
         );
     }
 }
@@ -461,7 +461,7 @@ mod tests {
 #[cfg(test)]
 mod concurrent_flush_tests {
     //! The deferred-wait transmission contract, proven against a probe output:
-    //! `write` waits out the channel's *previous* frame before touching its
+    //! `write` waits out the port's *previous* frame before touching its
     //! storage, starts the new one, and returns without waiting for it — so
     //! handles written back to back transmit concurrently.
 
@@ -476,7 +476,7 @@ mod concurrent_flush_tests {
         HwEndpointKind, HwEndpointSpec, HwManifest, HwRegistry, OutputError, Ws281xConfig,
         Ws281xDriver, Ws281xOutput,
     };
-    use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+    use lpc_shared::output::{OutputFormat, OutputPortHandle, OutputProvider};
 
     use super::Esp32OutputProvider;
 
@@ -624,7 +624,7 @@ mod concurrent_flush_tests {
         (Esp32OutputProvider::new(Rc::new(system)), log)
     }
 
-    fn open_probe(provider: &Esp32OutputProvider, n: usize) -> OutputChannelHandle {
+    fn open_probe(provider: &Esp32OutputProvider, n: usize) -> OutputPortHandle {
         provider
             .open(
                 &lpc_hardware::HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}"))
@@ -685,7 +685,7 @@ mod concurrent_flush_tests {
     }
 
     /// `flush` is the frame-wide barrier: after it, nothing is in flight, and
-    /// every in-flight channel got a `wait_complete`.
+    /// every in-flight port got a `wait_complete`.
     #[test]
     fn flush_waits_out_every_started_transmission() {
         let (provider, log) = probe_provider();
