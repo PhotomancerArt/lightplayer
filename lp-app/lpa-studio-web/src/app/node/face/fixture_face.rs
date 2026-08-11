@@ -26,7 +26,7 @@
 //! the shared view state feeds whichever renderer is showing, including
 //! live output colors. What the
 //! bar *offers* is not stable, and should not be: the wiring instruments
-//! (numbers, arrows, universe colors) are authoring tools, so they appear
+//! (numbers, arrows) are authoring tools, so they appear
 //! only in edit mode, and view mode's bar carries the live toggle alone.
 //! Edit mode also adds the texture-frame toggle and a full-page expand
 //! (fixed-position in place; the section never leaves the DOM). Toggle +

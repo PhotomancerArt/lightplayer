@@ -1,14 +1,14 @@
 //! The single deterministic resolver: document → ordered lamps.
 //!
 //! Wiring order is primary: lamps are numbered end-to-end across objects in
-//! document order, and DMX-style addresses are *derived* from that order by
-//! auto-flow ([`LAMPS_PER_UNIVERSE`] RGB lamps per universe).
+//! document order, and that zero-based index is a lamp's one address here.
 //!
 //! Manual patching layers on top and never touches the wiring order: it lives
 //! in the fixture's own patch document ([`crate::PatchDoc`]), addressing runs
-//! of lamps by their position in THIS order. The universe addresses derived
-//! here stay pure auto-flow — placing a run on a wire is the output's job,
-//! and giving a lamp two competing addresses would make neither trustworthy.
+//! of lamps by their position in THIS order. Placing a run on an output's
+//! port is the patch/output layer's job — the resolver deliberately derives
+//! no wire-side addresses, and "universe"/"channel" (real 512-limited DMX
+//! terms) stay out of its vocabulary entirely (D45).
 
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -19,21 +19,6 @@ use crate::map2d_doc::{
 };
 use crate::map2d_error::Map2dError;
 
-/// RGB lamps per DMX universe (170 × 3 channels = 510 of 512).
-pub const LAMPS_PER_UNIVERSE: u32 = 170;
-
-/// DMX channels per RGB lamp.
-pub const CHANNELS_PER_LAMP: u32 = 3;
-
-/// Derived DMX-style address of one lamp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LampAddress {
-    /// Zero-based universe index.
-    pub universe: u16,
-    /// Zero-based first channel of the lamp within its universe.
-    pub channel: u16,
-}
-
 /// One resolved lamp in doc space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedLamp {
@@ -43,7 +28,6 @@ pub struct ResolvedLamp {
     pub object: u32,
     /// Position in doc space (fit to a render target separately).
     pub pos: [f32; 2],
-    pub address: LampAddress,
 }
 
 /// One contiguous physical strand of lamps, and the document object it came
@@ -73,11 +57,6 @@ pub struct ResolvedMap2d {
 impl ResolvedMap2d {
     pub fn positions(&self) -> Vec<[f32; 2]> {
         self.lamps.iter().map(|lamp| lamp.pos).collect()
-    }
-
-    /// Number of universes the auto-flow occupies (0 for an empty document).
-    pub fn universe_count(&self) -> u32 {
-        (self.lamps.len() as u32).div_ceil(LAMPS_PER_UNIVERSE)
     }
 
     /// The whole lamp range one document object occupies, its strands merged.
@@ -121,7 +100,6 @@ pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
                 index,
                 object: object_index,
                 pos,
-                address: address_of(index),
             });
         }
         // One span per strand, all naming this object. A plain shape has
@@ -227,13 +205,6 @@ impl Rotation2d {
             self.center[0] + dx * self.cos - dy * self.sin,
             self.center[1] + dx * self.sin + dy * self.cos,
         ]
-    }
-}
-
-fn address_of(index: u32) -> LampAddress {
-    LampAddress {
-        universe: (index / LAMPS_PER_UNIVERSE).min(u16::MAX as u32) as u16,
-        channel: ((index % LAMPS_PER_UNIVERSE) * CHANNELS_PER_LAMP) as u16,
     }
 }
 
@@ -1201,34 +1172,6 @@ mod tests {
             resolve(&doc).unwrap_err(),
             Map2dError::InvalidObject { object: 1, .. }
         ));
-    }
-
-    #[test]
-    fn addresses_flow_across_universe_boundaries() {
-        let resolved = resolve_shape(Map2dShape::Grid(GridShape {
-            origin: [0.0, 0.0],
-            cols: 200, // crosses the 170-lamp universe boundary
-            rows: 1,
-            pitch: 1.0,
-            routing: GridRouting::Raster,
-            start_corner: GridCorner::Tl,
-        }));
-        assert_eq!(resolved.lamps.len(), 200);
-        assert_eq!(
-            resolved.lamps[169].address,
-            LampAddress {
-                universe: 0,
-                channel: 169 * 3
-            }
-        );
-        assert_eq!(
-            resolved.lamps[170].address,
-            LampAddress {
-                universe: 1,
-                channel: 0
-            }
-        );
-        assert_eq!(resolved.universe_count(), 2);
     }
 
     #[test]
