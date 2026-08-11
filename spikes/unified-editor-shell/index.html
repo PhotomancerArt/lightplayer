@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unified mapping/patching editor shell — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    /* editor object colours (OBJECT_COLORS in editor_canvas.rs) */
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+
+    /* spike-local: PORT hues — cool family = output "1", warm family = "Box 2" */
+    --port-io18: #5aa9e6; --port-io13: #64d8cb; --port-io2: #4c7ee6;
+    --port-io14: #f0913b; --port-io16: #e4c065;
+    --gap: #3a4149;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 900px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 42px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 900px; }
+  p.thesis b { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 900px; border: 1px solid var(--border); background: var(--surface-muted);
+              border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
+              margin: 14px 0 0; }
+  .leannote b { color: var(--muted); }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols button {
+    background: var(--surface-muted); color: var(--muted); font: inherit; font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .xcontrols button:hover { color: var(--strong); }
+  .xcontrols button.on { color: var(--good); border-color: rgba(63,214,142,.4);
+                         background: rgba(63,214,142,.1); }
+
+  /* =========================================================
+     TODAY strip — faithful, static, compact
+     ========================================================= */
+  .today { display: flex; gap: 16px; flex-wrap: wrap; }
+  .today .frame { border: 1px solid var(--border); border-radius: var(--r-md);
+                  background: var(--surface-subtle); overflow: hidden; flex: 1;
+                  min-width: 380px; max-width: 560px; }
+  .today .frame > .cap { padding: 5px 10px; font-size: 10px; letter-spacing: .1em;
+                         text-transform: uppercase; color: var(--subtle);
+                         border-bottom: 1px solid var(--border-muted); }
+  .mini { display: flex; height: 240px; font-size: 11px; }
+  .mini .mcanvas { flex: 1; background: var(--terminal); position: relative; }
+  .mini .mrail { width: 150px; border-left: 1px solid var(--border-strong);
+                 background: var(--surface); padding: 4px; }
+  .mini .mrail .h { font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+                    font-weight: 600; color: var(--subtle); padding: 4px 6px;
+                    border-bottom: 1px solid var(--border); margin-bottom: 3px; }
+  .mini .mrow { display: flex; align-items: center; gap: 5px; padding: 3px 6px;
+                border-radius: 5px; font-size: 10.5px; }
+  .mini .mrow .sw { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+  .mini .mrow .nm { flex: 1; color: var(--text); }
+  .mini .mrow .rg { font-family: var(--mono); font-size: 9px; color: var(--subtle); }
+  .mini .mhead { display: flex; gap: 5px; align-items: center; padding: 5px 8px;
+                 border-bottom: 1px solid var(--border-strong); background: var(--surface);
+                 font-size: 10px; }
+  .mini .mhead .t { letter-spacing: .12em; text-transform: uppercase; font-weight: 600;
+                    color: var(--subtle); }
+  .mini .mbtn { border: 1px solid var(--border-strong); border-radius: 5px;
+                padding: 1px 7px; font-size: 10px; color: var(--subtle); }
+  .mini .mbtn.on { color: var(--good); background: rgba(63,214,142,.1);
+                   border-color: rgba(63,214,142,.4); }
+  .mini2 { height: 240px; overflow: hidden; padding: 8px 10px; font-size: 10.5px; }
+  .mini2 .sect { color: var(--strong); font-weight: 600; font-size: 12px; margin: 4px 0 2px; }
+  .mini2 .strip { height: 14px; border-radius: 4px; background: var(--track);
+                  position: relative; margin: 3px 0 8px; overflow: hidden; }
+  .mini2 .strip i { position: absolute; top: 0; bottom: 0; background: var(--raised-strong);
+                    border-right: 1px solid var(--border); }
+  .mini2 .plab { font-family: var(--mono); font-size: 9px; color: var(--subtle); }
+
+  /* =========================================================
+     THE SHELL — shared chrome for concepts A/B/C
+     ========================================================= */
+  .shell { border: 1px solid var(--border-strong); border-radius: var(--r-md);
+           overflow: hidden; background: var(--bg); margin-top: 10px; }
+  .tabs { display: flex; align-items: center; gap: 2px; background: var(--surface-muted);
+          border-bottom: 1px solid var(--border-strong); padding: 0 10px; }
+  .tabs .brand { font-size: 11px; color: var(--subtle); padding: 0 12px 0 2px;
+                 font-weight: 600; letter-spacing: .02em; }
+  .tabs .brand b { color: var(--accent); font-weight: 600; }
+  .tab { padding: 8px 14px 7px; font-size: 12px; color: var(--subtle); cursor: pointer;
+         border-bottom: 2px solid transparent; user-select: none; }
+  .tab:hover { color: var(--strong); }
+  .tab.on { color: var(--strong); border-bottom-color: var(--accent); }
+  .tab.dis { opacity: .55; }
+  .tabs .proj { margin-left: auto; font-family: var(--mono); font-size: 10.5px;
+                color: var(--subtle); padding-right: 4px; }
+
+  .ehead { display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+           border-bottom: 1px solid var(--border-strong); background: var(--surface);
+           flex-wrap: wrap; min-height: 38px; }
+  .ehead .ttl { font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+                color: var(--muted); font-weight: 600; }
+  .ehead .status { font-family: var(--mono); font-size: 11px; color: var(--subtle); }
+  .ehead .dirty { color: var(--dirty); }
+  .ehead .sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
+  .ehead .sp { flex: 1; }
+  .ebtn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong);
+          background: none; cursor: pointer; padding: 3px 9px; border-radius: 6px;
+          font-size: 12px; color: var(--subtle); font-family: var(--sans); }
+  .ebtn:hover { color: var(--strong); }
+  .ebtn.on { color: var(--good); background: rgba(63,214,142,.1);
+             border-color: rgba(63,214,142,.4); }
+  .ebtn.warn { color: var(--warn-text); }
+  .ebtn kbd { font-family: var(--mono); font-size: 9.5px; color: var(--dim);
+              border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
+
+  .ebody { display: flex; min-height: 0; height: 560px; }
+  .rail { width: 236px; flex: none; overflow-y: auto; background: var(--surface); }
+  .rail.left  { border-right: 1px solid var(--border-strong); }
+  .rail.right { border-left: 1px solid var(--border-strong); width: 258px; }
+  .rail .rhead { padding: 7px 10px 5px; font-size: 10px; letter-spacing: .12em;
+                 text-transform: uppercase; font-weight: 600; color: var(--subtle);
+                 border-bottom: 1px solid var(--border); position: sticky; top: 0;
+                 background: var(--surface); z-index: 2; }
+  .canvas-zone { flex: 1; min-width: 0; background: var(--terminal); position: relative;
+                 overflow: hidden; }
+  .canvas-zone svg { display: block; width: 100%; height: 100%; }
+
+  /* fixtures rail rows (grown from .lpme-rail-row) */
+  .frow { display: flex; align-items: center; gap: 7px; padding: 4px 8px;
+          font-size: 12px; cursor: pointer; border-radius: 6px; margin: 1px 4px; }
+  .frow:hover { background: rgba(255,255,255,.04); }
+  .frow.sel { background: var(--sel-bg); }
+  .frow .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .frow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; color: var(--text); }
+  .frow .badge { font-family: var(--mono); font-size: 10px; color: var(--subtle);
+                 border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex: none; }
+  .frow .rg { font-family: var(--mono); font-size: 10px; color: var(--subtle); flex: none; }
+  .frow.fxhead { padding-top: 7px; }
+  .frow.fxhead .nm { font-weight: 600; color: var(--strong); }
+  .frow.fxhead .rg { color: var(--dim); }
+  .frow.inst { padding-left: 26px; }
+  .frow.inst2 { padding-left: 40px; }
+  .frow .chev { color: var(--dim); font-size: 9px; width: 10px; flex: none; text-align: center; }
+  /* the channel box: port-coloured wire chip on an instance row */
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono);
+          font-size: 9.5px; padding: 1px 5px; border-radius: 4px; flex: none;
+          background: var(--track); border: 1px solid var(--border-subtle);
+          color: var(--muted); }
+  .chip i { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+  .chip.contested { border-color: var(--err-border); color: var(--err-text);
+                    background: var(--err-bg); }
+  .chip .rot { color: var(--warn-text); }
+  .chip .rev { color: var(--dim); }
+  .frow .auto { font-family: var(--mono); font-size: 9px; color: var(--dim);
+                border: 1px dashed var(--border-strong); border-radius: 4px;
+                padding: 0 4px; flex: none; }
+  .frow .err { color: var(--err-text); }
+
+  /* outputs rail: port strips with fixture-coloured cells */
+  .orow-out { display: flex; align-items: baseline; gap: 7px; padding: 8px 10px 2px;
+              cursor: pointer; }
+  .orow-out .nm { font-weight: 600; color: var(--strong); font-size: 12.5px; }
+  .orow-out .node { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+  .orow-out .tot { margin-left: auto; font-family: var(--mono); font-size: 10px;
+                   color: var(--subtle); }
+  .port { padding: 3px 10px 7px; cursor: pointer; border-radius: 6px; margin: 0 4px; }
+  .port:hover { background: rgba(255,255,255,.03); }
+  .port.sel { background: var(--sel-bg); }
+  .port .plab { display: flex; gap: 6px; align-items: center; font-family: var(--mono);
+                font-size: 10px; color: var(--subtle); margin-bottom: 3px; }
+  .port .plab i { width: 7px; height: 7px; border-radius: 2px; }
+  .port .plab .cnt { margin-left: auto; color: var(--dim); }
+  .ptrack { position: relative; height: 22px; border-radius: 4px; background: var(--track);
+            overflow: hidden; border: 1px solid var(--border-muted); }
+  .pcell { position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
+           display: flex; align-items: center; justify-content: center; overflow: hidden;
+           font-family: var(--mono); font-size: 8.5px; color: rgba(0,0,0,.72);
+           font-weight: 600; letter-spacing: .01em; cursor: pointer;
+           border: 1px solid rgba(0,0,0,.3); }
+  .pcell.sel { outline: 2px solid var(--sel); outline-offset: 0; z-index: 2; }
+  .pcell.contested { background: repeating-linear-gradient(45deg, #874b4b 0 5px, #5d3234 5px 10px) !important;
+                     color: var(--err-text); border-color: var(--err-border); }
+  .pgap { position: absolute; top: 8px; bottom: 8px; border-radius: 2px;
+          background: repeating-linear-gradient(90deg, var(--gap) 0 3px, transparent 3px 7px); }
+  .rail .note { padding: 6px 10px; font-size: 10.5px; color: var(--dim); }
+  .rail .note b { color: var(--err-text); font-weight: 600; }
+
+  /* concept B filmstrip */
+  .filmstrip { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; z-index: 5; }
+  .film { width: 84px; height: 60px; border: 1px solid var(--border-strong); border-radius: 6px;
+          background: rgba(16,18,22,.92); cursor: pointer; position: relative; overflow: hidden; }
+  .film:hover { border-color: var(--subtle); }
+  .film.on { border-color: var(--sel); }
+  .film .fl { position: absolute; left: 5px; bottom: 3px; font-size: 9px; color: var(--muted); }
+  .film svg { width: 100%; height: 100%; }
+
+  /* canvas overlay labels */
+  .tile-label { font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase;
+                fill: var(--subtle); }
+  .tile-sub { font: 9.5px var(--mono); fill: var(--dim); }
+  .park-label { font: 10px var(--mono); fill: var(--dim); }
+
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1200px; }
+  @media (max-width: 1000px) { .duo { grid-template-columns: 1fr; } }
+  .anno { border: 1px solid var(--border); border-radius: var(--r-md);
+          background: var(--surface-subtle); padding: 12px 14px; }
+  .anno h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+             color: var(--heading); }
+  .anno .row { display: flex; gap: 10px; align-items: center; padding: 5px 0; font-size: 11.5px;
+               color: var(--subtle); }
+  .anno .row .demo { flex: none; width: 190px; }
+</style>
+</head>
+<body>
+
+<h1>Unified mapping/patching editor shell</h1>
+<p class="hint">
+  G1 ruled: the standalone <code>/patch</code> page is the wrong shell — patching belongs
+  <b>inside the mapping editor</b>, which already has the real selection/tree/canvas architecture.
+  This spike explores the unified shell: project tabs (<b>Nodes · Mapping · Patching</b>), the
+  wiring-order rail grown into a project-scope <b>Fixtures</b> tree (with the channel boxes),
+  a facing <b>Outputs</b> rail (the tree the other way), and one mode switch. The open question
+  is <b>canvas geometry at project scope</b> — three concepts below. Data is the real mini-dome
+  permutation <code>(1,5,4,3,2)</code> plus an unmapped ribbon for the range-grain case.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>mode</b>
+    <button id="xm-map" onclick="setMode('map')">mapping</button>
+    <button id="xm-patch" onclick="setMode('patch')">patching</button>
+  </span>
+  <span class="grp"><b>selection</b>
+    <button onclick="cycleSel()">cycle</button>
+    <button onclick="setSel(null)">clear</button>
+  </span>
+  <span class="grp"><b>states</b>
+    <button id="xribbon" onclick="toggleRibbon()">+ unpatched ribbon (overlap)</button>
+    <button onclick="rotateSel()">rotate selection</button>
+  </span>
+  <span class="grp"><b>reset</b><button onclick="resetAll()">reset</button></span>
+  <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
+</div>
+
+<h2>0 · Today, for contrast</h2>
+<p class="thesis">
+  Left: the mapping editor as shipped — one fixture, one document, the <b>wiring order</b> rail,
+  per-universe wire annotations. Right: the interim <code>/patch</code> page from slice 2 —
+  correct machinery, but a parallel mini-app: its own sidebar, its own selection, no tree,
+  no editor feel. The rest of this spike merges the right into the left.
+</p>
+<div class="today">
+  <div class="frame">
+    <div class="cap">mapping editor today — fixture scope</div>
+    <div class="mini">
+      <div style="flex:1; display:flex; flex-direction:column;">
+        <div class="mhead">
+          <span class="t">mapping</span>
+          <span style="font-family:var(--mono); color:var(--subtle);">dome.map2d.json <span style="color:var(--dirty)">●</span></span>
+          <span style="flex:1"></span>
+          <span class="mbtn on">select</span><span class="mbtn">grid</span>
+          <span class="mbtn">ring</span><span class="mbtn">path</span>
+        </div>
+        <div class="mcanvas"><svg id="today-canvas" viewBox="0 0 300 200"></svg></div>
+      </div>
+      <div class="mrail">
+        <div class="h">wiring order</div>
+        <div class="mrow" style="background:var(--sel-bg);"><span class="sw" style="background:var(--obj-0)"></span><span class="nm">sector</span><span class="badge" style="font-family:var(--mono);font-size:9px;color:var(--subtle);border:1px solid var(--border);border-radius:4px;padding:0 3px;">×5</span><span class="rg">1:1-150</span></div>
+        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side a</span><span class="rg">10</span></div>
+        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side b</span><span class="rg">10</span></div>
+        <div class="mrow" style="padding-left:18px;"><span class="chev" style="color:var(--dim);font-size:9px;">└</span><span class="nm" style="color:var(--muted);">side c</span><span class="rg">10</span></div>
+        <div style="padding:6px 6px 2px; font-size:9px; color:var(--dim); font-family:var(--mono);">↑ ranges say "1:1-150" — universes, pre-D45</div>
+      </div>
+    </div>
+  </div>
+  <div class="frame">
+    <div class="cap">interim /patch page (slice 2, being replaced)</div>
+    <div class="mini2">
+      <div class="sect" style="font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--subtle);">Patch</div>
+      <div style="color:var(--muted); font-size:11px; margin:2px 0;">1 <span style="color:var(--dim); font-size:10px;">— port 0 · IO18 · 39 lamps, port 1 · IO13 · 30, port 2 · IO2 · 39</span></div>
+      <div class="strip"><i style="left:0%; width:28%; background:var(--raised-strong)"></i><i style="left:28%; width:8%;"></i><i style="left:36%; width:28%;"></i><i style="left:64%; width:28%;"></i><i style="left:92%; width:8%;"></i></div>
+      <div style="color:var(--muted); font-size:11px; margin:2px 0;">Box 2 <span style="color:var(--dim); font-size:10px;">— port 0 · IO14 · 39, port 1 · IO16 · 30</span></div>
+      <div class="strip"><i style="left:0%; width:43%;"></i><i style="left:43%; width:13%;"></i><i style="left:56%; width:44%;"></i></div>
+      <div class="sect">Dome <span style="font-weight:400; color:var(--dim); font-size:10px;">150 lamps</span></div>
+      <div><span class="mbtn" style="border:1px solid var(--border-strong); border-radius:5px; padding:1px 7px; font-size:10px; color:var(--muted); margin-right:4px;">sector 0</span><span class="mbtn" style="border:1px solid var(--border-strong); border-radius:5px; padding:1px 7px; font-size:10px; color:var(--muted); margin-right:4px;">sector 1</span><span style="font-size:10px; color:var(--dim);">… flat chips, no tree, no canvas selection</span></div>
+      <div class="plab" style="margin-top:10px; color:var(--dim);">✕ own sidebar · ✕ own selection · ✕ no editor tools · ✓ bay cells (kept below)</div>
+    </div>
+  </div>
+</div>
+
+<h2>1 · Concept A — “Atlas”: every fixture in its own map space, tiled</h2>
+<p class="thesis">
+  The canvas shows <b>each fixture's own map2d space in a framed tile</b> — the dome's authored
+  geometry, the doors' authored geometry — laid out side by side (auto-packed, not meaningful
+  positions). The unmapped ribbon docks as a range bar: it has lamps but no geometry, and the
+  atlas says so instead of hiding it. Mapping tools operate inside whichever tile the selection
+  lives in. <b>Claim:</b> honest about what a map2d is (per-fixture space), no fake install
+  layout, and the whole project is visible at once.
+</p>
+<div class="shell" id="shellA"></div>
+
+<h2>2 · Concept B — “Focus”: one fixture's space at a time, tree-driven</h2>
+<p class="thesis">
+  The canvas is <b>exactly today's editor</b> — one fixture's map full-bleed — and project scope
+  comes from the rails: clicking another fixture in the tree (or the filmstrip, bottom-left)
+  swaps the canvas. The ribbon's “canvas” is an honest range strip. <b>Claim:</b> zero new
+  canvas semantics, mapping tools keep full fidelity, cheapest to build; the cost is that
+  cross-fixture patching is felt through the rails, never seen spatially.
+</p>
+<div class="shell" id="shellB"></div>
+
+<h2>3 · Concept C — “Install”: lamps at output-layout positions</h2>
+<p class="thesis">
+  The canvas shows the <b>installed arrangement</b> — lamp dots at the positions the output
+  layout system computed (what the interim /patch page drew, and what the sim shows). Doors sit
+  between the dome sectors they interrupt, because that is where they hang. The ribbon parks in
+  a “no layout” strip. <b>Claim:</b> this is the space a re-plug session happens in — you look
+  at the wall, not at doc coordinates. The cost: it is <i>not</i> the space mapping tools edit
+  in, so mapping mode either switches back to doc space (modal geometry!) or goes read-only here.
+</p>
+<div class="shell" id="shellC"></div>
+
+<h2>4 · Rail anatomy — the two trees and their cells</h2>
+<p class="thesis">
+  Shared by every concept. The <b>Fixtures</b> rail is the wiring-order rail grown up: fixture →
+  object → instance, with a <b>channel chip</b> per instance — port hue, port-local lamp range,
+  rotation and reverse markers. The <b>Outputs</b> rail is the same facts inverted: output →
+  port → cells coloured by <i>fixture object</i>, so “what is on IO14” and “where did sector 3
+  go” are both one glance. Wire annotations are port-named (<code>IO18:1-30</code>) — the D45
+  replacement for today's per-universe <code>1:1-23</code>.
+</p>
+<div class="duo">
+  <div class="anno">
+    <h3>fixtures-rail chips</h3>
+    <div class="row"><span class="demo"><span class="chip"><i style="background:var(--port-io2)"></i>IO2:1-30</span></span> plain placement: port hue + port-local range</div>
+    <div class="row"><span class="demo"><span class="chip"><i style="background:var(--port-io14)"></i>IO14:1-30 <span class="rev">‹rev</span></span></span> reversed run</div>
+    <div class="row"><span class="demo"><span class="chip"><i style="background:var(--port-io18)"></i>IO18:1-30 <span class="rot">+10</span></span></span> rotated: offset badge, stepped by object stride</div>
+    <div class="row"><span class="demo"><span class="chip contested"><i style="background:var(--port-io18)"></i>IO18:1-24 ⚠</span></span> contested lamps — degrade-and-report, never a dead frame</div>
+    <div class="row"><span class="demo"><span class="auto" style="font-family:var(--mono); font-size:9px; color:var(--dim); border:1px dashed var(--border-strong); border-radius:4px; padding:0 4px;">auto</span></span> unpatched: auto-flows on the default output</div>
+  </div>
+  <div class="anno">
+    <h3>outputs-rail cells</h3>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:70%; background:var(--obj-0);">sector/2</span><span class="pcell" style="left:74%; width:24%; background:var(--obj-1);">door/0</span></span></span> cells coloured by fixture object, labelled by path</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell sel" style="left:2%; width:70%; background:var(--obj-0);">sector/2</span></span></span> selection is the same blue everywhere</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell contested" style="left:2%; width:56%;">2 claims</span><span class="pcell" style="left:60%; width:38%; background:var(--obj-1);">door/0</span></span></span> contested span — red hatch on the port strip</div>
+    <div class="row"><span class="demo"><span class="ptrack" style="display:block; width:180px;"><span class="pcell" style="left:2%; width:40%; background:var(--obj-2);">door/1</span><span class="pgap" style="left:46%; width:52%;"></span></span></span> gap: dashed void, warn not error</div>
+  </div>
+</div>
+
+<p class="leannote" id="lean">
+  <b>Lean:</b> ship <b>B (“Focus”) as the v1 canvas</b> inside the full shell — it is today's
+  editor with project rails, zero new geometry semantics, and everything patching needs is
+  carried by the rails + selection sync. Keep <b>C (“Install”)</b> as the declared follow-up
+  <i>patching-mode view toggle</i> once fixture transforms exist (it is the space a re-plug
+  actually happens in), and treat <b>A (“Atlas”)</b> as the eventual arrange-mode substrate
+  rather than a v1 target. The rails and chips (section 4) are common to all three and can be
+  planned immediately.
+</p>
+
+<script>
+/* =========================================================
+   Data — the real mini-dome permutation + an unmapped ribbon
+   ========================================================= */
+const PORT_COLORS = { IO18: 'var(--port-io18)', IO13: 'var(--port-io13)', IO2: 'var(--port-io2)',
+                      IO14: 'var(--port-io14)', IO16: 'var(--port-io16)' };
+const OBJ = ['var(--obj-0)','var(--obj-1)','var(--obj-2)','var(--obj-3)','var(--obj-4)','var(--obj-5)'];
+
+// state
+const S = { mode: 'patch', sel: 'dome:/sector/1', ribbon: false, rot: {}, focus: 'dome', edits: 0 };
+const SEL_CYCLE = ['dome:/sector/0','dome:/sector/1','dome:/sector/2','doors:/door/1',
+                   'out:1:IO18','ribbon:', null];
+let selIdx = 1;
+
+// fixtures: dome (sector ×5 ×30, stride 10), doors (door ×3 ×9, stride 3), ribbon (range grain)
+const FIXTURES = [
+  { id:'dome',  name:'dome',  lamps:150, color:0,
+    objects:[ { id:'sector', n:5, per:30, stride:10 } ] },
+  { id:'doors', name:'doors', lamps:27,  color:1,
+    objects:[ { id:'door', n:3, per:9, stride:3 } ] },
+  { id:'ribbon', name:'ribbon-west-canopy', lamps:24, color:2, rangeOnly:true, objects:[] },
+];
+
+// outputs & the shipped patch: [fixture, path, port, portStart(0-based), lamps, rev, rot]
+const OUTPUTS = [
+  { name:'1',     node:'out_a', ports:[ {pin:'IO18', lamps:39}, {pin:'IO13', lamps:30}, {pin:'IO2', lamps:39} ] },
+  { name:'Box 2', node:'out_b', ports:[ {pin:'IO14', lamps:39}, {pin:'IO16', lamps:30} ] },
+];
+const PLACE = [
+  { fx:'dome',  path:'/sector/2', out:'1',     pin:'IO18', at:0,  n:30, rot:10 },
+  { fx:'doors', path:'/door/0',   out:'1',     pin:'IO18', at:30, n:9 },
+  { fx:'dome',  path:'/sector/4', out:'1',     pin:'IO13', at:0,  n:30 },
+  { fx:'dome',  path:'/sector/0', out:'1',     pin:'IO2',  at:0,  n:30 },
+  { fx:'doors', path:'/door/2',   out:'1',     pin:'IO2',  at:30, n:9 },
+  { fx:'dome',  path:'/sector/1', out:'Box 2', pin:'IO14', at:0,  n:30, rev:true },
+  { fx:'doors', path:'/door/1',   out:'Box 2', pin:'IO14', at:30, n:9, rot:3 },
+  { fx:'dome',  path:'/sector/3', out:'Box 2', pin:'IO16', at:0,  n:30 },
+];
+
+function fxColor(fxId, objIndex=0) {
+  const fx = FIXTURES.find(f => f.id === fxId);
+  return OBJ[(fx ? fx.color : 0) + objIndex];
+}
+function placement(fxId, path) { return PLACE.find(p => p.fx === fxId && p.path === path); }
+function rotOf(p) { return (p.rot || 0) + (S.rot[p.fx + ':' + p.path] || 0); }
+
+/* =========================================================
+   Geometry — dome ring, door triangles, install layout
+   ========================================================= */
+function sectorPts(k, cx, cy, r) {           // 30 dots: arc of 60° starting at k*72°
+  const pts = [], a0 = (k * 72 - 90 - 28) * Math.PI/180, a1 = (k * 72 - 90 + 28) * Math.PI/180;
+  for (let i = 0; i < 30; i++) {
+    const t = i / 29, a = a0 + (a1 - a0) * t;
+    const rr = r + 14 * Math.sin(t * Math.PI);   // gentle ridge bulge
+    pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]);
+  }
+  return pts;
+}
+function doorPts(k, cx, cy, spread) {        // 9 dots: small triangle
+  const pts = [], base = [[-8,7],[8,7],[0,-8]];
+  for (let s = 0; s < 3; s++) {
+    const [x1,y1] = base[s], [x2,y2] = base[(s+1)%3];
+    for (let i = 0; i < 3; i++) {
+      const t = i / 3;
+      pts.push([cx + (k-1)*spread + x1 + (x2-x1)*t, cy + y1 + (y2-y1)*t]);
+    }
+  }
+  return pts;
+}
+function domeDoc(cx, cy, r)  { return [0,1,2,3,4].map(k => sectorPts(k, cx, cy, r)); }
+function doorsDoc(cx, cy, s) { return [0,1,2].map(k => doorPts(k, cx, cy, s)); }
+function installLayout(cx, cy, r) {          // doors interleave the dome perimeter
+  return { dome: domeDoc(cx, cy, r),
+           doors: [0,1,2].map(k => {
+             const a = (k * 72 + 36 - 90) * Math.PI/180;     // in the gaps
+             return doorPts(1, cx + (r + 26) * Math.cos(a), cy + (r + 26) * Math.sin(a), 0);
+           }) };
+}
+
+/* =========================================================
+   SVG builders
+   ========================================================= */
+function lampDots(pts, { fxId, path, objIndex = 0, portPin = null, contestedUpTo = -1 }) {
+  const selKey = fxId + ':' + path;
+  const isSel = S.sel === selKey;
+  const fill = S.mode === 'patch'
+    ? (portPin ? PORT_COLORS[portPin] : 'var(--gap)')
+    : fxColor(fxId, objIndex);
+  let s = `<g data-sel="${selKey}" style="cursor:pointer" onclick="setSel('${selKey}')">`;
+  pts.forEach(([x, y], i) => {
+    const contested = S.mode === 'patch' && i < contestedUpTo;
+    s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.1"
+           fill="${contested ? '#c76a6a' : fill}" ${isSel ? 'stroke="var(--sel)" stroke-width="1.6"' : ''}/>`;
+  });
+  return s + '</g>';
+}
+function fixtureLampGroups(fxId, geo) {      // geo: array of instance point arrays
+  const fx = FIXTURES.find(f => f.id === fxId);
+  let s = '';
+  geo.forEach((pts, k) => {
+    const path = `/${fx.objects[0].id}/${k}`;
+    const p = placement(fxId, path);
+    const contestedUpTo = (S.ribbon && p && p.pin === 'IO18' && p.fx === 'dome') ? 24 : -1;
+    s += lampDots(pts, { fxId, path, portPin: p ? p.pin : null, contestedUpTo });
+  });
+  return s;
+}
+function rangeStripSVG(x, y, w, fxId, label) {   // the ribbon's honest range bar
+  const fx = FIXTURES.find(f => f.id === fxId);
+  const selKey = fxId + ':';
+  const isSel = S.sel === selKey;
+  const fill = S.mode === 'patch' ? (S.ribbon ? '#c76a6a' : 'var(--gap)') : fxColor(fxId);
+  let s = `<g style="cursor:pointer" onclick="setSel('${selKey}')">`;
+  s += `<rect x="${x}" y="${y}" width="${w}" height="18" rx="4" fill="var(--track)"
+        stroke="${isSel ? 'var(--sel)' : 'var(--border-strong)'}" stroke-dasharray="${isSel ? '' : '4 3'}"/>`;
+  for (let i = 0; i < fx.lamps; i++)
+    s += `<circle cx="${x + 8 + i * (w - 16) / (fx.lamps - 1)}" cy="${y + 9}" r="2.4" fill="${fill}"/>`;
+  s += `<text x="${x}" y="${y - 5}" class="park-label">${label}</text></g>`;
+  return s;
+}
+
+function canvasA() {                          // tiled fixture spaces
+  const dome = domeDoc(230, 210, 118), doors = doorsDoc(560, 330, 70);
+  let s = `<svg viewBox="0 0 760 460">`;
+  s += `<rect x="60" y="52" width="345" height="330" rx="8" fill="var(--surface-muted)" stroke="var(--border)"/>
+        <text x="74" y="74" class="tile-label">dome</text>
+        <text x="74" y="88" class="tile-sub">dome.map2d.json · 150 lamps</text>`;
+  s += fixtureLampGroups('dome', dome);
+  s += `<rect x="440" y="250" width="240" height="132" rx="8" fill="var(--surface-muted)" stroke="var(--border)"/>
+        <text x="454" y="272" class="tile-label">doors</text>
+        <text x="454" y="286" class="tile-sub">doors.map2d.json · 27 lamps</text>`;
+  s += fixtureLampGroups('doors', doors);
+  s += rangeStripSVG(440, 120, 240, 'ribbon', 'ribbon-west-canopy · no map2d · 24 lamps');
+  return s + '</svg>';
+}
+function canvasB() {                          // focused fixture
+  let s = `<svg viewBox="0 0 760 460">`;
+  if (S.focus === 'dome') {
+    s += fixtureLampGroups('dome', domeDoc(380, 232, 150));
+    s += `<text x="20" y="30" class="tile-label">dome</text>
+          <text x="20" y="44" class="tile-sub">dome.map2d.json · 150 lamps · grid 12u</text>`;
+  } else if (S.focus === 'doors') {
+    s += fixtureLampGroups('doors', doorsDoc(380, 230, 150));
+    s += `<text x="20" y="30" class="tile-label">doors</text>
+          <text x="20" y="44" class="tile-sub">doors.map2d.json · 27 lamps</text>`;
+  } else {
+    s += rangeStripSVG(120, 220, 520, 'ribbon', 'ribbon-west-canopy · no map2d — range grain only');
+    s += `<text x="20" y="30" class="tile-label">ribbon-west-canopy</text>
+          <text x="20" y="44" class="tile-sub">24 lamps · no spatial document</text>`;
+  }
+  return s + '</svg>';
+}
+function filmSVG(fxId) {
+  if (fxId === 'dome')  return `<svg viewBox="0 0 84 60">` +
+    domeDoc(42, 30, 17).map(pts => pts.map(([x,y]) =>
+      `<circle cx="${x}" cy="${y}" r="1" fill="${fxColor('dome')}"/>`).join('')).join('') + '</svg>';
+  if (fxId === 'doors') return `<svg viewBox="0 0 84 60">` +
+    doorsDoc(42, 30, 24).map(pts => pts.map(([x,y]) =>
+      `<circle cx="${x}" cy="${y}" r="1" fill="${fxColor('doors')}"/>`).join('')).join('') + '</svg>';
+  return `<svg viewBox="0 0 84 60"><rect x="10" y="26" width="64" height="8" rx="3"
+          fill="none" stroke="var(--border-strong)" stroke-dasharray="3 2"/></svg>`;
+}
+function canvasC() {                          // install space
+  const geo = installLayout(360, 225, 132);
+  let s = `<svg viewBox="0 0 760 460">`;
+  s += fixtureLampGroups('dome', geo.dome);
+  s += fixtureLampGroups('doors', geo.doors);
+  s += `<text x="20" y="30" class="tile-label">install · output layout</text>
+        <text x="20" y="44" class="tile-sub">positions from the layout wire — the sim's view</text>`;
+  s += `<rect x="518" y="398" width="222" height="42" rx="6" fill="none"
+        stroke="var(--border-strong)" stroke-dasharray="4 3"/>
+        <text x="530" y="415" class="park-label">no layout position:</text>`;
+  s += rangeStripSVG(530, 420, 198, 'ribbon', '');
+  if (S.mode === 'map')
+    s += `<rect x="0" y="0" width="760" height="460" fill="rgba(12,17,20,.55)"/>
+          <text x="380" y="235" text-anchor="middle" class="tile-label"
+           style="fill:var(--warn-text)">mapping tools edit doc space — switch fixture focus or accept read-only here</text>`;
+  return s + '</svg>';
+}
+
+/* =========================================================
+   Rails + header (shared chrome)
+   ========================================================= */
+function chipHTML(p, contested) {
+  if (!p) return `<span class="auto" title="unpatched — auto-flows on the default output">auto</span>`;
+  const rot = rotOf(p);
+  return `<span class="chip${contested ? ' contested' : ''}">
+      <i style="background:${PORT_COLORS[p.pin]}"></i>${p.pin}:${p.at + 1}-${p.at + p.n}` +
+      (contested ? ' ⚠' : '') +
+      (p.rev ? ` <span class="rev">‹rev</span>` : '') +
+      (rot ? ` <span class="rot">+${rot}</span>` : '') + `</span>`;
+}
+function fixturesRail(shell) {
+  let h = `<div class="rhead">fixtures</div>`;
+  for (const fx of FIXTURES) {
+    if (fx.rangeOnly && !S.ribbon && shell !== 'A') { /* still show; parked */ }
+    const selKey = fx.id + ':';
+    h += `<div class="frow fxhead ${S.sel === selKey ? 'sel' : ''}" onclick="setSel('${selKey}');setFocus('${fx.id}')">
+            <span class="sw" style="background:${fxColor(fx.id)}"></span>
+            <span class="nm">${fx.name}</span>
+            ${fx.rangeOnly ? `<span class="badge" title="no map2d — range grain">range</span>` : ''}
+            <span class="rg">${fx.lamps}</span>
+          </div>`;
+    for (const obj of fx.objects) {
+      h += `<div class="frow inst"><span class="chev">└</span>
+              <span class="sw" style="background:${fxColor(fx.id)}"></span>
+              <span class="nm">${obj.id}</span><span class="badge">×${obj.n}</span>
+              <span class="rg">${obj.per * obj.n}</span></div>`;
+      for (let k = 0; k < obj.n; k++) {
+        const path = `/${obj.id}/${k}`, selK = fx.id + ':' + path;
+        const p = placement(fx.id, path);
+        const contested = S.ribbon && p && p.pin === 'IO18' && fx.id === 'dome';
+        h += `<div class="frow inst2 ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}');setFocus('${fx.id}')">
+                <span class="chev">·</span><span class="nm" style="font-family:var(--mono); font-size:11px;">${path}</span>
+                ${S.mode === 'patch' ? chipHTML(p, contested) : `<span class="rg">${obj.per}</span>`}
+              </div>`;
+      }
+    }
+    if (fx.rangeOnly) {
+      const contested = S.ribbon;
+      h += `<div class="frow inst2 ${S.sel === selKey ? 'sel' : ''}" onclick="setSel('${selKey}')">
+              <span class="chev">·</span><span class="nm" style="font-family:var(--mono); font-size:11px;">0..${fx.lamps}</span>
+              ${S.mode === 'patch'
+                ? (contested ? `<span class="chip contested"><i style="background:${PORT_COLORS.IO18}"></i>IO18:1-24 ⚠</span>`
+                             : chipHTML(null, false))
+                : `<span class="rg">${fx.lamps}</span>`}
+            </div>`;
+      if (S.mode === 'patch' && contested)
+        h += `<div class="note"><b>24 contested lamps</b> on output 1 — ribbon auto-flowed onto IO18 under /sector/2. Contested lamps render dark; assign the ribbon a free port.</div>`;
+    }
+  }
+  return h;
+}
+function outputsRail() {
+  let h = `<div class="rhead">outputs</div>`;
+  for (const out of OUTPUTS) {
+    const total = out.ports.reduce((a, p) => a + p.lamps, 0);
+    h += `<div class="orow-out"><span class="nm">${out.name}</span>
+          <span class="node">${out.node}</span><span class="tot">${total} lamps</span></div>`;
+    for (const port of out.ports) {
+      const selK = 'out:' + out.name + ':' + port.pin;
+      const cells = PLACE.filter(p => p.out === out.name && p.pin === port.pin);
+      let strip = '';
+      for (const c of cells) {
+        const cSel = S.sel === c.fx + ':' + c.path;
+        const contested = S.ribbon && c.pin === 'IO18' && c.fx === 'dome';
+        const left = (c.at / port.lamps) * 100, width = (c.n / port.lamps) * 100;
+        strip += `<span class="pcell ${cSel ? 'sel' : ''} ${contested ? 'contested' : ''}"
+                    style="left:${left}%; width:${width}%; background:${fxColor(c.fx)};"
+                    onclick="event.stopPropagation(); setSel('${c.fx}:${c.path}')"
+                    title="${c.fx}${c.path} → ${c.pin} lamp ${c.at + 1}">${c.path.slice(1)}${rotOf(c) ? ' +' + rotOf(c) : ''}${c.rev ? ' ‹' : ''}</span>`;
+      }
+      if (S.ribbon && port.pin === 'IO18')
+        strip += `<span class="pcell contested" style="left:0%; width:${(24 / port.lamps) * 100}%;"
+                   onclick="event.stopPropagation(); setSel('ribbon:')">ribbon ⚠</span>`;
+      const used = cells.reduce((a, c) => a + c.n, 0);
+      if (used < port.lamps && !(S.ribbon && port.pin === 'IO18'))
+        strip += `<span class="pgap" style="left:${(used / port.lamps) * 100}%; width:${((port.lamps - used) / port.lamps) * 100}%;"></span>`;
+      h += `<div class="port ${S.sel === selK ? 'sel' : ''}" onclick="setSel('${selK}')">
+              <div class="plab"><i style="background:${PORT_COLORS[port.pin]}"></i>
+                ${port.pin}<span class="cnt">${used}/${port.lamps}</span></div>
+              <div class="ptrack">${strip}</div>
+            </div>`;
+    }
+    if (S.ribbon && out.name === '1')
+      h += `<div class="note"><b>overlap on IO18</b> — 2 producers claim lamps 1–24 (degrade-and-report)</div>`;
+  }
+  return h;
+}
+function headerHTML() {
+  const mapTools = `
+    <button class="ebtn on">select</button><button class="ebtn">grid</button>
+    <button class="ebtn">ring</button><button class="ebtn">path</button>
+    <span class="sep"></span><button class="ebtn">reference…</button>`;
+  const patchTools = `
+    <button class="ebtn">assign <kbd>a</kbd></button>
+    <button class="ebtn">reverse <kbd>r</kbd></button>
+    <button class="ebtn">rotate <kbd>; '</kbd></button>
+    <button class="ebtn">swap ports <kbd>s</kbd></button>
+    <button class="ebtn warn">clear</button>
+    <span class="sep"></span><button class="ebtn">ensure ids</button>`;
+  return `<div class="ehead">
+      <span class="ttl">${S.mode === 'map' ? 'mapping' : 'patching'}</span>
+      <span class="status">${S.mode === 'map' ? 'dome.map2d.json' : 'dome.patch.json · doors.patch.json'}
+        ${S.edits ? `<span class="dirty"> ●</span>` : ''}</span>
+      <span class="sep"></span>
+      ${S.mode === 'map' ? mapTools : patchTools}
+      <span class="sp"></span>
+      <span class="status">${S.edits ? S.edits + ' edit' + (S.edits > 1 ? 's' : '') + ' · ⌘Z' : ''}</span>
+      <button class="ebtn">save</button>
+    </div>`;
+}
+function tabsHTML() {
+  return `<div class="tabs">
+      <span class="brand"><b>Light</b>Player</span>
+      <span class="tab dis" title="the node workspace (today's editor page)">Nodes</span>
+      <span class="tab ${S.mode === 'map' ? 'on' : ''}" onclick="setMode('map')">Mapping</span>
+      <span class="tab ${S.mode === 'patch' ? 'on' : ''}" onclick="setMode('patch')">Patching</span>
+      <span class="proj">mini-dome · simulator ●</span>
+    </div>`;
+}
+
+/* =========================================================
+   Assembly + state
+   ========================================================= */
+function shellHTML(concept) {
+  const canvas = concept === 'A' ? canvasA() : concept === 'B' ? canvasB() : canvasC();
+  const filmstrip = concept === 'B' ? `
+    <div class="filmstrip">
+      ${FIXTURES.map(fx => `
+        <div class="film ${S.focus === fx.id ? 'on' : ''}" onclick="setFocus('${fx.id}')">
+          ${filmSVG(fx.id)}<span class="fl">${fx.id === 'ribbon' ? 'ribbon' : fx.name}</span>
+        </div>`).join('')}
+    </div>` : '';
+  return tabsHTML() + headerHTML() + `
+    <div class="ebody">
+      <div class="rail left">${fixturesRail(concept)}</div>
+      <div class="canvas-zone">${canvas}${filmstrip}</div>
+      <div class="rail right">${outputsRail()}</div>
+    </div>`;
+}
+function render() {
+  document.getElementById('shellA').innerHTML = shellHTML('A');
+  document.getElementById('shellB').innerHTML = shellHTML('B');
+  document.getElementById('shellC').innerHTML = shellHTML('C');
+  document.getElementById('xm-map').classList.toggle('on', S.mode === 'map');
+  document.getElementById('xm-patch').classList.toggle('on', S.mode === 'patch');
+  document.getElementById('xribbon').classList.toggle('on', S.ribbon);
+  document.getElementById('xstatus').textContent =
+    `mode=${S.mode} · sel=${S.sel || '—'}${S.ribbon ? ' · OVERLAP live' : ''}`;
+  drawToday();
+}
+function drawToday() {
+  const svg = document.getElementById('today-canvas');
+  if (!svg) return;
+  let s = '';
+  domeDoc(150, 105, 62).forEach((pts, k) => {
+    pts.forEach(([x, y]) => {
+      s += `<circle cx="${x}" cy="${y}" r="2" fill="${OBJ[0]}"
+            ${k === 1 ? 'stroke="var(--sel)" stroke-width="1"' : ''}/>`;
+    });
+  });
+  svg.innerHTML = s;
+}
+function setMode(m)  { S.mode = m; render(); }
+function setSel(k)   { S.sel = k; if (k && !k.startsWith('out:')) {
+                         const fx = k.split(':')[0]; if (fx) S.focus = fx; } render(); }
+function setFocus(f) { S.focus = f; render(); }
+function toggleRibbon() { S.ribbon = !S.ribbon; if (S.ribbon) S.mode = 'patch'; render(); }
+function cycleSel()  { selIdx = (selIdx + 1) % SEL_CYCLE.length; setSel(SEL_CYCLE[selIdx]); }
+function rotateSel() {
+  if (!S.sel || S.sel.startsWith('out:')) return;
+  const [fx, path] = [S.sel.split(':')[0], S.sel.slice(S.sel.indexOf(':') + 1)];
+  const p = placement(fx, path);
+  if (!p) return;
+  const stride = fx === 'dome' ? 10 : 3;
+  S.rot[fx + ':' + path] = (S.rot[fx + ':' + path] || 0) + stride;
+  S.edits += 1; S.mode = 'patch'; render();
+}
+function resetAll()  { S.mode = 'patch'; S.sel = 'dome:/sector/1'; S.ribbon = false;
+                       S.rot = {}; S.focus = 'dome'; S.edits = 0; selIdx = 1; render(); }
+// headless-capture affordance: #map / #ribbon / #rot set an initial state
+if (location.hash.includes('map'))    S.mode = 'map';
+if (location.hash.includes('ribbon')) S.ribbon = true;
+if (location.hash.includes('rot'))    { S.rot['dome:/sector/2'] = 10; S.edits = 2; }
+render();
+</script>
+</body>
+</html>
