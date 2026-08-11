@@ -57,6 +57,16 @@ use crate::resource::{
 /// first-class settings, this is the constant a smarter policy replaces.
 const TEST_PATTERN_RGB: [u8; 3] = [64, 64, 64];
 
+/// Half-period of the `highlight` blink, in seconds: 2 Hz, snappy enough to
+/// find on a rig at a glance without reading as show content.
+///
+/// The blink alternates the highlighted lamps between the test-pattern white
+/// and dark rather than white and the live frame: white guarantees contrast
+/// on dark content, dark guarantees it on bright content, and together the
+/// selection is findable on ANY background. Same dim white as the pattern,
+/// for the same max-current reason.
+const HIGHLIGHT_BLINK_SECONDS: f32 = 0.25;
+
 /// Samples per RGB lamp, the unit both the buffer and the reports speak.
 const SAMPLES_PER_LAMP: u32 = 3;
 
@@ -244,6 +254,55 @@ impl OutputNode {
             Err(error) => {
                 log::debug!("[output] name unavailable: {}", error.message);
                 None
+            }
+        }
+    }
+
+    /// Read the `highlight` Debug slot's lamp spans for this frame.
+    ///
+    /// Same tolerance contract as [`Self::test_pattern_active`]: an
+    /// unresolvable slot reads as "no highlight" and is logged, never fatal.
+    /// The microformat parse is equally forgiving — see
+    /// [`parse_highlight_lamps`].
+    fn highlight_lamps(&mut self, ctx: &mut TickContext<'_>) -> Result<Vec<(u32, u32)>, NodeError> {
+        let reader = self.def_view(ctx)?.highlight();
+        match reader.get::<_, String>(ctx) {
+            Ok(text) => Ok(parse_highlight_lamps(&text)),
+            Err(error) => {
+                log::debug!("[output] highlight unavailable: {error}");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    /// Paint the highlight spans over whatever frame is in the buffer.
+    ///
+    /// An overlay, not a bypass: the graph (or the test pattern) has already
+    /// painted `control_samples`, and only the named lamps are overwritten —
+    /// with the highlight white in the blink's on phase, dark in its off
+    /// phase. Lamps past the established extent are clipped, not an error: a
+    /// selection can outlive a shrinking wire by a frame, and a diagnostic
+    /// never kills output.
+    fn paint_highlight(&mut self, spans: &[(u32, u32)], time_seconds: f32) {
+        let on = (time_seconds / HIGHLIGHT_BLINK_SECONDS) as i64 % 2 == 0;
+        let rgb16: [u16; 3] = if on {
+            [
+                u16::from(TEST_PATTERN_RGB[0]) * 257,
+                u16::from(TEST_PATTERN_RGB[1]) * 257,
+                u16::from(TEST_PATTERN_RGB[2]) * 257,
+            ]
+        } else {
+            [0, 0, 0]
+        };
+        for (start, count) in spans {
+            let first = lamps_to_samples(*start) as usize;
+            let last = lamps_to_samples(start.saturating_add(*count)) as usize;
+            let end = last.min(self.control_samples.len());
+            if first >= end {
+                continue;
+            }
+            for (index, sample) in self.control_samples[first..end].iter_mut().enumerate() {
+                *sample = rgb16[index % 3];
             }
         }
     }
@@ -485,6 +544,36 @@ fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
 /// Patch documents count in lamps; buffers count in samples.
 const fn lamps_to_samples(lamps: u32) -> u32 {
     lamps.saturating_mul(SAMPLES_PER_LAMP)
+}
+
+/// Parse the `highlight` Debug slot's microformat into `(start, count)` lamp
+/// spans.
+///
+/// Comma-separated inclusive lamp ranges in the output's flat wire numbering,
+/// the same numbering `at.lamp` anchors and the status reports speak:
+/// `"0-29,45,90-119"`. Whitespace around segments is tolerated; a segment
+/// that does not parse, or an inverted range, is SKIPPED — the slot is a
+/// diagnostic written by tooling, and half a highlight beats a dead one.
+fn parse_highlight_lamps(text: &str) -> Vec<(u32, u32)> {
+    let mut spans = Vec::new();
+    for segment in text.split(',') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        let (first, last) = match segment.split_once('-') {
+            Some((first, last)) => (first.trim().parse::<u32>(), last.trim().parse::<u32>()),
+            None => (segment.parse::<u32>(), segment.parse::<u32>()),
+        };
+        let (Ok(first), Ok(last)) = (first, last) else {
+            continue;
+        };
+        if last < first {
+            continue;
+        }
+        spans.push((first, last - first + 1));
+    }
+    spans
 }
 
 /// One product rendered whole, for the fragments that only want part of it.
@@ -912,8 +1001,10 @@ impl NodeRuntime for OutputNode {
         // A pattern only ever REPAINTS an extent the graph already established;
         // before the first rendered frame there is nothing to repaint, so that
         // frame renders the graph and establishes it.
+        let highlight = self.highlight_lamps(ctx)?;
         if self.test_pattern_active(ctx)? && !self.control_samples.is_empty() {
             self.fill_solid(TEST_PATTERN_RGB);
+            self.paint_highlight(&highlight, ctx.time_seconds());
             return self.publish_channel_buffer(ctx);
         }
 
@@ -938,7 +1029,16 @@ impl NodeRuntime for OutputNode {
             })
             .collect();
         let fragments = plan_fragments(&placements);
-        self.render_fragments(ctx, &fragments)
+        self.render_fragments(ctx, &fragments)?;
+        // The highlight overlay repaints AFTER the real render, so the frame
+        // underneath stays the graph's and un-highlighted lamps are untouched.
+        // With no highlight this is a no-op and the publish above was the
+        // frame — the byte-identical path every unpulsed project takes.
+        if !highlight.is_empty() {
+            self.paint_highlight(&highlight, ctx.time_seconds());
+            self.publish_channel_buffer(ctx)?;
+        }
+        Ok(())
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
@@ -1019,6 +1119,10 @@ mod tests {
         /// When false the Debug slot has no def behind it and fails to resolve,
         /// as it does for an output attached outside a loaded project.
         test_pattern_resolvable: bool,
+        /// Effective value of the `highlight` Debug slot, read every frame.
+        highlight: String,
+        /// The `highlight` twin of `test_pattern_resolvable`.
+        highlight_resolvable: bool,
         graph_extent: ControlExtent,
         graph_color: [u16; 3],
         /// The products the `input` slot answers with, as a fragment map —
@@ -1043,6 +1147,8 @@ mod tests {
                 render_control_calls: 0,
                 test_pattern: false,
                 test_pattern_resolvable: true,
+                highlight: String::new(),
+                highlight_resolvable: true,
                 graph_extent: ONE_LAMP,
                 graph_color: [1000, 2000, 3000],
                 graph_products: Vec::new(),
@@ -1073,6 +1179,13 @@ mod tests {
                 )),
                 "test_pattern" => Err(ResolveError::new(String::from(
                     "unresolved consumed slot test_pattern",
+                ))),
+                "highlight" if self.highlight_resolvable => Ok(Production::leaf(
+                    WithRevision::new(Revision::new(1), LpValue::String(self.highlight.clone())),
+                    ProductionSource::Literal,
+                )),
+                "highlight" => Err(ResolveError::new(String::from(
+                    "unresolved consumed slot highlight",
                 ))),
                 "input" => {
                     self.input_resolve_calls += 1;
@@ -1205,8 +1318,27 @@ mod tests {
         resolver: &mut FakeResolver,
         frame: Revision,
     ) -> Result<(), NodeError> {
+        consume_at_time(node, resolver, frame, 0.0)
+    }
+
+    /// [`consume_at`] with an explicit frame time — what the highlight's
+    /// blink phase is derived from.
+    fn consume_at_time(
+        node: &mut OutputNode,
+        resolver: &mut FakeResolver,
+        frame: Revision,
+        time_seconds: f32,
+    ) -> Result<(), NodeError> {
         let shapes = SlotShapeRegistry::default();
-        let mut ctx = TickContext::new(node_id(), frame, resolver, &shapes);
+        let mut ctx = TickContext::with_render_services(
+            node_id(),
+            frame,
+            resolver,
+            &shapes,
+            None,
+            None,
+            time_seconds,
+        );
         node.consume(&mut ctx)
     }
 
@@ -1462,6 +1594,124 @@ mod tests {
                 0.0,
             )
             .is_err(),
+        );
+    }
+
+    // ---- Highlight pulse ----------------------------------------------
+
+    #[test]
+    fn parse_highlight_lamps_reads_the_microformat() {
+        assert_eq!(
+            parse_highlight_lamps("0-29, 45,90-119"),
+            vec![(0, 30), (45, 1), (90, 30)]
+        );
+        assert_eq!(parse_highlight_lamps(""), vec![]);
+        assert_eq!(
+            parse_highlight_lamps("zork, 7, 9-3, -2, 4-4"),
+            vec![(7, 1), (4, 1)],
+            "junk and inverted segments are skipped, never fatal",
+        );
+    }
+
+    #[test]
+    fn the_highlight_paints_its_lamps_over_the_rendered_frame() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.highlight = String::from("1");
+
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000, PATTERN16, PATTERN16, PATTERN16],
+            "lamp 0 keeps the graph's colors; lamp 1 wears the highlight",
+        );
+        assert_eq!(
+            resolver.input_resolve_calls, 1,
+            "the highlight is an overlay, not a bypass: the graph still renders",
+        );
+    }
+
+    #[test]
+    fn the_highlight_blinks_dark_in_its_off_phase() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.highlight = String::from("1");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.3).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000, 0, 0, 0],
+            "off phase: the highlighted lamp goes dark, the rest keep the show",
+        );
+    }
+
+    #[test]
+    fn the_highlight_composes_with_the_test_pattern() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+
+        resolver.test_pattern = true;
+        resolver.highlight = String::from("0");
+        consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.3).expect("pattern frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![0, 0, 0, PATTERN16, PATTERN16, PATTERN16],
+            "the pulse overlays the pattern too, so a selection stays findable mid-wiring-test",
+        );
+    }
+
+    #[test]
+    fn highlight_lamps_past_the_established_extent_are_clipped() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.highlight = String::from("1-500");
+
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000, PATTERN16, PATTERN16, PATTERN16],
+            "the buffer keeps its extent; lamps the wire does not have are ignored",
+        );
+    }
+
+    #[test]
+    fn an_unreadable_highlight_never_stops_the_output() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.highlight_resolvable = false;
+
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000],
+            "an unreadable diagnostic reads as no highlight; the output keeps pushing pixels",
+        );
+    }
+
+    #[test]
+    fn clearing_the_highlight_restores_the_graph_frame() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.highlight = String::from("0");
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("pulsed frame");
+
+        resolver.highlight = String::new();
+        consume_at(&mut node, &mut resolver, Revision::new(2)).expect("clear frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000],
+            "the frame the slot clears, the graph's own colors are back — nothing latched",
         );
     }
 
