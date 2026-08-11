@@ -15,7 +15,7 @@ pub const BASIC_BUTTON_JSON: &str = include_str!("corpus/basic_button.map2d.json
 /// Linear art: two ear paths + a headband path, 48 lamps.
 pub const CAT_EARS_JSON: &str = include_str!("corpus/cat_ears.map2d.json");
 
-/// A 16×16 snake-routed panel, 256 lamps across 2 universes.
+/// A 16×16 snake-routed panel, 256 lamps.
 pub const PANEL_16X16_JSON: &str = include_str!("corpus/panel_16x16.map2d.json");
 
 /// One physical channel that leaves the lit run, jumpers across on inert
@@ -56,7 +56,7 @@ pub fn fyeah() -> Map2dDoc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map2d_resolve::{LAMPS_PER_UNIVERSE, resolve};
+    use crate::map2d_resolve::resolve;
 
     /// Expected `path:N,count:N` labels from the fyeah mapping SVG.
     const FYEAH_COUNTS: [u32; 10] = [23, 25, 25, 27, 21, 26, 30, 29, 7, 6];
@@ -65,7 +65,6 @@ mod tests {
     fn basic_button_resolves_to_two_rings() {
         let resolved = resolve(&basic_button()).unwrap();
         assert_eq!(resolved.lamps.len(), 24);
-        assert_eq!(resolved.universe_count(), 1);
     }
 
     #[test]
@@ -78,10 +77,9 @@ mod tests {
     }
 
     #[test]
-    fn panel_resolves_256_lamps_across_two_universes() {
+    fn panel_resolves_256_lamps_snake_routed() {
         let resolved = resolve(&panel_16x16()).unwrap();
         assert_eq!(resolved.lamps.len(), 256);
-        assert_eq!(resolved.universe_count(), 2);
         // Snake: row 0 runs +x, row 1 runs -x.
         assert_eq!(resolved.lamps[0].pos, [100.0, 80.0]);
         assert_eq!(resolved.lamps[15].pos, [100.0 + 15.0 * 26.0, 80.0]);
@@ -182,13 +180,9 @@ mod tests {
         for (span, expected) in resolved.spans.iter().zip(FYEAH_COUNTS) {
             assert_eq!(span.count, expected);
         }
-        assert_eq!(resolved.universe_count(), 2);
-
-        // The universe boundary lands mid-object (inside p7).
-        let boundary = &resolved.lamps[LAMPS_PER_UNIVERSE as usize];
-        assert_eq!(boundary.address.universe, 1);
-        assert_eq!(boundary.address.channel, 0);
-        assert_eq!(boundary.object, 6);
+        // Lamp 170 lands mid-object (inside p7) — the flow crosses object
+        // boundaries without resetting.
+        assert_eq!(resolved.lamps[170].object, 6);
     }
 
     #[test]

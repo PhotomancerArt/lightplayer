@@ -5,12 +5,12 @@ use lpc_hardware::OutputError;
 /// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.
 pub type OutputDriverOptions = DisplayPipelineOptions;
 
-/// Handle for an opened output channel
+/// Handle for an opened output port
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OutputChannelHandle(i32);
+pub struct OutputPortHandle(i32);
 
-impl OutputChannelHandle {
-    /// Create a new output channel handle
+impl OutputPortHandle {
+    /// Create a new output port handle
     pub fn new(id: i32) -> Self {
         Self(id)
     }
@@ -35,15 +35,15 @@ pub enum OutputFormat {
 
 /// Trait for output providers (hardware drivers, test implementations, etc.)
 pub trait OutputProvider {
-    /// Open an output channel
+    /// Open an output port
     ///
     /// # Arguments
     /// * `endpoint` - Authored hardware endpoint spec, such as `ws281x:local:D10`
-    /// * `byte_count` - Total number of bytes to allocate for this channel
+    /// * `byte_count` - Total number of bytes to allocate for this port
     /// * `format` - Output format/protocol
     ///
     /// # Returns
-    /// Returns `OutputChannelHandle` on success, or `OutputError` if:
+    /// Returns `OutputPortHandle` on success, or `OutputError` if:
     /// - Endpoint is already open
     /// - Invalid parameters
     /// - Hardware initialization failed
@@ -53,12 +53,12 @@ pub trait OutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, OutputError>;
+    ) -> Result<OutputPortHandle, OutputError>;
 
-    /// Write 16-bit RGB data to an output channel
+    /// Write 16-bit RGB data to an output port
     ///
     /// # Arguments
-    /// * `handle` - Output channel handle from `open()`
+    /// * `handle` - Output port handle from `open()`
     /// * `data` - 16-bit RGB data: [r,g,b; num_leds], length = num_leds * 3
     ///
     /// # Returns
@@ -66,24 +66,24 @@ pub trait OutputProvider {
     /// - Handle is invalid
     /// - Data length doesn't match expected (num_leds * 3)
     /// - Hardware write failed
-    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError>;
+    fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError>;
 
-    /// Close an output channel
+    /// Close an output port
     ///
     /// # Arguments
-    /// * `handle` - Output channel handle from `open()`
+    /// * `handle` - Output port handle from `open()`
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or `OutputError` if handle is invalid
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError>;
+    fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError>;
 
     /// Complete every transmission begun by [`write`](OutputProvider::write).
     ///
     /// A provider may begin a hardware transmission in `write` and return
-    /// without waiting for it, so channels written back to back transmit
+    /// without waiting for it, so ports written back to back transmit
     /// **concurrently** — the frame then pays for its slowest wire rather than
     /// the sum of all of them. Such a provider finishes the job here: wait out
-    /// every in-flight channel and report the first failure. The engine calls
+    /// every in-flight port and report the first failure. The engine calls
     /// this once per frame, after the last `write` of the flush.
     ///
     /// The default is a no-op, correct for any provider whose `write` is
