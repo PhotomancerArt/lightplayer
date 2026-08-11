@@ -27,7 +27,7 @@ pub struct PatchVerbFixture {
     /// The fixture's map2d artifact, for span lowering (absent = shape-less
     /// strip: range grain only).
     pub mapping_artifact: Option<ArtifactLocation>,
-    /// The fixture's lamp count (validation universe).
+    /// The fixture's lamp count (the domain ranges validate against).
     pub lamp_count: u32,
 }
 

@@ -2284,7 +2284,7 @@ fn fixture_path_spans(config: MappingRef<'_>) -> Vec<FixturePathSpan> {
         // empty strands skipped, so `palette_index` stays a running index
         // over the spans that actually have lamps. A repeated document
         // therefore yields one honest span per instance. Studio's wiring
-        // arrows and universe coloring read these.
+        // arrows read these.
         MappingRef::Compact(compact) => {
             let mut spans = Vec::new();
             for span in &compact.spans {
@@ -5748,7 +5748,7 @@ mod mapping_representation_differential {
                 "{at}: sample coords"
             );
 
-            // 3. Path spans — studio wiring arrows and universe coloring.
+            // 3. Path spans — studio wiring arrows.
             assert_eq!(path_spans(slots), path_spans(compact), "{at}: path spans");
 
             // 4. The published 2D display layout.

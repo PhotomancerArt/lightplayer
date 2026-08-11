@@ -1,5 +1,5 @@
-//! Shared lamp-view geometry: universe palette/derivation and wiring-arrow
-//! segments.
+//! Shared lamp-view geometry: wiring-arrow segments and the neutral lamp
+//! fill.
 //!
 //! Inputs are neutral (positions + spans in caller-chosen view units) so the
 //! Studio face renderer (over `ControlLayout2d`) and the editor canvas (over
@@ -7,36 +7,8 @@
 //! view options are renderer input, renderers interchange behind the same
 //! data.
 
-/// RGB lamps per DMX universe (mirrors `lpc_mapping::LAMPS_PER_UNIVERSE`).
-pub const LAMPS_PER_UNIVERSE: u32 = 170;
-
-/// Universe fill palette (UI concern; distinct from object palettes and from
-/// Studio's violet bound-state family).
-const UNIVERSE_COLORS: &[[u8; 3]] = &[
-    [90, 169, 230],  // blue
-    [228, 192, 101], // gold
-    [63, 214, 142],  // green
-    [199, 146, 234], // lavender
-    [240, 145, 59],  // orange
-    [239, 83, 80],   // red
-    [100, 216, 203], // teal
-    [240, 98, 146],  // pink
-];
-
-/// Neutral lamp fill when neither live nor universe coloring applies.
+/// Neutral lamp fill when live coloring does not apply.
 const NEUTRAL_LAMP_RGB: [u8; 3] = [96, 102, 112];
-
-/// Zero-based universe of a wiring-order lamp index.
-#[must_use]
-pub fn lamp_universe(lamp_index: u32) -> u32 {
-    lamp_index / LAMPS_PER_UNIVERSE
-}
-
-/// Universe fill color for a lamp.
-#[must_use]
-pub fn universe_rgb(lamp_index: u32) -> [u8; 3] {
-    UNIVERSE_COLORS[(lamp_universe(lamp_index) as usize) % UNIVERSE_COLORS.len()]
-}
 
 #[must_use]
 pub const fn neutral_lamp_rgb() -> [u8; 3] {
@@ -135,14 +107,6 @@ pub fn wiring_arrows(input: &ArrowInput<'_>) -> MapArrowOverlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn universe_derivation_flows_at_170() {
-        assert_eq!(lamp_universe(0), 0);
-        assert_eq!(lamp_universe(169), 0);
-        assert_eq!(lamp_universe(170), 1);
-        assert_ne!(universe_rgb(0), universe_rgb(170));
-    }
 
     #[test]
     fn arrows_connect_within_spans_and_chain_between_them() {

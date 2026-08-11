@@ -6,8 +6,8 @@
 //! parametric objects — grids, multi-ring circles, sampled paths, and
 //! rotational repeats of any of those — whose vec order **is** the wiring
 //! order. [`resolve`] turns a document into the
-//! ordered lamp list (positions in doc space plus derived DMX-style
-//! `{universe, channel}` addresses); [`fit_points`] maps doc-space positions
+//! ordered lamp list (wiring-order indices plus positions in doc space);
+//! [`fit_points`] maps doc-space positions
 //! into a fixture render target without stretching.
 //!
 //! The crate owns a second document: the per-fixture **patch**
@@ -49,7 +49,7 @@ pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
 pub use map2d_object_id::{MAP2D_OBJECT_ID_MAX_LEN, Map2dObjectId, ensure_object_ids};
 pub use map2d_resolve::{
-    CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectInstanceSpan, ObjectSpan,
+    ObjectInstanceSpan, ObjectSpan,
     ResolvedLamp, ResolvedMap2d, Rotation2d, object_instance_spans, object_stride, resolve,
     shape_lamp_count, shape_stride,
 };
