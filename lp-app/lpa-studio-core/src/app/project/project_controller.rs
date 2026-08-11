@@ -31,11 +31,12 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
-    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
-    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
-    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, LpValue, MutationCmd,
+    MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp,
+    MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef,
+    SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup,
+    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
+    resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -94,6 +95,11 @@ pub struct ProjectController {
     /// [`Self::edit_buffer`] with the same ack lifecycle (state machine on
     /// [`PendingAssetEdit`]).
     asset_edit_buffer: BTreeMap<ArtifactLocation, PendingAssetEdit>,
+    /// Outputs whose `highlight` Debug slot the patch pulse last wrote
+    /// ([`Self::apply_patch_pulse`]) — what a subject change or a clear
+    /// must sweep. Session bookkeeping only: the slot itself is Debug
+    /// state and dies with the project either way.
+    pulsed_outputs: BTreeSet<lpc_model::NodeId>,
     /// Passive ticks left at the tightened verdict-chase interval. Set after
     /// an accepted asset-body apply so the node's compile verdict (error or
     /// clean) is pulled promptly instead of waiting a full device cadence;
@@ -374,6 +380,7 @@ impl ProjectController {
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
             asset_edit_buffer: BTreeMap::new(),
+            pulsed_outputs: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
             project_fs_root: None,
@@ -4731,6 +4738,97 @@ impl ProjectController {
                 self.apply_revert(server, handle_id, address, "Clear").await
             }
         }
+    }
+
+    /// Execute a [`crate::PatchPulseOp`]: map the selected patch subject
+    /// through the published placements and write each involved output's
+    /// `highlight` Debug slot, so the live sim/hardware pulses the lamps
+    /// the selection is about to re-patch (Q27/D43).
+    ///
+    /// Outputs the previous pulse wrote and this one does not are swept
+    /// with Clear — one selection, one pulse, never a trail. `None` (or a
+    /// subject no wire carries) clears everything. The writes are ordinary
+    /// Debug-slot overlay edits, so they reach whatever runs the engine and
+    /// never touch dirty/save accounting.
+    pub async fn apply_patch_pulse(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: crate::PatchPulseOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        use super::patch_pulse::{PulseWire, pulse_highlights, wire_extent_lamps};
+
+        let writes: Vec<(NodeId, String)> = match (&op.subject, self.sync.as_ref()) {
+            (Some(subject), Some(sync)) => {
+                let outputs: Vec<NodeId> = sync.published_outputs().collect();
+                let wires: Vec<PulseWire<'_>> = outputs
+                    .iter()
+                    .map(|node| PulseWire {
+                        node: *node,
+                        placements: sync.output_placements(*node),
+                        lamps: wire_extent_lamps(
+                            sync.output_frame(*node),
+                            sync.output_placements(*node),
+                        ),
+                    })
+                    .collect();
+                pulse_highlights(subject, &wires)
+            }
+            _ => Vec::new(),
+        };
+
+        let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
+        let stale: Vec<NodeId> = self
+            .pulsed_outputs
+            .iter()
+            .filter(|node| !written.contains(node))
+            .copied()
+            .collect();
+
+        let mut run = ProjectEditRun {
+            notices: UiNotices::new(),
+            logs: Vec::new(),
+        };
+        for node in stale {
+            let Some(address) = self.output_highlight_address(node) else {
+                // The output left the project since the pulse was set; its
+                // Debug state left with it.
+                continue;
+            };
+            let cleared = self
+                .apply_slot_edit(server, SlotEditOp::Clear { address })
+                .await?;
+            run.notices.notices.extend(cleared.notices.notices);
+            run.logs.extend(cleared.logs);
+        }
+        for (node, text) in &writes {
+            let Some(address) = self.output_highlight_address(*node) else {
+                continue;
+            };
+            let set = self
+                .apply_slot_edit(
+                    server,
+                    SlotEditOp::SetValue {
+                        address,
+                        value: LpValue::String(text.clone()),
+                    },
+                )
+                .await?;
+            run.notices.notices.extend(set.notices.notices);
+            run.logs.extend(set.logs);
+        }
+        self.pulsed_outputs = written;
+        Ok(run)
+    }
+
+    /// The `highlight` Debug slot's address on one output node, when the
+    /// node is still in the tree.
+    fn output_highlight_address(&self, node: NodeId) -> Option<ProjectSlotAddress> {
+        let controller = self.node_by_runtime_id(node)?;
+        Some(ProjectSlotAddress::new(
+            controller.address().clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("highlight").ok()?,
+        ))
     }
 
     /// Execute a [`PlaylistActivateOp`]: dispatch the activate-entry runtime

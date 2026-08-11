@@ -1653,6 +1653,141 @@ fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
     }
 }
 
+/// The patch pulse (Q27), the whole way: a `PatchPulseOp` naming the leaf
+/// fixture → the controller maps it through the published placements →
+/// the output's `highlight` Debug slot rides the overlay to the server →
+/// the ENGINE paints the pulse into the published frame the bay reads.
+///
+/// The leaf sits at wire lamps 22–33, patched into the middle of the
+/// body's run — so a pulse that painted producer-relative lamps, or the
+/// whole wire, fails here. The blink alternates highlight-white and dark;
+/// both are grey (R=G=B), and the leaf's own color is green, so the
+/// assertion is phase-independent: those lamps stopped being green.
+#[test]
+fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
+    let example =
+        crate::app::home::embedded_example("examples/peach-1d").expect("the peach is embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    macro_rules! refresh {
+        () => {{
+            let mut snapshot = None;
+            for _ in 0..4 {
+                handle.tx.send(project_action(ProjectOp::RefreshProject));
+                drive(actor.run_one_batch_for_test());
+                if let Some(next) = view.try_recv() {
+                    snapshot = Some(next);
+                }
+            }
+            snapshot.expect("a refresh emits a snapshot")
+        }};
+    }
+    let snapshot = refresh!();
+
+    let bay_of = |snapshot: &UiStudioView| {
+        all_faces(snapshot)
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Output(output) => output.patch.clone(),
+                _ => None,
+            })
+            .expect("the output card carries a patch bay")
+    };
+    let bay = bay_of(&snapshot);
+    // The subject: the leaf, addressed by the runtime id its twin-key
+    // carries (the id a patching surface selects by).
+    let leaf_cell = bay.ports[0]
+        .cells
+        .iter()
+        .find(|cell| cell.producer == "Peach leaf")
+        .expect("the leaf is on the wire");
+    let leaf_node = lpc_model::NodeId::new(
+        leaf_cell
+            .id
+            .split(':')
+            .next()
+            .and_then(|node| node.parse().ok())
+            .expect("the twin key leads with the node id"),
+    );
+    assert_eq!(
+        (leaf_cell.wire_start, leaf_cell.lamps),
+        (22, 12),
+        "the leaf is the strand patched into the body's middle"
+    );
+
+    // The wire before the pulse: leaves green, flesh pink.
+    let lamp_colour = |bay: &crate::UiPatchBay, lamp: u32| -> [u16; 3] {
+        let frame = bay.frame.as_ref().expect("the bay draws a live wire");
+        let base = lamp as usize * 3 * 2;
+        core::array::from_fn(|channel| {
+            let at = base + channel * 2;
+            u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+        })
+    };
+    for lamp in [22, 33] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(green > red, "before the pulse, wire lamp {lamp} is a leaf");
+    }
+
+    // Pulse the whole leaf fixture.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp {
+            subject: Some(crate::PatchPulseSubject::Fixture {
+                node: leaf_node,
+                range: None,
+            }),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    for lamp in [22, 33] {
+        let [red, green, blue] = lamp_colour(&bay, lamp);
+        assert!(
+            red == green && green == blue,
+            "wire lamp {lamp} pulses grey (highlight white or its dark phase), got {red},{green},{blue}"
+        );
+    }
+    for lamp in [0, 21, 34, 55] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(
+            red > green,
+            "wire lamp {lamp} is the body's flesh and keeps the show while the leaf pulses"
+        );
+    }
+
+    // Clear the pulse: the leaf's own color is back.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp { subject: None },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    for lamp in [22, 33] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(
+            green > red,
+            "after the clear, wire lamp {lamp} is a leaf again — nothing latched"
+        );
+    }
+}
+
 /// Every face in a snapshot's editor tree, root cards and nested alike.
 fn all_faces(view: &UiStudioView) -> Vec<UiNodeFace> {
     fn walk(children: &[crate::UiNodeChild], out: &mut Vec<UiNodeFace>) {
