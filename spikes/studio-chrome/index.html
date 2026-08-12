@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Studio chrome — the IDE workbench (round 2)</title>
+<title>Studio chrome — the IDE workbench (round 3)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -383,26 +383,24 @@
 </head>
 <body>
 
-<h1>Studio chrome — the IDE workbench (round 2)</h1>
+<h1>Studio chrome — the IDE workbench (round 3)</h1>
 <p class="hint">
-  <b>Round-1 verdict (Yona):</b> perspectives are OUT (the room must not rearrange itself);
-  documents-vs-slots dissolved once user arrangement was cut for v1 — <b>things have one home</b>,
-  good defaults over customization. What remains is the IntelliJ model, drawn here converged:
-  <b>four panels with fixed homes</b> (Project · Fixtures left — Device · Outputs right) toggled
-  from <b>edge strips</b>; the center holds <b>view tabs</b> (Nodes · Map · future views); the
-  active view sets panel <i>defaults</i> but panels are always available, independent of the view.
-  Fixtures and Outputs are the project tree's <b>multi-node custom faces</b> — derived slices over
-  node selection + on-selection loading that already exist. Code concepts: views in a
-  <code>PanelDock</code> (or <code>ViewSlot</code> — naming open, plain "slot" collides with
-  config slots).
+  <b>Round-2 rulings (Yona):</b> panel homes as drawn, but the Project panel is called
+  <b>Nodes</b> — the whole workbench is the project (a <b>Files</b> view is likely someday).
+  View tabs = <b>Nodes · Mapping</b> ("mapping" is the term of art a pro LED artist scans for;
+  the Nodes view / Nodes panel name-share is accepted — they show the same thing). Edge strips
+  ruled in; expectation is <b>radio</b> behaviour (one panel per side, switching) — drawn as the
+  default here, with a <b>stack</b> mode in the strip controls to test whether two-at-once earns
+  its keep. <code>PanelDock</code> ruled. Open: R3-1 radio vs stack, R3-2 per-view panel memory
+  (see §5). Rounds 1–2 in git history.
 </p>
 
 <div class="xcontrols">
   <span class="grp"><b>view</b>
     <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
-    <button id="xv-map" onclick="setView('map')">Map</button>
+    <button id="xv-map" onclick="setView('map')">Mapping</button>
   </span>
-  <span class="grp"><b>map mode</b>
+  <span class="grp"><b>mapping mode</b>
     <button id="xm-map" onclick="setMode('map')">mapping</button>
     <button id="xm-patch" onclick="setMode('patch')">patching</button>
   </span>
@@ -410,8 +408,10 @@
     <button id="xd-dome" onclick="setDensity('dome')">mini-dome</button>
     <button id="xd-rad" onclick="setDensity('radiance')">radiance 10×32</button>
   </span>
-  <span class="grp" style="color:var(--dim); font-size:11px;">panel toggles live on the
-    workbench's own edge strips →</span>
+  <span class="grp"><b>strips</b>
+    <button id="xs-radio" onclick="setStripMode('radio')">radio</button>
+    <button id="xs-stack" onclick="setStripMode('stack')">stack</button>
+  </span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
@@ -419,11 +419,14 @@
 <h2>1 · The workbench</h2>
 <p class="thesis">
   Full-height under the (slimmed) site header. <b>Edge strips</b> carry the four panel toggles —
-  left strip: Project · Fixtures; right strip: Device · Outputs. Panels open into their side's
-  dock; two open on one side stack. <b>View tabs</b> switch the center only. Defaults per view —
-  Nodes opens Project + Device; Map opens Fixtures + Outputs — but any panel can be summoned in
-  any view (that's the "always there" rule: check a port's occupancy without leaving Nodes).
-  Patching is a <b>mode inside Map</b>. Future views ride the same tab row (greyed).
+  left strip: Nodes · Fixtures; right strip: Device · Outputs. A strip button opens its panel in
+  the side's dock; in <b>radio</b> mode (default — the ruling's expectation) it replaces the
+  side's open panel, and re-clicking collapses the side; <b>stack</b> mode (strip control above)
+  lets a side hold both. <b>View tabs</b> switch the center only. Panel visibility is remembered
+  <b>per view</b> (R3-2 ruling: try it and see how it feels), seeded by defaults — Nodes opens
+  the Nodes tree + Device; Mapping opens Fixtures + Outputs — and any panel can be summoned in
+  any view (the "always there" rule: check a port's occupancy without leaving Nodes). Patching
+  is a <b>mode inside Mapping</b>. Future views ride the same tab row (greyed).
 </p>
 <div class="wb" id="c1"></div>
 <p class="secnote" style="font-size:10.5px; color:var(--dim); margin-top:8px;">
@@ -435,13 +438,14 @@
 <section id="sec2">
 <h2>2 · The four panels</h2>
 <p class="thesis">
-  One panel, one role — no double duty. Project stays the <b>assembly</b> view (all nodes, add,
-  structure). Fixtures and Outputs are <b>project-scope slices</b>: the multi-node analogue of the
-  custom node faces, derived from the same graph + node selection + on-selection body loading the
-  app already has. Device is the card that exists today, docked.
+  One panel, one role — no double duty. Nodes (né Project — the whole workbench is the project)
+  stays the <b>assembly</b> tree: all nodes, add, structure. Fixtures and Outputs are
+  <b>project-scope slices</b>: the multi-node analogue of the custom node faces, derived from the
+  same graph + node selection + on-selection body loading the app already has. Device is the card
+  that exists today, docked.
 </p>
 <div class="anat">
-  <div class="apanel"><h3>Project</h3>
+  <div class="apanel"><h3>Nodes</h3>
     <p class="arole"><b>Assembly + structure.</b> All nodes of the graph, tree-shaped; add node;
       advanced tinkering. No fixture chips — that's the Fixtures panel's job.</p>
     <div class="aframe" id="anat-project"></div></div>
@@ -488,36 +492,40 @@
 </section>
 
 <section id="sec6">
-<h2>5 · Decisions on the table (round 2)</h2>
+<h2>5 · Rulings + what round 3 tests</h2>
 <table class="dec">
-  <tr><th></th><th>Question</th><th>Drawn</th><th>Lean</th></tr>
+  <tr><th></th><th>Decision</th><th>Status</th></tr>
   <tr><td class="q">R2-1</td>
-      <td>Panel homes: Project + Fixtures left · Device + Outputs right?</td>
-      <td>§1 (content/structure left, hardware right; Fixtures adjacent to the canvas it
-          describes, Outputs adjacent to the Device they live on)</td>
-      <td>Yes as drawn</td></tr>
+      <td>Panel homes: left = Nodes (né Project) + Fixtures · right = Device + Outputs. The whole
+          workbench is the project; a <b>Files</b> view is likely someday (greyed in the tab
+          row).</td>
+      <td><b>RULED</b> (round 2)</td></tr>
   <tr><td class="q">R2-2</td>
-      <td>View tab names: <b>Nodes · Map</b>?</td>
-      <td>§1 tab row ("Map" = the subway-map noun; "mapping" stays the activity/mode word)</td>
-      <td>Nodes · Map</td></tr>
-  <tr><td class="q">R2-3</td>
-      <td>Are edge strips the toggle surface (vs buttons in a header corner)?</td>
-      <td>§1 edge strips (IntelliJ tool-window bars); they are also §4's mobile strip, folded</td>
-      <td>Edge strips — they scale to more panels and unify with mobile</td></tr>
-  <tr><td class="q">R2-4</td>
-      <td>Panel visibility remembered per view (Nodes remembers its set, Map its own)?</td>
-      <td>§1 behaves per-view (switch views and back — each keeps its set)</td>
-      <td>Per-view sticky, seeded by good defaults</td></tr>
+      <td>View tabs: <b>Nodes · Mapping</b> — "mapping" is the term of art an experienced LED
+          artist scans the screen for. Nodes view / Nodes panel share the name; accepted — they
+          show the same thing.</td>
+      <td><b>RULED</b> (round 2)</td></tr>
   <tr><td class="q">R2-5</td>
-      <td>Code names: <code>PanelDock</code> vs <code>ViewSlot</code> for the docking concept?</td>
-      <td>— (naming only)</td>
-      <td><code>PanelDock</code> — "slot" stays a config/data word</td></tr>
+      <td>Code name: <code>PanelDock</code> — distinct from config/data "slot", easy to rename
+          later.</td>
+      <td><b>RULED</b> (round 2)</td></tr>
+  <tr><td class="q">R3-1</td>
+      <td>Strip behaviour: <b>radio</b> (one panel per side, ruling's expectation — drawn as
+          default) vs <b>stack</b> (two per side). Flip the <b>strips</b> control and feel
+          whether two-at-once earns its keep.</td>
+      <td>OPEN — try both</td></tr>
+  <tr><td class="q">R3-2</td>
+      <td>Panel visibility remembered <b>per main view</b> (Nodes keeps its set, Mapping its
+          own; defaults seed first visit). Ruled as "try it and see how it feels" — switch views
+          and back with different panels open.</td>
+      <td>TENTATIVE — feel test</td></tr>
 </table>
 <p class="leannote">
-  <b>Lean.</b> Ship the §1 workbench as the chrome plan's target: fixed homes, edge-strip toggles,
-  per-view sticky visibility, Nodes · Map tabs, patching as a Map mode. Internally panels are
-  data-driven (a view id → dock assignment table) so <i>we</i> can experiment — and customization
-  stays a future option, not v1 machinery.
+  <b>Lean.</b> Radio strips + per-view memory. Radio keeps sides honest at density (the 10×32
+  rail never shares a column) and matches the expectation; per-view memory is what makes the
+  defaults feel like the view helping rather than rearranging. Internally the view → dock
+  assignment stays a data table so <i>we</i> can experiment; customization remains a future
+  option, not v1 machinery.
 </p>
 </section>
 
@@ -525,8 +533,9 @@
 /* ================= state ================= */
 const state = {
   view: 'nodes',            // 'nodes' | 'map'
-  mode: 'map',              // 'map' | 'patch'  (Map view's mode)
+  mode: 'map',              // 'map' | 'patch'  (the Mapping view's mode)
   density: 'dome',
+  stripMode: 'radio',       // R3-1: 'radio' (ruling's expectation) | 'stack'
   sel: 'dome/2',
   phoneView: 'main',        // 'main' | 'project' | 'fixtures' | 'outputs' | 'device'
   // per-view panel visibility (R2-4): seeded with the good defaults
@@ -596,7 +605,7 @@ const DOME_BOXES = [
       cells: [{ label: 'peach', w: 40, range: true }, { gap: true, w: 24 }] },
   ]},
 ];
-const PANEL_TITLES = { project: 'Project', fixtures: 'Fixtures', outputs: 'Outputs', device: 'Device' };
+const PANEL_TITLES = { project: 'Nodes', fixtures: 'Fixtures', outputs: 'Outputs', device: 'Device' };
 const PANEL_SIDE = { project: 'left', fixtures: 'left', device: 'right', outputs: 'right' };
 const STRIP_ORDER = ['project', 'fixtures', 'device', 'outputs']; // dock stacking = strip order
 
@@ -837,9 +846,10 @@ function viewTabs() {
   const vt = (id, ico, label) =>
     `<span class="vtab ${state.view === id ? 'on' : ''}" onclick="setView('${id}')">
      <span class="vico">${ico}</span>${label}</span>`;
-  return `<div class="viewtabs">${vt('nodes', '▤', 'Nodes')}${vt('map', '⌖', 'Map')}
+  return `<div class="viewtabs">${vt('nodes', '▤', 'Nodes')}${vt('map', '⌖', 'Mapping')}
     <span class="vtab future" title="future"><span class="vico">▸</span>Live</span>
-    <span class="vtab future" title="future"><span class="vico">≣</span>Show</span></div>`;
+    <span class="vtab future" title="future"><span class="vico">≣</span>Show</span>
+    <span class="vtab future" title="future"><span class="vico">🗀</span>Files</span></div>`;
 }
 
 function edgeStrip(side) {
@@ -884,7 +894,7 @@ function renderWorkbench() {
 /* ================= section 2: anatomy ================= */
 function renderAnatomy() {
   const frame = (id, body) => { document.getElementById(id).innerHTML =
-    `<div class="phead"><span class="ptitle">${id.split('-')[1]}</span></div>
+    `<div class="phead"><span class="ptitle">${PANEL_TITLES[id.split('-')[1]]}</span></div>
      <div class="pbody">${body}</div>`; };
   frame('anat-project', projectTree());
   frame('anat-fixtures', fixturesPanel());
@@ -930,7 +940,7 @@ function phoneStrip(interactive) {
   const on = v => state.phoneView === v ? 'on' : '';
   const act = v => interactive ? `onclick="phoneSummon('${v}')"` : '';
   return `<div class="pstrip">
-    <span class="sq ${on('project')}" ${act('project')} title="Project">▤</span>
+    <span class="sq ${on('project')}" ${act('project')} title="Nodes">▤</span>
     <span class="sq ${on('fixtures')}" ${act('fixtures')} title="Fixtures">⬡</span>
     <span class="pdoc">
       <button class="${state.view === 'nodes' ? 'on' : ''}" ${interactive ? `onclick="setView('nodes')"` : ''}>Nodes</button>
@@ -965,7 +975,7 @@ function renderPhones() {
   const tablet = `<div class="phone tab"><div class="pcap">md · one dock open; other side stays a strip</div>
     <div class="pbdy">
       <div class="vstrip" style="border-right:1px solid var(--border-strong)">
-        <span class="ebtn" style="transform:rotate(180deg)">Project</span>
+        <span class="ebtn" style="transform:rotate(180deg)">Nodes</span>
         <span class="ebtn" style="transform:rotate(180deg)">Fixtures</span></div>
       <div class="col main">${viewTabs()}${state.view === 'nodes'
         ? `<div class="mainbody">${nodeCardsView()}</div>`
@@ -987,8 +997,9 @@ function renderAll() {
   document.getElementById('xm-map').disabled = state.view !== 'map';
   document.getElementById('xm-patch').disabled = state.view !== 'map';
   B('xd-dome', state.density === 'dome'); B('xd-rad', state.density === 'radiance');
+  B('xs-radio', state.stripMode === 'radio'); B('xs-stack', state.stripMode === 'stack');
   document.getElementById('xstatus').textContent =
-    `view=${state.view} · mode=${state.mode} · sel=${state.sel}`;
+    `view=${state.view} · mode=${state.mode} · strips=${state.stripMode} · sel=${state.sel}`;
 }
 function setView(v) { state.view = v; if (state.phoneView !== 'main') state.phoneView = 'main'; renderAll(); }
 function setMode(m) { state.mode = m; state.view = 'map'; renderAll(); }
@@ -997,8 +1008,25 @@ function togglePanel(id) {
   const side = PANEL_SIDE[id];
   const arr = state.panels[state.view][side];
   const i = arr.indexOf(id);
-  if (i >= 0) arr.splice(i, 1); else arr.push(id);
-  arr.sort((a, b) => STRIP_ORDER.indexOf(a) - STRIP_ORDER.indexOf(b));
+  if (state.stripMode === 'radio') {
+    // one panel per side: switch to it; re-click collapses the side
+    state.panels[state.view][side] = i >= 0 ? [] : [id];
+  } else {
+    if (i >= 0) arr.splice(i, 1); else arr.push(id);
+    arr.sort((a, b) => STRIP_ORDER.indexOf(a) - STRIP_ORDER.indexOf(b));
+  }
+  renderAll();
+}
+function setStripMode(m) {
+  state.stripMode = m;
+  if (m === 'radio') { // collapse each side to its first open panel
+    for (const v of Object.keys(state.panels)) {
+      for (const s of ['left', 'right']) {
+        const arr = state.panels[v][s];
+        if (arr.length > 1) state.panels[v][s] = [arr[0]];
+      }
+    }
+  }
   renderAll();
 }
 function selectPath(p) { state.sel = p; renderAll(); }
