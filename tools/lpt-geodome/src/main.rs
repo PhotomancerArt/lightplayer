@@ -240,10 +240,7 @@ fn validate(dome: &Map2dDoc, doors: &Map2dDoc) {
     // The door chevron's legs are equal, so the middle lamp sits on the apex.
     let door = door_points();
     let legs = (dist(door[0], door[1]), dist(door[1], door[2]));
-    assert!(
-        (legs.0 - legs.1).abs() < 0.15,
-        "door legs uneven: {legs:?}"
-    );
+    assert!((legs.0 - legs.1).abs() < 0.15, "door legs uneven: {legs:?}");
 
     // Every panel keeps enough lamps to read as a triangle.
     let (points, gaps) = sector_path();
