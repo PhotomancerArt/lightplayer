@@ -391,8 +391,9 @@ pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
 ];
 
 /// `examples/mini-dome` — the mini RADIANCE stand-in: a 5-way repeated
-/// dome (30 lamps a sector, map2d format 3 stable ids) AND three always-lit
-/// triangular polygon door panels, scattered across TWO named outputs with
+/// dome (30 lamps a sector — three suspended triangle panels on one gapped
+/// path, map2d format 3 stable ids) AND three always-lit chevron doors,
+/// scattered across TWO named outputs with
 /// shared ports — many-to-many, the patching archetype
 /// (`docs/use-cases/2026-08-09-mini-dome.md`). The `.patch.json` files
 /// carry the as-built permutation as format-2 path-identity rows

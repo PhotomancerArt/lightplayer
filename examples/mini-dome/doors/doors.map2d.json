@@ -6,11 +6,12 @@
     {
       "name": "door",
       "id": "door",
+      "stride": 3,
       "shape": {
         "repeat": {
           "shape": {
-            "polygon": {
-              "points": [[76.0, 16.0], [88.0, 28.0], [72.0, 32.0]],
+            "path": {
+              "points": [[54.6, 8.3], [71.5, 40.1], [107.5, 38.8]],
               "count": 9
             }
           },

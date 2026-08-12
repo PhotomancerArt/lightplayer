@@ -187,12 +187,14 @@ const GOLDEN: &[Expectation] = &[
     },
     // The mini-dome: TWO producers scattered across TWO named outputs
     // (many-to-many, format-2 path-identity patches, reversal + rotation).
-    // Captured 2026-08-10 as the scatter engine landed (slice-2 P3/P4) —
-    // there was no earlier behavior to preserve; from here on these bytes
-    // are as load-bearing as every other row. `out_b` publishes empty on
-    // tick 1: output identities self-register on first consume, so the
-    // fixtures' named runs settle one tick later — deterministic, and part
-    // of the pinned behavior.
+    // Captured 2026-08-10 as the scatter engine landed (slice-2 P3/P4);
+    // re-captured 2026-08-12 when the example's map2d geometry was rebuilt
+    // to match the real dome (suspended triangle panels + chevron doors —
+    // lamp POSITIONS moved, so sampled bytes moved; counts, patch files and
+    // scatter placements are pinned unchanged by `mini_dome_scatter`).
+    // `out_b` publishes empty on tick 1: output identities self-register on
+    // first consume, so the fixtures' named runs settle one tick later —
+    // deterministic, and part of the pinned behavior.
     Expectation {
         project: "mini-dome",
         outputs: &[
@@ -200,18 +202,18 @@ const GOLDEN: &[Expectation] = &[
                 "/mini_dome.show/out_a.output",
                 &[
                     (648, 0xd6d7c0c9db5a6bc5, [0, 0, 0, 0, 0, 0]),
-                    (648, 0x2230a42e4638d8b8, [77, 66, 42, 99, 211, 144]),
-                    (648, 0x678a3e30dcf52f20, [239, 65, 14, 99, 249, 144]),
-                    (648, 0x932bafaee622498f, [139, 65, 235, 98, 23, 145]),
+                    (648, 0xa1c0804dc081a47a, [255, 59, 21, 35, 97, 13]),
+                    (648, 0xc6c609db4557ca9c, [239, 59, 14, 35, 99, 13]),
+                    (648, 0x7996a56e5b4cf6f3, [223, 59, 7, 35, 102, 13]),
                 ],
             ),
             (
                 "/mini_dome.show/out_b.output",
                 &[
                     (0, 0xcbf29ce484222325, [0, 0, 0, 0, 0, 0]),
-                    (414, 0x1518cf3bccf96a17, [31, 7, 145, 22, 55, 41]),
-                    (414, 0x671c7df0bb808ce4, [37, 7, 147, 22, 51, 41]),
-                    (414, 0xb5f71a69347e3423, [44, 7, 148, 22, 48, 41]),
+                    (414, 0x3cbe239ba08d3c4b, [38, 31, 165, 28, 105, 29]),
+                    (414, 0xee2b96b92e76b853, [248, 30, 143, 28, 105, 29]),
+                    (414, 0xfc6e14e2f95501fd, [202, 30, 121, 28, 105, 29]),
                 ],
             ),
         ],
