@@ -28,6 +28,7 @@ pub mod share;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
 pub mod wiring;
+pub mod workbench;
 
 pub use account::AccountPage;
 pub use docs::DocsPage;

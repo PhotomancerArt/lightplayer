@@ -425,9 +425,7 @@ pub fn App() -> Element {
                 // lens sync above never reads this rewrite as a move to
                 // some other document and never fights it.
                 let current = route.peek().clone();
-                if let StudioRoute::Project {
-                    uid, play, patch, ..
-                } = &current
+                if let StudioRoute::Project { uid, view, .. } = &current
                     && next.open_project_uid.as_deref() == Some(uid.to_string().as_str())
                 {
                     let canonical = StudioRoute::Project {
@@ -437,8 +435,7 @@ pub fn App() -> Element {
                             .as_deref()
                             .map(share_link::slugify)
                             .filter(|slug| !slug.is_empty()),
-                        play: *play,
-                        patch: *patch,
+                        view: *view,
                     };
                     if canonical != current {
                         router::replace(&canonical);
@@ -763,8 +760,9 @@ pub fn App() -> Element {
         && !current_route.project_matches_view(&current_view);
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
+    let project_view = current_route.project_view();
     let play = current_route.is_play();
-    let patch = matches!(&current_route, StudioRoute::Project { patch: true, .. });
+    let patch = project_view == router::ProjectView::Patch;
     let play_toggle = current_route
         .is_lens()
         .then(|| current_route.with_play(!play).path());
@@ -772,6 +770,27 @@ pub fn App() -> Element {
     // project-scoped.
     let patch_toggle = matches!(&current_route, StudioRoute::Project { .. })
         .then(|| current_route.with_patch(!patch).path());
+    // The workbench view tabs' targets: same-session view suffixes on the
+    // current lens address, plain links like the play/patch toggles. A
+    // device lens has no mapping address yet, so its Mapping tab hides.
+    let workbench_hrefs = current_route.is_lens().then(|| {
+        (
+            current_route
+                .with_view(router::ProjectView::Workspace)
+                .path(),
+            matches!(&current_route, StudioRoute::Project { .. })
+                .then(|| current_route.with_view(router::ProjectView::Mapping).path()),
+        )
+    });
+    // Workbench routes trade the scrolling-document page for a
+    // full-height app frame: the docks and center scroll INTERNALLY.
+    // Keyed off an actually-open editor so opening frames, galleries,
+    // and bare-pane states keep the document layout.
+    let editor_open = current_view
+        .panes
+        .iter()
+        .any(|pane| matches!(&pane.body, lpa_studio_core::UiViewContent::ProjectEditor(_)));
+    let workbench_route = current_route.is_lens() && !play && !patch && editor_open;
 
     // Sharing administers THE project in the address bar (D1 — the address
     // bar IS the link), so both its doors exist only on a project route.
@@ -828,10 +847,15 @@ pub fn App() -> Element {
     };
     let settings = current_view.settings.clone();
 
+    let main_class = if workbench_route {
+        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-7 tw:pb-4 tw:pt-7 tw:max-[880px]:px-[10px] tw:max-[880px]:pb-2 tw:max-[880px]:pt-[10px]"
+    } else {
+        "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
+    };
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
-        main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+        main { class: "{main_class}",
             SiteChrome {
                 section,
                 sessions: current_view.sessions.clone(),
@@ -916,7 +940,8 @@ pub fn App() -> Element {
                         gallery: crate::app::layout::ShellGallery::Projects,
                         opening_frame,
                         play,
-                        patch,
+                        project_view,
+                        workbench_hrefs: workbench_hrefs.clone(),
                         on_action,
                     }
                 },
@@ -928,7 +953,8 @@ pub fn App() -> Element {
                         running: false,
                         opening_frame,
                         play,
-                        patch,
+                        project_view,
+                        workbench_hrefs: workbench_hrefs.clone(),
                         on_action,
                     }
                 },
