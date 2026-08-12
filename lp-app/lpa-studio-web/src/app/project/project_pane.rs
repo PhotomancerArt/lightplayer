@@ -20,6 +20,14 @@
 //! Disconnect remain ops without buttons). The popup is the save panel
 //! (M3 P5) plus the root's "Project settings" rows: the
 //! per-bucket sections list the labeled pending edits with per-entry revert.
+//!
+//! **Embedded mode** (workbench ruling 2): the workbench's Nodes dock renders
+//! this pane FLAT — no card chrome, no project-name/[i] header, just the save
+//! affordances, any sync issue, and the tree on the panel's own background.
+//! The dock is already titled "Nodes", so a card inside it was box-in-box; and
+//! the popup that used to hang off this header now lives on the ROOT NODE
+//! CARD's [i] in the center ([`ProjectDetailSections`], re-housed whole).
+//! Every other mount keeps the card, header, and popup exactly as before.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -35,6 +43,46 @@ use crate::app::project::pending_edit_section::{
 };
 use crate::app::project::{ProjectNodeTree, ProjectSettingsSection, ProjectShareSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
+use crate::core::{ActionButton, ActionButtonVariant};
+
+/// Everything the project's detail popup shows, gathered from the editor view
+/// plus the pane-level status — one value so the SAME sections can render in
+/// two homes: the project pane's own [i] (every non-workbench mount) and the
+/// workspace ROOT NODE card's [i] (the workbench's center, ruling 2).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectDetailContent {
+    affordance: UiAffordance,
+    project_name: String,
+    status: UiStatus,
+    dirty: DirtySummary,
+    overlay_revision: i64,
+    edits_in_flight: usize,
+    stats: Vec<UiMetric>,
+    pending_edits: Vec<UiPendingEdit>,
+    root_slots: Vec<UiConfigSlot>,
+    manifest: Option<lpa_studio_core::UiProjectManifest>,
+    library_identity: Option<(String, String)>,
+}
+
+impl ProjectDetailContent {
+    /// Gather the popup's content from the editor view and the pane status
+    /// (the same merge the pane header's affordance uses).
+    pub fn new(view: &ProjectEditorView, status: UiStatus) -> Self {
+        Self {
+            affordance: view.affordance(status.kind),
+            project_name: view.project_name.clone(),
+            status,
+            dirty: view.dirty,
+            overlay_revision: view.sync.overlay_revision,
+            edits_in_flight: view.edits_in_flight,
+            stats: view.stats.clone(),
+            pending_edits: view.pending_edits.clone(),
+            root_slots: view.root_slots.clone(),
+            manifest: view.manifest.clone(),
+            library_identity: view.library_identity.clone(),
+        }
+    }
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -45,6 +93,11 @@ pub fn ProjectPane(
     #[props(default = UiStatus::neutral("Project"))]
     status: UiStatus,
     #[props(default = false)] running: bool,
+    /// Render FLAT, with no card chrome and no header (workbench dock only —
+    /// see the module docs). Every other mount leaves this off and renders
+    /// exactly as it always has.
+    #[props(default = false)]
+    embedded: bool,
     on_action: EventHandler<UiAction>,
     /// Open the detail popup immediately (stories only).
     #[props(default = false)]
@@ -53,17 +106,14 @@ pub fn ProjectPane(
     #[props(default = false)]
     add_picker_initially_open: bool,
 ) -> Element {
-    let dirty = view.dirty;
-    let edits_in_flight = view.edits_in_flight;
-    let affordance = view.affordance(status.kind);
+    let detail_content = ProjectDetailContent::new(&view, status.clone());
+    let affordance = detail_content.affordance;
     let chrome = PaneChrome {
         tone: affordance_pane_tone(affordance, status.kind),
         accent: false,
         chips: Vec::new(),
     };
-    let overlay_revision = view.sync.overlay_revision;
     let sync_issue = view.sync.issue.clone();
-    let stats = view.stats.clone();
     let roots = view.tree.roots.clone();
     let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);
     let tree_add_menu = view.add_node_menu.clone();
@@ -71,14 +121,50 @@ pub fn ProjectPane(
     // and the workspace button carry the picker. Header actions are the
     // contextual Save / Revert pair on the generic `PaneActionButton` path.
     let header_actions = view.header_actions.clone();
-    let project_name = view.project_name.clone();
-    let pending_edits = view.pending_edits.clone();
-    let root_slots = view.root_slots.clone();
-    let manifest = view.manifest.clone();
-    let library_identity = view.library_identity.clone();
     // D8 tier (a): the project-wide debug channel, deliberately outside the
     // dirty rollup that drives `chrome`/`affordance` (D7).
     let debug_overrides = view.debug_overrides;
+
+    if embedded {
+        // Flat on the dock's background: the save/revert affordances as a
+        // quiet row (they used to ride the header), the debug chip, the sync
+        // issue, and the tree. No card, no title row, no [i] — the dock's tab
+        // names this, and the popup moved to the root node card.
+        return rsx! {
+            div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-2.5",
+                if !header_actions.is_empty() || debug_overrides > 0 {
+                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-1.5",
+                        for action in header_actions {
+                            ActionButton {
+                                key: "{action.action.meta().label}",
+                                action: action.action.clone(),
+                                running,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        DebugActiveChip { count: debug_overrides, on_action }
+                    }
+                }
+                if let Some(issue) = sync_issue.as_ref() {
+                    div { class: "tw:grid tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-2 tw:text-xs tw:text-status-error-foreground",
+                        strong { "{issue.message}" }
+                        if let Some(detail) = issue.detail.as_ref() {
+                            p { class: "tw:m-0 tw:text-xs tw:text-status-error-foreground", "{detail}" }
+                        }
+                    }
+                }
+                ProjectNodeTree {
+                    roots,
+                    running,
+                    add_node_menu: tree_add_menu,
+                    syncing,
+                    add_picker_initially_open,
+                    on_action,
+                }
+            }
+        };
+    }
 
     rsx! {
         StudioPane {
@@ -92,17 +178,7 @@ pub fn ProjectPane(
             },
             detail: rsx! {
                 ProjectDetailPopover {
-                    affordance,
-                    project_name,
-                    status,
-                    dirty,
-                    overlay_revision,
-                    edits_in_flight,
-                    stats,
-                    pending_edits,
-                    root_slots,
-                    manifest,
-                    library_identity,
+                    content: detail_content,
                     on_action,
                     initially_open,
                 }
@@ -184,29 +260,13 @@ fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectDetailPopover(
-    affordance: UiAffordance,
-    project_name: String,
-    status: UiStatus,
-    dirty: DirtySummary,
-    overlay_revision: i64,
-    edits_in_flight: usize,
-    stats: Vec<UiMetric>,
-    pending_edits: Vec<UiPendingEdit>,
-    #[props(default)] root_slots: Vec<UiConfigSlot>,
-    /// The container-manifest identity, when a library package backs it.
-    #[props(default)]
-    manifest: Option<lpa_studio_core::UiProjectManifest>,
-    /// The open project's library identity, when a package backs it.
-    #[props(default)]
-    library_identity: Option<(String, String)>,
+    content: ProjectDetailContent,
     on_action: EventHandler<UiAction>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
+    let affordance = content.affordance;
     let style = affordance_trigger_style(affordance);
     let label = trigger_label(affordance);
-    let status_class = node_status_label_class(status.kind);
-    let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
-    let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
 
     rsx! {
         DetailPopover {
@@ -216,59 +276,92 @@ fn ProjectDetailPopover(
             placement: PopoverPlacement::BottomEnd,
             active: affordance.is_announced(),
             initially_open,
+            ProjectDetailSections { content, on_action }
+        }
+    }
+}
+
+/// The project popup's SECTIONS, without the popover around them — the
+/// re-housable unit (ruling 2). Rendered inside the project pane's own [i]
+/// on every non-workbench mount, and inside the workspace ROOT NODE card's
+/// [i] in the workbench's center, where the flat Nodes dock has no header of
+/// its own to hang a popup from.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn ProjectDetailSections(
+    content: ProjectDetailContent,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let ProjectDetailContent {
+        affordance,
+        project_name,
+        status,
+        dirty,
+        overlay_revision,
+        edits_in_flight,
+        stats,
+        pending_edits,
+        root_slots,
+        manifest,
+        library_identity,
+    } = content;
+    let status_class = node_status_label_class(status.kind);
+    let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
+    let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
+
+    rsx! {
+        DetailSection {
+            div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
+                div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
+                    strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{project_name}" }
+                    span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground", "Project" }
+                }
+                span { class: status_class, "{status.label}" }
+            }
+        }
+        if !root_slots.is_empty() || manifest.is_some() {
+            // The project's identity rows (container manifest, plus the
+            // root's nodes count): purpose-built controls, NOT the
+            // generic slot editor — see `project_settings_section`.
+            DetailSection { title: "Project settings",
+                ProjectSettingsSection { manifest, root_slots }
+            }
+        }
+        // Share is its own section: settings are what the project IS,
+        // share is what you do with it. A project with no library
+        // package behind it (the storeless demo path, or a
+        // device-hosted project this library does not know) renders
+        // none — the affordances read the library snapshot.
+        if let Some((uid, slug)) = library_identity.clone() {
+            DetailSection { title: "Share",
+                ProjectShareSection { uid, slug, unsaved: dirty.persisted }
+            }
+        }
+        DetailSection { title: "Pending edits",
+            ProjectDetailRow { label: "State", value: state_label(affordance).to_string() }
+            ProjectDetailRow { label: "Overlay revision", value: overlay_revision.to_string() }
+            if edits_in_flight > 0 {
+                ProjectDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
+            }
+        }
+        DetailSection {
+            title: "Unsaved (persisted)",
+            meta: dirty.persisted.to_string(),
+            tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
+            PendingEditList { entries: unsaved_entries, on_action }
+        }
+        if dirty.failed > 0 || !failed_entries.is_empty() {
             DetailSection {
-                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
-                    div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
-                        strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{project_name}" }
-                        span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground", "Project" }
-                    }
-                    span { class: status_class, "{status.label}" }
-                }
+                title: "Failed edits",
+                meta: dirty.failed.to_string(),
+                tint: bucket_section_tint(PendingEditBucket::Failed, dirty.failed),
+                PendingEditList { entries: failed_entries, on_action }
             }
-            if !root_slots.is_empty() || manifest.is_some() {
-                // The project's identity rows (container manifest, plus the
-                // root's nodes count): purpose-built controls, NOT the
-                // generic slot editor — see `project_settings_section`.
-                DetailSection { title: "Project settings",
-                    ProjectSettingsSection { manifest, root_slots }
-                }
-            }
-            // Share is its own section: settings are what the project IS,
-            // share is what you do with it. A project with no library
-            // package behind it (the storeless demo path, or a
-            // device-hosted project this library does not know) renders
-            // none — the affordances read the library snapshot.
-            if let Some((uid, slug)) = library_identity.clone() {
-                DetailSection { title: "Share",
-                    ProjectShareSection { uid, slug, unsaved: dirty.persisted }
-                }
-            }
-            DetailSection { title: "Pending edits",
-                ProjectDetailRow { label: "State", value: state_label(affordance).to_string() }
-                ProjectDetailRow { label: "Overlay revision", value: overlay_revision.to_string() }
-                if edits_in_flight > 0 {
-                    ProjectDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
-                }
-            }
-            DetailSection {
-                title: "Unsaved (persisted)",
-                meta: dirty.persisted.to_string(),
-                tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
-                PendingEditList { entries: unsaved_entries, on_action }
-            }
-            if dirty.failed > 0 || !failed_entries.is_empty() {
-                DetailSection {
-                    title: "Failed edits",
-                    meta: dirty.failed.to_string(),
-                    tint: bucket_section_tint(PendingEditBucket::Failed, dirty.failed),
-                    PendingEditList { entries: failed_entries, on_action }
-                }
-            }
-            if !stats.is_empty() {
-                DetailSection { title: "Project stats",
-                    for metric in stats {
-                        ProjectDetailRow { label: metric.label.clone(), value: metric.value.clone() }
-                    }
+        }
+        if !stats.is_empty() {
+            DetailSection { title: "Project stats",
+                for metric in stats {
+                    ProjectDetailRow { label: metric.label.clone(), value: metric.value.clone() }
                 }
             }
         }
