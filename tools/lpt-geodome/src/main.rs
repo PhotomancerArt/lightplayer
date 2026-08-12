@@ -38,7 +38,12 @@ const R_EQUATOR: f32 = 42.0;
 const R_GROUND: f32 = 52.0;
 /// Panel inset: each panel is its host strut triangle shrunk toward the
 /// host's centroid (the 2' lucite panel suspended inside the ~4.3' face).
-const PANEL_SHRINK: f32 = 0.55;
+/// Tighter than the physical ratio (~0.46) on purpose: with ~30 lamps
+/// spread over eight panels, a sector's three-to-four dots per panel only
+/// read as a glowing triangle when they sit close enough for their sample
+/// footprints to fuse — the panel glows as a surface in real life, and a
+/// compact cluster is the closest a 150-lamp miniature gets to that.
+const PANEL_SHRINK: f32 = 0.3;
 /// Lamps per dome sector (5 sectors x 30 = the example's 150-lamp dome).
 const SECTOR_LAMPS: u32 = 30;
 /// Lamps per door (3 doors x 9 = the example's 27-lamp doors fixture).
