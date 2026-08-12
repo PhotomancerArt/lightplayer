@@ -6,20 +6,79 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use super::panels::{FixturesPanel, OutputsPanel};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchView};
 use crate::app::StudioShell;
+use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
 use crate::router::ProjectView;
-use lpa_studio_core::ProjectSyncPhase;
+use lpa_studio_core::{
+    NodeId, ProjectSyncPhase, UiPatchSurface, UiPatchTarget, UiStudioView, UiViewContent,
+};
+
+/// Stamp port/output labels onto every cell by id join — what
+/// `build_patch_surface` does in production; the shared patch-story
+/// builders leave them empty (the interim page only tooltips them, but
+/// the panels' chips RENDER them).
+fn labelled(mut surface: UiPatchSurface) -> UiPatchSurface {
+    let mut labels = std::collections::BTreeMap::new();
+    for output in &surface.outputs {
+        let output_label = output.display_name().to_string();
+        for port in &output.bay.ports {
+            for cell in &port.cells {
+                labels.insert(
+                    cell.id.clone(),
+                    (port.pin_label.clone(), output_label.clone()),
+                );
+            }
+        }
+    }
+    for output in &mut surface.outputs {
+        for port in &mut output.bay.ports {
+            for cell in &mut port.cells {
+                if let Some((pin, out)) = labels.get(&cell.id) {
+                    cell.port_label = pin.clone();
+                    cell.output_label = out.clone();
+                }
+            }
+        }
+    }
+    for fixture in &mut surface.fixtures {
+        for cell in &mut fixture.patch.cells {
+            if let Some((pin, out)) = labels.get(&cell.id) {
+                cell.port_label = pin.clone();
+                cell.output_label = out.clone();
+            }
+        }
+    }
+    surface
+}
+
+/// The ready-project studio view with the mini-dome patch surface on its
+/// editor pane, so the workbench's Fixtures/Outputs docks render real.
+fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
+    let mut view = project_ready_view();
+    for pane in &mut view.panes {
+        if let UiViewContent::ProjectEditor(editor) = &mut pane.body {
+            editor.patch_surface = Some(labelled(mini_dome_surface(false)));
+            editor.patch_selection = selection.clone();
+        }
+    }
+    view
+}
 
 /// Through the shell, like production: route-view in, workbench out.
 fn workbench_story(project_view: ProjectView) -> Element {
+    let selection = matches!(project_view, ProjectView::Mapping).then(|| UiPatchTarget::Instance {
+        node: NodeId::new(2),
+        path: "/sector/2".to_string(),
+    });
     rsx! {
         div { class: "tw:flex tw:h-[720px] tw:flex-col",
             StudioShell {
-                view: project_ready_view(),
+                view: view_with_surface(selection),
                 running: true,
                 project_view,
                 workbench_hrefs: Some(("#".to_string(), Some("#".to_string()))),
@@ -27,6 +86,60 @@ fn workbench_story(project_view: ProjectView) -> Element {
             }
         }
     }
+}
+
+/// One panel at dock width — the chrome around it is the frame stories'
+/// job; these pin the panel bodies at density.
+fn dock_frame(body: Element) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[520px] tw:w-[300px] tw:flex-col tw:overflow-y-auto tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:p-2.5",
+            {body}
+        }
+    }
+}
+
+#[story(
+    description = "The Fixtures panel on the mini-dome: fixture rows with object-colour swatches, instance rows with mapped dots and port-named channel chips (text + position — the one colour language leaves ports uncoloured). Sector 2 selected."
+)]
+fn fixtures_panel_mini_dome() -> Element {
+    dock_frame(rsx! {
+        FixturesPanel {
+            surface: Some(labelled(mini_dome_surface(false))),
+            selection: Some(UiPatchTarget::Instance {
+                node: NodeId::new(2),
+                path: "/sector/2".to_string(),
+            }),
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The Fixtures panel at range grain (the peach): no instance rows — one honest 0..N range row per fixture with its wire-window chips, the reversed half wearing ‹rev."
+)]
+fn fixtures_panel_peach_range() -> Element {
+    dock_frame(rsx! {
+        FixturesPanel {
+            surface: Some(labelled(peach_surface())),
+            selection: None,
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The Outputs panel on the mini-dome: box 1 expanded (one at a time — the radiance rule), one-line ports with occupancy, neutral producer-labelled wire-window cells; box 2 collapsed to its occupancy row. The selected cell wears the selection blue."
+)]
+fn outputs_panel_mini_dome() -> Element {
+    dock_frame(rsx! {
+        OutputsPanel {
+            surface: Some(labelled(mini_dome_surface(false))),
+            selection: Some(UiPatchTarget::Cell {
+                id: "dome:0:60:0".to_string(),
+            }),
+            on_action: move |_| {},
+        }
+    })
 }
 
 #[story(
