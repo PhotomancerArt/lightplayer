@@ -6479,6 +6479,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpt-geodome"
+version = "40.0.0"
+dependencies = [
+ "lpc-mapping",
+]
+
+[[package]]
 name = "lpvm"
 version = "40.0.0"
 dependencies = [

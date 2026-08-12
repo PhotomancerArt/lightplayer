@@ -11,11 +11,11 @@
 
 That's a dome — a miniature of a real one: a 2-frequency geodesic shell
 of bare struts, hoisted on a riser ring, with glowing triangular panels
-suspended inside the strut triangles. Five identical sectors of thirty
-lamps — three panels each, one strand jumpered panel-to-panel — and three
-chevron doors around the rim that stay warmly lit no matter what the show
-does. Two control boxes drive it: **"1"** with three ports, **"Box 2"**
-with two.
+suspended inside all forty strut triangles. Five identical sectors of
+thirty lamps — eight panels each, one strand jumpered panel-to-panel —
+and three chevron doors around the rim that stay warmly lit no matter
+what the show does. Two control boxes drive it: **"1"** with three
+ports, **"Box 2"** with two.
 
 Here's the thing about domes: the mapping never changes — the geometry was
 decided when the struts were cut — but the **plugging changes every single
@@ -32,15 +32,16 @@ three things a repeated structure needs.
 ## Instances, by name
 
 Open `dome/dome.map2d.json` and there is exactly **one** sector in it —
-three triangle panels traced by a single thirty-lamp path (the segments
-between panels are `gaps`: jumper wire that carries no lamps), repeated
-five ways around the center:
+eight triangle panels (one per 2V face) traced by a single thirty-lamp
+path whose connector segments are `gaps`: jumper wire that carries no
+lamps — repeated five ways around the center. (The geometry is
+generated from the real dome's structure by `cargo run -p lpt-geodome`.)
 
 ```json
 {
   "name": "sector",
   "id": "sector",
-  "shape": { "repeat": { "shape": { "path": { "...": "...", "gaps": [3, 7] } }, "count": 5 } }
+  "shape": { "repeat": { "shape": { "path": { "...": "...", "gaps": [3, 7, 11, 15, 19, 23, 27] } }, "count": 5 } }
 }
 ```
 
@@ -77,11 +78,10 @@ Two of the rows carry more:
 - `"r"` on `/sector/1` — that sector was plugged in at its **far end**, so
   its run is laid down the wire back-to-front. One flag, not a rewired
   strut.
-- the `10` on `/sector/2` — rotation. Ten lamps is exactly **one
-  panel**: the crew fed that sector's strand starting at the second
-  panel, so its run reads one panel further along than the design says.
-  **Offset** turns it in software the way the crew plugged it in
-  hardware.
+- the `10` on `/sector/2` — rotation. That sector's strand was fed a
+  few panels along, so its run reads ten lamps further around than the
+  design says. **Offset** turns it in software the way the crew plugged
+  it in hardware.
 
 The doors put a number on that turn. Each door is a **chevron** — a big
 open triangle with no bottom edge, nine lamps up one leg and over to the
