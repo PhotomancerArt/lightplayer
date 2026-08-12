@@ -12,7 +12,7 @@ pub mod project_workspace;
 pub(crate) mod project_workspace_stories;
 
 pub use project_node_tree::ProjectNodeTree;
-pub use project_pane::ProjectPane;
+pub use project_pane::{ProjectDetailContent, ProjectDetailSections, ProjectPane};
 pub use project_settings_section::ProjectSettingsSection;
 pub use project_share_section::ProjectShareSection;
 pub use project_workspace::ProjectNodeWorkspace;
