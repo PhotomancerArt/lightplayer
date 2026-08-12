@@ -27,14 +27,18 @@
 //! unified-editor plan mounts the arrange canvas here; the Fixtures and
 //! Outputs panels arrive with that plan's substrate (this module's P2).
 
+pub mod panels;
 #[cfg(feature = "stories")]
 pub(crate) mod workbench_stories;
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectEditorView, UiAction, UiDeviceCard, UiPaneView};
+use lpa_studio_core::{
+    ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
+};
 
 use crate::app::ProjectNodeWorkspace;
 use crate::core::PaneView;
+use panels::{FixturesPanel, OutputsPanel};
 
 /// Which center the workbench renders — the route's view suffix
 /// ([`crate::router::ProjectView`]), narrowed to the views the workbench
@@ -189,6 +193,10 @@ pub fn WorkbenchFrame(
 ) -> Element {
     let mut memory = use_signal(move || initial_memory.unwrap_or_default());
     let docks = memory.read().view(view);
+    // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
+    // and the surface's one shared selection.
+    let surface = project_editor.patch_surface.clone();
+    let patch_selection = project_editor.patch_selection.clone();
 
     rsx! {
         div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:rounded-lg tw:border tw:border-border-strong tw:bg-background",
@@ -202,6 +210,8 @@ pub fn WorkbenchFrame(
                     panel,
                     panes: panes.clone(),
                     lens_card: lens_card.clone(),
+                    surface: surface.clone(),
+                    patch_selection: patch_selection.clone(),
                     running,
                     now_secs,
                     on_hide: move |()| memory.write().view_mut(view).toggle(panel),
@@ -235,6 +245,8 @@ pub fn WorkbenchFrame(
                     panel,
                     panes: panes.clone(),
                     lens_card: lens_card.clone(),
+                    surface: surface.clone(),
+                    patch_selection: patch_selection.clone(),
                     running,
                     now_secs,
                     on_hide: move |()| memory.write().view_mut(view).toggle(panel),
@@ -256,7 +268,7 @@ pub fn WorkbenchFrame(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTabs(view: WorkbenchView, workspace_href: String, mapping_href: Option<String>) -> Element {
     rsx! {
-        div { class: "tw:flex tw:min-h-[34px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-surface-muted tw:px-2",
+        div { class: "tw:flex tw:min-h-[34px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2",
             ViewTab {
                 label: "Nodes",
                 href: workspace_href,
@@ -305,11 +317,11 @@ fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<Pane
         DockSide::Right => "writing-mode: vertical-rl;",
     };
     rsx! {
-        div { class: "tw:flex tw:w-[27px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5 tw:py-2 {border} tw:border-border-subtle tw:bg-surface-muted",
+        div { class: "tw:flex tw:w-[27px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5 tw:py-2 {border} tw:border-border-subtle tw:bg-card-muted",
             for panel in PanelId::strip(side) {
                 button {
                     class: if open == Some(panel) {
-                        "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-surface-raised tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-accent"
+                        "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-accent"
                     } else {
                         "tw:cursor-pointer tw:rounded tw:border tw:border-transparent tw:bg-transparent tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground"
                     },
@@ -332,6 +344,8 @@ fn PanelDock(
     panel: PanelId,
     panes: Vec<UiPaneView>,
     lens_card: Option<UiDeviceCard>,
+    surface: Option<UiPatchSurface>,
+    patch_selection: Option<UiPatchTarget>,
     running: bool,
     now_secs: Option<f64>,
     on_hide: EventHandler<()>,
@@ -342,8 +356,8 @@ fn PanelDock(
         DockSide::Right => "tw:w-[320px]",
     };
     rsx! {
-        div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-surface-subtle",
-            div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-subtle tw:bg-surface-muted tw:px-2.5",
+        div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
+            div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
                 span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground",
                     "{panel.title()}"
                 }
@@ -381,11 +395,18 @@ fn PanelDock(
                             }
                         }
                     },
-                    // P2 makes these real (the #409 surface DTOs); until
-                    // then the toggles are honest about what is coming.
-                    PanelId::Fixtures | PanelId::Outputs => rsx! {
-                        div { class: "tw:mt-3 tw:rounded-lg tw:border tw:border-dashed tw:border-border-strong tw:px-4 tw:py-5 tw:text-center tw:text-xs tw:text-dim-foreground",
-                            "The {panel.title()} panel arrives with the next commits."
+                    PanelId::Fixtures => rsx! {
+                        FixturesPanel {
+                            surface,
+                            selection: patch_selection,
+                            on_action,
+                        }
+                    },
+                    PanelId::Outputs => rsx! {
+                        OutputsPanel {
+                            surface,
+                            selection: patch_selection,
+                            on_action,
                         }
                     },
                 }
