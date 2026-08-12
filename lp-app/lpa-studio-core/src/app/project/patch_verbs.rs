@@ -65,10 +65,16 @@ impl PatchVerbContext<'_> {
     }
 
     /// Validate a transformed document the way the engine will read it.
+    /// Kernel degrades (duplicate paths) BLOCK here even though the engine
+    /// would light through them — the editor never authors a document it
+    /// knows the kernel will degrade.
     fn validate(&self, doc: &PatchDoc) -> Result<(), PatchVerbError> {
-        resolve_patch(&self.resolve_ctx(), doc)
-            .map(|_| ())
-            .map_err(|error| PatchVerbError(error.to_string()))
+        let resolution = resolve_patch(&self.resolve_ctx(), doc)
+            .map_err(|error| PatchVerbError(error.to_string()))?;
+        match resolution.refusals.first() {
+            None => Ok(()),
+            Some(refusal) => Err(PatchVerbError(refusal.to_string())),
+        }
     }
 }
 
@@ -195,9 +201,15 @@ pub fn rotate(
     let index = subject_entry(&mut next, subject, None)?;
     // The entry's lamp count, for the wrap: lower the source through the
     // span table the same way resolution does.
-    let resolved = resolve_patch(&ctx.resolve_ctx(), &next)
+    let resolution = resolve_patch(&ctx.resolve_ctx(), &next)
         .map_err(|error| PatchVerbError(error.to_string()))?;
-    let count = resolved
+    if let Some(refusal) = resolution.refusals.first() {
+        // A degraded entry breaks the entry↔range index alignment the
+        // lookup below relies on — and the verb would be blocked anyway.
+        return Err(PatchVerbError(refusal.to_string()));
+    }
+    let count = resolution
+        .ranges
         .get(index)
         .map(|range| range.count)
         .filter(|count| *count > 0)

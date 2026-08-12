@@ -17,6 +17,11 @@
 //! and changes on every install — so they are stored apart and
 //! [`resolve_patch`] anchors sparse entries over auto-flow.
 //!
+//! A third document is project-level: the editor's `editor.json`
+//! ([`EditorMetaDoc`]) — per-node Arrange-canvas placement, for human eyes
+//! only. The engine and the device never read it, and it is never a
+//! sampling input (see the module doc in `editor_meta`).
+//!
 //! Boundary: schema + pure geometry only. No filesystem access, no engine
 //! types, no UI. The crate is `no_std + alloc` and dependency-light because
 //! the device resolves documents at project load.
@@ -30,6 +35,7 @@
 extern crate alloc;
 
 pub mod corpus;
+mod editor_meta;
 pub mod import;
 mod map2d_doc;
 mod map2d_error;
@@ -39,6 +45,10 @@ mod map2d_resolve;
 mod map_object_path;
 mod patch;
 
+pub use editor_meta::{
+    EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,
+    EditorSurfaceMeta, EditorTransform,
+};
 pub use map_object_path::MapObjectPath;
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
@@ -54,5 +64,6 @@ pub use map2d_resolve::{
 };
 pub use patch::{
     PATCH_FORMAT, PATCH_FORMAT_BASE, PATCH_FORMAT_OBJECT_GRAIN, PatchDoc, PatchEntry, PatchError,
-    PatchRange, PatchResolveContext, PatchSource, PatchedRange, patched_wire_lamp, resolve_patch,
+    PatchRange, PatchResolution, PatchResolveContext, PatchSource, PatchedRange, patched_wire_lamp,
+    resolve_patch,
 };
