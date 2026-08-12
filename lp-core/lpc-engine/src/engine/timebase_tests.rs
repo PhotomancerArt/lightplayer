@@ -171,7 +171,7 @@ fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_transport: &str, endpoint
             r#"
 {{
   "kind": "Output",
-  "channels": {{ "0": {{ "endpoint": "{endpoint}" }} }},
+  "ports": {{ "0": {{ "endpoint": "{endpoint}" }} }},
   "bindings": {{ "input": {{ "source": "bus:control.out" }} }}
 }}
 "#
@@ -180,7 +180,7 @@ fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_transport: &str, endpoint
 }
 
 fn write_shared_assets(fs: &LpFsMemory) {
-    write(fs, "/project.json", "{ \"format\": 9 }\n");
+    write(fs, "/project.json", "{ \"format\": 10 }\n");
     write(
         fs,
         "/shader.glsl",

@@ -154,6 +154,10 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
+        // Browser sim transport is postMessage — no 16 KiB serial frame —
+        // so this link declares no frame budget and answers display
+        // layouts at any scale (dome-class included).
+        server.set_project_read_frame_budget(None);
         // Wire hello identity (sans-IO: injected here). Browser runtimes
         // carry no git provenance or stamped identity; the hello's
         // capability half comes from the constructor above.

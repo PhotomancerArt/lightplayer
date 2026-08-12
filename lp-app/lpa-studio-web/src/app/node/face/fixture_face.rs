@@ -26,7 +26,7 @@
 //! the shared view state feeds whichever renderer is showing, including
 //! live output colors. What the
 //! bar *offers* is not stable, and should not be: the wiring instruments
-//! (numbers, arrows, universe colors) are authoring tools, so they appear
+//! (numbers, arrows) are authoring tools, so they appear
 //! only in edit mode, and view mode's bar carries the live toggle alone.
 //! Edit mode also adds the texture-frame toggle and a full-page expand
 //! (fixed-position in place; the section never leaves the DOM). Toggle +
@@ -39,6 +39,13 @@
 //! rendered by the same component the shader card renders its declaration
 //! with, so the two cannot drift apart.
 //!
+//! Under the hero, when this fixture's lamps have reached an output's
+//! wire, sits the patch bay's FIXTURE side (D34a): its own runs laid along
+//! its own channel space, each labelled with where on the wire it landed.
+//! The same cells the output card shows, the other ordering — a fixture
+//! split across two stretches of strand reads unbroken here, and that
+//! difference IS the patch. Read-only; the document is edited as text.
+//!
 //! The `controls` section holds one dominant horizontal fader bound to
 //! `FixtureDef.brightness.some`.
 
@@ -49,7 +56,7 @@ use lpa_studio_core::{
     UiProductPreview,
 };
 
-use crate::app::node::face::{FixtureShapeMoment, node_ui_action};
+use crate::app::node::face::{FixturePatchRow, FixtureShapeMoment, node_ui_action};
 use crate::app::node::lamp_view::control_live_lamp_colors;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
@@ -213,6 +220,15 @@ pub fn FixtureFace(
                         live: view().live,
                     }
                 }
+            }
+            // The patch bay's FIXTURE side, in the section this fixture
+            // already has rather than a new one: the hero says what this
+            // fixture is showing, and the row under it says where those
+            // lamps landed on the wire — the same cells the driven
+            // output's card lays along the strand (D34a). Absent until
+            // something this fixture produces reaches an output.
+            if let Some(patch) = face.patch.clone() {
+                FixturePatchRow { patch }
             }
         }
         NodeCardSection { label: "settings",

@@ -18,7 +18,7 @@ use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, Rotation2d, bounds_of_poi
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::{MapEditorSession, editable_path};
 use crate::editor_core::map_tool::MapTool;
-use crate::editor_core::view_geometry::{ArrowInput, universe_rgb, wiring_arrows};
+use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
 use crate::view::map_editor::EditorViewOptions;
 
 /// Object fill palette (wiring-order cycling; matches the UX spike).
@@ -168,8 +168,8 @@ pub fn EditorCanvas(
     // Live colors as direct DOM writes (P2 of the view/edit-split plan):
     // subscribe to the feed and the session (a doc edit rebuilds the lamp
     // nodes, so the override must re-apply after that render), then write
-    // inline `style` fills. The VDOM owns the `fill` ATTRIBUTE (palette /
-    // universe); this effect owns inline style ONLY — one writer per
+    // inline `style` fills. The VDOM owns the `fill` ATTRIBUTE (palette);
+    // this effect owns inline style ONLY — one writer per
     // surface, so the two never fight.
     {
         let canvas_dom_id = canvas_dom_id.clone();
@@ -376,6 +376,8 @@ pub fn EditorCanvas(
         let ghost_doc = lpc_mapping::Map2dDoc {
             objects: vec![lpc_mapping::Map2dObject {
                 name: String::new(),
+                id: None,
+                stride: None,
                 shape: Map2dShape::Path(lpc_mapping::PathShape {
                     points: draft_points.clone(),
                     count,
@@ -776,16 +778,13 @@ pub fn EditorCanvas(
                         let inert =
                             scoped_object == Some(object_index) && instance.is_some_and(|i| i > 0);
                         // The ATTRIBUTE fill is the non-live look (instance
-                        // hue > universe color > object palette); live output
+                        // hue > object palette); live output
                         // rides an inline-style override written by the
                         // live-color effect, so color frames never re-render
                         // this tree.
                         let fill = if let Some(instance) = instance {
                             OBJECT_COLORS[(object_index + instance) % OBJECT_COLORS.len()]
                                 .to_string()
-                        } else if opts.universes {
-                            let [r, g, b] = universe_rgb(lamp.index);
-                            format!("rgb({r} {g} {b})")
                         } else {
                             object_color(object_index).to_string()
                         };

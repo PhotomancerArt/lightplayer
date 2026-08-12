@@ -1,7 +1,7 @@
 //! Mapping view options and the toggle bar shared across the output
 //! section's view ⇄ edit flip.
 //!
-//! Wiring instruments — `numbers`, `arrows`, `universes` — are **edit-mode
+//! Wiring instruments — `numbers`, `arrows` — are **edit-mode
 //! tools**: inspecting how a fixture is wired is an authoring activity, so
 //! only the mapping editor renders them and only edit mode offers their
 //! toggles. View mode is a product display: `live` colors lamps from the
@@ -17,13 +17,12 @@ use lpa_mapping_editor::EditorViewOptions;
 
 use crate::base::icon::{StudioIcon, StudioIconName};
 
-/// View options for the lamp map display. `numbers`/`arrows`/`universes`
-/// drive the mapping editor only — nothing in view mode reads them.
+/// View options for the lamp map display. `numbers`/`arrows` drive the
+/// mapping editor only — nothing in view mode reads them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapViewOptions {
     pub numbers: bool,
     pub arrows: bool,
-    pub universes: bool,
     pub live: bool,
 }
 
@@ -32,7 +31,6 @@ impl Default for MapViewOptions {
         Self {
             numbers: false,
             arrows: false,
-            universes: false,
             live: true,
         }
     }
@@ -46,7 +44,6 @@ impl From<EditorViewOptions> for MapViewOptions {
         Self {
             numbers: opts.numbers,
             arrows: opts.arrows,
-            universes: opts.universes,
             live: opts.live,
         }
     }
@@ -60,7 +57,6 @@ impl MapViewOptions {
         EditorViewOptions {
             numbers: self.numbers,
             arrows: self.arrows,
-            universes: self.universes,
             live: self.live,
             fit_preview: false,
             reference: true,
@@ -72,7 +68,6 @@ impl MapViewOptions {
     pub fn apply_to_editor(self, editor: &mut EditorViewOptions) {
         editor.numbers = self.numbers;
         editor.arrows = self.arrows;
-        editor.universes = self.universes;
         editor.live = self.live;
     }
 }
@@ -87,7 +82,7 @@ pub fn MapViewToggles(
     /// Render only the buttons (the host provides the bar wrapper).
     #[props(default = false)]
     bare: bool,
-    /// Offer the wiring instruments (numbers, arrows, universe colors).
+    /// Offer the wiring instruments (numbers, arrows).
     /// Edit mode only — view mode is a product display, so its bar carries
     /// the live toggle alone.
     #[props(default = false)]
@@ -117,12 +112,6 @@ pub fn MapViewToggles(
                     title: "wiring arrows (A)",
                     onclick: toggle(|mut v| { v.arrows = !v.arrows; v }),
                     StudioIcon { name: StudioIconName::MapArrows, size: 13 }
-                }
-                button {
-                    class: class_for(value.universes),
-                    title: "universe colors, 170 lamps each (U)",
-                    onclick: toggle(|mut v| { v.universes = !v.universes; v }),
-                    StudioIcon { name: StudioIconName::MapUniverses, size: 13 }
                 }
             }
             button {

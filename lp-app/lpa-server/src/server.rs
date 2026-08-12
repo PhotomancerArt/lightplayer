@@ -43,6 +43,15 @@ pub struct LpServer {
     /// boot-control record) — deliberately not project data, and applied to
     /// every engine this server creates, present and future.
     safe_output_clamp: Option<u8>,
+    /// The transport's project-read FRAME budget, declared by the embedder
+    /// (`set_project_read_frame_budget`). One declaration drives BOTH
+    /// derived limits so they can never disagree: the stream sink refuses
+    /// events past the frame, and every engine's display-layout budget is
+    /// the frame minus the probe-header reserve. `Some(n)` = frames must
+    /// fit `n` bytes (serial's 16 KiB default); `None` = the link has no
+    /// meaningful frame limit (in-proc, websocket) — layouts are always
+    /// answered and the sink gets a generous runaway ceiling instead.
+    project_read_frame_budget: Option<usize>,
     /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
     memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
@@ -206,6 +215,7 @@ impl LpServer {
             base_fs,
             last_frame_time_us: RefCell::new(None),
             safe_output_clamp: None,
+            project_read_frame_budget: Some(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES),
             memory_stats,
             time_provider,
             button_service,
@@ -500,6 +510,7 @@ impl LpServer {
                     let msg_id = client_msg.id;
                     match client_msg.msg {
                         ClientRequest::ProjectRead { handle, request } => {
+                            let sink_frame_budget = self.sink_frame_budget();
                             let mut server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
@@ -528,7 +539,11 @@ impl LpServer {
                             server_status.panel_auto_save = Some(project.panel_auto_save());
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
-                            let mut sink = ProjectReadStreamSink::new(transport, msg_id);
+                            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                                transport,
+                                msg_id,
+                                sink_frame_budget,
+                            );
                             let stream_result =
                                 source.stream_project_read_events(request, &mut sink).await;
                             match stream_result {
@@ -664,12 +679,16 @@ impl LpServer {
             self.radio_service.clone(),
             self.graphics.clone(),
         )?;
-        // The clamp is device state: every engine wears it, including this
-        // freshly created one.
+        // The clamp and the frame budget are device state: every engine
+        // wears them, including this freshly created one.
+        let engine_budget = self.engine_display_layout_budget();
         if let Some(project) = self.project_manager.get_project_mut(handle) {
             project
                 .engine_mut()
                 .set_safe_output_clamp(self.safe_output_clamp);
+            project
+                .engine_mut()
+                .set_display_layout_budget(engine_budget);
         }
         Ok(handle)
     }
@@ -695,6 +714,51 @@ impl LpServer {
     /// reporting (clients surface the safe-mode state and its exit).
     pub fn safe_output_clamp(&self) -> Option<u8> {
         self.safe_output_clamp
+    }
+
+    /// Declare the transport's project-read frame budget and apply the
+    /// derived display-layout budget to every loaded engine. Future loads
+    /// inherit it too.
+    ///
+    /// The default is the embedded serial frame
+    /// ([`lpc_wire::PROJECT_READ_FRAME_MAX_BYTES`]) — the smallest link —
+    /// so only embedders with bigger pipes (in-proc hosts, websocket, the
+    /// browser sim) need to opt out with `None`. Fail-safe direction: an
+    /// un-plumbed host refuses big layouts rather than wedging a serial
+    /// link.
+    pub fn set_project_read_frame_budget(&mut self, budget: Option<usize>) {
+        self.project_read_frame_budget = budget;
+        let engine_budget = self.engine_display_layout_budget();
+        let handles: alloc::vec::Vec<_> = self
+            .project_manager
+            .list_loaded_projects()
+            .into_iter()
+            .map(|loaded| loaded.handle)
+            .collect();
+        for handle in handles {
+            if let Some(project) = self.project_manager.get_project_mut(handle) {
+                project
+                    .engine_mut()
+                    .set_display_layout_budget(engine_budget);
+            }
+        }
+    }
+
+    /// The display-layout byte budget engines derive from the declared
+    /// frame budget: frame minus the probe-header reserve, `None` when the
+    /// link is unbounded.
+    fn engine_display_layout_budget(&self) -> Option<usize> {
+        self.project_read_frame_budget
+            .map(|frame| frame.saturating_sub(lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES))
+    }
+
+    /// The stream sink's per-event ceiling for this link. A bounded link
+    /// enforces its declared frame; an unbounded one still gets a generous
+    /// runaway ceiling so a berserk serializer cannot OOM the host.
+    fn sink_frame_budget(&self) -> usize {
+        const UNBOUNDED_LINK_RUNAWAY_CEILING: usize = 4 * 1024 * 1024;
+        self.project_read_frame_budget
+            .unwrap_or(UNBOUNDED_LINK_RUNAWAY_CEILING)
     }
 
     /// Set the last frame processing time (called by server loop)

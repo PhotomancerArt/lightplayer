@@ -86,7 +86,6 @@ pub(crate) fn editor_fit_preview() -> Element {
                 initial_view: Some(EditorViewOptions {
                     numbers: false,
                     arrows: true,
-                    universes: false,
                     live: false,
                     fit_preview: true,
                     reference: true,
@@ -150,28 +149,6 @@ pub(crate) fn editor_reference_trace() -> Element {
                 doc_epoch: 0,
                 doc: lpc_mapping::corpus::repeated_sector(),
                 reference: Some(reference),
-            }
-        }
-    }
-}
-
-#[story(
-    description = "Universe coloring in the editor: 256 panel lamps flowing across the 170-lamp boundary, ranges annotated per universe in the rail."
-)]
-pub(crate) fn editor_universes() -> Element {
-    rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::panel_16x16(),
-                initial_view: Some(EditorViewOptions {
-                    numbers: false,
-                    arrows: false,
-                    universes: true,
-                    live: false,
-                    fit_preview: false,
-                    reference: true,
-                }),
             }
         }
     }

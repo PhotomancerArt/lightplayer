@@ -911,22 +911,6 @@ impl PreviewSlotHandle {
         self.slot.borrow().output.frame_revision()
     }
 
-    /// Whether the slot has output frames but no geometry to draw them with,
-    /// because the engine refused the layout (dome-scale) or none has
-    /// arrived yet. The consumer synthesizes one and installs it with
-    /// [`Self::set_synthesized_display_layout`].
-    pub fn wants_display_layout(&self) -> bool {
-        self.slot.borrow().output.wants_display_layout()
-    }
-
-    /// Install a consumer-synthesized display layout for the slot's lamps.
-    pub fn set_synthesized_display_layout(
-        &self,
-        layout: std::rc::Rc<lpc_model::ControlDisplayLayout>,
-    ) {
-        self.slot.borrow_mut().output.set_synthesized_layout(layout);
-    }
-
     /// Suspend (`false`) or resume (`true`) presenting. Hiding pauses the
     /// scheduler and freezes the canvas on its last frame; showing
     /// resumes a held runtime immediately, or re-leases the slot when its

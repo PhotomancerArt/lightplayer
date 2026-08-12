@@ -68,6 +68,11 @@ fn every_pattern_template_validates_against_the_checked_in_schemas() {
                 continue;
             }
             let text = std::str::from_utf8(bytes).expect("authored artifacts are utf8");
+            if path.ends_with(".patch.json") {
+                lpc_mapping::PatchDoc::from_json(text)
+                    .unwrap_or_else(|error| panic!("{template:?}/{path}: {error}"));
+                continue;
+            }
             if path.ends_with(".map2d.json") {
                 let doc = lpc_mapping::Map2dDoc::from_json(text)
                     .unwrap_or_else(|error| panic!("{template:?}/{path}: {error}"));

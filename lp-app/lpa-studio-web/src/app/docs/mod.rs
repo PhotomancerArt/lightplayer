@@ -74,6 +74,33 @@ pub const PAGES: &[DocPage] = &[
         }],
     },
     DocPage {
+        slug: "the-peach",
+        title: "The peach",
+        markdown: include_str!("../../../../../docs/user-guide/the-peach.md"),
+        // Two sims, because the article's argument IS the pair: the same
+        // artwork, the same wire, the same patch files, declared 1D and 2D.
+        // A reader who cannot see them side by side has to take it on faith.
+        sims: &[
+            DocsSimSpec {
+                name: "twod",
+                example_id: "examples/peach-2d",
+            },
+            DocsSimSpec {
+                name: "oned",
+                example_id: "examples/peach-1d",
+            },
+        ],
+    },
+    DocPage {
+        slug: "patching-the-dome",
+        title: "Patching the dome",
+        markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.md"),
+        sims: &[DocsSimSpec {
+            name: "main",
+            example_id: "examples/mini-dome",
+        }],
+    },
+    DocPage {
         slug: "brightness-and-smooth-fades",
         title: "Brightness & smooth fades",
         markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.md"),

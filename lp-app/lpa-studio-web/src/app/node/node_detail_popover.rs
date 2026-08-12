@@ -23,6 +23,7 @@ use crate::app::module::ExportFindingRow;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
+use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
 use crate::base::{DetailPopover, DetailSection, DetailSectionTint, StudioIcon, StudioIconName};
 
 #[component]
@@ -39,6 +40,13 @@ pub(crate) fn NodeDetailPopover(
     /// they arrive as an option rather than as header fields.
     #[props(default = None)]
     module: Option<UiModuleFace>,
+    /// The PROJECT's detail sections, on the workspace ROOT node only
+    /// (workbench ruling 2). The workbench's Nodes dock renders the project
+    /// pane flat — no header, so no [i] of its own — and this popup is where
+    /// that content now lives: identity, project settings, share, pending
+    /// edits, stats. Every other card leaves it `None`.
+    #[props(default = None)]
+    project: Option<ProjectDetailContent>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
@@ -154,6 +162,12 @@ pub(crate) fn NodeDetailPopover(
                         }
                     }
                 }
+            }
+            // The PROJECT's own sections, re-housed here on the root card
+            // (ruling 2) — the same component the project pane's [i] renders,
+            // so the sections and their ops never fork.
+            if let Some(project) = project {
+                ProjectDetailSections { content: project, on_action: forward }
             }
         }
     }

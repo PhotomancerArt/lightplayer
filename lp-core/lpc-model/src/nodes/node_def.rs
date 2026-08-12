@@ -431,16 +431,28 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
+/// A fixture references up to two sibling documents — its mapping and its
+/// patch — and they are independent: either, both, or neither.
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    match fixture.mapping.value() {
-        MappingConfig::Map2d { source } => {
-            assets_for_slot(source, containing_file, AssetContentType::FixtureMap2d)
-        }
-        _ => Ok(Vec::new()),
+    let mut assets = Vec::new();
+    if let MappingConfig::Map2d { source } = fixture.mapping.value() {
+        assets.extend(assets_for_slot(
+            source,
+            containing_file,
+            AssetContentType::FixtureMap2d,
+        )?);
     }
+    if let Some(source) = fixture.patch.value().source() {
+        assets.extend(assets_for_slot(
+            source,
+            containing_file,
+            AssetContentType::FixturePatch,
+        )?);
+    }
+    Ok(assets)
 }
 
 fn assets_for_slot(
@@ -689,7 +701,7 @@ mod tests {
             &registry,
             r#"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "options": { "dithering_enabled": false }
 }"#,
         )
@@ -1126,7 +1138,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "value": 0.25 } }
 }"##,
         )
@@ -1141,7 +1153,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "target": "bus:control.out" } }
 }"##,
         )
@@ -1260,6 +1272,65 @@ mod tests {
                 AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
                 AssetContentType::FixtureMap2d,
             )]
+        );
+    }
+
+    /// A patched fixture references TWO siblings, each under its own content
+    /// type — the loader looks assets up one per (node, content type), so a
+    /// shared type would make the pair unresolvable.
+    #[test]
+    fn node_def_referenced_assets_carry_the_fixtures_mapping_and_patch_apart() {
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
+  },
+  "patch": {
+    "kind": "File",
+    "source": "fixture.patch.json"
+  }
+}"#,
+        )
+        .expect("fixture");
+
+        assert_eq!(
+            fixture
+                .referenced_assets(LpPath::new("/fixtures/f.json"))
+                .unwrap(),
+            vec![
+                ReferencedAsset::new(
+                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
+                    AssetContentType::FixtureMap2d,
+                ),
+                ReferencedAsset::new(
+                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.patch.json")),
+                    AssetContentType::FixturePatch,
+                ),
+            ]
+        );
+    }
+
+    /// The patch is independent of the mapping: a hand-authored `PathPoints`
+    /// fixture (no mapping document at all) can still be patched.
+    #[test]
+    fn a_patch_is_referenced_without_a_mapping_document() {
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 1 },
+  "patch": { "kind": "File", "source": "strip.patch.json" }
+}"#,
+        )
+        .expect("fixture");
+
+        assert_eq!(
+            fixture
+                .referenced_asset_paths(LpPath::new("/fixtures/f.json"))
+                .unwrap(),
+            vec![LpPathBuf::from("/fixtures/strip.patch.json")]
         );
     }
 

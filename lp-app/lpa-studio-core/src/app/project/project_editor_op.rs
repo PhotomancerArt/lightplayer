@@ -11,6 +11,11 @@ pub enum ProjectEditorOp {
     /// collapse, mirrored composer draft) — the node arm of the CardUiState
     /// re-home. Applied synchronously in the controller, like `Focus`.
     NodeUi(crate::app::project::node_card_ui_state::NodeUiOp),
+    /// Point the patch surface's one shared selection (D36; core-owned so
+    /// e2e can drive it and P6's verbs can read it). Applied synchronously.
+    PatchSelect {
+        target: Option<crate::UiPatchTarget>,
+    },
 }
 
 impl ControllerOp for ProjectEditorOp {
@@ -26,6 +31,11 @@ impl ControllerOp for ProjectEditorOp {
                 "Change what this node card is showing.",
                 ActionPriority::Tertiary,
             ),
+            Self::PatchSelect { .. } => ActionMeta::new(
+                "Select patch target",
+                "Point the patch surface's selection.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -37,7 +47,7 @@ impl ControllerOp for ProjectEditorOp {
         // `NodeUi` is likewise a purely local mutation: the handler never
         // awaits, so the deadline never engages.
         match self {
-            Self::Focus | Self::NodeUi(_) => ActionClass::Foreground {
+            Self::Focus | Self::NodeUi(_) | Self::PatchSelect { .. } => ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             },
         }

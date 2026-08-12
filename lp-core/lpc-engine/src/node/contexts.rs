@@ -30,6 +30,7 @@ use lpfs::LpFs;
 
 use super::ScopeRef;
 use super::node_error::NodeError;
+use super::node_runtime::PatchedRun;
 
 /// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
 ///
@@ -338,6 +339,40 @@ impl<'r> TickContext<'r> {
         self.resolver
             .render_control(product, request, target)
             .map_err(|e| NodeError::msg(alloc::format!("render control: {}", e.message)))
+    }
+
+    /// Where a control product's producer says its lamps land on THIS
+    /// node's wire: the producer's resolved runs, filtered to the ones
+    /// addressed to the current (output) node — `None` for auto-flow,
+    /// `Some(vec![])` for "patched, nothing lands here" (D40; the
+    /// distinction is documented on the engine's implementation).
+    ///
+    /// The output asks this once per producer per frame, between resolving
+    /// its input (which ticks the producer) and rendering.
+    pub fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+    ) -> Option<alloc::vec::Vec<PatchedRun>> {
+        self.resolver.control_patch_placement(product, self.node_id)
+    }
+
+    /// Register this (output) node's authored name for patch routing —
+    /// called at the top of the output's `consume`, the one place its def
+    /// is readable. Returns the colliding name when a live sibling already
+    /// claims it (surface it as runtime status; routing stays exact-match).
+    pub fn register_output_identity(
+        &mut self,
+        name: Option<alloc::string::String>,
+    ) -> Option<alloc::string::String> {
+        let node = self.node_id;
+        let revision = self.revision;
+        self.resolver.register_output_identity(node, name, revision)
+    }
+
+    /// Every registered output name plus the revision the set last changed
+    /// at — the fixture's dangling-entry check caches on the revision.
+    pub fn known_output_names(&self) -> (alloc::vec::Vec<alloc::string::String>, Revision) {
+        self.resolver.known_output_names()
     }
 
     /// Publishes this node's timebase for the current tick.

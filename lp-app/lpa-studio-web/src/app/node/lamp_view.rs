@@ -9,8 +9,7 @@
 //! costs one JS call regardless of lamp count.
 //!
 //! View mode is a product display, not a wiring tool — no numbers, no
-//! universe colors, no arrows. Those are authoring instruments and live in
-//! the mapping editor.
+//! arrows. Those are authoring instruments and live in the mapping editor.
 //!
 //! Upgrade path: the software rasterizer's per-frame fill is the cost that
 //! scales, and at Radiance scale this component grows a WebGL/instanced
@@ -296,7 +295,14 @@ fn paint_lamp_dot(
     }
 }
 
-fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
+/// One lamp's display colour, decoded from a control preview's own samples
+/// — the sample-layout walk (span, encoding, colour order) plus the linear
+/// → sRGB transfer, shared with the patch bay's cell strips so the bay and
+/// the lamp field can never disagree about a colour.
+pub(crate) fn control_rgb_at_sample(
+    preview: &UiControlProductPreview,
+    sample_start: u32,
+) -> Option<[u8; 3]> {
     let span = preview.sample_layout.spans.iter().find(|span| {
         matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })
             && sample_start >= span.start
