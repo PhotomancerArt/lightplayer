@@ -157,6 +157,34 @@ fn workbench_mapping_view() -> Element {
 }
 
 #[story(
+    description = "The mobile fold with a panel summoned: below the fold breakpoint the summon strip carries the view switch plus the four panel toggles (the edge strips, folded), and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the desktop docks."
+)]
+fn workbench_mobile_outputs_summoned() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[640px] tw:flex-col",
+            WorkbenchFrame {
+                view: WorkbenchView::Mapping,
+                panes: vec![project_synced_pane_view()],
+                project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
+                    .with_patch_surface(
+                        Some(labelled(mini_dome_surface(false))),
+                        Some(UiPatchTarget::Instance {
+                            node: NodeId::new(2),
+                            path: "/sector/2".to_string(),
+                        }),
+                    ),
+                lens_card: Some(simulator_lens_card()),
+                running: true,
+                workspace_href: "#".to_string(),
+                mapping_href: Some("#".to_string()),
+                initial_summoned: Some(super::PanelId::Outputs),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     description = "Both docks collapsed (radio re-click): the edge strips are all that remain of the sides, and the center takes the full width. The strips stay clickable — the collapsed state's handle."
 )]
 fn workbench_docks_collapsed() -> Element {

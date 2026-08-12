@@ -189,6 +189,9 @@ pub fn WorkbenchFrame(
     /// Stories only: preset panel memory (collapsed docks and the like).
     #[props(default)]
     initial_memory: Option<PanelMemory>,
+    /// Stories only: preset the mobile fold's summoned panel.
+    #[props(default)]
+    initial_summoned: Option<PanelId>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut memory = use_signal(move || initial_memory.unwrap_or_default());
@@ -197,67 +200,172 @@ pub fn WorkbenchFrame(
     // and the surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
     let patch_selection = project_editor.patch_selection.clone();
+    // The mobile fold's summoned panel: below the fold breakpoint the
+    // summon strip replaces the edge strips, and a summoned panel
+    // temporarily REPLACES the main view (an overlay with a back
+    // header). Desktop never reads this — the overlay is display-gated
+    // to the fold, so widening the window simply reveals the desktop
+    // docks again.
+    let mut summoned = use_signal(move || initial_summoned);
 
     rsx! {
         div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:rounded-lg tw:border tw:border-border-strong tw:bg-background",
-            EdgeStrip {
-                side: DockSide::Left,
-                open: docks.left,
-                on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
-            }
-            if let Some(panel) = docks.left {
-                PanelDock {
-                    panel,
-                    panes: panes.clone(),
-                    lens_card: lens_card.clone(),
-                    surface: surface.clone(),
-                    patch_selection: patch_selection.clone(),
-                    running,
-                    now_secs,
-                    on_hide: move |()| memory.write().view_mut(view).toggle(panel),
-                    on_action,
+            div { class: "tw:contents tw:max-[960px]:hidden",
+                EdgeStrip {
+                    side: DockSide::Left,
+                    open: docks.left,
+                    on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                }
+                if let Some(panel) = docks.left {
+                    PanelDock {
+                        panel,
+                        panes: panes.clone(),
+                        lens_card: lens_card.clone(),
+                        surface: surface.clone(),
+                        patch_selection: patch_selection.clone(),
+                        running,
+                        now_secs,
+                        on_hide: move |()| memory.write().view_mut(view).toggle(panel),
+                        on_action,
+                    }
                 }
             }
-            div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle",
-                ViewTabs { view, workspace_href, mapping_href }
-                match view {
-                    WorkbenchView::Nodes => rsx! {
-                        div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5",
-                            ProjectNodeWorkspace { view: project_editor, on_action }
-                        }
+            div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle tw:max-[960px]:border-x-0",
+                SummonStrip {
+                    view,
+                    summoned: *summoned.read(),
+                    workspace_href: workspace_href.clone(),
+                    mapping_href: mapping_href.clone(),
+                    on_summon: move |panel: PanelId| {
+                        let current = *summoned.peek();
+                        summoned.set(if current == Some(panel) { None } else { Some(panel) });
                     },
-                    WorkbenchView::Mapping => rsx! {
-                        // The honest placeholder: the arrange canvas is the
-                        // unified-editor plan's first mount here.
-                        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
-                            div { class: "tw:rounded-lg tw:border tw:border-dashed tw:border-border-strong tw:px-8 tw:py-6 tw:text-center",
-                                p { class: "tw:m-0 tw:text-sm tw:font-semibold tw:text-muted-foreground", "Mapping" }
-                                p { class: "tw:m-0 tw:mt-1 tw:text-xs tw:text-dim-foreground",
-                                    "The arrange canvas lands here next — the Fixtures and Outputs panels are already live."
+                }
+                div { class: "tw:max-[960px]:hidden",
+                    ViewTabs { view, workspace_href, mapping_href }
+                }
+                div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                    match view {
+                        WorkbenchView::Nodes => rsx! {
+                            div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[960px]:p-2",
+                                ProjectNodeWorkspace { view: project_editor, on_action }
+                            }
+                        },
+                        WorkbenchView::Mapping => rsx! {
+                            // The honest placeholder: the arrange canvas is the
+                            // unified-editor plan's first mount here.
+                            div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
+                                div { class: "tw:rounded-lg tw:border tw:border-dashed tw:border-border-strong tw:px-8 tw:py-6 tw:text-center",
+                                    p { class: "tw:m-0 tw:text-sm tw:font-semibold tw:text-muted-foreground", "Mapping" }
+                                    p { class: "tw:m-0 tw:mt-1 tw:text-xs tw:text-dim-foreground",
+                                        "The arrange canvas lands here next — the Fixtures and Outputs panels are already live."
+                                    }
+                                }
+                            }
+                        },
+                    }
+                    if let Some(panel) = *summoned.read() {
+                        // The summoned panel, replacing main below the fold.
+                        div { class: "tw:absolute tw:inset-0 tw:z-10 tw:hidden tw:flex-col tw:bg-background tw:max-[960px]:flex",
+                            div { class: "tw:flex tw:min-h-[32px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-subtle tw:px-2.5",
+                                button {
+                                    class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
+                                    onclick: move |_| summoned.set(None),
+                                    "‹ back"
+                                }
+                                span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
+                                    "{panel.title()}"
+                                }
+                            }
+                            div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
+                                PanelBody {
+                                    panel,
+                                    panes: panes.clone(),
+                                    lens_card: lens_card.clone(),
+                                    surface: surface.clone(),
+                                    patch_selection: patch_selection.clone(),
+                                    running,
+                                    now_secs,
+                                    on_action,
                                 }
                             }
                         }
-                    },
+                    }
                 }
             }
-            if let Some(panel) = docks.right {
-                PanelDock {
-                    panel,
-                    panes: panes.clone(),
-                    lens_card: lens_card.clone(),
-                    surface: surface.clone(),
-                    patch_selection: patch_selection.clone(),
-                    running,
-                    now_secs,
-                    on_hide: move |()| memory.write().view_mut(view).toggle(panel),
-                    on_action,
+            div { class: "tw:contents tw:max-[960px]:hidden",
+                if let Some(panel) = docks.right {
+                    PanelDock {
+                        panel,
+                        panes: panes.clone(),
+                        lens_card: lens_card.clone(),
+                        surface: surface.clone(),
+                        patch_selection: patch_selection.clone(),
+                        running,
+                        now_secs,
+                        on_hide: move |()| memory.write().view_mut(view).toggle(panel),
+                        on_action,
+                    }
+                }
+                EdgeStrip {
+                    side: DockSide::Right,
+                    open: docks.right,
+                    on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
                 }
             }
-            EdgeStrip {
-                side: DockSide::Right,
-                open: docks.right,
-                on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+        }
+    }
+}
+
+/// The fold's sticky strip: the desktop edge strips folded into one row —
+/// view switch centered, the four panel summon buttons flanking it in
+/// their home-side order. Hidden above the fold breakpoint.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SummonStrip(
+    view: WorkbenchView,
+    summoned: Option<PanelId>,
+    workspace_href: String,
+    mapping_href: Option<String>,
+    on_summon: EventHandler<PanelId>,
+) -> Element {
+    let button = |panel: PanelId, glyph: &'static str| {
+        let class = if summoned == Some(panel) {
+            "tw:flex tw:h-[26px] tw:w-[30px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:text-xs tw:text-selection-border"
+        } else {
+            "tw:flex tw:h-[26px] tw:w-[30px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-xs tw:text-subtle-foreground tw:hover:text-strong-foreground"
+        };
+        rsx! {
+            button {
+                class: "{class}",
+                title: "{panel.title()} panel",
+                onclick: move |_| on_summon.call(panel),
+                "{glyph}"
             }
+        }
+    };
+    let seg = |label: &'static str, href: String, active: bool| {
+        let class = if active {
+            "tw:flex-1 tw:rounded tw:bg-card-raised tw:px-0 tw:py-1 tw:text-center tw:text-[11px] tw:font-semibold tw:text-strong-foreground tw:no-underline"
+        } else {
+            "tw:flex-1 tw:rounded tw:px-0 tw:py-1 tw:text-center tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:no-underline"
+        };
+        rsx! {
+            a { class: "{class}", href: "{href}", "{label}" }
+        }
+    };
+    rsx! {
+        div { class: "tw:hidden tw:min-h-[38px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-strong tw:bg-card-muted tw:px-2 tw:max-[960px]:flex",
+            {button(PanelId::Nodes, "▤")}
+            {button(PanelId::Fixtures, "⬡")}
+            div { class: "tw:mx-1 tw:flex tw:flex-1 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-strong tw:p-0.5",
+                {seg("Nodes", workspace_href, view == WorkbenchView::Nodes)}
+                if let Some(href) = mapping_href {
+                    {seg("Mapping", href, view == WorkbenchView::Mapping)}
+                }
+            }
+            {button(PanelId::Outputs, "▦")}
+            {button(PanelId::Device, "⌁")}
         }
     }
 }
@@ -351,9 +459,11 @@ fn PanelDock(
     on_hide: EventHandler<()>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // The md middle: docks narrow rather than auto-collapsing — closing
+    // a dock the user opened would be the room rearranging itself.
     let width = match panel.side() {
-        DockSide::Left => "tw:w-[270px]",
-        DockSide::Right => "tw:w-[320px]",
+        DockSide::Left => "tw:w-[270px] tw:max-[1240px]:w-[225px]",
+        DockSide::Right => "tw:w-[320px] tw:max-[1240px]:w-[265px]",
     };
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
@@ -370,47 +480,73 @@ fn PanelDock(
                 }
             }
             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
-                match panel {
-                    PanelId::Nodes => rsx! {
-                        div { class: "tw:grid tw:content-start tw:gap-3.5",
-                            for (index, pane) in panes.into_iter().enumerate() {
-                                PaneView {
-                                    key: "{pane.node_id}",
-                                    view: pane,
-                                    primary: index == 0,
-                                    running,
-                                    on_action,
-                                }
-                            }
-                        }
-                    },
-                    PanelId::Device => rsx! {
-                        if let Some(card) = lens_card {
-                            crate::app::home::device_card::DeviceCard {
-                                sim: card.sim,
-                                pane: true,
-                                card,
-                                now_secs,
-                                on_action,
-                            }
-                        }
-                    },
-                    PanelId::Fixtures => rsx! {
-                        FixturesPanel {
-                            surface,
-                            selection: patch_selection,
-                            on_action,
-                        }
-                    },
-                    PanelId::Outputs => rsx! {
-                        OutputsPanel {
-                            surface,
-                            selection: patch_selection,
-                            on_action,
-                        }
-                    },
+                PanelBody {
+                    panel,
+                    panes,
+                    lens_card,
+                    surface,
+                    patch_selection,
+                    running,
+                    now_secs,
+                    on_action,
                 }
             }
         }
+    }
+}
+
+/// One panel's BODY, dock- and summon-agnostic: the docks and the mobile
+/// summon overlay render the same content through this one component.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PanelBody(
+    panel: PanelId,
+    panes: Vec<UiPaneView>,
+    lens_card: Option<UiDeviceCard>,
+    surface: Option<UiPatchSurface>,
+    patch_selection: Option<UiPatchTarget>,
+    running: bool,
+    now_secs: Option<f64>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    match panel {
+        PanelId::Nodes => rsx! {
+            div { class: "tw:grid tw:content-start tw:gap-3.5",
+                for (index, pane) in panes.into_iter().enumerate() {
+                    PaneView {
+                        key: "{pane.node_id}",
+                        view: pane,
+                        primary: index == 0,
+                        running,
+                        on_action,
+                    }
+                }
+            }
+        },
+        PanelId::Device => rsx! {
+            if let Some(card) = lens_card {
+                crate::app::home::device_card::DeviceCard {
+                    sim: card.sim,
+                    pane: true,
+                    card,
+                    now_secs,
+                    on_action,
+                }
+            }
+        },
+        PanelId::Fixtures => rsx! {
+            FixturesPanel {
+                surface,
+                selection: patch_selection,
+                on_action,
+            }
+        },
+        PanelId::Outputs => rsx! {
+            OutputsPanel {
+                surface,
+                selection: patch_selection,
+                on_action,
+            }
+        },
     }
 }
