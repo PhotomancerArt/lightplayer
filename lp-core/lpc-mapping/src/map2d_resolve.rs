@@ -962,7 +962,7 @@ mod tests {
     }
 
     /// An equilateral triangle with 12-unit sides (36-unit perimeter) and 9
-    /// lamps — the mini-dome door archetype: 3 lamps per side, stride 3.
+    /// lamps — the triangular-panel archetype: 3 lamps per side, stride 3.
     fn triangle_12() -> PolygonShape {
         PolygonShape {
             points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
