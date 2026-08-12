@@ -3573,7 +3573,8 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
 
         if expect_instances {
             // The mini-dome: two named outputs, both fixtures at instance
-            // grain with the archetype's strides (sector 30, door side 3).
+            // grain with the archetype's strides (sector fine-step 1,
+            // door 3).
             assert_eq!(surface.outputs.len(), 2, "{id}");
             let names: Vec<&str> = surface
                 .outputs
@@ -3591,10 +3592,10 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
                 .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
             assert_eq!(dome.instances.len(), 5, "{id}: five sector instances");
             assert_eq!(dome.instances[2].path, "/sector/2");
-            // A path strut has no intrinsic period, so its instances step
-            // by 1 (fine rotation); the intrinsic stride belongs to the
-            // polygon doors below. G1 question 3 owns whether sectors
-            // should inherit an authored override instead.
+            // A path sector has no intrinsic period, so its instances step
+            // by 1 (fine rotation); the doors below carry an authored
+            // stride override instead. G1 question 3 owns whether sectors
+            // should inherit an authored override too.
             assert_eq!(dome.instances[2].stride, 1);
             let doors = surface
                 .fixtures
@@ -3604,7 +3605,7 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             assert_eq!(doors.instances.len(), 3, "{id}: three door panels");
             assert_eq!(
                 doors.instances[1].stride, 3,
-                "{id}: a door rotates by one polygon side"
+                "{id}: a door rotates a third at a time (authored stride)"
             );
         } else {
             // The peach: one unnamed output; fixtures patch at range grain.
