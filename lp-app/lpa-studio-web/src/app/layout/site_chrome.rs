@@ -104,12 +104,18 @@ pub fn SiteChrome(
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
+    /// The workbench routes' spacing (Final-gate ruling): the header's
+    /// gap below shrinks so the full-height frame starts close under the
+    /// chrome. Document routes keep the roomy default.
+    #[props(default = false)]
+    tight: bool,
     children: Element,
 ) -> Element {
+    let margin = if tight { "tw:mb-1.5" } else { "tw:mb-[18px]" };
     rsx! {
         // `tw:@container`: the collapse below responds to the BAR's own
         // width, not the viewport, so an embedded/narrow mount behaves.
-        header { class: "tw:@container tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
+        header { class: "tw:@container {margin} tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
             // Brand lockup — the way to Home (see module docs). At Home it
             // wears the tabs' you're-here underline (G3 feedback: the logo
             // IS Home's tab, so it marks the place like one).
