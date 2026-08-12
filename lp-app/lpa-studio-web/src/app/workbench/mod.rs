@@ -464,7 +464,7 @@ fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<Pane
                         "tw:cursor-pointer tw:rounded tw:border tw:border-transparent tw:bg-transparent tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground"
                     },
                     style: "{rotate}",
-                    title: "{panel.title()} panel",
+                    title: "Show the {panel.title()} panel",
                     onclick: move |_| on_toggle.call(panel),
                     "{panel.title()}"
                 }
@@ -504,6 +504,14 @@ fn PanelDock(
         DockSide::Left => "tw:w-[270px] tw:max-[1240px]:w-[225px]",
         DockSide::Right => "tw:w-[320px] tw:max-[1240px]:w-[265px]",
     };
+    // The explicit hide affordance (Final-gate ruling): a chevron at the
+    // row's end pointing at the edge the dock retreats to. Pressing the
+    // active tab still collapses (the strip-toggle shortcut), but the
+    // icon is the discoverable path.
+    let hide_glyph = match side {
+        DockSide::Left => "«",
+        DockSide::Right => "»",
+    };
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
             div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-subtle tw:bg-card-muted",
@@ -514,6 +522,13 @@ fn PanelDock(
                         active: tab == panel,
                         on_press: move |panel| on_tab.call(panel),
                     }
+                }
+                span { class: "tw:flex-1" }
+                button {
+                    class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:px-2 tw:text-xs tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground",
+                    title: "Hide the {panel.title()} panel",
+                    onclick: move |_| on_tab.call(panel),
+                    "{hide_glyph}"
                 }
             }
             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",

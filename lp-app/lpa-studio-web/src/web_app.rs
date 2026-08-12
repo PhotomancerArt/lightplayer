@@ -853,7 +853,7 @@ pub fn App() -> Element {
     // reads as a full-width toolbar under the site chrome; the chrome itself
     // keeps the inset.
     let main_class = if workbench_route {
-        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-7 tw:max-[960px]:px-[10px] tw:max-[960px]:pb-0 tw:max-[960px]:pt-[10px]"
+        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-2 tw:max-[960px]:px-[10px] tw:max-[960px]:pb-0 tw:max-[960px]:pt-1"
     } else {
         "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
     };
@@ -866,6 +866,7 @@ pub fn App() -> Element {
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
                 project_menu,
+                tight: workbench_route,
                 if let Some(href) = patch_toggle {
                     // Same-session zoom like play: the route listener sees
                     // no new document and only the shell swap happens.
