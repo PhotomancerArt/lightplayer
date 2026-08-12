@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Studio chrome — the IDE workbench (round 1)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    /* editor object colours (OBJECT_COLORS in editor_canvas.rs) */
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+    --gap: #3a4149;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 940px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 42px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 940px; }
+  p.thesis b { color: var(--muted); }
+  code, kbd.k { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 940px; border: 1px solid var(--border); background: var(--surface-muted);
+              border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
+              margin: 14px 0 0; }
+  .leannote b { color: var(--muted); }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols button {
+    background: var(--surface-muted); color: var(--muted); font: inherit; font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .xcontrols button:hover { color: var(--strong); }
+  .xcontrols button.on { color: var(--good); border-color: rgba(63,214,142,.4);
+                         background: rgba(63,214,142,.1); }
+  .xcontrols button:disabled { opacity: .4; cursor: default; }
+
+  /* ================= workbench frame ================= */
+  .wb { border: 1px solid var(--border-strong); border-radius: var(--r-md);
+        overflow: hidden; background: var(--bg); margin-top: 10px; }
+  /* slim global site header — kept, dimmed: the rework lives BELOW it */
+  .ghead { display: flex; align-items: center; gap: 16px; padding: 6px 14px;
+           background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
+           font-size: 11.5px; color: var(--subtle); }
+  .ghead .brand { font-weight: 600; color: var(--subtle); }
+  .ghead .brand b { color: var(--accent); }
+  .ghead .gnav { display: flex; gap: 14px; }
+  .ghead .gnav span { cursor: pointer; }
+  .ghead .gnav span:hover { color: var(--strong); }
+  .ghead .sp { flex: 1; }
+  .ghead .sess { font-family: var(--mono); font-size: 10px; color: var(--good);
+                 border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 1px 9px; }
+  .ghead .dots { color: var(--dim); letter-spacing: 2px; }
+
+  /* perspective strip (concept 1 only) */
+  .persp { display: flex; align-items: center; gap: 4px; padding: 5px 12px;
+           background: var(--surface-subtle); border-bottom: 1px solid var(--border-strong); }
+  .persp .plabel { font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+                   color: var(--dim); margin-right: 8px; }
+  .pbtn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 13px;
+          font-size: 12px; color: var(--subtle); cursor: pointer; border-radius: var(--r-sm);
+          border: 1px solid transparent; user-select: none; }
+  .pbtn:hover { color: var(--strong); }
+  .pbtn.on { color: var(--strong); background: var(--raised); border-color: var(--border-strong); }
+  .pbtn .pico { font-size: 11px; color: var(--dim); }
+  .pbtn.on .pico { color: var(--accent); }
+
+  .wbbody { display: flex; min-height: 0; height: 560px; background: var(--bg); }
+  .col { display: flex; flex-direction: column; min-height: 0; background: var(--surface-subtle); }
+  .col.side { width: 250px; flex: none; }
+  .col.side.right { width: 288px; }
+  .col.side.left  { border-right: 1px solid var(--border-strong); }
+  .col.side.right { border-left: 1px solid var(--border-strong); }
+  .col.main { flex: 1; min-width: 0; background: var(--bg); }
+  .col.side.collapsed { width: 30px; cursor: pointer; }
+  .col.side.collapsed .colbody, .col.side.collapsed .coltabs { display: none; }
+  .col.side.collapsed .vlabel {
+    writing-mode: vertical-rl; font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim); padding: 12px 0; margin: 0 auto;
+  }
+
+  /* column header: either plain title (perspectives) or tabs (documents/slots) */
+  .colhead { display: flex; align-items: center; gap: 6px; min-height: 30px;
+             padding: 0 8px; border-bottom: 1px solid var(--border-subtle);
+             background: var(--surface-muted); flex: none; }
+  .colhead .ctitle { font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+                     color: var(--dim); font-weight: 600; padding: 0 4px; }
+  .colhead .sp { flex: 1; }
+  .cbtn { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 12px;
+          padding: 2px 5px; border-radius: 4px; font-family: var(--sans); }
+  .cbtn:hover { color: var(--strong); background: var(--bg-wash); }
+
+  .coltabs { display: flex; gap: 2px; align-items: flex-end; align-self: stretch; }
+  .ctab { padding: 7px 11px 6px; font-size: 11px; color: var(--subtle); cursor: pointer;
+          border-bottom: 2px solid transparent; user-select: none; position: relative; }
+  .ctab:hover { color: var(--strong); }
+  .ctab.on { color: var(--strong); border-bottom-color: var(--accent); }
+  .ctab .sug { position: absolute; top: 5px; right: 2px; width: 5px; height: 5px;
+               border-radius: 50%; background: var(--accent); }
+
+  .colbody { flex: 1; overflow-y: auto; min-height: 0; }
+
+  /* main document tabs (concepts 2+3) */
+  .doctabs { display: flex; align-items: center; gap: 2px; padding: 0 8px;
+             background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+             min-height: 30px; flex: none; }
+  .dtab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 6px;
+          font-size: 12px; color: var(--subtle); cursor: pointer;
+          border-bottom: 2px solid transparent; user-select: none; }
+  .dtab:hover { color: var(--strong); }
+  .dtab.on { color: var(--strong); border-bottom-color: var(--accent); }
+  .dtab .dico { font-size: 11px; color: var(--dim); }
+  .dtab.on .dico { color: var(--accent); }
+
+  /* editor toolbar inside main */
+  .etools { display: flex; align-items: center; gap: 5px; padding: 5px 10px;
+            border-bottom: 1px solid var(--border-subtle); background: var(--surface-subtle);
+            flex-wrap: wrap; min-height: 34px; flex: none; }
+  .etools .sep { width: 1px; align-self: stretch; background: var(--border); margin: 3px 4px; }
+  .etools .sp { flex: 1; }
+  .tbtn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent;
+          background: none; cursor: pointer; padding: 3px 8px; border-radius: 5px;
+          font-size: 11.5px; color: var(--subtle); font-family: var(--sans); }
+  .tbtn:hover { color: var(--strong); background: var(--bg-wash); }
+  .tbtn.on { color: var(--strong); background: var(--raised); border-color: var(--border-strong); }
+  .tbtn kbd { font-family: var(--mono); font-size: 9px; color: var(--dim);
+              border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
+  .modeseg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px;
+             overflow: hidden; }
+  .modeseg button { background: none; border: 0; color: var(--subtle); font: inherit;
+                    font-size: 11.5px; padding: 3px 12px; cursor: pointer; }
+  .modeseg button.on { background: var(--raised-strong); color: var(--strong); }
+
+  .mainbody { flex: 1; min-height: 0; overflow: auto; position: relative; }
+  .mainbody.canvas { overflow: hidden; background:
+      radial-gradient(circle at 30% 20%, rgba(255,255,255,.02), transparent 60%), var(--bg); }
+  .mainbody svg { display: block; width: 100%; height: 100%; }
+
+  /* status bar */
+  .wbstatus { display: flex; align-items: center; gap: 14px; padding: 3px 12px;
+              border-top: 1px solid var(--border-strong); background: var(--surface-muted);
+              font-family: var(--mono); font-size: 10px; color: var(--dim); min-height: 22px; }
+  .wbstatus .good { color: var(--good); }
+  .wbstatus .sp { flex: 1; }
+  .wbstatus .dirty { color: var(--dirty); }
+
+  /* ---- tree rows (project / fixtures) ---- */
+  .tree { padding: 6px 6px 14px; }
+  .trow { display: flex; align-items: center; gap: 7px; padding: 4px 7px; border-radius: 6px;
+          font-size: 12.5px; color: var(--muted); cursor: pointer; border: 1px solid transparent; }
+  .trow:hover { background: var(--bg-wash); }
+  .trow.sel { background: var(--sel-bg); border-color: rgba(76,159,254,.35); color: var(--strong); }
+  .trow .tico { width: 15px; text-align: center; color: var(--dim); font-size: 11px; flex: none; }
+  .trow .tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trow .kind { margin-left: auto; font-size: 9.5px; color: var(--dim); letter-spacing: .05em; flex: none; }
+  .trow .warn { color: var(--warn-text); font-size: 10px; }
+  .trow.child { margin-left: 16px; }
+  .trow.leaf { margin-left: 32px; padding: 2.5px 7px; }
+  .trow .mdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+  .trow .mdot.un { background: none; border: 1px solid var(--dim); }
+  .chip { font-family: var(--mono); font-size: 9.5px; color: var(--subtle);
+          border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px;
+          background: var(--surface-muted); white-space: nowrap; }
+  .chip.rev { color: var(--warn-text); }
+  .chip.range { color: var(--obj-4); border-color: rgba(240,145,59,.4); }
+  .addrow { margin: 8px 7px 0; padding: 5px 9px; border: 1px dashed var(--border-strong);
+            border-radius: 6px; color: var(--dim); font-size: 11.5px; cursor: pointer; }
+  .addrow:hover { color: var(--muted); }
+  .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+  /* ---- node cards (the re-housed Nodes tenant) ---- */
+  .cards { padding: 12px 14px 22px; display: grid; gap: 12px; max-width: 660px; margin: 0 auto; }
+  .ncard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+           overflow: hidden; }
+  .ncard .nhead { display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+                  border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted); }
+  .ncard .nhead b { font-size: 13px; color: var(--strong); font-weight: 600; }
+  .ncard .nhead .kind { font-size: 10px; color: var(--dim); }
+  .ncard .nhead .sp { flex: 1; }
+  .ncard .nhead .ibtn { border: 1px solid var(--border-strong); border-radius: 5px;
+                        color: var(--subtle); font-size: 10px; padding: 1px 7px; background: none; }
+  .ncard .prev { background: #000; height: 110px; display: flex; align-items: center;
+                 justify-content: center; }
+  .ncard .prow { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+                 border-top: 1px solid var(--border-subtle); font-size: 11px; color: var(--subtle); }
+  .ncard .prow .lab { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+                      color: var(--dim); width: 84px; flex: none; }
+  .ncard .slider { flex: 1; height: 4px; border-radius: 2px; background: var(--track);
+                   position: relative; }
+  .ncard .slider .fill { position: absolute; inset: 0 auto 0 0; width: 72%; border-radius: 2px;
+                         background: color-mix(in srgb, var(--heading) 55%, var(--track)); }
+  .ncard .slider .knob { position: absolute; top: 50%; left: 72%; width: 10px; height: 16px;
+                         transform: translate(-50%,-50%); background: var(--raised-strong);
+                         border: 1px solid var(--border-strong); border-radius: 3px; }
+  .ncard .prow .val { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .ncard .fold { padding: 6px 12px; border-top: 1px solid var(--border-subtle); font-size: 10.5px;
+                 color: var(--dim); }
+  .ncard .fold b { color: var(--subtle); font-weight: 600; letter-spacing: .08em; font-size: 9.5px; }
+  .ncard .code { font-family: var(--mono); font-size: 10.5px; color: var(--subtle);
+                 padding: 9px 12px; background: var(--terminal); line-height: 1.55; }
+  .ncard .code .kw { color: var(--obj-3); } .ncard .code .fn { color: var(--obj-0); }
+
+  /* ---- device view ---- */
+  .dev { padding: 10px; display: grid; gap: 10px; }
+  .devcard { border: 1px solid rgba(63,214,142,.45); border-left: 3px solid var(--good);
+             border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+  .devcard.off { border-color: var(--border); border-left-color: var(--border-strong); opacity: .75; }
+  .devcard .dhead { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+                    background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle); }
+  .devcard .dhead b { font-size: 12.5px; color: var(--strong); }
+  .devcard .dhead .tag { margin-left: auto; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
+  .devcard .icons { display: flex; gap: 4px; padding: 5px 8px;
+                    border-bottom: 1px solid var(--border-subtle); }
+  .devcard .icons span { border: 1px solid transparent; border-radius: 5px; padding: 2px 9px;
+                         font-size: 10.5px; color: var(--dim); cursor: pointer; }
+  .devcard .icons span.on { border-color: rgba(63,214,142,.4); background: rgba(63,214,142,.1);
+                            color: var(--good); }
+  .devcard .dbody { padding: 8px 11px; font-size: 11px; color: var(--subtle); display: grid; gap: 4px; }
+  .devcard .dbody .run { color: var(--good); font-size: 11.5px; }
+  .devcard .krow { display: flex; gap: 10px; }
+  .devcard .krow .k { width: 74px; flex: none; font-size: 9.5px; letter-spacing: .08em;
+                      text-transform: uppercase; color: var(--dim); padding-top: 1px; }
+  .devcard .krow .v { font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---- outputs rail ---- */
+  .outs { padding: 8px 8px 16px; }
+  .obox { margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
+          background: var(--surface); overflow: hidden; }
+  .obox .bhead { display: flex; align-items: center; gap: 7px; padding: 5px 9px;
+                 background: var(--surface-muted); cursor: pointer; font-size: 11px;
+                 color: var(--muted); }
+  .obox .bhead .occ { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+                      font-family: var(--mono); font-size: 9.5px; color: var(--dim); }
+  .occbar { width: 44px; height: 5px; border-radius: 3px; background: var(--track);
+            overflow: hidden; }
+  .occbar i { display: block; height: 100%; background: color-mix(in srgb, var(--heading) 60%, var(--track)); }
+  .port { padding: 4px 9px 6px; border-top: 1px solid var(--border-subtle); }
+  .port .pline { display: flex; align-items: baseline; gap: 7px; font-family: var(--mono);
+                 font-size: 10.5px; color: var(--muted); }
+  .port .pline .pin { color: var(--strong); font-weight: 600; }
+  .port .pline .use { margin-left: auto; color: var(--dim); font-size: 9.5px; }
+  .cellbar { display: flex; gap: 2px; margin-top: 4px; height: 16px; }
+  .cell { flex: 1; border: 1px solid var(--border-strong); border-radius: 3px;
+          background: var(--raised); font-family: var(--mono); font-size: 8.5px;
+          color: var(--subtle); display: flex; align-items: center; justify-content: center;
+          overflow: hidden; white-space: nowrap; cursor: pointer; min-width: 0; }
+  .cell:hover { border-color: var(--dim); }
+  .cell.sel { border-color: var(--sel); background: var(--sel-bg); color: var(--strong); }
+  .cell.gap { background: none; border-style: dashed; border-color: var(--border-muted);
+              color: var(--border-strong); cursor: default; }
+  .cell.range { border-color: rgba(240,145,59,.4); color: var(--obj-4); }
+  .dense .port { padding: 2px 9px 3px; }
+  .dense .cellbar { height: 10px; margin-top: 2px; }
+  .dense .cell { font-size: 0; }
+
+  /* ---- canvas svg bits ---- */
+  .nametag { font: 600 10px var(--sans); fill: var(--muted); }
+  .nametag2 { font: 9px var(--mono); fill: var(--dim); }
+  .tagframe { fill: var(--surface-muted); stroke: var(--border-strong); rx: 4; }
+  .fixframe { fill: none; stroke: var(--border-muted); stroke-dasharray: 3 3; rx: 8; }
+  .fixframe.sel { stroke: var(--sel); stroke-dasharray: none; }
+
+  /* ---- verb bar (patching, docked bottom of main) ---- */
+  .verbbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+             border-top: 1px solid var(--border-strong); background: var(--surface-muted);
+             flex: none; flex-wrap: wrap; }
+  .verbbar .vhint { font-size: 10px; color: var(--dim); margin-left: auto; }
+
+  /* ================= mobile frames ================= */
+  .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin-top: 10px; }
+  .phone { width: 300px; flex: none; border: 1px solid var(--border-strong); border-radius: 14px;
+           overflow: hidden; background: var(--bg); }
+  .phone.tab { width: 620px; }
+  .phone .pcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+                 color: var(--dim); background: var(--surface-muted);
+                 border-bottom: 1px solid var(--border-subtle); }
+  .phone .pbody { height: 520px; display: flex; flex-direction: column; min-height: 0; }
+  .phone.tab .pbody { height: 470px; flex-direction: row; }
+  /* sticky top strip */
+  .pstrip { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+            background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
+            flex: none; }
+  .pstrip .sq { width: 30px; height: 26px; display: inline-flex; align-items: center;
+                justify-content: center; border: 1px solid var(--border-strong); border-radius: 6px;
+                color: var(--subtle); font-size: 12px; cursor: pointer; flex: none;
+                background: var(--surface-subtle); user-select: none; }
+  .pstrip .sq:hover { color: var(--strong); }
+  .pstrip .sq.on { color: var(--sel); border-color: rgba(76,159,254,.55); background: var(--sel-bg); }
+  .pstrip .pdoc { flex: 1; display: flex; border: 1px solid var(--border-strong); border-radius: 6px;
+                  overflow: hidden; }
+  .pstrip .pdoc button { flex: 1; background: none; border: 0; color: var(--subtle); font: inherit;
+                         font-size: 11px; padding: 4px 0; cursor: pointer; }
+  .pstrip .pdoc button.on { background: var(--raised-strong); color: var(--strong); }
+  .pmain { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+  .pmain.canvas { overflow: hidden; display: flex; align-items: center; }
+  .pmain.canvas svg { width: 100%; height: 100%; }
+  .pmain .backhead { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+                     font-size: 11px; color: var(--subtle); background: var(--surface-subtle);
+                     border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; }
+  .pmain .backhead b { color: var(--muted); font-weight: 600; text-transform: uppercase;
+                       font-size: 10px; letter-spacing: .1em; }
+  .pmain .backhead .bk { cursor: pointer; color: var(--sel); }
+
+  /* today (section 1) */
+  .todaygrid { display: grid; grid-template-columns: 250px minmax(0,1fr) 300px; gap: 14px;
+               padding: 14px; }
+  .todaycol { display: grid; gap: 12px; align-content: start; }
+  .scrollnote { text-align: center; color: var(--dim); font-size: 10.5px; padding: 6px 0 2px; }
+  .panecard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+              overflow: hidden; }
+  .panecard .phead { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+                     border-bottom: 1px solid var(--border-subtle); }
+  .panecard .phead b { color: var(--strong); font-size: 13.5px; }
+  .panecard .phead .kind { font-size: 10px; color: var(--dim); }
+  .panecard .phead .ibtn { margin-left: auto; border: 1px solid var(--border-strong);
+                           border-radius: 5px; color: var(--subtle); font-size: 10px;
+                           padding: 1px 7px; background: none; }
+
+  .secnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; max-width: 940px; }
+
+  /* decisions table */
+  table.dec { border-collapse: collapse; font-size: 12px; margin-top: 12px; max-width: 1080px; }
+  table.dec th, table.dec td { border: 1px solid var(--border); padding: 7px 11px;
+                               text-align: left; vertical-align: top; }
+  table.dec th { background: var(--surface-muted); color: var(--muted); font-size: 10.5px;
+                 letter-spacing: .08em; text-transform: uppercase; }
+  table.dec td { color: var(--subtle); }
+  table.dec td b { color: var(--muted); }
+  table.dec td.q { font-family: var(--mono); color: var(--heading); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<h1>Studio chrome — the IDE workbench (round 1)</h1>
+<p class="hint">
+  The studio editor's chrome, reworked to house advanced editors — starting with <b>Mapping</b>
+  (name ruled). Scope: the <b>editor routes only</b>; galleries and the global site header are
+  untouched. The headline question is the <b>mental ownership model</b>: what owns which panes are
+  visible where, when? Three models are drawn below with the SAME two tenants — the re-housed
+  Nodes card list and the Mapping editor at real density. Use <b>active editor</b> in the strip and
+  watch how each concept reacts: that reaction <i>is</i> the model. Reference:
+  <code>spikes/unified-editor-shell/index.html</code> rounds 1–5 (rails, chips, canvas ratified there).
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>active editor</b>
+    <button id="xed-nodes" onclick="setEditor('nodes')">Nodes</button>
+    <button id="xed-map" onclick="setEditor('mapping')">Mapping</button>
+  </span>
+  <span class="grp"><b>mapping mode</b>
+    <button id="xmo-map" onclick="setMode('map')">mapping</button>
+    <button id="xmo-patch" onclick="setMode('patch')">patching</button>
+  </span>
+  <span class="grp"><b>outputs data</b>
+    <button id="xde-dome" onclick="setDensity('dome')">mini-dome</button>
+    <button id="xde-rad" onclick="setDensity('radiance')">radiance 10×32</button>
+  </span>
+  <span class="grp"><b>§4 device slot</b>
+    <button id="xdv-r" onclick="setDeviceLeft(false)">right</button>
+    <button id="xdv-l" onclick="setDeviceLeft(true)">left</button>
+  </span>
+  <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
+</div>
+
+<section id="sec1">
+<h2>1 · Today — the scrolling document (for comparison)</h2>
+<p class="thesis">
+  Production now: a page that scrolls as a document under the site header. Three columns —
+  project pane · node cards · device card — with <b>fixed identities</b>; on narrow screens they
+  simply stack and you scroll through everything. There is no place to put a viewport-filling
+  canvas, and "which pane is where" is hard-coded per route.
+</p>
+<div class="wb" id="c0"></div>
+</section>
+
+<section id="sec2">
+<h2>2 · Concept P — “Perspectives” (the view owns everything)</h2>
+<p class="thesis">
+  Eclipse's answer. A perspective switch sits above the columns; the active perspective owns the
+  <b>entire</b> arrangement — switching Nodes → Mapping swaps all three columns as one gesture,
+  and Patching is naturally a <b>third perspective</b>. Maximal per-task tailoring; the cost is that
+  the room rearranges itself around you (note the device card simply <i>vanishes</i> outside the
+  Nodes perspective — each perspective shows only what it declared).
+</p>
+<div class="wb" id="c1"></div>
+</section>
+
+<section id="sec3">
+<h2>3 · Concept D — “Documents” (the shell owns the sides, docs own the center)</h2>
+<p class="thesis">
+  VS Code's answer. The center is a <b>document strip</b> — Nodes and Mapping are documents;
+  patching is a <b>mode inside the Mapping document</b> (segmented control in its toolbar). The side
+  columns are shell-owned <b>tool views with their own tabs</b> (left: Project · right: Device /
+  Outputs) that persist across document switches. A document may <i>suggest</i> a side view
+  (opening Mapping reveals Outputs and marks the tab) but never restructures the room. One tree,
+  adorned: the Project tree grows channel chips when the Mapping document is active.
+</p>
+<div class="wb" id="c2"></div>
+<p class="secnote">Try the <b>«</b> button in the left column header — columns collapse to a
+  labelled strip, which is how Mapping earns canvas width without a layout change.</p>
+</section>
+
+<section id="sec4">
+<h2>4 · Concept S — “Slots” (the shell owns slots, you own the arrangement)</h2>
+<p class="thesis">
+  The hybrid. The shell owns three durable slots — [left][main][right] — and <b>views are
+  furniture</b>: stacked, collapsible sections you can move between slots (⠿ grip; try
+  <b>§4 device slot</b> in the strip to put Device on the left). The active document
+  <b>contributes</b> default views — Mapping contributes Outputs, tagged with its origin — and your
+  arrangement outlives document switches. Same document strip as concept D; the difference is
+  entirely in who decides what the sides hold.
+</p>
+<div class="wb" id="c3"></div>
+</section>
+
+<section id="sec5">
+<h2>5 · Mobile — full-screen main + summon strip</h2>
+<p class="thesis">
+  Below the fold breakpoint the workbench is <b>one full-screen main view</b> with a sticky strip:
+  document switch in the middle, <b>summon buttons</b> on the edges. Summoning a side view
+  (☰ project tree · ▤ outputs · ⌁ device) <b>temporarily replaces</b> the main view — a back
+  header returns. This replaces today's stack-and-scroll for the editor routes. The first phone is
+  live — tap its strip. The tablet frame shows the md middle: main + one side column, the other
+  collapsed to a strip.
+</p>
+<div class="phones" id="phones"></div>
+</section>
+
+<section id="sec6">
+<h2>6 · Decisions on the table</h2>
+<table class="dec">
+  <tr><th></th><th>Question</th><th>Options drawn</th><th>Lean</th></tr>
+  <tr><td class="q">D1</td>
+      <td><b>The ownership model</b> — what owns which panes are visible where, when?</td>
+      <td>§2 perspectives (view owns all) · §3 documents (shell owns sides, docs own center) ·
+          §4 slots (shell owns slots, docs contribute, user arrangement wins)</td>
+      <td>§4 slots, with §3's restraint as the default behaviour — docs contribute, nothing
+          rearranges without you</td></tr>
+  <tr><td class="q">D2</td>
+      <td>Is Patching a third top-level place, or a mode inside Mapping?</td>
+      <td>§2 draws it as a perspective; §3/§4 draw it as a mode segment in the Mapping toolbar</td>
+      <td>Mode inside Mapping (one editor, two modes — rounds 1–5 ruling holds)</td></tr>
+  <tr><td class="q">D3</td>
+      <td>Side-column style: tabbed (one view visible per column) or stacked sections?</td>
+      <td>§3 tabs both sides · §4 stacked sections</td>
+      <td>Stacked left (tree wants the full column anyway), tabbed right (Device/Outputs
+          alternate); drawn as §4-with-§3-right if ruled</td></tr>
+  <tr><td class="q">D4</td>
+      <td>Mobile: summon-replaces-main with a sticky strip?</td>
+      <td>§5 (live phone) vs today's stack-and-scroll (§1 note)</td>
+      <td>Yes — summon model; it is the fold of every desktop concept, not a special case</td></tr>
+  <tr><td class="q">D5</td>
+      <td>Full-height app frame (columns scroll internally) for editor routes?</td>
+      <td>All of §2–§4 are full-height; §1 is the scrolling document</td>
+      <td>Yes for editor routes; galleries stay documents</td></tr>
+  <tr><td class="q">D6</td>
+      <td>How far does “app-like tightening” go on the header?</td>
+      <td>All concepts draw the site header slimmed (~30px, dimmed) with the session chip kept</td>
+      <td>Keep the global header, slim it; the workbench gets the vertical budget</td></tr>
+</table>
+<p class="leannote" id="lean">
+  <b>Lean.</b> Concept <b>S (slots)</b> carrying concept D's defaults: the shell owns three durable
+  slots; documents own only the center and <i>contribute</i> side views without restructuring;
+  the user's arrangement is sticky. Perspectives (§2) photograph beautifully but the room
+  rearranging itself is exactly the "two apps" feeling this rework exists to avoid — and it makes
+  the device surface a per-perspective decision, which is how panes get lost. Patching stays a
+  mode inside Mapping. Mobile summon-strip generalises every concept, so it is close to free.
+</p>
+</section>
+
+<script>
+/* ================= state ================= */
+const state = {
+  editor: 'nodes',       // 'nodes' | 'mapping'
+  mode: 'map',           // 'map' | 'patch'   (mapping editor's mode)
+  density: 'dome',       // 'dome' | 'radiance'
+  deviceLeft: false,     // concept S slot assignment
+  c2right: 'device',     // concept D right-column tab
+  c2Lcollapsed: false, c3Lcollapsed: false,
+  sel: 'dome/2',         // selected instance path
+  phoneView: 'main',     // 'main' | 'tree' | 'outputs' | 'device'
+};
+// URL params: ?only=sec3 hides other sections; editor/mode/density preset state.
+const Q = new URLSearchParams(location.search);
+if (Q.get('editor')) state.editor = Q.get('editor');
+if (Q.get('mode')) state.mode = Q.get('mode');
+if (Q.get('density')) state.density = Q.get('density');
+if (Q.get('device') === 'left') state.deviceLeft = true;
+if (Q.get('phone')) state.phoneView = Q.get('phone');
+if (state.editor === 'mapping') state.c2right = 'outputs'; // the D-concept "suggest" default
+if (Q.get('collapse') === 'left') { state.c2Lcollapsed = true; }
+if (Q.get('only')) {
+  document.querySelectorAll('section').forEach(s => { if (s.id !== Q.get('only')) s.hidden = true; });
+  document.querySelector('.xcontrols').style.position = 'static';
+}
+
+/* ================= data (mini-dome world, #409) ================= */
+const FIXTURES = [
+  { id: 'dome', lamps: 150, color: 'var(--obj-0)', kind: '2d map',
+    instances: [
+      { path: 'dome/0', chip: 'IO18:1-30' },
+      { path: 'dome/1', chip: 'IO18:31-60' },
+      { path: 'dome/2', chip: 'IO13:1-30' },
+      { path: 'dome/3', chip: 'IO13:31-60', rev: true },
+      { path: 'dome/4', chip: 'IO2:1-30' },
+    ]},
+  { id: 'doors', lamps: 27, color: 'var(--obj-2)', kind: '2d map',
+    instances: [
+      { path: 'doors/0', chip: 'IO14:1-9' },
+      { path: 'doors/1', chip: 'IO14:10-18' },
+      { path: 'doors/2', chip: 'IO14:19-27' },
+    ]},
+  { id: 'peach', lamps: 40, color: 'var(--obj-4)', kind: 'range', range: true,
+    instances: [ { path: 'peach 0..40', chip: 'IO16:1-40', range: true } ]},
+];
+const TREE_TOP = [
+  { ico: '▤', name: 'Mini dome', kind: 'module', root: true },
+  { ico: '◔', name: 'Clock', kind: 'clock', child: true },
+  { ico: '✳', name: 'Sky shader', kind: 'shader', child: true },
+  { ico: '◑', name: 'Sunrise palette', kind: 'palette', child: true, warn: true },
+];
+const TREE_TAIL = [
+  { ico: '⌁', name: 'out_a', kind: 'output', child: true },
+  { ico: '⌁', name: 'out_b', kind: 'output', child: true },
+];
+const DOME_BOXES = [
+  { name: 'Box 1 · out_a', ports: [
+    { pin: 'IO18', strip: 'ws2812', used: 60, total: 64,
+      cells: [{ label: 'dome/0', w: 30 }, { label: 'dome/1', w: 30 }, { gap: true, w: 4 }] },
+    { pin: 'IO13', strip: 'ws2812', used: 60, total: 64,
+      cells: [{ label: 'dome/2', w: 30 }, { label: 'dome/3 ‹', w: 30 }, { gap: true, w: 4 }] },
+    { pin: 'IO2', strip: 'ws2812', used: 30, total: 64,
+      cells: [{ label: 'dome/4', w: 30 }, { gap: true, w: 34 }] },
+  ]},
+  { name: 'Box 2 · out_b', ports: [
+    { pin: 'IO14', strip: 'ws2812', used: 27, total: 64,
+      cells: [{ label: 'doors/0', w: 9 }, { label: 'doors/1', w: 9 }, { label: 'doors/2', w: 9 },
+              { gap: true, w: 37 }] },
+    { pin: 'IO16', strip: 'sk6812', used: 40, total: 64,
+      cells: [{ label: 'peach', w: 40, range: true }, { gap: true, w: 24 }] },
+  ]},
+];
+
+/* ================= tiny helpers ================= */
+const esc = s => s;
+function seg(id, options, current, fn) {
+  return '<span class="modeseg">' + options.map(o =>
+    `<button class="${o.v === current ? 'on' : ''}" onclick="${fn}('${o.v}')">${o.t}</button>`
+  ).join('') + '</span>';
+}
+
+/* ================= shared views ================= */
+function gheadHTML() {
+  return `<div class="ghead">
+    <span class="brand">⏵ <b>Light</b>Player</span>
+    <span class="gnav"><span>Devices</span><span>Projects</span></span>
+    <span class="sp"></span>
+    <span class="sess">mini dome · sim ▸</span>
+    <span class="dots">···</span>
+  </div>`;
+}
+
+function treeView(adorned) {
+  let h = '<div class="tree">';
+  for (const n of TREE_TOP) {
+    h += `<div class="trow ${n.child ? 'child' : ''}">
+      <span class="tico">${n.ico}</span><span class="tname">${n.name}</span>
+      ${n.warn ? '<span class="warn">⚠</span>' : ''}<span class="kind">${n.kind}</span></div>`;
+  }
+  for (const f of FIXTURES) {
+    const sel = state.sel.startsWith(f.id) && adorned;
+    h += `<div class="trow child ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
+      <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
+      <span class="tname">${f.id}</span>
+      ${adorned ? `<span class="kind">${f.lamps} · ${f.kind}</span>` : `<span class="kind">fixture</span>`}
+    </div>`;
+    if (adorned) {
+      for (const i of f.instances) {
+        h += `<div class="trow leaf ${state.sel === i.path.split(' ')[0] ? 'sel' : ''}"
+                   onclick="selectPath('${i.path.split(' ')[0]}')">
+          <span class="mdot"></span><span class="tname" style="font-size:11.5px">${i.path}</span>
+          <span style="margin-left:auto; display:inline-flex; gap:3px;">
+            <span class="chip ${i.range ? 'range' : ''}">${i.chip}</span>
+            ${i.rev ? '<span class="chip rev">‹rev</span>' : ''}
+          </span></div>`;
+      }
+    }
+  }
+  for (const n of TREE_TAIL) {
+    h += `<div class="trow child"><span class="tico">${n.ico}</span>
+      <span class="tname">${n.name}</span><span class="kind">${n.kind}</span></div>`;
+  }
+  h += '<div class="addrow">+ Add node…</div></div>';
+  return h;
+}
+
+function miniRingSVG(color) {
+  let dots = '';
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 - Math.PI / 2;
+    const hue = i * 25;
+    dots += `<circle cx="${55 + Math.cos(a) * 38}" cy="${52 + Math.sin(a) * 38}" r="4"
+             fill="hsl(${hue} 80% 62%)"/>`;
+  }
+  return `<svg viewBox="0 0 110 104" style="height:96px">${dots}</svg>`;
+}
+
+function nodeCardsView() {
+  return `<div class="cards">
+    <div class="ncard">
+      <div class="nhead"><span style="color:var(--dim)">▾</span><b>dome</b>
+        <span class="kind">fixture</span><span class="sp"></span>
+        <button class="ibtn">i</button></div>
+      <div class="prev">${miniRingSVG()}</div>
+      <div class="prow"><span class="lab">Brightness</span>
+        <span class="slider"><span class="fill"></span><span class="knob"></span></span>
+        <span class="val">184</span></div>
+      <div class="fold">▸ <b>DIMENSIONALITY</b> &nbsp;2d map · 150 lamps</div>
+      <div class="fold">▸ <b>ADVANCED</b> &nbsp;slots · bindings</div>
+    </div>
+    <div class="ncard">
+      <div class="nhead"><span style="color:var(--dim)">▾</span><b>Sky shader</b>
+        <span class="kind">shader</span><span class="sp"></span>
+        <button class="ibtn">i</button></div>
+      <div class="code"><span class="kw">vec3</span> <span class="fn">main</span>(Ctx ctx) {<br>
+        &nbsp;&nbsp;<span class="kw">let</span> sky = mix(horizon, zenith, ctx.pos.y);<br>
+        &nbsp;&nbsp;<span class="kw">return</span> sky * pal(ctx.t);<br>}</div>
+      <div class="prow"><span class="lab">Speed</span>
+        <span class="slider"><span class="fill" style="width:38%"></span>
+        <span class="knob" style="left:38%"></span></span><span class="val">0.4</span></div>
+    </div>
+    <div class="ncard">
+      <div class="nhead"><span style="color:var(--dim)">▸</span><b>doors</b>
+        <span class="kind">fixture</span><span class="sp"></span>
+        <button class="ibtn">i</button></div>
+      <div class="fold">▸ <b>OUTPUT</b> &nbsp;27 lamps · out_b</div>
+    </div>
+  </div>`;
+}
+
+function deviceView() {
+  return `<div class="dev">
+    <div class="devcard">
+      <div class="dhead"><b>Simulator</b><span class="tag">SIMULATOR ⤢</span></div>
+      <div class="icons"><span>▷</span><span class="on">ⓘ</span><span>▤</span><span>⌗</span><span>⚠</span></div>
+      <div class="dbody"><span class="run">Running</span>
+        <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
+        <div class="krow"><span class="k">Frame</span><span class="v">60 fps · 2.1 ms</span></div>
+        <div class="krow"><span class="k">Power</span><span class="v">12% of 10 A budget</span></div>
+      </div>
+    </div>
+    <div class="devcard off">
+      <div class="dhead"><b>Workbench ESP32</b><span class="tag">USB</span></div>
+      <div class="dbody"><div class="krow"><span class="k">State</span>
+        <span class="v">unplugged · last seen 2h</span></div></div>
+    </div>
+  </div>`;
+}
+
+function outputsView() {
+  if (state.density === 'radiance') return radianceOutputs();
+  let h = '<div class="outs">';
+  for (const box of DOME_BOXES) {
+    h += `<div class="obox"><div class="bhead">▾ ${box.name}
+      <span class="occ">${box.ports.reduce((a, p) => a + p.used, 0)} lamps</span></div>`;
+    for (const p of box.ports) {
+      h += `<div class="port"><div class="pline"><span class="pin">${p.pin}</span>
+        <span>${p.strip}</span><span class="use">${p.used}/${p.total}</span></div>
+        <div class="cellbar">`;
+      for (const c of p.cells) {
+        if (c.gap) { h += `<span class="cell gap" style="flex-grow:${c.w}">·</span>`; continue; }
+        const on = state.mode === 'patch' && state.sel && c.label.startsWith(state.sel);
+        h += `<span class="cell ${on ? 'sel' : ''} ${c.range ? 'range' : ''}"
+              style="flex-grow:${c.w}" onclick="selectPath('${c.label.split(' ')[0]}')">${c.label}</span>`;
+      }
+      h += '</div></div>';
+    }
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+
+function radianceOutputs() {
+  let h = '<div class="outs dense">';
+  for (let b = 1; b <= 10; b++) {
+    const used = 300 - (b * 7 % 60);
+    if (b !== 3) {
+      h += `<div class="obox"><div class="bhead">▸ Box ${b}
+        <span class="occ"><span class="occbar"><i style="width:${70 + (b * 13) % 30}%"></i></span>
+        ${30 + b % 3}/32</span></div></div>`;
+      continue;
+    }
+    h += `<div class="obox"><div class="bhead">▾ Box 3
+      <span class="occ">31/32 · 930 lamps</span></div>`;
+    for (let p = 0; p < 8; p++) {
+      h += `<div class="port"><div class="pline"><span class="pin">P${p}</span>
+        <span class="use">30/30</span></div><div class="cellbar">
+        <span class="cell ${p === 2 && state.mode === 'patch' ? 'sel' : ''}" style="flex-grow:30"></span>
+        </div></div>`;
+    }
+    h += `<div class="port"><div class="pline"><span class="use">… 24 more ports</span></div></div></div>`;
+  }
+  return h + '</div>';
+}
+
+/* ---- canvas ---- */
+function canvasSVG(idsuffix) {
+  const patch = state.mode === 'patch';
+  let dome = '';
+  for (let s = 0; s < 5; s++) {
+    const seld = state.sel === `dome/${s}`;
+    const a0 = (s / 5) * Math.PI * 2 - Math.PI / 2;
+    for (let r = 0; r < 3; r++) {
+      for (let i = 0; i < 10; i++) {
+        const a = a0 + (i / 10) * (Math.PI * 2 / 5) * 0.92 + 0.05;
+        const rad = 52 + r * 26;
+        dome += `<circle cx="${(260 + Math.cos(a) * rad).toFixed(1)}"
+          cy="${(205 + Math.sin(a) * rad * 0.82).toFixed(1)}" r="3.4"
+          fill="${seld && patch ? 'var(--sel)' : 'var(--obj-0)'}"
+          opacity="${seld || !patch ? .95 : .45}"/>`;
+      }
+    }
+    if (seld) {
+      const am = a0 + Math.PI / 5;
+      dome += `<circle cx="${260 + Math.cos(am) * 78}" cy="${205 + Math.sin(am) * 64}" r="44"
+        fill="none" stroke="var(--sel)" stroke-dasharray="4 3" opacity=".8"/>`;
+    }
+  }
+  let doors = '';
+  for (let d = 0; d < 3; d++) for (let i = 0; i < 9; i++)
+    doors += `<circle cx="${560 + d * 34}" cy="${120 + i * 17}" r="3.2"
+      fill="var(--obj-2)" opacity="${patch ? .5 : .9}"/>`;
+  let peach = '';
+  for (let i = 0; i < 24; i++)
+    peach += `<circle cx="${120 + i * 15}" cy="386" r="2.6" fill="var(--obj-4)" opacity=".8"/>`;
+  return `<svg viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet" id="cv${idsuffix}">
+    <rect class="fixframe ${state.sel.startsWith('dome') ? 'sel' : ''}" x="140" y="88" width="240" height="238" rx="8"/>
+    <rect class="tagframe" x="140" y="70" width="86" height="16" rx="4"/>
+    <text class="nametag" x="148" y="82">dome</text>
+    <text class="nametag2" x="192" y="82">150</text>
+    ${dome}
+    <rect class="fixframe" x="542" y="98" width="106" height="166" rx="8"/>
+    <rect class="tagframe" x="542" y="80" width="82" height="16" rx="4"/>
+    <text class="nametag" x="550" y="92">doors</text>
+    <text class="nametag2" x="596" y="92">27</text>
+    ${doors}
+    <rect x="106" y="372" width="384" height="28" rx="6" fill="none"
+      stroke="var(--obj-4)" stroke-dasharray="5 4" opacity=".55"/>
+    <rect class="tagframe" x="106" y="354" width="112" height="16" rx="4"/>
+    <text class="nametag" x="114" y="366">peach</text>
+    <text class="nametag2" x="158" y="366">0..40 range</text>
+    ${peach}
+  </svg>`;
+}
+
+function mapToolbar(withModeSeg) {
+  const patch = state.mode === 'patch';
+  let h = '<div class="etools">';
+  if (withModeSeg) h += seg('m', [{ v: 'map', t: 'mapping' }, { v: 'patch', t: 'patching' }], state.mode, 'setMode') +
+    '<span class="sep"></span>';
+  if (!patch) {
+    h += `<button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
+      <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
+      <button class="tbtn">⌖ ref</button><span class="sep"></span>
+      <button class="tbtn">fit</button><span style="font-family:var(--mono);font-size:10px;color:var(--dim)">100%</span>`;
+  } else {
+    h += `<button class="tbtn">assign</button><button class="tbtn">flip <kbd>r</kbd></button>
+      <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
+      <button class="tbtn">swap <kbd>s</kbd></button><button class="tbtn">clear</button>
+      <span class="sep"></span><button class="tbtn on">⌁ pulse on select</button>`;
+  }
+  h += `<span class="sp"></span><button class="tbtn">show visual</button></div>`;
+  return h;
+}
+
+function verbBar() {
+  if (state.mode !== 'patch') return '';
+  return `<div class="verbbar">
+    <button class="tbtn">flip <kbd>r</kbd></button>
+    <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
+    <button class="tbtn">swap <kbd>s</kbd></button>
+    <button class="tbtn">clear <kbd>⌫</kbd></button>
+    <span class="vhint">? for keys · Esc steps out</span></div>`;
+}
+
+function mappingMain(idsuffix, withModeSeg) {
+  return mapToolbar(withModeSeg) +
+    `<div class="mainbody canvas">${canvasSVG(idsuffix)}</div>` + verbBar();
+}
+
+function statusBar(left, right) {
+  return `<div class="wbstatus"><span class="good">sim ▸ running</span>
+    <span>217 lamps</span><span>60 fps</span><span>${left}</span>
+    <span class="sp"></span><span>${right}</span><span class="good">saved ✓</span></div>`;
+}
+
+/* ================= section 1: today ================= */
+function renderToday() {
+  document.getElementById('c0').innerHTML = gheadHTML() +
+    `<div class="todaygrid">
+      <div class="todaycol">
+        <div class="panecard">
+          <div class="phead"><b>Mini dome</b><span class="kind">Project</span>
+            <button class="ibtn">i</button></div>
+          ${treeView(false)}
+        </div>
+      </div>
+      <div class="todaycol">${nodeCardsView()}
+        <div class="scrollnote">⌄ page scrolls as one document — more cards below ⌄</div></div>
+      <div class="todaycol">${deviceView()}</div>
+    </div>`;
+}
+
+/* ================= section 2: perspectives ================= */
+function renderC1() {
+  const persp = state.editor === 'nodes' ? 'nodes' : (state.mode === 'patch' ? 'patching' : 'mapping');
+  const pb = (id, ico, label) =>
+    `<span class="pbtn ${persp === id ? 'on' : ''}" onclick="setPerspective('${id}')">
+     <span class="pico">${ico}</span>${label}</span>`;
+  let cols;
+  if (persp === 'nodes') {
+    cols = `
+      <div class="col side left"><div class="colhead"><span class="ctitle">Project</span></div>
+        <div class="colbody">${treeView(false)}</div></div>
+      <div class="col main"><div class="mainbody">${nodeCardsView()}</div></div>
+      <div class="col side right"><div class="colhead"><span class="ctitle">Device</span></div>
+        <div class="colbody">${deviceView()}</div></div>`;
+  } else {
+    cols = `
+      <div class="col side left"><div class="colhead"><span class="ctitle">Fixtures</span></div>
+        <div class="colbody">${treeView(true)}</div></div>
+      <div class="col main">${mappingMain('c1', false)}</div>
+      <div class="col side right"><div class="colhead"><span class="ctitle">Outputs</span></div>
+        <div class="colbody">${outputsView()}</div></div>`;
+  }
+  document.getElementById('c1').innerHTML = gheadHTML() +
+    `<div class="persp"><span class="plabel">Perspective</span>
+      ${pb('nodes', '▤', 'Nodes')}${pb('mapping', '⌖', 'Mapping')}${pb('patching', '⌁', 'Patching')}
+     </div>
+     <div class="wbbody">${cols}</div>` +
+    statusBar('perspective: ' + persp,
+      persp === 'nodes' ? 'device card: right column' : 'device card: not in this perspective');
+}
+
+/* ================= sections 3+4: document strip main ================= */
+function docTabs() {
+  const dt = (id, ico, label) =>
+    `<span class="dtab ${state.editor === id ? 'on' : ''}" onclick="setEditor('${id}')">
+     <span class="dico">${ico}</span>${label}</span>`;
+  return `<div class="doctabs">${dt('nodes', '▤', 'Nodes')}${dt('mapping', '⌖', 'Mapping')}</div>`;
+}
+function mainCol(idsuffix) {
+  const inner = state.editor === 'nodes'
+    ? `<div class="mainbody">${nodeCardsView()}</div>`
+    : mappingMain(idsuffix, true);
+  return `<div class="col main">${docTabs()}${inner}</div>`;
+}
+
+function renderC2() {
+  const adorned = state.editor === 'mapping';
+  const left = state.c2Lcollapsed
+    ? `<div class="col side left collapsed" onclick="toggleC2L()"><span class="vlabel">Project</span></div>`
+    : `<div class="col side left">
+        <div class="colhead"><span class="coltabs"><span class="ctab on">Project</span></span>
+          <span class="sp"></span><button class="cbtn" onclick="toggleC2L()" title="collapse">«</button></div>
+        <div class="colbody">${treeView(adorned)}</div></div>`;
+  const rtab = (id, label, sug) =>
+    `<span class="ctab ${state.c2right === id ? 'on' : ''}" onclick="setC2Right('${id}')">
+     ${label}${sug ? '<span class="sug"></span>' : ''}</span>`;
+  const right = `<div class="col side right">
+      <div class="colhead"><span class="coltabs">
+        ${rtab('device', 'Device', false)}
+        ${adorned ? rtab('outputs', 'Outputs', state.c2right !== 'outputs') : ''}
+      </span></div>
+      <div class="colbody">${state.c2right === 'outputs' && adorned ? outputsView() : deviceView()}</div>
+    </div>`;
+  document.getElementById('c2').innerHTML = gheadHTML() +
+    `<div class="wbbody">${left}${mainCol('c2')}${right}</div>` +
+    statusBar('document: ' + state.editor,
+      adorned ? 'Mapping suggested the Outputs tab — Device stays one click away' : 'sides unchanged by the document');
+}
+
+function renderC3() {
+  const adorned = state.editor === 'mapping';
+  const sect = (title, body, origin, open = true) =>
+    `<div style="border-bottom:1px solid var(--border-subtle)">
+      <div class="colhead" style="border-bottom:none; cursor:grab;">
+        <span style="color:var(--border-strong); font-size:10px;">⠿</span>
+        <span class="ctitle">${open ? '▾' : '▸'} ${title}</span>
+        ${origin ? `<span class="chip" style="font-size:8.5px">from ${origin}</span>` : ''}
+        <span class="sp"></span><button class="cbtn">⋮</button></div>
+      ${open ? `<div style="max-height:340px; overflow-y:auto;">${body}</div>` : ''}</div>`;
+  const leftViews = [sect('Project', treeView(adorned))]
+    .concat(state.deviceLeft ? [sect('Device', deviceView())] : []);
+  const rightViews = []
+    .concat(adorned ? [sect('Outputs', outputsView(), 'Mapping')] : [])
+    .concat(!state.deviceLeft ? [sect('Device', deviceView(), null, !adorned || state.density !== 'radiance')] : []);
+  const emptyHint = `<div style="margin:14px 10px; border:1px dashed var(--border-strong);
+    border-radius:8px; padding:18px 10px; text-align:center; color:var(--dim); font-size:10.5px;">
+    empty slot — drag a view here</div>`;
+  const left = state.c3Lcollapsed
+    ? `<div class="col side left collapsed" onclick="toggleC3L()"><span class="vlabel">Project</span></div>`
+    : `<div class="col side left"><div class="colbody">${leftViews.join('')}</div></div>`;
+  document.getElementById('c3').innerHTML = gheadHTML() +
+    `<div class="wbbody">${left}${mainCol('c3')}
+      <div class="col side right"><div class="colbody">
+        ${rightViews.length ? rightViews.join('') : emptyHint}</div></div>
+     </div>` +
+    statusBar('slots: [Project' + (state.deviceLeft ? ' · Device' : '') + '] [main] [' +
+      (adorned ? 'Outputs' : '') + (!state.deviceLeft ? (adorned ? ' · ' : '') + 'Device' : (adorned ? '' : '—')) + ']',
+      'views are furniture — ⠿ drag between slots; your arrangement sticks');
+}
+
+/* ================= section 5: phones ================= */
+function phoneStrip(interactive) {
+  const on = v => state.phoneView === v ? 'on' : '';
+  const act = (v) => interactive ? `onclick="phoneSummon('${v}')"` : '';
+  return `<div class="pstrip">
+    <span class="sq ${on('tree')}" ${act('tree')}>☰</span>
+    <span class="pdoc">
+      <button class="${state.editor === 'nodes' ? 'on' : ''}" ${interactive ? `onclick="setEditor('nodes')"` : ''}>Nodes</button>
+      <button class="${state.editor === 'mapping' ? 'on' : ''}" ${interactive ? `onclick="setEditor('mapping')"` : ''}>Mapping</button>
+    </span>
+    <span class="sq ${on('outputs')}" ${act('outputs')}>▤</span>
+    <span class="sq ${on('device')}" ${act('device')}>⌁</span>
+  </div>`;
+}
+function phoneMain() {
+  if (state.phoneView === 'tree') return `<div class="pmain">
+    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Project</b></div>
+    ${treeView(state.editor === 'mapping')}</div>`;
+  if (state.phoneView === 'outputs') return `<div class="pmain">
+    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Outputs</b></div>
+    ${outputsView()}</div>`;
+  if (state.phoneView === 'device') return `<div class="pmain">
+    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Device</b></div>
+    ${deviceView()}</div>`;
+  return state.editor === 'nodes'
+    ? `<div class="pmain">${nodeCardsView()}</div>`
+    : `<div class="pmain canvas">${canvasSVG('ph')}</div>${verbBar()}`;
+}
+function renderPhones() {
+  const live = `<div class="phone"><div class="pcap">sm · live — tap the strip</div>
+    <div class="pbody">${phoneStrip(true)}${phoneMain()}</div></div>`;
+  // static frames rendered from fixed states (do not disturb the live state)
+  const saved = { ...state };
+  Object.assign(state, { editor: 'mapping', mode: 'patch', phoneView: 'main' });
+  const patching = `<div class="phone"><div class="pcap">sm · mapping doc, patching mode — verbs docked</div>
+    <div class="pbody">${phoneStrip(false)}${phoneMain()}</div></div>`;
+  Object.assign(state, { editor: 'mapping', mode: 'map', phoneView: 'outputs' });
+  const summoned = `<div class="phone"><div class="pcap">sm · outputs summoned — replaces main</div>
+    <div class="pbody">${phoneStrip(false)}${phoneMain()}</div></div>`;
+  Object.assign(state, saved);
+  const tablet = `<div class="phone tab"><div class="pcap">md · main + one side; other side is a strip</div>
+    <div class="pbody">
+      <div class="col side left collapsed" style="border-right:1px solid var(--border-strong)">
+        <span class="vlabel">Project</span></div>
+      <div class="col main">${docTabs()}${state.editor === 'nodes'
+        ? `<div class="mainbody">${nodeCardsView()}</div>` : mappingMain('tab', true)}</div>
+      <div class="col side right" style="width:240px; border-left:1px solid var(--border-strong)">
+        <div class="colhead"><span class="coltabs"><span class="ctab">Device</span>
+          <span class="ctab on">Outputs</span></span></div>
+        <div class="colbody">${outputsView()}</div></div>
+    </div></div>`;
+  document.getElementById('phones').innerHTML = live + patching + summoned + tablet;
+}
+
+/* ================= state changes ================= */
+function renderAll() {
+  renderToday(); renderC1(); renderC2(); renderC3(); renderPhones();
+  const B = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
+  B('xed-nodes', state.editor === 'nodes'); B('xed-map', state.editor === 'mapping');
+  B('xmo-map', state.mode === 'map'); B('xmo-patch', state.mode === 'patch');
+  document.getElementById('xmo-map').disabled = state.editor !== 'mapping';
+  document.getElementById('xmo-patch').disabled = state.editor !== 'mapping';
+  B('xde-dome', state.density === 'dome'); B('xde-rad', state.density === 'radiance');
+  B('xdv-r', !state.deviceLeft); B('xdv-l', state.deviceLeft);
+  document.getElementById('xstatus').textContent =
+    `editor=${state.editor} · mode=${state.mode} · sel=${state.sel}`;
+}
+function setEditor(e) {
+  state.editor = e;
+  if (e === 'mapping' && state.c2right === 'device') state.c2right = 'outputs'; // the "suggest" behaviour
+  if (e === 'nodes') { state.c2right = 'device'; state.phoneView = 'main'; }
+  renderAll();
+}
+function setMode(m) { state.mode = m; if (m) state.editor = 'mapping'; renderAll(); }
+function setPerspective(p) {
+  if (p === 'nodes') { state.editor = 'nodes'; }
+  else { state.editor = 'mapping'; state.mode = p === 'patching' ? 'patch' : 'map'; }
+  renderAll();
+}
+function setDensity(d) { state.density = d; renderAll(); }
+function setDeviceLeft(v) { state.deviceLeft = v; renderAll(); }
+function setC2Right(v) { state.c2right = v; renderAll(); }
+function toggleC2L() { state.c2Lcollapsed = !state.c2Lcollapsed; renderAll(); }
+function toggleC3L() { state.c3Lcollapsed = !state.c3Lcollapsed; renderAll(); }
+function selectPath(p) { state.sel = p; renderAll(); }
+function phoneSummon(v) { state.phoneView = v === state.phoneView ? 'main' : v; renderAll(); }
+
+renderAll();
+</script>
+</body>
+</html>
