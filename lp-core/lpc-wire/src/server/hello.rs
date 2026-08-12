@@ -33,6 +33,29 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 18: display layouts cross the wire PACKED — `ControlLayout2d`
+///   serializes as packing spans (`[first_lamp, count, sample_start,
+///   sample_stride, radius]` 5-tuples) plus base64 u16le lamp centers,
+///   replacing the per-lamp `[i, s, x, y, r]` tuple list (~5.4 B/lamp vs
+///   ~75). An old peer cannot decode the new shape and vice versa —
+///   changed encoding of an existing message, which is what earns the
+///   bump. This is what lets a dome-scale (≤2048-lamp) layout ride one
+///   project-read frame instead of being refused as `Unsupported`.
+/// - 17: the wire's CUT reaches the read — `OutputFrameEntry` (and its
+///   chunk header) gain `placements: Vec<WireOutputPlacement>`, one
+///   `(fixture span ↔ wire span)` run per producer, in lamps. Required
+///   fields on existing structs: an old peer's entry cannot decode against
+///   the new shape, which is what earns the bump. This is the only
+///   description of which fixture owns which stretch of a strand — the
+///   patch bay's data (D34a), and unavailable to a client that would
+///   otherwise have to re-derive auto-flow ordering from the project.
+/// - 16: output fragments — `SlotMerge` gains a `fragments` variant and
+///   `OutputDef::input` declares it, so every project read now ships a slot
+///   shape carrying `"merge": "fragments"`. `SlotSemantics.merge` rides the
+///   shape frames (`ProjectReadEvent`'s `SlotShapeEntry`), and an old peer
+///   deserializing that enum has no such variant — it cannot decode the
+///   output node's shape at all, which is what earns the bump. Additive
+///   though the model change reads.
 /// - 15: the projection factorization (post-G2 ruling, format v9) —
 ///   `WireCellProjection` becomes the factored `{shape, mirror, flip}`
 ///   RECORD over a new `WireProjectionShape` (extrude_x/extrude_y/radial/
@@ -120,7 +143,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 15;
+pub const WIRE_PROTO_VERSION: u32 = 18;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

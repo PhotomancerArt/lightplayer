@@ -299,14 +299,14 @@ fn strip_map2d_json() -> String {
     )
 }
 
-/// One channel, no count: the single-wire degenerate case of the channels
+/// One port, no count: the single-wire degenerate case of the ports
 /// map — "this wire takes the whole control product" (the multi-endpoint
 /// ADR §1). A second wire is authored later, in the editor.
 fn output_json(endpoint: &str) -> String {
     format!(
         r#"{{
   "kind": "Output",
-  "channels": {{
+  "ports": {{
     "0": {{
       "endpoint": "{endpoint}"
     }}

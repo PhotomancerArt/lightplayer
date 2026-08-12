@@ -22,6 +22,9 @@ pub struct UiFixtureFace {
     /// The mapping document's inline-editor plumbing (fetch/apply/revert
     /// targets), present when the mapping slot resolves to a `Map2d` asset.
     pub mapping_editor: Option<UiAssetEditor>,
+    /// The patch document's plumbing (`{stem}.patch.json`), when the
+    /// fixture authors one — the patch surface's write target (P6).
+    pub patch_editor: Option<UiAssetEditor>,
     /// Estimated draw against the declared supply budget. `None` when the
     /// fixture declares no budget, in which case nothing is ever limited and
     /// there is nothing worth saying on the face.
@@ -37,6 +40,15 @@ pub struct UiFixtureFace {
     /// are absent (a hand-built face, or a def predating the slots); the
     /// guided state then renders nothing rather than inventing targets.
     pub shape_presets: Option<UiShapePresets>,
+    /// The patch bay's fixture side (D34a): this fixture's own runs, laid
+    /// along ITS channel space and labelled with where each landed on the
+    /// wire. The SAME cells the driven output's face shows — one model,
+    /// two orderings.
+    ///
+    /// Filled by the project controller's `apply_patch_bays` pass, from the
+    /// output-frame probe. `None` when nothing this fixture produces has
+    /// reached an output's wire yet.
+    pub patch: Option<crate::UiFixturePatch>,
 }
 
 /// The slot addresses the fixture Shape presets write — **the

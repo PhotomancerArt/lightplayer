@@ -126,20 +126,6 @@
       },
       "type": "object"
     },
-    "lpc_model::nodes::output::output_channel_def::OutputChannelDef": {
-      "additionalProperties": false,
-      "properties": {
-        "count": {
-          "maximum": 4294967295,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "endpoint": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -159,6 +145,20 @@
           "maxItems": 3,
           "minItems": 3,
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::output::output_port_def::OutputPortDef": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -1107,15 +1107,6 @@
           },
           "type": "object"
         },
-        "channels": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lpc_model::nodes::output::output_channel_def::OutputChannelDef"
-          },
-          "propertyNames": {
-            "pattern": "^\\+?[0-9]+$"
-          },
-          "type": "object"
-        },
         "input": {
           "additionalProperties": false,
           "properties": {
@@ -1154,8 +1145,20 @@
         "kind": {
           "const": "Output"
         },
+        "name": {
+          "type": "string"
+        },
         "options": {
           "$ref": "#/$defs/lpc_model::nodes::output::output_def::OutputDriverOptionsConfig"
+        },
+        "ports": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::output::output_port_def::OutputPortDef"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
         }
       },
       "required": [
@@ -1456,6 +1459,66 @@
               "properties": {
                 "kind": {
                   "const": "Map2d"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "$path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "$path"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "patch": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Unset"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "File"
                 },
                 "source": {
                   "anyOf": [

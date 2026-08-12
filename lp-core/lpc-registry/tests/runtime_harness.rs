@@ -84,7 +84,7 @@ fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
-    write_file(&mut fs, "/project.json", "{\n  \"format\": 9\n}\n");
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 10\n}\n");
     write_file(
         &mut fs,
         "/module.json",

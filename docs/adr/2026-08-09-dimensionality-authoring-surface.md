@@ -103,8 +103,9 @@ a convenience.
 
 This is why the fixture's Shape presets write through a narrow declared
 seam rather than a parallel path, and why the `declare_space` agent tool
-is a follow-up rather than a quick addition: the cheap version of it is a
-second writer.
+was a follow-up rather than a quick addition: the cheap version of it is a
+second writer. (It has since landed under exactly that constraint — a
+drift test pins its paths against this section's addresses.)
 
 ### 5. Controls that gate each other are one control
 
@@ -208,12 +209,21 @@ the inward fold, so bit-identity requires the flip.
 
 ## Follow-ups
 
-- **`declare_space` agent tool.** The Studio shader agent's tools are
-  `iterate` / `upsert_param` / `speed`; none writes `ShaderDef::space`, so
-  an agent can stage a `render_1d` body onto a `TwoD` node and be unable
-  to repair the mismatch it created. The system prompt also asserts the 2D
-  entry unconditionally, which is false on a `OneD` shader. Must reuse the
-  section's write path per §4.
+- ~~**`declare_space` agent tool.**~~ **DONE (2026-08-09)** — see the
+  `2026-07-25-studio-shader-agent-architecture.md` addendum. The agent's
+  tools were `iterate` / `upsert_param` (there was no `speed` tool);
+  neither wrote `ShaderDef::space`, so an agent could stage a `render_1d`
+  body onto a `TwoD` node and be unable to repair the mismatch it created,
+  and the system prompt asserted the 2D entry unconditionally — false on
+  every `OneD` shader. §4 is honored by construction plus a gate:
+  `space_declaration_edits()` is the one spelling, and
+  `agent_edits_match_the_dimensionality_tiles` pins every path it emits
+  against this section's own derived addresses, so a second writer fails
+  the build rather than shipping. The prompt's entry line is now derived
+  from `ShaderContext::space`.
+  - Left open by it: `lps-probe` hard-requires `render_2d`, so on a 1D
+    node `iterate` stages and reports the engine verdict correctly but its
+    PROBES cannot evaluate the shader.
 - **`dimensionality` as the section name** is Yona's stated preference
   with a noted reservation ("a bit long"); `dimension` / `geometry` remain
   a one-const swap at `SPACE_SECTION_LABEL`.

@@ -615,6 +615,7 @@ impl AgentHost for EvalHost {
                 mapping_kind: "ring".into(),
             }),
             bindings: Vec::new(),
+            ..ShaderContext::default()
         }
     }
 }

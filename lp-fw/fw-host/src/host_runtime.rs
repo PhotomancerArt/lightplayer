@@ -133,7 +133,7 @@ fn create_memory_server() -> LpServer {
     // Wire hello identity (sans-IO: injected here, never read ambiently by
     // the server). Host runtimes carry no git provenance or stamped
     // identity; fake devices script a uid (see `create_memory_server_with`).
-    create_memory_server_with(
+    let mut server = create_memory_server_with(
         LpFsMemory::new(),
         lpc_wire::HelloIdentity::new(
             "fw-host",
@@ -145,7 +145,14 @@ fn create_memory_server() -> LpServer {
                 "release"
             },
         ),
-    )
+    );
+    // In-proc transport: messages move over channels, not a 16 KiB serial
+    // frame, so this link declares no frame budget and answers layouts at
+    // any scale. `create_memory_server_with` deliberately keeps the serial
+    // default — `FakeEsp32Device` builds on it to EMULATE a serial device,
+    // and its budgets must stay honest.
+    server.set_project_read_frame_budget(None);
+    server
 }
 
 /// Build the standard in-memory host server over a caller-supplied

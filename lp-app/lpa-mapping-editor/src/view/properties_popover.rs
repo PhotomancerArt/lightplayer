@@ -246,7 +246,7 @@ pub fn PropertiesPopover(
                 {shape_fields(session, on_committed, index, selected_shape, base_depth)}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
-                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
+                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count}"
                     }
                 }
             } else {
@@ -348,6 +348,7 @@ pub(crate) fn shape_kind_label(shape: &Map2dShape) -> &'static str {
         Map2dShape::Grid(_) => "grid",
         Map2dShape::Ring(_) => "ring",
         Map2dShape::Path(_) => "path",
+        Map2dShape::Polygon(_) => "polygon",
         Map2dShape::Repeat(_) => "repeat",
     }
 }
@@ -451,6 +452,14 @@ fn shape_fields(
                 PathGapsField { session, on_committed, index, depth, gaps: path.gaps.clone() }
             }
         }
+        // A hand-authored polygon (no creation tool yet): the count is the
+        // one live parameter; the outline is authored in the document.
+        Map2dShape::Polygon(polygon) => {
+            rsx! {
+                NumberField { session, on_committed, index, depth, label: "count", value: polygon.count as f32, min: 1.0, is_int: true,
+                    apply: FieldApply::PolygonCount }
+            }
+        }
         // A repeat's own parameters, then the shape it turns — one panel, read
         // top to bottom as "N copies of this, about here". The inner fields
         // recurse, so a nested repeat simply shows another instances row.
@@ -520,6 +529,7 @@ pub enum FieldApply {
     RingDir,
     PathCount,
     PathReversed,
+    PolygonCount,
     RepeatCount,
     RepeatCenterX,
     RepeatCenterY,
@@ -535,6 +545,9 @@ fn apply_number(shape: &mut Map2dShape, apply: FieldApply, value: f32) {
         (FieldApply::RingRings, Map2dShape::Ring(ring)) => ring.rings = value.max(1.0) as u32,
         (FieldApply::RingAngle, Map2dShape::Ring(ring)) => ring.start_angle_deg = value,
         (FieldApply::PathCount, Map2dShape::Path(path)) => path.count = value.max(1.0) as u32,
+        (FieldApply::PolygonCount, Map2dShape::Polygon(polygon)) => {
+            polygon.count = value.max(1.0) as u32;
+        }
         // Sanitize owns the upper bound (`MAX_REPEAT_COUNT`) so a typed digit
         // that overshoots is clamped on commit rather than refused mid-typing.
         (FieldApply::RepeatCount, Map2dShape::Repeat(repeat)) => {

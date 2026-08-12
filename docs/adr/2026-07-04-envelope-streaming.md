@@ -167,6 +167,11 @@ any applier protocol error the mirror is discarded (`view.revision` reset to
   `fixture_sized_control_preview_fits_project_read_frame_budget`). If fixtures
   grow ~4×+, split the layout semantically into per-lamp-range events rather
   than growing the transport budget.
+  *(2026-08-10: superseded for this payload by
+  `2026-08-10-packed-display-layouts-transport-budget` — the layout now
+  crosses the wire packed (~5.4 B/lamp), which carries the declared
+  2048-lamp embedded ceiling in one frame; the per-lamp-range split
+  remains the recorded escalation beyond that ceiling.)*
 - **Sub-root slot patching.** Slots are gated per-root (M5 G6a); sub-root
   progressive patches remain future work.
 - **Real-hardware Studio smoke.** The end-to-end gated multi-frame read over

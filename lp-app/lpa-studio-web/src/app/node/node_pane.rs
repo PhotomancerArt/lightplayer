@@ -48,6 +48,11 @@ pub fn NodePane(
     /// Panel gestures raised by a module face (reset, auto-save).
     #[props(default = None)]
     module_panel: Option<EventHandler<crate::app::module::PanelGesture>>,
+    /// The PROJECT's detail sections, on the workspace ROOT card only
+    /// (workbench ruling 2): the workbench's flat Nodes dock has no header of
+    /// its own, so the project's [i] content lives on this card's popup.
+    #[props(default = None)]
+    project: Option<crate::app::project::ProjectDetailContent>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
@@ -193,6 +198,7 @@ pub fn NodePane(
                             header,
                             pending_edits: pending_edits.clone(),
                             module: module_face.clone(),
+                            project,
                             on_action,
                         }
                     },

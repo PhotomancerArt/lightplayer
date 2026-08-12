@@ -61,7 +61,7 @@ pub fn create_server(
     // constant (the GPU tier, when it arrives, is a separate backend).
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let server = LpServer::new_with_hardware_services(
+    let mut server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
         "projects/".as_path(),
@@ -71,6 +71,10 @@ pub fn create_server(
         Some(radio_service),
         graphics,
     );
+    // Websocket transport (tungstenite, effectively unbounded frames) — no
+    // 16 KiB serial constraint, so this link declares no frame budget and
+    // answers display layouts at any scale.
+    server.set_project_read_frame_budget(None);
 
     // Create a new filesystem instance to return (same type as what was created)
     let returned_fs = create_filesystem(dir, memory)?;

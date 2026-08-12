@@ -242,7 +242,11 @@ mod tests {
             // document is an opaque asset (D1) and `project.json` is the
             // non-node container manifest (its canonical form is
             // `ProjectManifest::write_json`, asserted below).
-            if !name.ends_with(".json") || name.ends_with(".map2d.json") || name == "project.json" {
+            if !name.ends_with(".json")
+                || name.ends_with(".map2d.json")
+                || name.ends_with(".patch.json")
+                || name == "project.json"
+            {
                 continue;
             }
             let text = core::str::from_utf8(bytes).expect("utf-8");

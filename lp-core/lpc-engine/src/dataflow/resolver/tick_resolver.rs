@@ -1,12 +1,14 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
+use alloc::vec::Vec;
+
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::dataflow::timebase::PhasorKey;
-use crate::node::ScopeRef;
+use crate::node::{PatchedRun, ScopeRef};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -66,6 +68,41 @@ pub trait TickResolver {
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
     ) -> Result<ControlLayout, ResolveError>;
+
+    /// Where a control product's producer says its lamps land on
+    /// `consumer`'s wire — the resolved patch runs addressed to that
+    /// output — or `None` for auto-flow (`Some(vec![])` = patched, nothing
+    /// here; see the engine implementation for the D40 contract).
+    ///
+    /// Defaulted to `None` so a node-level test fake need not model patching
+    /// to tick a node that asks; the engine's own resolver forwards to the
+    /// producing node.
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+        consumer: NodeId,
+    ) -> Option<Vec<PatchedRun>> {
+        let _ = (product, consumer);
+        None
+    }
+
+    /// Record `node`'s authored output name for patch routing; answers a
+    /// live sibling's colliding claim. Defaulted so fakes need not model
+    /// output identity.
+    fn register_output_identity(
+        &mut self,
+        node: NodeId,
+        name: Option<alloc::string::String>,
+        revision: Revision,
+    ) -> Option<alloc::string::String> {
+        let _ = (node, name, revision);
+        None
+    }
+
+    /// The registered output-name set and the revision it last changed at.
+    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
+        (Vec::new(), Revision::default())
+    }
 
     fn runtime_buffer_mut(
         &mut self,
@@ -174,6 +211,27 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.host
             .render_control(product, request, target)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+        consumer: NodeId,
+    ) -> Option<Vec<PatchedRun>> {
+        self.host.control_patch_placement(product, consumer)
+    }
+
+    fn register_output_identity(
+        &mut self,
+        node: NodeId,
+        name: Option<alloc::string::String>,
+        revision: Revision,
+    ) -> Option<alloc::string::String> {
+        self.host.register_output_identity(node, name, revision)
+    }
+
+    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
+        self.host.known_output_names()
     }
 
     fn render_texture(

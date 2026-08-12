@@ -52,6 +52,19 @@ pub enum AgentOp {
         seq: u64,
         upsert: lpa_agent::ParamUpsert,
     },
+    /// The agent's `declare_space` write (dispatched by the host bridge,
+    /// not the web layer): send ONE `PutSlotEdit` batch on the target
+    /// node's def artifact — the SAME ops the dimensionality section's
+    /// tiles dispatch — and record the outcome into the session's bridge
+    /// cell under `seq`, where the awaiting run future polls it up.
+    DeclareSpace {
+        artifact: ArtifactLocation,
+        /// Bridge-allocated correlation id for the ack (the same counter
+        /// `UpsertParam` draws from — only one agent write is ever in
+        /// flight).
+        seq: u64,
+        declaration: lpa_agent::SpaceDeclaration,
+    },
 }
 
 impl ControllerOp for AgentOp {
@@ -80,6 +93,11 @@ impl ControllerOp for AgentOp {
             Self::UpsertParam { .. } => ActionMeta::new(
                 "Upsert param",
                 "Stage the agent's param record edit as a pending edit.",
+                ActionPriority::Primary,
+            ),
+            Self::DeclareSpace { .. } => ActionMeta::new(
+                "Declare space",
+                "Stage the agent's dimensionality declaration as a pending edit.",
                 ActionPriority::Primary,
             ),
         }

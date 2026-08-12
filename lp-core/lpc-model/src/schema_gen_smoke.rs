@@ -7,7 +7,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        ColorOrder, ControlLamp2d, ModuleDef, NodeInvocation, SlotMapDyn, SlotShapeRegistrySnapshot,
+        ColorOrder, ControlLayout2d, ModuleDef, NodeInvocation, SlotMapDyn,
+        SlotShapeRegistrySnapshot,
     };
 
     macro_rules! assert_schema_compiles {
@@ -50,27 +51,24 @@ mod tests {
         );
     }
 
-    /// `ControlLamp2d` has a custom `Serialize` that emits a 5-element tuple, so
-    /// its schema must be a fixed-length array, not a named-field struct.
+    /// `ControlLayout2d` serializes as the PACKED wire form (spans + base64
+    /// centers), so its schema must describe that object — packing-span
+    /// 5-tuples under `s`, a base64 string under `c` — and never the
+    /// in-memory per-lamp vector.
     #[test]
-    fn control_lamp_is_a_fixed_length_tuple_schema() {
-        let json = assert_schema_compiles!(ControlLamp2d);
+    fn control_layout_schema_describes_the_packed_wire_form() {
+        let json = assert_schema_compiles!(ControlLayout2d);
         assert!(
-            json.contains(r#""type":"array""#),
-            "ControlLamp2d should be an array schema: {json}"
-        );
-        assert!(
-            json.contains(r#""prefixItems""#),
-            "ControlLamp2d should use prefixItems for its tuple: {json}"
+            json.contains(r#""s""#) && json.contains(r#""c""#),
+            "ControlLayout2d schema should carry packed spans and centers: {json}"
         );
         assert!(
             json.contains(r#""maxItems":5"#) && json.contains(r#""minItems":5"#),
-            "ControlLamp2d should be exactly 5 elements: {json}"
+            "packing spans should be 5-element tuples: {json}"
         );
-        // The tuple form must not be described as a named-field object.
         assert!(
-            !json.contains(r#""properties""#),
-            "ControlLamp2d tuple schema must not expose named struct fields: {json}"
+            !json.contains("lamp_index") && !json.contains(r#""lamps""#),
+            "the in-memory lamp vector must not leak into the wire schema: {json}"
         );
     }
 

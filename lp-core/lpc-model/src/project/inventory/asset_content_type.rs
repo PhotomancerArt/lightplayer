@@ -14,6 +14,12 @@ pub enum AssetContentType {
     ComputeShaderSource,
     /// 2D mapping document (`*.map2d.json`) consumed by a fixture node.
     FixtureMap2d,
+    /// Patch document (`*.patch.json`) consumed by a fixture node.
+    ///
+    /// Its own content type rather than a second `FixtureMap2d`: assets are
+    /// looked up one-per-(node, content type), and a fixture references both
+    /// of its documents at once.
+    FixturePatch,
     /// Image data; decoding details are future work.
     Image,
     /// Generic UTF-8 text.

@@ -45,10 +45,6 @@ use crate::{UiControlProductPreview, UiControlSampleFormat};
 pub struct CardFeedApply {
     /// The revision moved: a genuinely new frame landed.
     pub new_frame: bool,
-    /// The device refused (or omitted) the display layout and the feed has
-    /// none, so the caller should synthesize one locally. Dome-scale
-    /// fixtures live here permanently — the layout is over the wire budget.
-    pub wants_layout: bool,
 }
 
 /// The live frame feed for one device session.
@@ -59,16 +55,24 @@ pub struct CardFeedState {
     /// The output node this card follows, latched at the first frame.
     node: Option<NodeId>,
     /// The geometry every preview shares — one `Rc`, replaced only when the
-    /// device sends a different layout or a local synthesis lands.
+    /// device sends a different layout.
+    ///
+    /// The layout is stated in the OUTPUT's numbering: this feed's frames
+    /// are an output's published buffer, so the renderer reads each lamp's
+    /// colour at that lamp's `sample_start` in those bytes. A producer's
+    /// own numbering stops being the wire's the moment a second producer
+    /// joins or a patch moves a run — which is why only the engine (whose
+    /// fragment merge knows the placements) ever supplies this, and a
+    /// refusal leaves the card honestly layout-less rather than drawing
+    /// every lamp from another lamp's bytes.
     layout: Option<Rc<ControlDisplayLayout>>,
-    /// The engine-side revision of `layout`, for `IfChanged` gating. `None`
-    /// while the layout is client-synthesized (the refusal never tells us
-    /// the engine's layout revision).
+    /// The engine-side revision of `layout`, for `IfChanged` gating.
     layout_revision: Option<Revision>,
-    /// The device answered `Unsupported` for this connection's geometry.
-    /// The feed stops asking (the engine builds and measures the whole
-    /// layout to refuse it — real work at dome scale, every pull) and the
-    /// client-side synthesis stands in until the handle is invalidated.
+    /// The device answered `Unsupported` for this connection's geometry —
+    /// a PERMANENT answer (genuinely over the link's budget). The feed
+    /// stops asking: the engine builds and measures the whole layout to
+    /// refuse it — real work at dome scale, every pull — until the handle
+    /// is invalidated.
     layout_refused: bool,
     /// The newest frame, as the renderer consumes it.
     frame: Option<UiControlProductPreview>,
@@ -151,11 +155,6 @@ impl CardFeedState {
         self.node
     }
 
-    /// Whether the feed still has no geometry to draw with.
-    pub fn wants_layout(&self) -> bool {
-        self.layout.is_none()
-    }
-
     /// What the next pull should ask for.
     ///
     /// `Always` until geometry is known, `IfChanged` while the device's own
@@ -173,18 +172,6 @@ impl CardFeedState {
             },
             None => ControlDisplayLayoutRead::Always,
         }
-    }
-
-    /// Install a client-synthesized display layout (the dome-scale fallback).
-    /// It becomes the stable `Rc` every later preview clones, and the
-    /// current frame — already built — adopts it too, so the card draws on
-    /// the same pull the synthesis ran on.
-    pub fn set_synthesized_layout(&mut self, layout: Rc<ControlDisplayLayout>) {
-        if let Some(frame) = self.frame.as_mut() {
-            frame.display_layout = Some(Rc::clone(&layout));
-        }
-        self.layout = Some(layout);
-        self.layout_revision = None;
     }
 
     /// Pick this card's entry out of a pulled result: the latched output
@@ -219,10 +206,7 @@ impl CardFeedState {
             && entry.channels > 0
             && !entry.bytes.is_empty();
         if unchanged || !readable {
-            return CardFeedApply {
-                new_frame: false,
-                wants_layout: self.wants_layout(),
-            };
+            return CardFeedApply { new_frame: false };
         }
 
         self.frame = Some(UiControlProductPreview {
@@ -238,10 +222,7 @@ impl CardFeedState {
             bytes: Rc::from(entry.bytes.as_slice()),
         });
         self.last_frame_at = Some(now);
-        CardFeedApply {
-            new_frame: true,
-            wants_layout: self.wants_layout(),
-        }
+        CardFeedApply { new_frame: true }
     }
 
     /// Whether a feed pull is due at `now` under the completion `gap`. A
@@ -383,41 +364,21 @@ mod tests {
         );
     }
 
+    /// A refusal is permanent for the connection: the feed stops asking so
+    /// the engine stops re-building and re-measuring a layout it will
+    /// refuse again — and the card stays honestly layout-less.
     #[test]
-    fn a_refused_layout_stops_the_asking_and_takes_a_synthesis() {
+    fn a_refused_layout_stops_the_asking() {
         let mut feed = CardFeedState::default();
         let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
         refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
             reason: "over the wire budget".to_string(),
         };
 
-        let applied = feed.apply_entry(&refused, NOW);
+        feed.apply_entry(&refused, NOW);
 
-        assert!(applied.wants_layout);
         assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::None);
-
-        let synthesized = Rc::new(ControlDisplayLayout::Layout2d(layout_2d(11)));
-        feed.set_synthesized_layout(Rc::clone(&synthesized));
-
-        // The frame already in hand adopts it, and the next one shares it.
-        assert!(Rc::ptr_eq(
-            &synthesized,
-            feed.frame()
-                .expect("frame")
-                .display_layout
-                .as_ref()
-                .expect("layout")
-        ));
-        feed.apply_entry(&entry(4, 2, vec![9, 0, 8, 0, 7, 0]), NOW + 0.2);
-        assert!(Rc::ptr_eq(
-            &synthesized,
-            feed.frame()
-                .expect("frame")
-                .display_layout
-                .as_ref()
-                .expect("layout")
-        ));
-        assert!(!feed.wants_layout());
+        assert!(feed.frame().expect("frame").display_layout.is_none());
     }
 
     #[test]
@@ -501,6 +462,9 @@ mod tests {
                 }],
             },
             display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            // These feeds render lamps, not the bay: one auto-flowed
+            // producer over the whole wire is the shape they see.
+            placements: Vec::new(),
             bytes,
         }
     }

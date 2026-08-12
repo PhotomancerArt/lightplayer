@@ -12,6 +12,7 @@ pub(crate) mod v5_to_v6;
 pub(crate) mod v6_to_v7;
 pub(crate) mod v7_to_v8;
 pub(crate) mod v8_to_v9;
+pub(crate) mod v9_to_v10;
 
 use crate::project_files::ProjectFiles;
 use crate::upgrade_error::UpgradeError;
@@ -61,5 +62,10 @@ pub(crate) const STEPS: &[UpgradeStep] = &[
         from: 8,
         to: 9,
         apply: v8_to_v9::apply,
+    },
+    UpgradeStep {
+        from: 9,
+        to: 10,
+        apply: v9_to_v10::apply,
     },
 ];
