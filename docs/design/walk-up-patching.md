@@ -143,9 +143,12 @@ peach already exercises them). What this buys:
 
 Enforcement: the kernel **refuses** path-duplicate entries at
 resolve (like every other patch refusal: degrade and report), and
-the editor never authors them. (Implementation note for the
-assignment pass: this refusal does not exist yet — format 2 still
-parses duplicates silently.)
+the editor never authors them. (Implementation note: the refusal
+exists as of the unified-editor pass-1 plan's P1 —
+`resolve_patch` returns a `PatchResolution` whose `refusals`
+report `DuplicatePath` per-entry degrades; the later entry drops
+to auto-flow, the verb layer blocks documents that would degrade,
+and the engine surfaces the report as `patch_error`.)
 
 ## Scope posture
 
