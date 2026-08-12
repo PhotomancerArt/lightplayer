@@ -50,7 +50,7 @@ fn instance(path: &str, label: &str, start: u32, lamps: u32, stride: u32) -> UiP
 }
 
 /// The mini-dome's shape: two named outputs sharing sectors and doors.
-fn mini_dome_surface(contested: bool) -> UiPatchSurface {
+pub(crate) fn mini_dome_surface(contested: bool) -> UiPatchSurface {
     let mut sector2 = cell("dome:0:60:0", "dome", 60, 30, 0);
     sector2.contested = contested;
     let mut door0 = cell("doors:0:0:30", "doors", 0, 9, 30);
@@ -182,7 +182,7 @@ fn mini_dome_surface(contested: bool) -> UiPatchSurface {
 
 /// The peach: one output, two fixtures, NO instance grain (format-1 range
 /// entries over docs without ids) — the surface's second first-class shape.
-fn peach_surface() -> UiPatchSurface {
+pub(crate) fn peach_surface() -> UiPatchSurface {
     UiPatchSurface {
         outputs: vec![UiPatchSurfaceOutput {
             node: NodeId::new(10),
