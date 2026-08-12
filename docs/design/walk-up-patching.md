@@ -1,7 +1,7 @@
 # Walk-up patching — the assignment flow
 
-Status: draft (design doc, distilled from lp2014 + Yona's account,
-2026-08-11). Companion to the unified editor-shell spike
+Status: ratified 2026-08-11 (spike round 5; split question and
+two-pass posture ruled by Yona). Companion to the unified editor-shell spike
 (`spikes/unified-editor-shell/index.html`) and the slice-2 ADR
 (`../adr/2026-08-10-object-ids-output-names-and-scatter.md`).
 
@@ -39,7 +39,15 @@ fixture a place in the outputs, guided by the actual lights.
    creates the assignment — lp2014's `selectShape` auto-mapped on
    click whenever a channel group was selected. The assignment is
    **not final**: the object stays selected in an adjust state.
-4. **Adjust.** The object's run shows direction and phase markers —
+   **The object display never white-pulses.** The app cannot know
+   which object those lamps are — that is exactly the fact the
+   human supplies. White lives on the port cells (and physically on
+   the piece); the canvas stays dim until the click.
+4. **Adjust.** The moment the click lands, **both sides switch to
+   the mapping animation**: the object AND its port cell run the
+   same chase — the output view shows what is *actually being
+   output* now, which is the mapping, not the finder pulse. The
+   object's run shows direction and phase markers —
    lp2014 drew an arrow at the first lamp and a square at the last
    (flipped when reversed) and a moving chase from start to end.
    Controls (all also hotkeys):
@@ -69,6 +77,14 @@ unique colour per object also works (LP2025 already has per-object
 colours). lp2014 exported live `lastFrameRgb` per shape and live
 `rgbData` per output lamp and rendered both in the UI — the strips
 were alive.
+
+### Controls surface
+
+Every verb is a hotkey AND a visible control: a **bottom verb bar**
+(flip · rotate coarse/fine · shift · grow · finish | unmap · swap ·
+help) with the key printed on each button. Bottom-edge placement
+serves tablet/phone thumb reach — the same bar is the mobile verb
+strip. A help overlay (`?`) carries the full grammar.
 
 ## Everything is editable
 
@@ -109,18 +125,15 @@ the model *could not* split an object. LP2025 equivalents:
 | debugChannels white pulse | Q27 pulse (chipped: task_2d2386cb) |
 | debugGroupIndex persistence | patch selection |
 
-## The open data question: can an object's mapping split?
+## RULED: one object = one contiguous wire window
 
-Today's patch format 2 *permits* a split: multiple entries can name
-the same path with different `range` sub-spans. lp2014 could not
-split, and nobody missed it.
-
-**Recommendation: one object = one contiguous wire window** at
-object grain (rotation wrap-splitting *within* the window is
-placement detail, not a split). Anything that genuinely needs two
-windows becomes two objects (or a group), or drops to manual
-range-grain entries — which stay as the escape hatch (the peach
-already exercises them). What this buys:
+**Ratified 2026-08-11** ("keep it simple… it's just an object →
+output, port, lamp"). At object grain an assignment is exactly one
+`(output, port-window)` per path — rotation wrap-splitting *within*
+the window is placement detail, not a split. Anything that genuinely
+needs two windows becomes two objects (or a group), or drops to
+manual range-grain entries — which stay as the escape hatch (the
+peach already exercises them). What this buys:
 
 - the UI atom stays "one chip / one cell per object instance";
 - every verb (flip, rotate, shift, swap) has an unambiguous target;
@@ -128,9 +141,11 @@ already exercises them). What this buys:
 - the walk-up mental model ("that panel lives at IO14:31") stays
   true.
 
-If ratified, the kernel should **refuse** path-duplicate entries at
+Enforcement: the kernel **refuses** path-duplicate entries at
 resolve (like every other patch refusal: degrade and report), and
-the editor never authors them.
+the editor never authors them. (Implementation note for the
+assignment pass: this refusal does not exist yet — format 2 still
+parses duplicates silently.)
 
 ## Scope posture
 
@@ -140,11 +155,10 @@ the editor never authors them.
   is not v1. Symmetric structures may keep assignments
   sector-specific (5-way rotational group), because that is how the
   piece is actually wired.
-- The assignment flow is a candidate for its **own implementation
-  pass**, separate from (though designed with) the editor-shell
-  unification — it is the trickiest UX in the product and deserves
-  its own gate. This doc + the spike's round-4 section are its
-  design record.
+- **RULED 2026-08-11: two passes.** The editor-shell unification is
+  planned and built first; the assignment flow is its own pass with
+  its own plan and gate. This doc + the spike's walkthrough section
+  are its design record.
 - Real-world validation target: an icosahedral-geodesic-sector
   object in a 5-way rotational group — the actual dome shape. (The
   full dome exceeds current firmware lamp budgets; the editor must
