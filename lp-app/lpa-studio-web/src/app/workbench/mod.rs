@@ -11,10 +11,15 @@
 //!   [`PanelId::side`], a data table by design, so experiments are a
 //!   constant edit — but there is deliberately no user arrangement in v1
 //!   ("things have one home", spike round-2 ruling).
-//! - Edge strips toggle panels **radio-per-side**: clicking a strip
-//!   button switches the side's open panel; re-clicking collapses the
-//!   side. One panel per side keeps the dense panels honest (the
-//!   radiance-scale Outputs rail never shares a column).
+//! - Panels toggle **radio-per-side**. An EXPANDED dock says so with a
+//!   TAB ROW at its top — both of the side's panels as tabs, the open one
+//!   active; clicking the other switches, clicking the active one
+//!   collapses the side (R4-1: the tab row replaces both the edge strip
+//!   and the old "—" hide button while the dock is open). A COLLAPSED
+//!   side falls back to the vertical edge strip, which is then the only
+//!   thing left of that side and the handle that reopens it. One panel
+//!   per side keeps the dense panels honest (the radiance-scale Outputs
+//!   rail never shares a column).
 //! - Panel visibility is remembered **per view** ([`PanelMemory`]),
 //!   seeded by each view's defaults — the Nodes view opens the Nodes
 //!   tree + Device, the Mapping view opens Fixtures + Outputs — so
@@ -34,9 +39,10 @@ pub(crate) mod workbench_stories;
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
+    UiViewContent,
 };
 
-use crate::app::ProjectNodeWorkspace;
+use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
 use panels::{FixturesPanel, OutputsPanel};
 
@@ -208,13 +214,29 @@ pub fn WorkbenchFrame(
     // docks again.
     let mut summoned = use_signal(move || initial_summoned);
 
+    // The project pane's controller status, so the root card's re-housed
+    // project popup keeps the same status word the pane header showed.
+    let project_status = panes.iter().find_map(|pane| {
+        matches!(pane.body, UiViewContent::ProjectEditor(_)).then(|| pane.status.clone())
+    });
+
     rsx! {
-        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:rounded-lg tw:border tw:border-border-strong tw:bg-background",
+        // No outer box (R5): the workbench is the page's working surface,
+        // not a card on it. Hairline separators inside the row do the
+        // dividing — a rounded border here was box-in-box at every width.
+        // Below the fold (R4-2) the frame bleeds the shell's mobile inset
+        // back out, so the summon strip is a full-width toolbar rather than
+        // a floating bar; the site chrome above keeps the inset.
+        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:bg-background tw:max-[960px]:-mx-[10px]",
             div { class: "tw:contents tw:max-[960px]:hidden",
-                EdgeStrip {
-                    side: DockSide::Left,
-                    open: docks.left,
-                    on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                // Only a COLLAPSED side keeps its strip: an open dock wears
+                // the tab row instead, so the side is named exactly once.
+                if docks.left.is_none() {
+                    EdgeStrip {
+                        side: DockSide::Left,
+                        open: docks.left,
+                        on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                    }
                 }
                 if let Some(panel) = docks.left {
                     PanelDock {
@@ -225,7 +247,7 @@ pub fn WorkbenchFrame(
                         patch_selection: patch_selection.clone(),
                         running,
                         now_secs,
-                        on_hide: move |()| memory.write().view_mut(view).toggle(panel),
+                        on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
                         on_action,
                     }
                 }
@@ -248,7 +270,11 @@ pub fn WorkbenchFrame(
                     match view {
                         WorkbenchView::Nodes => rsx! {
                             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[960px]:p-2",
-                                ProjectNodeWorkspace { view: project_editor, on_action }
+                                ProjectNodeWorkspace {
+                                    view: project_editor,
+                                    project_status: project_status.clone(),
+                                    on_action,
+                                }
                             }
                         },
                         WorkbenchView::Mapping => rsx! {
@@ -303,14 +329,16 @@ pub fn WorkbenchFrame(
                         patch_selection: patch_selection.clone(),
                         running,
                         now_secs,
-                        on_hide: move |()| memory.write().view_mut(view).toggle(panel),
+                        on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
                         on_action,
                     }
                 }
-                EdgeStrip {
-                    side: DockSide::Right,
-                    open: docks.right,
-                    on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                if docks.right.is_none() {
+                    EdgeStrip {
+                        side: DockSide::Right,
+                        open: docks.right,
+                        on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                    }
                 }
             }
         }
@@ -376,7 +404,7 @@ fn SummonStrip(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTabs(view: WorkbenchView, workspace_href: String, mapping_href: Option<String>) -> Element {
     rsx! {
-        div { class: "tw:flex tw:min-h-[34px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2",
+        div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2",
             ViewTab {
                 label: "Nodes",
                 href: workspace_href,
@@ -393,15 +421,17 @@ fn ViewTabs(view: WorkbenchView, workspace_href: String, mapping_href: Option<St
     }
 }
 
-/// One view tab: the nav-tab grammar (accent underline = you are here),
-/// scaled for the workbench's tighter row.
+/// One view tab: the nav-tab grammar (accent underline = you are here).
+/// Deliberately HEAVIER than the dock tabs — bigger text, mixed case, a
+/// 2px underline against the dock tab's hairline — so the tab hierarchy
+/// reads view tabs > dock tabs at a glance (R4-1).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
     let class = if active {
-        "tw:relative tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-3 tw:after:bottom-0 tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']"
+        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-accent tw:after:content-['']"
     } else {
-        "tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground"
+        "tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground"
     };
     rsx! {
         a { class: "{class}", href: "{href}", "{label}" }
@@ -443,9 +473,15 @@ fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<Pane
     }
 }
 
-/// One open panel in a dock: small-caps header + scrolling body. Bodies
+/// One open panel in a dock: the side's TAB ROW + scrolling body. Bodies
 /// re-house existing components whole — the project pane column, the
 /// device card — never redesigns of them.
+///
+/// The tab row is the whole side's control (R4-1): both of the side's
+/// panels appear, the open one is active, the inactive one switches, and
+/// the ACTIVE one collapses the side — which is why there is no "—"
+/// button any more, and why the edge strip only returns once the side is
+/// collapsed. Every click is the same radio toggle the strip dispatches.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelDock(
@@ -456,27 +492,28 @@ fn PanelDock(
     patch_selection: Option<UiPatchTarget>,
     running: bool,
     now_secs: Option<f64>,
-    on_hide: EventHandler<()>,
+    /// A tab press: the SAME radio toggle the strip sends — the active
+    /// tab collapses the side, the other opens in its place.
+    on_tab: EventHandler<PanelId>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The md middle: docks narrow rather than auto-collapsing — closing
     // a dock the user opened would be the room rearranging itself.
-    let width = match panel.side() {
+    let side = panel.side();
+    let width = match side {
         DockSide::Left => "tw:w-[270px] tw:max-[1240px]:w-[225px]",
         DockSide::Right => "tw:w-[320px] tw:max-[1240px]:w-[265px]",
     };
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
-            div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
-                span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground",
-                    "{panel.title()}"
-                }
-                span { class: "tw:flex-1" }
-                button {
-                    class: "tw:cursor-pointer tw:rounded tw:border-none tw:bg-transparent tw:px-1.5 tw:text-xs tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground",
-                    title: "Hide the {panel.title()} panel",
-                    onclick: move |_| on_hide.call(()),
-                    "—"
+            div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-subtle tw:bg-card-muted",
+                for tab in PanelId::strip(side) {
+                    DockTab {
+                        key: "{tab.title()}",
+                        panel: tab,
+                        active: tab == panel,
+                        on_press: move |panel| on_tab.call(panel),
+                    }
                 }
             }
             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
@@ -491,6 +528,34 @@ fn PanelDock(
                     on_action,
                 }
             }
+        }
+    }
+}
+
+/// One dock tab: small-caps, deliberately LIGHTER than the center's view
+/// tabs (the hierarchy reads view tabs > dock tabs) — the active one wears
+/// the dock's own surface plus a hairline accent underline, and pressing it
+/// collapses the side.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DockTab(panel: PanelId, active: bool, on_press: EventHandler<PanelId>) -> Element {
+    let class = if active {
+        "tw:relative tw:cursor-pointer tw:border-none tw:bg-card-subtle tw:px-2.5 tw:py-1 tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-strong-foreground tw:after:absolute tw:after:inset-x-0 tw:after:bottom-0 tw:after:h-px tw:after:bg-accent tw:after:content-['']"
+    } else {
+        "tw:cursor-pointer tw:border-none tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground"
+    };
+    let title = if active {
+        format!("Hide the {} panel", panel.title())
+    } else {
+        format!("Show the {} panel", panel.title())
+    };
+    rsx! {
+        button {
+            class,
+            title: "{title}",
+            aria_pressed: "{active}",
+            onclick: move |_| on_press.call(panel),
+            "{panel.title()}"
         }
     }
 }
@@ -513,12 +578,28 @@ fn PanelBody(
         PanelId::Nodes => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-3.5",
                 for (index, pane) in panes.into_iter().enumerate() {
-                    PaneView {
-                        key: "{pane.node_id}",
-                        view: pane,
-                        primary: index == 0,
-                        running,
-                        on_action,
+                    // The project pane renders FLAT here (ruling 2): the dock
+                    // tab already names it, so a card inside the panel was
+                    // box-in-box, and its header's [i] now lives on the root
+                    // node card in the center. Every other pane keeps the
+                    // shared `PaneView` path.
+                    if let UiViewContent::ProjectEditor(editor) = pane.body.clone() {
+                        ProjectPane {
+                            key: "{pane.node_id}",
+                            view: *editor,
+                            status: pane.status.clone(),
+                            running,
+                            embedded: true,
+                            on_action,
+                        }
+                    } else {
+                        PaneView {
+                            key: "{pane.node_id}",
+                            view: pane,
+                            primary: index == 0,
+                            running,
+                            on_action,
+                        }
                     }
                 }
             }

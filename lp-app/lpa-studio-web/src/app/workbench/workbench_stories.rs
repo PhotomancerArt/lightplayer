@@ -9,13 +9,16 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchView};
 use crate::app::StudioShell;
+use crate::app::module::module_fixtures::root_module_node_view;
+use crate::app::node::NodeDetailPopover;
 use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
+use crate::app::project::ProjectDetailContent;
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
-    NodeId, ProjectSyncPhase, UiPatchSurface, UiPatchTarget, UiStudioView, UiViewContent,
+    NodeId, ProjectSyncPhase, UiPatchSurface, UiPatchTarget, UiStatus, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what
@@ -128,7 +131,7 @@ fn fixtures_panel_peach_range() -> Element {
 }
 
 #[story(
-    description = "The Outputs panel on the mini-dome: box 1 expanded (one at a time — the radiance rule), one-line ports with occupancy, neutral producer-labelled wire-window cells; box 2 collapsed to its occupancy row. The selected cell wears the selection blue."
+    description = "The Outputs panel on the mini-dome: every box open at once (the default) as a flat stack of slim header rows — chevron · name · occupancy — with one-line ports and neutral producer-labelled wire-window cells indented under each. A header press collapses just its own box. The selected cell wears the selection blue."
 )]
 fn outputs_panel_mini_dome() -> Element {
     dock_frame(rsx! {
@@ -143,14 +146,14 @@ fn outputs_panel_mini_dome() -> Element {
 }
 
 #[story(
-    description = "The workbench's Nodes view: edge strips flanking the frame, the project pane docked left as the Nodes panel, the node workspace in the center under the view tabs, and the device card docked right. The default panel set for this view."
+    description = "The workbench's Nodes view: both docks open, so each wears its own TAB ROW (Nodes · Fixtures left, Device · Outputs right) instead of an edge strip — the active tab is the open panel, and pressing it collapses the side. The project pane renders FLAT in the left dock (no card, no header, no [i] — that popup moved to the root node card's ⓘ in the center), and the center's view tabs sit visibly heavier than the dock tabs above it."
 )]
 fn workbench_nodes_view() -> Element {
     workbench_story(ProjectView::Workspace)
 }
 
 #[story(
-    description = "The workbench's Mapping view: the honest placeholder center (the arrange canvas is the unified-editor plan's mount), with the view's default docks — Fixtures left, Outputs right — still placeholder bodies until the panels land."
+    description = "The workbench's Mapping view: the honest placeholder center (the arrange canvas is the unified-editor plan's mount), with the view's default docks — Fixtures left, Outputs right — each under its own tab row."
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)
@@ -185,9 +188,59 @@ fn workbench_mobile_outputs_summoned() -> Element {
 }
 
 #[story(
-    description = "Both docks collapsed (radio re-click): the edge strips are all that remain of the sides, and the center takes the full width. The strips stay clickable — the collapsed state's handle."
+    description = "Both docks collapsed (a press on the active dock tab): the vertical edge strips are all that remain of the sides — the collapsed state's handle — and the center takes the full width. A strip button expands that panel, and the strip is replaced by the dock's tab row."
 )]
 fn workbench_docks_collapsed() -> Element {
+    workbench_memory_story(PanelMemory {
+        nodes: DockState {
+            left: None,
+            right: None,
+        },
+        mapping: DockState {
+            left: None,
+            right: None,
+        },
+    })
+}
+
+#[story(
+    description = "The two side treatments in one frame: the left side collapsed to its vertical strip, the right side open under its Device · Outputs tab row. The comparison is the point — a side is named EITHER by a strip or by tabs, never both, and the dock tabs stay lighter than the center's view tabs."
+)]
+fn workbench_mixed_dock_states() -> Element {
+    workbench_memory_story(PanelMemory {
+        nodes: DockState {
+            left: None,
+            right: Some(super::PanelId::Device),
+        },
+        mapping: DockState {
+            left: None,
+            right: Some(super::PanelId::Outputs),
+        },
+    })
+}
+
+#[story(
+    description = "The re-housed project popup (ruling 2): the workspace ROOT card's ⓘ now carries what the project pane's header used to — project identity with the status word, the Project settings rows, Share, pending edits, and the project stats — because the workbench's Nodes dock renders the project pane flat, with no header to hang a popup from. Same component, same ops; the pane's own [i] is untouched on every other route."
+)]
+fn workbench_root_card_project_popup() -> Element {
+    let editor = project_editor_fixture(ProjectSyncPhase::Ready);
+    let root = root_module_node_view();
+    rsx! {
+        div { class: "tw:flex tw:min-h-[760px] tw:items-start tw:justify-end",
+            NodeDetailPopover {
+                header: root.header,
+                pending_edits: editor.pending_edits.clone(),
+                project: Some(ProjectDetailContent::new(&editor, UiStatus::good("Ready"))),
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+/// The Nodes-view frame with preset dock memory — the strip/tab stories'
+/// shared mount.
+fn workbench_memory_story(memory: PanelMemory) -> Element {
     rsx! {
         div { class: "tw:flex tw:h-[560px] tw:flex-col",
             WorkbenchFrame {
@@ -198,16 +251,7 @@ fn workbench_docks_collapsed() -> Element {
                 running: true,
                 workspace_href: "#".to_string(),
                 mapping_href: Some("#".to_string()),
-                initial_memory: Some(PanelMemory {
-                    nodes: DockState {
-                        left: None,
-                        right: None,
-                    },
-                    mapping: DockState {
-                        left: None,
-                        right: None,
-                    },
-                }),
+                initial_memory: Some(memory),
                 on_action: move |_| {},
             }
         }

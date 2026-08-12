@@ -847,8 +847,13 @@ pub fn App() -> Element {
     };
     let settings = current_view.settings.clone();
 
+    // The workbench keeps a modest desktop inset (the workbench frame draws
+    // no box of its own now — see `app::workbench`), and below the fold
+    // breakpoint the frame bleeds this padding back out so its summon strip
+    // reads as a full-width toolbar under the site chrome; the chrome itself
+    // keeps the inset.
     let main_class = if workbench_route {
-        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-7 tw:pb-4 tw:pt-7 tw:max-[880px]:px-[10px] tw:max-[880px]:pb-2 tw:max-[880px]:pt-[10px]"
+        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-7 tw:max-[960px]:px-[10px] tw:max-[960px]:pb-0 tw:max-[960px]:pt-[10px]"
     } else {
         "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
     };

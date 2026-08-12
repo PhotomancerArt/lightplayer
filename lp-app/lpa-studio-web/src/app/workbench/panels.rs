@@ -8,9 +8,12 @@
 //!
 //! Density rules (spike §3, ratified): the Fixtures panel is
 //! fixture → instance rows with text channel chips (port identity is
-//! text + position — port hues were cut); the Outputs panel collapses
-//! every box to an occupancy row and expands ONE at a time, so the
-//! radiance-scale rail (10×32) stays legible in a dock.
+//! text + position — port hues were cut); the Outputs panel is a flat
+//! stack of slim section headers (chevron · name · occupancy) with their
+//! port rows beneath — each box opens INDEPENDENTLY, all open by default
+//! (R4-3, replacing the one-at-a-time rule: the rail reads like the
+//! Fixtures panel, and collapsing is how a radiance-scale project gets
+//! its 10×32 back under control).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -263,8 +266,9 @@ fn InstanceRow(
 }
 
 /// The Outputs panel: box → port → wire-window cells at dock density.
-/// Boxes collapse to occupancy rows; ONE expands at a time (the spike's
-/// radiance rule). Rows and cells select through the shared selection.
+/// Every box carries its OWN open state, all open by default (R4-3), so
+/// two boxes can be read side by side; the chevron header toggles just
+/// its own. Rows and cells select through the shared selection.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OutputsPanel(
@@ -272,8 +276,10 @@ pub fn OutputsPanel(
     selection: Option<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The expanded box, by output node id; defaults to the first output.
-    let mut expanded = use_signal(|| Option::<lpa_studio_core::NodeId>::None);
+    // The CLOSED boxes, by output node id — closed is the exception, so
+    // an output the panel has never seen reads as open by default and no
+    // seeding pass is needed when the surface grows.
+    let mut collapsed = use_signal(std::collections::BTreeSet::<lpa_studio_core::NodeId>::new);
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -282,18 +288,22 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
-    let open = expanded
-        .read()
-        .or_else(|| surface.outputs.first().map(|output| output.node));
     rsx! {
-        div { class: "tw:grid tw:content-start tw:gap-1.5",
+        div { class: "tw:grid tw:content-start tw:gap-0.5",
             for output in surface.outputs.clone() {
                 OutputBox {
                     key: "{output.node.0}",
-                    expanded: open == Some(output.node),
+                    expanded: !collapsed.read().contains(&output.node),
                     output,
                     selection: selection.clone(),
-                    on_expand: move |node| expanded.set(Some(node)),
+                    on_toggle: move |node| {
+                        collapsed
+                            .with_mut(|closed| {
+                                if !closed.remove(&node) {
+                                    closed.insert(node);
+                                }
+                            });
+                    },
                     on_action,
                 }
             }
@@ -301,14 +311,16 @@ pub fn OutputsPanel(
     }
 }
 
-/// One output's box: occupancy header row; ports + cells when expanded.
+/// One output: a slim section-header ROW (chevron · name · occupancy) with
+/// its port rows indented beneath — no card, no nested border, so the panel
+/// reads as flat as the Fixtures panel beside it (R4-3).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn OutputBox(
     output: UiPatchSurfaceOutput,
     expanded: bool,
     selection: Option<UiPatchTarget>,
-    on_expand: EventHandler<lpa_studio_core::NodeId>,
+    on_toggle: EventHandler<lpa_studio_core::NodeId>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let name = output.display_name().to_string();
@@ -329,12 +341,12 @@ fn OutputBox(
     let chevron = if expanded { "▾" } else { "▸" };
     let output_target = UiPatchTarget::Output { node: output.node };
     let header_class = if is_selected(&selection, &output_target) {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:border tw:border-selection-border tw:bg-selection-bg tw:px-2 tw:py-1"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:border tw:border-transparent tw:bg-card-muted tw:px-2 tw:py-1 tw:hover:bg-background-wash"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash"
     };
     rsx! {
-        section { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+        section { class: "tw:grid tw:content-start",
             header {
                 class: "{header_class}",
                 onclick: {
@@ -342,9 +354,9 @@ fn OutputBox(
                     let target = output_target.clone();
                     let node = output.node;
                     move |_| {
-                        // Expanding is also selecting: one gesture, both
+                        // Toggling is also selecting: one gesture, both
                         // meanings — the row is the output.
-                        on_expand.call(node);
+                        on_toggle.call(node);
                         select(&on_action, Some(target.clone()));
                     }
                 },
@@ -366,7 +378,10 @@ fn OutputBox(
                 }
             }
             if expanded {
-                div { class: "tw:grid tw:gap-1 tw:px-2 tw:py-1.5",
+                // Indented under the header rather than boxed inside it —
+                // the port rows belong to the row above, and one hairline
+                // rail is enough to say so.
+                div { class: "tw:ml-2.5 tw:grid tw:gap-1 tw:border-l tw:border-border-subtle tw:py-1 tw:pl-2",
                     for port in output.bay.ports.clone() {
                         PortRow {
                             key: "{output.node.0}-{port.key}",
