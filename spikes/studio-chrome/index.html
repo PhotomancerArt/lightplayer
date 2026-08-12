@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Studio chrome — the IDE workbench (round 1)</title>
+<title>Studio chrome — the IDE workbench (round 2)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -81,7 +81,6 @@
   /* ================= workbench frame ================= */
   .wb { border: 1px solid var(--border-strong); border-radius: var(--r-md);
         overflow: hidden; background: var(--bg); margin-top: 10px; }
-  /* slim global site header — kept, dimmed: the rework lives BELOW it */
   .ghead { display: flex; align-items: center; gap: 16px; padding: 6px 14px;
            background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
            font-size: 11.5px; color: var(--subtle); }
@@ -95,67 +94,55 @@
                  border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 1px 9px; }
   .ghead .dots { color: var(--dim); letter-spacing: 2px; }
 
-  /* perspective strip (concept 1 only) */
-  .persp { display: flex; align-items: center; gap: 4px; padding: 5px 12px;
-           background: var(--surface-subtle); border-bottom: 1px solid var(--border-strong); }
-  .persp .plabel { font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
-                   color: var(--dim); margin-right: 8px; }
-  .pbtn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 13px;
-          font-size: 12px; color: var(--subtle); cursor: pointer; border-radius: var(--r-sm);
-          border: 1px solid transparent; user-select: none; }
-  .pbtn:hover { color: var(--strong); }
-  .pbtn.on { color: var(--strong); background: var(--raised); border-color: var(--border-strong); }
-  .pbtn .pico { font-size: 11px; color: var(--dim); }
-  .pbtn.on .pico { color: var(--accent); }
+  .wbbody { display: flex; min-height: 0; height: 580px; background: var(--bg); }
 
-  .wbbody { display: flex; min-height: 0; height: 560px; background: var(--bg); }
-  .col { display: flex; flex-direction: column; min-height: 0; background: var(--surface-subtle); }
-  .col.side { width: 250px; flex: none; }
-  .col.side.right { width: 288px; }
-  .col.side.left  { border-right: 1px solid var(--border-strong); }
-  .col.side.right { border-left: 1px solid var(--border-strong); }
-  .col.main { flex: 1; min-width: 0; background: var(--bg); }
-  .col.side.collapsed { width: 30px; cursor: pointer; }
-  .col.side.collapsed .colbody, .col.side.collapsed .coltabs { display: none; }
-  .col.side.collapsed .vlabel {
-    writing-mode: vertical-rl; font-size: 10px; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--dim); padding: 12px 0; margin: 0 auto;
-  }
+  /* edge strips — the panel toggles (IntelliJ tool-window bars) */
+  .estrip { width: 27px; flex: none; background: var(--surface-muted); display: flex;
+            flex-direction: column; gap: 4px; padding: 8px 0; align-items: center; }
+  .estrip.l { border-right: 1px solid var(--border-strong); }
+  .estrip.r { border-left: 1px solid var(--border-strong); }
+  .ebtn { writing-mode: vertical-rl; font-size: 9.5px; letter-spacing: .12em;
+          text-transform: uppercase; color: var(--dim); cursor: pointer; user-select: none;
+          padding: 8px 3px; border-radius: 4px; border: 1px solid transparent; }
+  .estrip.l .ebtn { transform: rotate(180deg); }
+  .ebtn:hover { color: var(--strong); background: var(--bg-wash); }
+  .ebtn.on { color: var(--accent); background: var(--raised); border-color: var(--border-strong); }
 
-  /* column header: either plain title (perspectives) or tabs (documents/slots) */
-  .colhead { display: flex; align-items: center; gap: 6px; min-height: 30px;
-             padding: 0 8px; border-bottom: 1px solid var(--border-subtle);
-             background: var(--surface-muted); flex: none; }
-  .colhead .ctitle { font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
-                     color: var(--dim); font-weight: 600; padding: 0 4px; }
-  .colhead .sp { flex: 1; }
-  .cbtn { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 12px;
-          padding: 2px 5px; border-radius: 4px; font-family: var(--sans); }
-  .cbtn:hover { color: var(--strong); background: var(--bg-wash); }
+  .dock { width: 250px; flex: none; display: flex; flex-direction: column; min-height: 0;
+          background: var(--surface-subtle); }
+  .dock.l { border-right: 1px solid var(--border-strong); }
+  .dock.r { border-left: 1px solid var(--border-strong); width: 290px; }
+  .panel { display: flex; flex-direction: column; min-height: 0; flex: 1;
+           border-bottom: 1px solid var(--border-strong); }
+  .panel:last-child { border-bottom: none; }
+  .phead { display: flex; align-items: center; gap: 6px; min-height: 28px;
+           padding: 0 8px; border-bottom: 1px solid var(--border-subtle);
+           background: var(--surface-muted); flex: none; }
+  .phead .ptitle { font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+                   color: var(--dim); font-weight: 600; }
+  .phead .sp { flex: 1; }
+  .phead .hbtn { background: none; border: 0; color: var(--dim); cursor: pointer;
+                 font-size: 11px; padding: 1px 5px; border-radius: 4px; }
+  .phead .hbtn:hover { color: var(--strong); background: var(--bg-wash); }
+  .pbody { flex: 1; overflow-y: auto; min-height: 0; }
 
-  .coltabs { display: flex; gap: 2px; align-items: flex-end; align-self: stretch; }
-  .ctab { padding: 7px 11px 6px; font-size: 11px; color: var(--subtle); cursor: pointer;
-          border-bottom: 2px solid transparent; user-select: none; position: relative; }
-  .ctab:hover { color: var(--strong); }
-  .ctab.on { color: var(--strong); border-bottom-color: var(--accent); }
-  .ctab .sug { position: absolute; top: 5px; right: 2px; width: 5px; height: 5px;
-               border-radius: 50%; background: var(--accent); }
+  .col.main { flex: 1; min-width: 0; background: var(--bg); display: flex;
+              flex-direction: column; min-height: 0; }
 
-  .colbody { flex: 1; overflow-y: auto; min-height: 0; }
-
-  /* main document tabs (concepts 2+3) */
-  .doctabs { display: flex; align-items: center; gap: 2px; padding: 0 8px;
-             background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
-             min-height: 30px; flex: none; }
-  .dtab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 6px;
+  /* center view tabs */
+  .viewtabs { display: flex; align-items: center; gap: 2px; padding: 0 8px;
+              background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+              min-height: 30px; flex: none; }
+  .vtab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 6px;
           font-size: 12px; color: var(--subtle); cursor: pointer;
           border-bottom: 2px solid transparent; user-select: none; }
-  .dtab:hover { color: var(--strong); }
-  .dtab.on { color: var(--strong); border-bottom-color: var(--accent); }
-  .dtab .dico { font-size: 11px; color: var(--dim); }
-  .dtab.on .dico { color: var(--accent); }
+  .vtab:hover { color: var(--strong); }
+  .vtab.on { color: var(--strong); border-bottom-color: var(--accent); }
+  .vtab .vico { font-size: 11px; color: var(--dim); }
+  .vtab.on .vico { color: var(--accent); }
+  .vtab.future { opacity: .45; cursor: default; }
+  .vtab.future:hover { color: var(--subtle); }
 
-  /* editor toolbar inside main */
   .etools { display: flex; align-items: center; gap: 5px; padding: 5px 10px;
             border-bottom: 1px solid var(--border-subtle); background: var(--surface-subtle);
             flex-wrap: wrap; min-height: 34px; flex: none; }
@@ -177,17 +164,15 @@
   .mainbody { flex: 1; min-height: 0; overflow: auto; position: relative; }
   .mainbody.canvas { overflow: hidden; background:
       radial-gradient(circle at 30% 20%, rgba(255,255,255,.02), transparent 60%), var(--bg); }
-  .mainbody svg { display: block; width: 100%; height: 100%; }
+  .mainbody.canvas svg { display: block; width: 100%; height: 100%; }
 
-  /* status bar */
   .wbstatus { display: flex; align-items: center; gap: 14px; padding: 3px 12px;
               border-top: 1px solid var(--border-strong); background: var(--surface-muted);
               font-family: var(--mono); font-size: 10px; color: var(--dim); min-height: 22px; }
   .wbstatus .good { color: var(--good); }
   .wbstatus .sp { flex: 1; }
-  .wbstatus .dirty { color: var(--dirty); }
 
-  /* ---- tree rows (project / fixtures) ---- */
+  /* ---- tree rows ---- */
   .tree { padding: 6px 6px 14px; }
   .trow { display: flex; align-items: center; gap: 7px; padding: 4px 7px; border-radius: 6px;
           font-size: 12.5px; color: var(--muted); cursor: pointer; border: 1px solid transparent; }
@@ -198,7 +183,7 @@
   .trow .kind { margin-left: auto; font-size: 9.5px; color: var(--dim); letter-spacing: .05em; flex: none; }
   .trow .warn { color: var(--warn-text); font-size: 10px; }
   .trow.child { margin-left: 16px; }
-  .trow.leaf { margin-left: 32px; padding: 2.5px 7px; }
+  .trow.leaf { margin-left: 20px; padding: 2.5px 7px; }
   .trow .mdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
   .trow .mdot.un { background: none; border: 1px solid var(--dim); }
   .chip { font-family: var(--mono); font-size: 9.5px; color: var(--subtle);
@@ -210,8 +195,10 @@
             border-radius: 6px; color: var(--dim); font-size: 11.5px; cursor: pointer; }
   .addrow:hover { color: var(--muted); }
   .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .psummary { padding: 5px 13px; font-family: var(--mono); font-size: 9.5px; color: var(--dim);
+              border-bottom: 1px solid var(--border-subtle); }
 
-  /* ---- node cards (the re-housed Nodes tenant) ---- */
+  /* ---- node cards ---- */
   .cards { padding: 12px 14px 22px; display: grid; gap: 12px; max-width: 660px; margin: 0 auto; }
   .ncard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
            overflow: hidden; }
@@ -243,8 +230,8 @@
                  padding: 9px 12px; background: var(--terminal); line-height: 1.55; }
   .ncard .code .kw { color: var(--obj-3); } .ncard .code .fn { color: var(--obj-0); }
 
-  /* ---- device view ---- */
-  .dev { padding: 10px; display: grid; gap: 10px; }
+  /* ---- device panel ---- */
+  .dev { padding: 10px; display: grid; gap: 10px; align-content: start; }
   .devcard { border: 1px solid rgba(63,214,142,.45); border-left: 3px solid var(--good);
              border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
   .devcard.off { border-color: var(--border); border-left-color: var(--border-strong); opacity: .75; }
@@ -266,7 +253,7 @@
   .devcard .krow .v { font-family: var(--mono); font-size: 10.5px; color: var(--muted);
                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* ---- outputs rail ---- */
+  /* ---- outputs panel ---- */
   .outs { padding: 8px 8px 16px; }
   .obox { margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
           background: var(--surface); overflow: hidden; }
@@ -297,18 +284,54 @@
   .dense .cellbar { height: 10px; margin-top: 2px; }
   .dense .cell { font-size: 0; }
 
-  /* ---- canvas svg bits ---- */
+  /* ---- canvas svg ---- */
   .nametag { font: 600 10px var(--sans); fill: var(--muted); }
   .nametag2 { font: 9px var(--mono); fill: var(--dim); }
   .tagframe { fill: var(--surface-muted); stroke: var(--border-strong); rx: 4; }
   .fixframe { fill: none; stroke: var(--border-muted); stroke-dasharray: 3 3; rx: 8; }
   .fixframe.sel { stroke: var(--sel); stroke-dasharray: none; }
 
-  /* ---- verb bar (patching, docked bottom of main) ---- */
   .verbbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
              border-top: 1px solid var(--border-strong); background: var(--surface-muted);
              flex: none; flex-wrap: wrap; }
   .verbbar .vhint { font-size: 10px; color: var(--dim); margin-left: auto; }
+
+  /* ---- panel anatomy (section 2) ---- */
+  .anat { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; align-items: flex-start; }
+  .anat .apanel { width: 264px; flex: none; }
+  .anat .aframe { border: 1px solid var(--border-strong); border-radius: var(--r-md);
+                  overflow: hidden; background: var(--surface-subtle); height: 350px;
+                  display: flex; flex-direction: column; }
+  .anat h3 { font-size: 11px; margin: 0 0 2px; color: var(--muted); font-weight: 600; }
+  .anat .arole { font-size: 10.5px; color: var(--dim); margin: 0 0 8px; min-height: 42px; }
+  .anat .arole b { color: var(--subtle); }
+
+  /* ---- future views (section 3) ---- */
+  .future { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+  .fframe { width: 460px; border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+            overflow: hidden; background: var(--surface-subtle); opacity: .85; }
+  .fframe .fcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em;
+                  text-transform: uppercase; color: var(--dim); background: var(--surface-muted);
+                  border-bottom: 1px dashed var(--border-strong); }
+  .fframe .fbody { height: 300px; display: flex; flex-direction: column; }
+  .bigpanel { flex: 1; display: grid; gap: 14px; padding: 18px 22px; align-content: center; }
+  .bigrow { display: flex; align-items: center; gap: 14px; }
+  .bigrow .lab { width: 110px; flex: none; font-size: 10px; letter-spacing: .1em;
+                 text-transform: uppercase; color: var(--dim); }
+  .bigrow .slider { flex: 1; height: 6px; border-radius: 3px; background: var(--track);
+                    position: relative; }
+  .bigrow .slider .fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px;
+                          background: color-mix(in srgb, var(--heading) 55%, var(--track)); }
+  .bigrow .slider .knob { position: absolute; top: 50%; width: 14px; height: 22px;
+                          transform: translate(-50%,-50%); background: var(--raised-strong);
+                          border: 1px solid var(--border-strong); border-radius: 4px; }
+  .tl { flex: 1; padding: 14px 18px; display: grid; gap: 8px; align-content: start; }
+  .tlrow { display: flex; gap: 6px; align-items: center; }
+  .tlrow .tname { width: 90px; flex: none; font-size: 10.5px; color: var(--subtle); }
+  .tlbar { flex: 1; height: 20px; border-radius: 4px; background: var(--track);
+           position: relative; overflow: hidden; }
+  .tlseg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
+           border: 1px solid var(--border-strong); }
 
   /* ================= mobile frames ================= */
   .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin-top: 10px; }
@@ -318,9 +341,8 @@
   .phone .pcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
                  color: var(--dim); background: var(--surface-muted);
                  border-bottom: 1px solid var(--border-subtle); }
-  .phone .pbody { height: 520px; display: flex; flex-direction: column; min-height: 0; }
-  .phone.tab .pbody { height: 470px; flex-direction: row; }
-  /* sticky top strip */
+  .phone .pbdy { height: 520px; display: flex; flex-direction: column; min-height: 0; }
+  .phone.tab .pbdy { height: 470px; flex-direction: row; }
   .pstrip { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
             background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
             flex: none; }
@@ -345,22 +367,8 @@
                        font-size: 10px; letter-spacing: .1em; }
   .pmain .backhead .bk { cursor: pointer; color: var(--sel); }
 
-  /* today (section 1) */
-  .todaygrid { display: grid; grid-template-columns: 250px minmax(0,1fr) 300px; gap: 14px;
-               padding: 14px; }
-  .todaycol { display: grid; gap: 12px; align-content: start; }
-  .scrollnote { text-align: center; color: var(--dim); font-size: 10.5px; padding: 6px 0 2px; }
-  .panecard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
-              overflow: hidden; }
-  .panecard .phead { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-                     border-bottom: 1px solid var(--border-subtle); }
-  .panecard .phead b { color: var(--strong); font-size: 13.5px; }
-  .panecard .phead .kind { font-size: 10px; color: var(--dim); }
-  .panecard .phead .ibtn { margin-left: auto; border: 1px solid var(--border-strong);
-                           border-radius: 5px; color: var(--subtle); font-size: 10px;
-                           padding: 1px 7px; background: none; }
-
-  .secnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; max-width: 940px; }
+  .vstrip { width: 27px; flex: none; background: var(--surface-muted); display: flex;
+            flex-direction: column; gap: 4px; padding: 8px 0; align-items: center; }
 
   /* decisions table */
   table.dec { border-collapse: collapse; font-size: 12px; margin-top: 12px; max-width: 1080px; }
@@ -375,164 +383,168 @@
 </head>
 <body>
 
-<h1>Studio chrome — the IDE workbench (round 1)</h1>
+<h1>Studio chrome — the IDE workbench (round 2)</h1>
 <p class="hint">
-  The studio editor's chrome, reworked to house advanced editors — starting with <b>Mapping</b>
-  (name ruled). Scope: the <b>editor routes only</b>; galleries and the global site header are
-  untouched. The headline question is the <b>mental ownership model</b>: what owns which panes are
-  visible where, when? Three models are drawn below with the SAME two tenants — the re-housed
-  Nodes card list and the Mapping editor at real density. Use <b>active editor</b> in the strip and
-  watch how each concept reacts: that reaction <i>is</i> the model. Reference:
-  <code>spikes/unified-editor-shell/index.html</code> rounds 1–5 (rails, chips, canvas ratified there).
+  <b>Round-1 verdict (Yona):</b> perspectives are OUT (the room must not rearrange itself);
+  documents-vs-slots dissolved once user arrangement was cut for v1 — <b>things have one home</b>,
+  good defaults over customization. What remains is the IntelliJ model, drawn here converged:
+  <b>four panels with fixed homes</b> (Project · Fixtures left — Device · Outputs right) toggled
+  from <b>edge strips</b>; the center holds <b>view tabs</b> (Nodes · Map · future views); the
+  active view sets panel <i>defaults</i> but panels are always available, independent of the view.
+  Fixtures and Outputs are the project tree's <b>multi-node custom faces</b> — derived slices over
+  node selection + on-selection loading that already exist. Code concepts: views in a
+  <code>PanelDock</code> (or <code>ViewSlot</code> — naming open, plain "slot" collides with
+  config slots).
 </p>
 
 <div class="xcontrols">
-  <span class="grp"><b>active editor</b>
-    <button id="xed-nodes" onclick="setEditor('nodes')">Nodes</button>
-    <button id="xed-map" onclick="setEditor('mapping')">Mapping</button>
+  <span class="grp"><b>view</b>
+    <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
+    <button id="xv-map" onclick="setView('map')">Map</button>
   </span>
-  <span class="grp"><b>mapping mode</b>
-    <button id="xmo-map" onclick="setMode('map')">mapping</button>
-    <button id="xmo-patch" onclick="setMode('patch')">patching</button>
+  <span class="grp"><b>map mode</b>
+    <button id="xm-map" onclick="setMode('map')">mapping</button>
+    <button id="xm-patch" onclick="setMode('patch')">patching</button>
   </span>
   <span class="grp"><b>outputs data</b>
-    <button id="xde-dome" onclick="setDensity('dome')">mini-dome</button>
-    <button id="xde-rad" onclick="setDensity('radiance')">radiance 10×32</button>
+    <button id="xd-dome" onclick="setDensity('dome')">mini-dome</button>
+    <button id="xd-rad" onclick="setDensity('radiance')">radiance 10×32</button>
   </span>
-  <span class="grp"><b>§4 device slot</b>
-    <button id="xdv-r" onclick="setDeviceLeft(false)">right</button>
-    <button id="xdv-l" onclick="setDeviceLeft(true)">left</button>
-  </span>
+  <span class="grp" style="color:var(--dim); font-size:11px;">panel toggles live on the
+    workbench's own edge strips →</span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
 <section id="sec1">
-<h2>1 · Today — the scrolling document (for comparison)</h2>
+<h2>1 · The workbench</h2>
 <p class="thesis">
-  Production now: a page that scrolls as a document under the site header. Three columns —
-  project pane · node cards · device card — with <b>fixed identities</b>; on narrow screens they
-  simply stack and you scroll through everything. There is no place to put a viewport-filling
-  canvas, and "which pane is where" is hard-coded per route.
+  Full-height under the (slimmed) site header. <b>Edge strips</b> carry the four panel toggles —
+  left strip: Project · Fixtures; right strip: Device · Outputs. Panels open into their side's
+  dock; two open on one side stack. <b>View tabs</b> switch the center only. Defaults per view —
+  Nodes opens Project + Device; Map opens Fixtures + Outputs — but any panel can be summoned in
+  any view (that's the "always there" rule: check a port's occupancy without leaving Nodes).
+  Patching is a <b>mode inside Map</b>. Future views ride the same tab row (greyed).
 </p>
-<div class="wb" id="c0"></div>
+<div class="wb" id="c1"></div>
+<p class="secnote" style="font-size:10.5px; color:var(--dim); margin-top:8px;">
+  Everything here is live: edge-strip toggles, view tabs, mode segment, tree/cell selection,
+  density. Selection is one system — click a fixture row, canvas frame, or port cell and every
+  open panel follows.</p>
 </section>
 
 <section id="sec2">
-<h2>2 · Concept P — “Perspectives” (the view owns everything)</h2>
+<h2>2 · The four panels</h2>
 <p class="thesis">
-  Eclipse's answer. A perspective switch sits above the columns; the active perspective owns the
-  <b>entire</b> arrangement — switching Nodes → Mapping swaps all three columns as one gesture,
-  and Patching is naturally a <b>third perspective</b>. Maximal per-task tailoring; the cost is that
-  the room rearranges itself around you (note the device card simply <i>vanishes</i> outside the
-  Nodes perspective — each perspective shows only what it declared).
+  One panel, one role — no double duty. Project stays the <b>assembly</b> view (all nodes, add,
+  structure). Fixtures and Outputs are <b>project-scope slices</b>: the multi-node analogue of the
+  custom node faces, derived from the same graph + node selection + on-selection body loading the
+  app already has. Device is the card that exists today, docked.
 </p>
-<div class="wb" id="c1"></div>
+<div class="anat">
+  <div class="apanel"><h3>Project</h3>
+    <p class="arole"><b>Assembly + structure.</b> All nodes of the graph, tree-shaped; add node;
+      advanced tinkering. No fixture chips — that's the Fixtures panel's job.</p>
+    <div class="aframe" id="anat-project"></div></div>
+  <div class="apanel"><h3>Fixtures</h3>
+    <p class="arole"><b>The light-side slice.</b> fixture → object → instance with channel chips,
+      mapped/unmapped state, object colours. Selection here focuses the Map canvas.</p>
+    <div class="aframe" id="anat-fixtures"></div></div>
+  <div class="apanel" style="width:290px"><h3>Outputs</h3>
+    <p class="arole"><b>The hardware-side slice.</b> box → port → wire-window cells, occupancy,
+      gaps, contested ranges. Radiance density (10×32) must stay legible — toggle it above.</p>
+    <div class="aframe" id="anat-outputs"></div></div>
+  <div class="apanel"><h3>Device</h3>
+    <p class="arole"><b>Today's device card, docked.</b> Run state, lamps, frame, power; the sim /
+      hardware surface. Unchanged by this rework.</p>
+    <div class="aframe" id="anat-device"></div></div>
+</div>
 </section>
 
 <section id="sec3">
-<h2>3 · Concept D — “Documents” (the shell owns the sides, docs own the center)</h2>
+<h2>3 · Future views (same tab row, zero new chrome)</h2>
 <p class="thesis">
-  VS Code's answer. The center is a <b>document strip</b> — Nodes and Mapping are documents;
-  patching is a <b>mode inside the Mapping document</b> (segmented control in its toolbar). The side
-  columns are shell-owned <b>tool views with their own tabs</b> (left: Project · right: Device /
-  Outputs) that persist across document switches. A document may <i>suggest</i> a side view
-  (opening Mapping reveals Outputs and marks the tab) but never restructures the room. One tree,
-  adorned: the Project tree grows channel chips when the Mapping document is active.
+  The test of the model: adding a view = a center tab + panel defaults. <b>Live / Perform</b> puts
+  the root panel front and center over a read-only map strip (kiosk mode; maybe what ships on
+  device). <b>Show</b> gets playlists / timelines. Neither is designed here — the frames only
+  prove the chrome doesn't change shape when they arrive.
 </p>
-<div class="wb" id="c2"></div>
-<p class="secnote">Try the <b>«</b> button in the left column header — columns collapse to a
-  labelled strip, which is how Mapping earns canvas width without a layout change.</p>
-</section>
-
-<section id="sec4">
-<h2>4 · Concept S — “Slots” (the shell owns slots, you own the arrangement)</h2>
-<p class="thesis">
-  The hybrid. The shell owns three durable slots — [left][main][right] — and <b>views are
-  furniture</b>: stacked, collapsible sections you can move between slots (⠿ grip; try
-  <b>§4 device slot</b> in the strip to put Device on the left). The active document
-  <b>contributes</b> default views — Mapping contributes Outputs, tagged with its origin — and your
-  arrangement outlives document switches. Same document strip as concept D; the difference is
-  entirely in who decides what the sides hold.
-</p>
-<div class="wb" id="c3"></div>
+<div class="future">
+  <div class="fframe"><div class="fcap">future · Live / Perform — panel first, read-only map</div>
+    <div class="fbody" id="fut-live"></div></div>
+  <div class="fframe"><div class="fcap">future · Show — playlists / timelines</div>
+    <div class="fbody" id="fut-show"></div></div>
+</div>
 </section>
 
 <section id="sec5">
-<h2>5 · Mobile — full-screen main + summon strip</h2>
+<h2>4 · Mobile — the edge strips fold into the summon strip</h2>
 <p class="thesis">
-  Below the fold breakpoint the workbench is <b>one full-screen main view</b> with a sticky strip:
-  document switch in the middle, <b>summon buttons</b> on the edges. Summoning a side view
-  (☰ project tree · ▤ outputs · ⌁ device) <b>temporarily replaces</b> the main view — a back
-  header returns. This replaces today's stack-and-scroll for the editor routes. The first phone is
-  live — tap its strip. The tablet frame shows the md middle: main + one side column, the other
-  collapsed to a strip.
+  Same model, folded: the main view is full-screen; the sticky strip carries the view switch and
+  the <b>same four panel toggles</b> the desktop edge strips carry. Summoning a panel temporarily
+  replaces the main view; back returns. The first phone is live. The tablet frame is the md
+  middle: one dock open, the other side stays a strip.
 </p>
 <div class="phones" id="phones"></div>
 </section>
 
 <section id="sec6">
-<h2>6 · Decisions on the table</h2>
+<h2>5 · Decisions on the table (round 2)</h2>
 <table class="dec">
-  <tr><th></th><th>Question</th><th>Options drawn</th><th>Lean</th></tr>
-  <tr><td class="q">D1</td>
-      <td><b>The ownership model</b> — what owns which panes are visible where, when?</td>
-      <td>§2 perspectives (view owns all) · §3 documents (shell owns sides, docs own center) ·
-          §4 slots (shell owns slots, docs contribute, user arrangement wins)</td>
-      <td>§4 slots, with §3's restraint as the default behaviour — docs contribute, nothing
-          rearranges without you</td></tr>
-  <tr><td class="q">D2</td>
-      <td>Is Patching a third top-level place, or a mode inside Mapping?</td>
-      <td>§2 draws it as a perspective; §3/§4 draw it as a mode segment in the Mapping toolbar</td>
-      <td>Mode inside Mapping (one editor, two modes — rounds 1–5 ruling holds)</td></tr>
-  <tr><td class="q">D3</td>
-      <td>Side-column style: tabbed (one view visible per column) or stacked sections?</td>
-      <td>§3 tabs both sides · §4 stacked sections</td>
-      <td>Stacked left (tree wants the full column anyway), tabbed right (Device/Outputs
-          alternate); drawn as §4-with-§3-right if ruled</td></tr>
-  <tr><td class="q">D4</td>
-      <td>Mobile: summon-replaces-main with a sticky strip?</td>
-      <td>§5 (live phone) vs today's stack-and-scroll (§1 note)</td>
-      <td>Yes — summon model; it is the fold of every desktop concept, not a special case</td></tr>
-  <tr><td class="q">D5</td>
-      <td>Full-height app frame (columns scroll internally) for editor routes?</td>
-      <td>All of §2–§4 are full-height; §1 is the scrolling document</td>
-      <td>Yes for editor routes; galleries stay documents</td></tr>
-  <tr><td class="q">D6</td>
-      <td>How far does “app-like tightening” go on the header?</td>
-      <td>All concepts draw the site header slimmed (~30px, dimmed) with the session chip kept</td>
-      <td>Keep the global header, slim it; the workbench gets the vertical budget</td></tr>
+  <tr><th></th><th>Question</th><th>Drawn</th><th>Lean</th></tr>
+  <tr><td class="q">R2-1</td>
+      <td>Panel homes: Project + Fixtures left · Device + Outputs right?</td>
+      <td>§1 (content/structure left, hardware right; Fixtures adjacent to the canvas it
+          describes, Outputs adjacent to the Device they live on)</td>
+      <td>Yes as drawn</td></tr>
+  <tr><td class="q">R2-2</td>
+      <td>View tab names: <b>Nodes · Map</b>?</td>
+      <td>§1 tab row ("Map" = the subway-map noun; "mapping" stays the activity/mode word)</td>
+      <td>Nodes · Map</td></tr>
+  <tr><td class="q">R2-3</td>
+      <td>Are edge strips the toggle surface (vs buttons in a header corner)?</td>
+      <td>§1 edge strips (IntelliJ tool-window bars); they are also §4's mobile strip, folded</td>
+      <td>Edge strips — they scale to more panels and unify with mobile</td></tr>
+  <tr><td class="q">R2-4</td>
+      <td>Panel visibility remembered per view (Nodes remembers its set, Map its own)?</td>
+      <td>§1 behaves per-view (switch views and back — each keeps its set)</td>
+      <td>Per-view sticky, seeded by good defaults</td></tr>
+  <tr><td class="q">R2-5</td>
+      <td>Code names: <code>PanelDock</code> vs <code>ViewSlot</code> for the docking concept?</td>
+      <td>— (naming only)</td>
+      <td><code>PanelDock</code> — "slot" stays a config/data word</td></tr>
 </table>
-<p class="leannote" id="lean">
-  <b>Lean.</b> Concept <b>S (slots)</b> carrying concept D's defaults: the shell owns three durable
-  slots; documents own only the center and <i>contribute</i> side views without restructuring;
-  the user's arrangement is sticky. Perspectives (§2) photograph beautifully but the room
-  rearranging itself is exactly the "two apps" feeling this rework exists to avoid — and it makes
-  the device surface a per-perspective decision, which is how panes get lost. Patching stays a
-  mode inside Mapping. Mobile summon-strip generalises every concept, so it is close to free.
+<p class="leannote">
+  <b>Lean.</b> Ship the §1 workbench as the chrome plan's target: fixed homes, edge-strip toggles,
+  per-view sticky visibility, Nodes · Map tabs, patching as a Map mode. Internally panels are
+  data-driven (a view id → dock assignment table) so <i>we</i> can experiment — and customization
+  stays a future option, not v1 machinery.
 </p>
 </section>
 
 <script>
 /* ================= state ================= */
 const state = {
-  editor: 'nodes',       // 'nodes' | 'mapping'
-  mode: 'map',           // 'map' | 'patch'   (mapping editor's mode)
-  density: 'dome',       // 'dome' | 'radiance'
-  deviceLeft: false,     // concept S slot assignment
-  c2right: 'device',     // concept D right-column tab
-  c2Lcollapsed: false, c3Lcollapsed: false,
-  sel: 'dome/2',         // selected instance path
-  phoneView: 'main',     // 'main' | 'tree' | 'outputs' | 'device'
+  view: 'nodes',            // 'nodes' | 'map'
+  mode: 'map',              // 'map' | 'patch'  (Map view's mode)
+  density: 'dome',
+  sel: 'dome/2',
+  phoneView: 'main',        // 'main' | 'project' | 'fixtures' | 'outputs' | 'device'
+  // per-view panel visibility (R2-4): seeded with the good defaults
+  panels: {
+    nodes: { left: ['project'], right: ['device'] },
+    map:   { left: ['fixtures'], right: ['outputs'] },
+  },
 };
-// URL params: ?only=sec3 hides other sections; editor/mode/density preset state.
 const Q = new URLSearchParams(location.search);
-if (Q.get('editor')) state.editor = Q.get('editor');
+if (Q.get('view')) state.view = Q.get('view');
 if (Q.get('mode')) state.mode = Q.get('mode');
 if (Q.get('density')) state.density = Q.get('density');
-if (Q.get('device') === 'left') state.deviceLeft = true;
 if (Q.get('phone')) state.phoneView = Q.get('phone');
-if (state.editor === 'mapping') state.c2right = 'outputs'; // the D-concept "suggest" default
-if (Q.get('collapse') === 'left') { state.c2Lcollapsed = true; }
+if (Q.get('panels')) { // e.g. panels=project,fixtures/outputs,device
+  const [l, r] = Q.get('panels').split('/');
+  state.panels[state.view] = { left: (l || '').split(/[+, ]/).filter(Boolean),
+                               right: (r || '').split(/[+, ]/).filter(Boolean) };
+}
 if (Q.get('only')) {
   document.querySelectorAll('section').forEach(s => { if (s.id !== Q.get('only')) s.hidden = true; });
   document.querySelector('.xcontrols').style.position = 'static';
@@ -584,27 +596,12 @@ const DOME_BOXES = [
       cells: [{ label: 'peach', w: 40, range: true }, { gap: true, w: 24 }] },
   ]},
 ];
+const PANEL_TITLES = { project: 'Project', fixtures: 'Fixtures', outputs: 'Outputs', device: 'Device' };
+const PANEL_SIDE = { project: 'left', fixtures: 'left', device: 'right', outputs: 'right' };
+const STRIP_ORDER = ['project', 'fixtures', 'device', 'outputs']; // dock stacking = strip order
 
-/* ================= tiny helpers ================= */
-const esc = s => s;
-function seg(id, options, current, fn) {
-  return '<span class="modeseg">' + options.map(o =>
-    `<button class="${o.v === current ? 'on' : ''}" onclick="${fn}('${o.v}')">${o.t}</button>`
-  ).join('') + '</span>';
-}
-
-/* ================= shared views ================= */
-function gheadHTML() {
-  return `<div class="ghead">
-    <span class="brand">⏵ <b>Light</b>Player</span>
-    <span class="gnav"><span>Devices</span><span>Projects</span></span>
-    <span class="sp"></span>
-    <span class="sess">mini dome · sim ▸</span>
-    <span class="dots">···</span>
-  </div>`;
-}
-
-function treeView(adorned) {
+/* ================= panels ================= */
+function projectTree() {
   let h = '<div class="tree">';
   for (const n of TREE_TOP) {
     h += `<div class="trow ${n.child ? 'child' : ''}">
@@ -612,39 +609,111 @@ function treeView(adorned) {
       ${n.warn ? '<span class="warn">⚠</span>' : ''}<span class="kind">${n.kind}</span></div>`;
   }
   for (const f of FIXTURES) {
-    const sel = state.sel.startsWith(f.id) && adorned;
     h += `<div class="trow child ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
       <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
-      <span class="tname">${f.id}</span>
-      ${adorned ? `<span class="kind">${f.lamps} · ${f.kind}</span>` : `<span class="kind">fixture</span>`}
-    </div>`;
-    if (adorned) {
-      for (const i of f.instances) {
-        h += `<div class="trow leaf ${state.sel === i.path.split(' ')[0] ? 'sel' : ''}"
-                   onclick="selectPath('${i.path.split(' ')[0]}')">
-          <span class="mdot"></span><span class="tname" style="font-size:11.5px">${i.path}</span>
-          <span style="margin-left:auto; display:inline-flex; gap:3px;">
-            <span class="chip ${i.range ? 'range' : ''}">${i.chip}</span>
-            ${i.rev ? '<span class="chip rev">‹rev</span>' : ''}
-          </span></div>`;
-      }
-    }
+      <span class="tname">${f.id}</span><span class="kind">fixture</span></div>`;
   }
   for (const n of TREE_TAIL) {
     h += `<div class="trow child"><span class="tico">${n.ico}</span>
       <span class="tname">${n.name}</span><span class="kind">${n.kind}</span></div>`;
   }
-  h += '<div class="addrow">+ Add node…</div></div>';
-  return h;
+  return h + '<div class="addrow">+ Add node…</div></div>';
 }
 
-function miniRingSVG(color) {
+function fixturesPanel() {
+  let h = `<div class="psummary">3 fixtures · 217 lamps · 9 instances</div><div class="tree">`;
+  for (const f of FIXTURES) {
+    h += `<div class="trow ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
+      <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
+      <span class="tname">${f.id}</span><span class="kind">${f.lamps} · ${f.kind}</span></div>`;
+    for (const i of f.instances) {
+      h += `<div class="trow leaf ${state.sel === i.path.split(' ')[0] ? 'sel' : ''}"
+                 onclick="selectPath('${i.path.split(' ')[0]}')">
+        <span class="mdot"></span><span class="tname" style="font-size:11.5px">${i.path}</span>
+        <span style="margin-left:auto; display:inline-flex; gap:3px;">
+          <span class="chip ${i.range ? 'range' : ''}">${i.chip}</span>
+          ${i.rev ? '<span class="chip rev">‹rev</span>' : ''}
+        </span></div>`;
+    }
+  }
+  return h + '</div>';
+}
+
+function devicePanel() {
+  return `<div class="dev">
+    <div class="devcard">
+      <div class="dhead"><b>Simulator</b><span class="tag">SIMULATOR ⤢</span></div>
+      <div class="icons"><span>▷</span><span class="on">ⓘ</span><span>▤</span><span>⌗</span><span>⚠</span></div>
+      <div class="dbody"><span class="run">Running</span>
+        <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
+        <div class="krow"><span class="k">Frame</span><span class="v">60 fps · 2.1 ms</span></div>
+        <div class="krow"><span class="k">Power</span><span class="v">12% of 10 A budget</span></div>
+      </div>
+    </div>
+    <div class="devcard off">
+      <div class="dhead"><b>Workbench ESP32</b><span class="tag">USB</span></div>
+      <div class="dbody"><div class="krow"><span class="k">State</span>
+        <span class="v">unplugged · last seen 2h</span></div></div>
+    </div>
+  </div>`;
+}
+
+function outputsPanel() {
+  if (state.density === 'radiance') return radianceOutputs();
+  let h = '<div class="outs">';
+  for (const box of DOME_BOXES) {
+    h += `<div class="obox"><div class="bhead">▾ ${box.name}
+      <span class="occ">${box.ports.reduce((a, p) => a + p.used, 0)} lamps</span></div>`;
+    for (const p of box.ports) {
+      h += `<div class="port"><div class="pline"><span class="pin">${p.pin}</span>
+        <span>${p.strip}</span><span class="use">${p.used}/${p.total}</span></div>
+        <div class="cellbar">`;
+      for (const c of p.cells) {
+        if (c.gap) { h += `<span class="cell gap" style="flex-grow:${c.w}">·</span>`; continue; }
+        const on = state.sel && c.label.startsWith(state.sel);
+        h += `<span class="cell ${on ? 'sel' : ''} ${c.range ? 'range' : ''}"
+              style="flex-grow:${c.w}" onclick="selectPath('${c.label.split(' ')[0]}')">${c.label}</span>`;
+      }
+      h += '</div></div>';
+    }
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+
+function radianceOutputs() {
+  let h = '<div class="outs dense">';
+  for (let b = 1; b <= 10; b++) {
+    if (b !== 3) {
+      h += `<div class="obox"><div class="bhead">▸ Box ${b}
+        <span class="occ"><span class="occbar"><i style="width:${70 + (b * 13) % 30}%"></i></span>
+        ${30 + b % 3}/32</span></div></div>`;
+      continue;
+    }
+    h += `<div class="obox"><div class="bhead">▾ Box 3
+      <span class="occ">31/32 · 930 lamps</span></div>`;
+    for (let p = 0; p < 8; p++) {
+      h += `<div class="port"><div class="pline"><span class="pin">P${p}</span>
+        <span class="use">30/30</span></div><div class="cellbar">
+        <span class="cell ${p === 2 && state.mode === 'patch' ? 'sel' : ''}" style="flex-grow:30"></span>
+        </div></div>`;
+    }
+    h += `<div class="port"><div class="pline"><span class="use">… 24 more ports</span></div></div></div>`;
+  }
+  return h + '</div>';
+}
+
+const PANEL_BODY = {
+  project: projectTree, fixtures: fixturesPanel, outputs: outputsPanel, device: devicePanel,
+};
+
+/* ================= center views ================= */
+function miniRingSVG() {
   let dots = '';
   for (let i = 0; i < 14; i++) {
     const a = (i / 14) * Math.PI * 2 - Math.PI / 2;
-    const hue = i * 25;
     dots += `<circle cx="${55 + Math.cos(a) * 38}" cy="${52 + Math.sin(a) * 38}" r="4"
-             fill="hsl(${hue} 80% 62%)"/>`;
+             fill="hsl(${i * 25} 80% 62%)"/>`;
   }
   return `<svg viewBox="0 0 110 104" style="height:96px">${dots}</svg>`;
 }
@@ -682,72 +751,6 @@ function nodeCardsView() {
   </div>`;
 }
 
-function deviceView() {
-  return `<div class="dev">
-    <div class="devcard">
-      <div class="dhead"><b>Simulator</b><span class="tag">SIMULATOR ⤢</span></div>
-      <div class="icons"><span>▷</span><span class="on">ⓘ</span><span>▤</span><span>⌗</span><span>⚠</span></div>
-      <div class="dbody"><span class="run">Running</span>
-        <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
-        <div class="krow"><span class="k">Frame</span><span class="v">60 fps · 2.1 ms</span></div>
-        <div class="krow"><span class="k">Power</span><span class="v">12% of 10 A budget</span></div>
-      </div>
-    </div>
-    <div class="devcard off">
-      <div class="dhead"><b>Workbench ESP32</b><span class="tag">USB</span></div>
-      <div class="dbody"><div class="krow"><span class="k">State</span>
-        <span class="v">unplugged · last seen 2h</span></div></div>
-    </div>
-  </div>`;
-}
-
-function outputsView() {
-  if (state.density === 'radiance') return radianceOutputs();
-  let h = '<div class="outs">';
-  for (const box of DOME_BOXES) {
-    h += `<div class="obox"><div class="bhead">▾ ${box.name}
-      <span class="occ">${box.ports.reduce((a, p) => a + p.used, 0)} lamps</span></div>`;
-    for (const p of box.ports) {
-      h += `<div class="port"><div class="pline"><span class="pin">${p.pin}</span>
-        <span>${p.strip}</span><span class="use">${p.used}/${p.total}</span></div>
-        <div class="cellbar">`;
-      for (const c of p.cells) {
-        if (c.gap) { h += `<span class="cell gap" style="flex-grow:${c.w}">·</span>`; continue; }
-        const on = state.mode === 'patch' && state.sel && c.label.startsWith(state.sel);
-        h += `<span class="cell ${on ? 'sel' : ''} ${c.range ? 'range' : ''}"
-              style="flex-grow:${c.w}" onclick="selectPath('${c.label.split(' ')[0]}')">${c.label}</span>`;
-      }
-      h += '</div></div>';
-    }
-    h += '</div>';
-  }
-  return h + '</div>';
-}
-
-function radianceOutputs() {
-  let h = '<div class="outs dense">';
-  for (let b = 1; b <= 10; b++) {
-    const used = 300 - (b * 7 % 60);
-    if (b !== 3) {
-      h += `<div class="obox"><div class="bhead">▸ Box ${b}
-        <span class="occ"><span class="occbar"><i style="width:${70 + (b * 13) % 30}%"></i></span>
-        ${30 + b % 3}/32</span></div></div>`;
-      continue;
-    }
-    h += `<div class="obox"><div class="bhead">▾ Box 3
-      <span class="occ">31/32 · 930 lamps</span></div>`;
-    for (let p = 0; p < 8; p++) {
-      h += `<div class="port"><div class="pline"><span class="pin">P${p}</span>
-        <span class="use">30/30</span></div><div class="cellbar">
-        <span class="cell ${p === 2 && state.mode === 'patch' ? 'sel' : ''}" style="flex-grow:30"></span>
-        </div></div>`;
-    }
-    h += `<div class="port"><div class="pline"><span class="use">… 24 more ports</span></div></div></div>`;
-  }
-  return h + '</div>';
-}
-
-/* ---- canvas ---- */
 function canvasSVG(idsuffix) {
   const patch = state.mode === 'patch';
   let dome = '';
@@ -797,11 +800,13 @@ function canvasSVG(idsuffix) {
   </svg>`;
 }
 
-function mapToolbar(withModeSeg) {
+function mapToolbar() {
   const patch = state.mode === 'patch';
   let h = '<div class="etools">';
-  if (withModeSeg) h += seg('m', [{ v: 'map', t: 'mapping' }, { v: 'patch', t: 'patching' }], state.mode, 'setMode') +
-    '<span class="sep"></span>';
+  h += `<span class="modeseg">
+    <button class="${!patch ? 'on' : ''}" onclick="setMode('map')">mapping</button>
+    <button class="${patch ? 'on' : ''}" onclick="setMode('patch')">patching</button>
+  </span><span class="sep"></span>`;
   if (!patch) {
     h += `<button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
       <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
@@ -827,218 +832,175 @@ function verbBar() {
     <span class="vhint">? for keys · Esc steps out</span></div>`;
 }
 
-function mappingMain(idsuffix, withModeSeg) {
-  return mapToolbar(withModeSeg) +
-    `<div class="mainbody canvas">${canvasSVG(idsuffix)}</div>` + verbBar();
+/* ================= the workbench ================= */
+function viewTabs() {
+  const vt = (id, ico, label) =>
+    `<span class="vtab ${state.view === id ? 'on' : ''}" onclick="setView('${id}')">
+     <span class="vico">${ico}</span>${label}</span>`;
+  return `<div class="viewtabs">${vt('nodes', '▤', 'Nodes')}${vt('map', '⌖', 'Map')}
+    <span class="vtab future" title="future"><span class="vico">▸</span>Live</span>
+    <span class="vtab future" title="future"><span class="vico">≣</span>Show</span></div>`;
 }
 
-function statusBar(left, right) {
-  return `<div class="wbstatus"><span class="good">sim ▸ running</span>
-    <span>217 lamps</span><span>60 fps</span><span>${left}</span>
-    <span class="sp"></span><span>${right}</span><span class="good">saved ✓</span></div>`;
+function edgeStrip(side) {
+  const ids = side === 'left' ? ['project', 'fixtures'] : ['device', 'outputs'];
+  const open = state.panels[state.view][side];
+  return `<div class="estrip ${side === 'left' ? 'l' : 'r'}">` + ids.map(id =>
+    `<span class="ebtn ${open.includes(id) ? 'on' : ''}"
+      onclick="togglePanel('${id}')">${PANEL_TITLES[id]}</span>`).join('') + '</div>';
 }
 
-/* ================= section 1: today ================= */
-function renderToday() {
-  document.getElementById('c0').innerHTML = gheadHTML() +
-    `<div class="todaygrid">
-      <div class="todaycol">
-        <div class="panecard">
-          <div class="phead"><b>Mini dome</b><span class="kind">Project</span>
-            <button class="ibtn">i</button></div>
-          ${treeView(false)}
-        </div>
-      </div>
-      <div class="todaycol">${nodeCardsView()}
-        <div class="scrollnote">⌄ page scrolls as one document — more cards below ⌄</div></div>
-      <div class="todaycol">${deviceView()}</div>
-    </div>`;
+function dock(side) {
+  const open = state.panels[state.view][side];
+  if (!open.length) return '';
+  const panels = open.map(id => `<div class="panel">
+    <div class="phead"><span class="ptitle">${PANEL_TITLES[id]}</span><span class="sp"></span>
+      <button class="hbtn" onclick="togglePanel('${id}')" title="hide">—</button></div>
+    <div class="pbody">${PANEL_BODY[id]()}</div></div>`).join('');
+  return `<div class="dock ${side === 'left' ? 'l' : 'r'}">${panels}</div>`;
 }
 
-/* ================= section 2: perspectives ================= */
-function renderC1() {
-  const persp = state.editor === 'nodes' ? 'nodes' : (state.mode === 'patch' ? 'patching' : 'mapping');
-  const pb = (id, ico, label) =>
-    `<span class="pbtn ${persp === id ? 'on' : ''}" onclick="setPerspective('${id}')">
-     <span class="pico">${ico}</span>${label}</span>`;
-  let cols;
-  if (persp === 'nodes') {
-    cols = `
-      <div class="col side left"><div class="colhead"><span class="ctitle">Project</span></div>
-        <div class="colbody">${treeView(false)}</div></div>
-      <div class="col main"><div class="mainbody">${nodeCardsView()}</div></div>
-      <div class="col side right"><div class="colhead"><span class="ctitle">Device</span></div>
-        <div class="colbody">${deviceView()}</div></div>`;
-  } else {
-    cols = `
-      <div class="col side left"><div class="colhead"><span class="ctitle">Fixtures</span></div>
-        <div class="colbody">${treeView(true)}</div></div>
-      <div class="col main">${mappingMain('c1', false)}</div>
-      <div class="col side right"><div class="colhead"><span class="ctitle">Outputs</span></div>
-        <div class="colbody">${outputsView()}</div></div>`;
-  }
-  document.getElementById('c1').innerHTML = gheadHTML() +
-    `<div class="persp"><span class="plabel">Perspective</span>
-      ${pb('nodes', '▤', 'Nodes')}${pb('mapping', '⌖', 'Mapping')}${pb('patching', '⌁', 'Patching')}
-     </div>
-     <div class="wbbody">${cols}</div>` +
-    statusBar('perspective: ' + persp,
-      persp === 'nodes' ? 'device card: right column' : 'device card: not in this perspective');
-}
-
-/* ================= sections 3+4: document strip main ================= */
-function docTabs() {
-  const dt = (id, ico, label) =>
-    `<span class="dtab ${state.editor === id ? 'on' : ''}" onclick="setEditor('${id}')">
-     <span class="dico">${ico}</span>${label}</span>`;
-  return `<div class="doctabs">${dt('nodes', '▤', 'Nodes')}${dt('mapping', '⌖', 'Mapping')}</div>`;
-}
-function mainCol(idsuffix) {
-  const inner = state.editor === 'nodes'
+function renderWorkbench() {
+  const center = state.view === 'nodes'
     ? `<div class="mainbody">${nodeCardsView()}</div>`
-    : mappingMain(idsuffix, true);
-  return `<div class="col main">${docTabs()}${inner}</div>`;
+    : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG('c1')}</div>${verbBar()}`;
+  const openL = state.panels[state.view].left, openR = state.panels[state.view].right;
+  document.getElementById('c1').innerHTML =
+    `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
+      <span class="gnav"><span>Devices</span><span>Projects</span></span><span class="sp"></span>
+      <span class="sess">mini dome · sim ▸</span><span class="dots">···</span></div>
+     <div class="wbbody">
+       ${edgeStrip('left')}${dock('left')}
+       <div class="col main">${viewTabs()}${center}</div>
+       ${dock('right')}${edgeStrip('right')}
+     </div>
+     <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
+       <span>60 fps</span><span>view: ${state.view}${state.view === 'map' ? ' · ' + state.mode : ''}</span>
+       <span class="sp"></span>
+       <span>panels: [${openL.join(' ')}] · [${openR.join(' ')}]</span>
+       <span class="good">saved ✓</span></div>`;
 }
 
-function renderC2() {
-  const adorned = state.editor === 'mapping';
-  const left = state.c2Lcollapsed
-    ? `<div class="col side left collapsed" onclick="toggleC2L()"><span class="vlabel">Project</span></div>`
-    : `<div class="col side left">
-        <div class="colhead"><span class="coltabs"><span class="ctab on">Project</span></span>
-          <span class="sp"></span><button class="cbtn" onclick="toggleC2L()" title="collapse">«</button></div>
-        <div class="colbody">${treeView(adorned)}</div></div>`;
-  const rtab = (id, label, sug) =>
-    `<span class="ctab ${state.c2right === id ? 'on' : ''}" onclick="setC2Right('${id}')">
-     ${label}${sug ? '<span class="sug"></span>' : ''}</span>`;
-  const right = `<div class="col side right">
-      <div class="colhead"><span class="coltabs">
-        ${rtab('device', 'Device', false)}
-        ${adorned ? rtab('outputs', 'Outputs', state.c2right !== 'outputs') : ''}
-      </span></div>
-      <div class="colbody">${state.c2right === 'outputs' && adorned ? outputsView() : deviceView()}</div>
-    </div>`;
-  document.getElementById('c2').innerHTML = gheadHTML() +
-    `<div class="wbbody">${left}${mainCol('c2')}${right}</div>` +
-    statusBar('document: ' + state.editor,
-      adorned ? 'Mapping suggested the Outputs tab — Device stays one click away' : 'sides unchanged by the document');
+/* ================= section 2: anatomy ================= */
+function renderAnatomy() {
+  const frame = (id, body) => { document.getElementById(id).innerHTML =
+    `<div class="phead"><span class="ptitle">${id.split('-')[1]}</span></div>
+     <div class="pbody">${body}</div>`; };
+  frame('anat-project', projectTree());
+  frame('anat-fixtures', fixturesPanel());
+  frame('anat-outputs', outputsPanel());
+  frame('anat-device', devicePanel());
 }
 
-function renderC3() {
-  const adorned = state.editor === 'mapping';
-  const sect = (title, body, origin, open = true) =>
-    `<div style="border-bottom:1px solid var(--border-subtle)">
-      <div class="colhead" style="border-bottom:none; cursor:grab;">
-        <span style="color:var(--border-strong); font-size:10px;">⠿</span>
-        <span class="ctitle">${open ? '▾' : '▸'} ${title}</span>
-        ${origin ? `<span class="chip" style="font-size:8.5px">from ${origin}</span>` : ''}
-        <span class="sp"></span><button class="cbtn">⋮</button></div>
-      ${open ? `<div style="max-height:340px; overflow-y:auto;">${body}</div>` : ''}</div>`;
-  const leftViews = [sect('Project', treeView(adorned))]
-    .concat(state.deviceLeft ? [sect('Device', deviceView())] : []);
-  const rightViews = []
-    .concat(adorned ? [sect('Outputs', outputsView(), 'Mapping')] : [])
-    .concat(!state.deviceLeft ? [sect('Device', deviceView(), null, !adorned || state.density !== 'radiance')] : []);
-  const emptyHint = `<div style="margin:14px 10px; border:1px dashed var(--border-strong);
-    border-radius:8px; padding:18px 10px; text-align:center; color:var(--dim); font-size:10.5px;">
-    empty slot — drag a view here</div>`;
-  const left = state.c3Lcollapsed
-    ? `<div class="col side left collapsed" onclick="toggleC3L()"><span class="vlabel">Project</span></div>`
-    : `<div class="col side left"><div class="colbody">${leftViews.join('')}</div></div>`;
-  document.getElementById('c3').innerHTML = gheadHTML() +
-    `<div class="wbbody">${left}${mainCol('c3')}
-      <div class="col side right"><div class="colbody">
-        ${rightViews.length ? rightViews.join('') : emptyHint}</div></div>
-     </div>` +
-    statusBar('slots: [Project' + (state.deviceLeft ? ' · Device' : '') + '] [main] [' +
-      (adorned ? 'Outputs' : '') + (!state.deviceLeft ? (adorned ? ' · ' : '') + 'Device' : (adorned ? '' : '—')) + ']',
-      'views are furniture — ⠿ drag between slots; your arrangement sticks');
+/* ================= section 3: future views ================= */
+function renderFuture() {
+  document.getElementById('fut-live').innerHTML =
+    `<div style="height:86px; border-bottom:1px dashed var(--border-strong); display:flex;
+       align-items:center; justify-content:center; overflow:hidden;">
+       <div style="transform:scale(.5); width:720px; flex:none;">${canvasSVG('fl')}</div></div>
+     <div class="bigpanel">
+       <div class="bigrow"><span class="lab">Brightness</span>
+         <span class="slider"><span class="fill" style="width:72%"></span>
+         <span class="knob" style="left:72%"></span></span></div>
+       <div class="bigrow"><span class="lab">Warmth</span>
+         <span class="slider"><span class="fill" style="width:45%"></span>
+         <span class="knob" style="left:45%"></span></span></div>
+       <div class="bigrow"><span class="lab">Scene</span>
+         <span style="display:inline-flex; gap:8px;">
+           <button class="tbtn on">Sunrise</button><button class="tbtn">Aurora</button>
+           <button class="tbtn">Ember</button></span></div>
+     </div>`;
+  document.getElementById('fut-show').innerHTML =
+    `<div class="tl">
+      <div class="tlrow"><span class="tname">intro</span><span class="tlbar">
+        <span class="tlseg" style="left:2%; width:20%; background:rgba(90,169,230,.25); border-color:rgba(90,169,230,.5)"></span></span></div>
+      <div class="tlrow"><span class="tname">sunrise</span><span class="tlbar">
+        <span class="tlseg" style="left:22%; width:34%; background:rgba(228,192,101,.22); border-color:rgba(228,192,101,.5)"></span></span></div>
+      <div class="tlrow"><span class="tname">aurora</span><span class="tlbar">
+        <span class="tlseg" style="left:56%; width:28%; background:rgba(63,214,142,.2); border-color:rgba(63,214,142,.5)"></span></span></div>
+      <div class="tlrow"><span class="tname">outro</span><span class="tlbar">
+        <span class="tlseg" style="left:84%; width:13%; background:rgba(199,146,234,.2); border-color:rgba(199,146,234,.5)"></span></span></div>
+      <div style="margin-top:10px; color:var(--dim); font-size:10.5px;">playlist · timeline ·
+        cue authoring — future pass, drawn only to prove the tab row holds it</div>
+     </div>`;
 }
 
-/* ================= section 5: phones ================= */
+/* ================= section 4: phones ================= */
 function phoneStrip(interactive) {
   const on = v => state.phoneView === v ? 'on' : '';
-  const act = (v) => interactive ? `onclick="phoneSummon('${v}')"` : '';
+  const act = v => interactive ? `onclick="phoneSummon('${v}')"` : '';
   return `<div class="pstrip">
-    <span class="sq ${on('tree')}" ${act('tree')}>☰</span>
+    <span class="sq ${on('project')}" ${act('project')} title="Project">▤</span>
+    <span class="sq ${on('fixtures')}" ${act('fixtures')} title="Fixtures">⬡</span>
     <span class="pdoc">
-      <button class="${state.editor === 'nodes' ? 'on' : ''}" ${interactive ? `onclick="setEditor('nodes')"` : ''}>Nodes</button>
-      <button class="${state.editor === 'mapping' ? 'on' : ''}" ${interactive ? `onclick="setEditor('mapping')"` : ''}>Mapping</button>
+      <button class="${state.view === 'nodes' ? 'on' : ''}" ${interactive ? `onclick="setView('nodes')"` : ''}>Nodes</button>
+      <button class="${state.view === 'map' ? 'on' : ''}" ${interactive ? `onclick="setView('map')"` : ''}>Map</button>
     </span>
-    <span class="sq ${on('outputs')}" ${act('outputs')}>▤</span>
-    <span class="sq ${on('device')}" ${act('device')}>⌁</span>
+    <span class="sq ${on('outputs')}" ${act('outputs')} title="Outputs">▦</span>
+    <span class="sq ${on('device')}" ${act('device')} title="Device">⌁</span>
   </div>`;
 }
 function phoneMain() {
-  if (state.phoneView === 'tree') return `<div class="pmain">
-    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Project</b></div>
-    ${treeView(state.editor === 'mapping')}</div>`;
-  if (state.phoneView === 'outputs') return `<div class="pmain">
-    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Outputs</b></div>
-    ${outputsView()}</div>`;
-  if (state.phoneView === 'device') return `<div class="pmain">
-    <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span><b>Device</b></div>
-    ${deviceView()}</div>`;
-  return state.editor === 'nodes'
+  if (state.phoneView !== 'main') {
+    return `<div class="pmain">
+      <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span>
+        <b>${PANEL_TITLES[state.phoneView]}</b></div>
+      ${PANEL_BODY[state.phoneView]()}</div>`;
+  }
+  return state.view === 'nodes'
     ? `<div class="pmain">${nodeCardsView()}</div>`
     : `<div class="pmain canvas">${canvasSVG('ph')}</div>${verbBar()}`;
 }
 function renderPhones() {
   const live = `<div class="phone"><div class="pcap">sm · live — tap the strip</div>
-    <div class="pbody">${phoneStrip(true)}${phoneMain()}</div></div>`;
-  // static frames rendered from fixed states (do not disturb the live state)
+    <div class="pbdy">${phoneStrip(true)}${phoneMain()}</div></div>`;
   const saved = { ...state };
-  Object.assign(state, { editor: 'mapping', mode: 'patch', phoneView: 'main' });
-  const patching = `<div class="phone"><div class="pcap">sm · mapping doc, patching mode — verbs docked</div>
-    <div class="pbody">${phoneStrip(false)}${phoneMain()}</div></div>`;
-  Object.assign(state, { editor: 'mapping', mode: 'map', phoneView: 'outputs' });
-  const summoned = `<div class="phone"><div class="pcap">sm · outputs summoned — replaces main</div>
-    <div class="pbody">${phoneStrip(false)}${phoneMain()}</div></div>`;
+  Object.assign(state, { view: 'map', mode: 'patch', phoneView: 'main' });
+  const patching = `<div class="phone"><div class="pcap">sm · Map view, patching mode — verbs docked</div>
+    <div class="pbdy">${phoneStrip(false)}${phoneMain()}</div></div>`;
+  Object.assign(state, { view: 'map', mode: 'map', phoneView: 'outputs' });
+  const summoned = `<div class="phone"><div class="pcap">sm · Outputs summoned — replaces main</div>
+    <div class="pbdy">${phoneStrip(false)}${phoneMain()}</div></div>`;
   Object.assign(state, saved);
-  const tablet = `<div class="phone tab"><div class="pcap">md · main + one side; other side is a strip</div>
-    <div class="pbody">
-      <div class="col side left collapsed" style="border-right:1px solid var(--border-strong)">
-        <span class="vlabel">Project</span></div>
-      <div class="col main">${docTabs()}${state.editor === 'nodes'
-        ? `<div class="mainbody">${nodeCardsView()}</div>` : mappingMain('tab', true)}</div>
-      <div class="col side right" style="width:240px; border-left:1px solid var(--border-strong)">
-        <div class="colhead"><span class="coltabs"><span class="ctab">Device</span>
-          <span class="ctab on">Outputs</span></span></div>
-        <div class="colbody">${outputsView()}</div></div>
+  const tablet = `<div class="phone tab"><div class="pcap">md · one dock open; other side stays a strip</div>
+    <div class="pbdy">
+      <div class="vstrip" style="border-right:1px solid var(--border-strong)">
+        <span class="ebtn" style="transform:rotate(180deg)">Project</span>
+        <span class="ebtn" style="transform:rotate(180deg)">Fixtures</span></div>
+      <div class="col main">${viewTabs()}${state.view === 'nodes'
+        ? `<div class="mainbody">${nodeCardsView()}</div>`
+        : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG('tab')}</div>${verbBar()}`}</div>
+      <div class="dock r" style="width:240px"><div class="panel">
+        <div class="phead"><span class="ptitle">Outputs</span></div>
+        <div class="pbody">${outputsPanel()}</div></div></div>
+      <div class="estrip r"><span class="ebtn">Device</span><span class="ebtn on">Outputs</span></div>
     </div></div>`;
   document.getElementById('phones').innerHTML = live + patching + summoned + tablet;
 }
 
 /* ================= state changes ================= */
 function renderAll() {
-  renderToday(); renderC1(); renderC2(); renderC3(); renderPhones();
+  renderWorkbench(); renderAnatomy(); renderFuture(); renderPhones();
   const B = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
-  B('xed-nodes', state.editor === 'nodes'); B('xed-map', state.editor === 'mapping');
-  B('xmo-map', state.mode === 'map'); B('xmo-patch', state.mode === 'patch');
-  document.getElementById('xmo-map').disabled = state.editor !== 'mapping';
-  document.getElementById('xmo-patch').disabled = state.editor !== 'mapping';
-  B('xde-dome', state.density === 'dome'); B('xde-rad', state.density === 'radiance');
-  B('xdv-r', !state.deviceLeft); B('xdv-l', state.deviceLeft);
+  B('xv-nodes', state.view === 'nodes'); B('xv-map', state.view === 'map');
+  B('xm-map', state.mode === 'map'); B('xm-patch', state.mode === 'patch');
+  document.getElementById('xm-map').disabled = state.view !== 'map';
+  document.getElementById('xm-patch').disabled = state.view !== 'map';
+  B('xd-dome', state.density === 'dome'); B('xd-rad', state.density === 'radiance');
   document.getElementById('xstatus').textContent =
-    `editor=${state.editor} · mode=${state.mode} · sel=${state.sel}`;
+    `view=${state.view} · mode=${state.mode} · sel=${state.sel}`;
 }
-function setEditor(e) {
-  state.editor = e;
-  if (e === 'mapping' && state.c2right === 'device') state.c2right = 'outputs'; // the "suggest" behaviour
-  if (e === 'nodes') { state.c2right = 'device'; state.phoneView = 'main'; }
-  renderAll();
-}
-function setMode(m) { state.mode = m; if (m) state.editor = 'mapping'; renderAll(); }
-function setPerspective(p) {
-  if (p === 'nodes') { state.editor = 'nodes'; }
-  else { state.editor = 'mapping'; state.mode = p === 'patching' ? 'patch' : 'map'; }
-  renderAll();
-}
+function setView(v) { state.view = v; if (state.phoneView !== 'main') state.phoneView = 'main'; renderAll(); }
+function setMode(m) { state.mode = m; state.view = 'map'; renderAll(); }
 function setDensity(d) { state.density = d; renderAll(); }
-function setDeviceLeft(v) { state.deviceLeft = v; renderAll(); }
-function setC2Right(v) { state.c2right = v; renderAll(); }
-function toggleC2L() { state.c2Lcollapsed = !state.c2Lcollapsed; renderAll(); }
-function toggleC3L() { state.c3Lcollapsed = !state.c3Lcollapsed; renderAll(); }
+function togglePanel(id) {
+  const side = PANEL_SIDE[id];
+  const arr = state.panels[state.view][side];
+  const i = arr.indexOf(id);
+  if (i >= 0) arr.splice(i, 1); else arr.push(id);
+  arr.sort((a, b) => STRIP_ORDER.indexOf(a) - STRIP_ORDER.indexOf(b));
+  renderAll();
+}
 function selectPath(p) { state.sel = p; renderAll(); }
 function phoneSummon(v) { state.phoneView = v === state.phoneView ? 'main' : v; renderAll(); }
 
