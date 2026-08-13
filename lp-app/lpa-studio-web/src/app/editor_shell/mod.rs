@@ -3,8 +3,9 @@
 //!
 //! The workbench chrome (#413) owns the docks, panels, and view tabs;
 //! this module owns only the CENTER: the editor toolbar strip and the
-//! [`arrange_canvas::ArrangeCanvas`]. The Fixtures/Outputs panels are the
-//! editor's rails — they are grown in place, never forked.
+//! one crate canvas (mounted through [`arrange::ArrangeCanvasHost`] for
+//! the fixture activity). The Fixtures/Outputs panels are the editor's
+//! rails — they are grown in place, never forked.
 //!
 //! Mode note (Yona, 2026-08-12 gate rulings): mapping lands FIRST;
 //! patching becomes its OWN workbench view later (R5), so there is no
@@ -14,7 +15,7 @@
 //! inside the same canvas, and the camera snaps to the fixture's frame —
 //! the "snap viewport to fixture" solution.
 
-pub mod arrange_canvas;
+pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
 pub(crate) mod mapping_session;
@@ -29,7 +30,7 @@ use lpa_studio_core::{
     UiPatchTarget,
 };
 
-use arrange_canvas::{ArrangeCanvas, PackSlots, dive_context, refresh_pack_slots};
+use arrange::{ArrangeCanvasHost, PackSlots, dive_context, refresh_pack_slots};
 use mapping_session::MappingSessionHost;
 
 /// The Mapping view's center: toolbar + arrange canvas.
@@ -376,7 +377,7 @@ pub fn EditorShellCenter(
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Loading the arrangement…" }
                     }
                 } else {
-                    ArrangeCanvas {
+                    ArrangeCanvasHost {
                         surface: surface.clone(),
                         bodies,
                         selection: selection.clone(),
