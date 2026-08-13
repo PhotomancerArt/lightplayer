@@ -6,15 +6,18 @@
 //! [`arrange_canvas::ArrangeCanvas`]. The Fixtures/Outputs panels are the
 //! editor's rails — they are grown in place, never forked.
 //!
-//! Mode note (Yona, 2026-08-12 mid-run steer): mapping lands FIRST and
-//! patching's home is decided after it is played with — so there is no
-//! mapping|patching mode segment here yet, and the interim `/patch` page
-//! stays untouched. The toolbar keeps the slot the segment (or whatever
-//! wins) will occupy.
+//! Mode note (Yona, 2026-08-12 gate rulings): mapping lands FIRST;
+//! patching becomes its OWN workbench view later (R5), so there is no
+//! mode segment here and the interim `/patch` page stays untouched until
+//! then. Diving into a fixture is IN-PLACE (no separate screen): the
+//! focused fixture's session mounts with the other fixtures dimmed
+//! inside the same canvas, and the camera snaps to the fixture's frame —
+//! the "snap viewport to fixture" solution.
 
 pub mod arrange_canvas;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
+pub(crate) mod mapping_session;
 
 use std::collections::BTreeMap;
 
@@ -26,8 +29,8 @@ use lpa_studio_core::{
     UiPatchTarget,
 };
 
-use crate::app::node::mapping_asset_editor::MappingAssetEditor;
-use arrange_canvas::ArrangeCanvas;
+use arrange_canvas::{ArrangeCanvas, dive_context};
+use mapping_session::MappingSessionHost;
 
 /// The Mapping view's center: toolbar + arrange canvas.
 #[component]
@@ -40,10 +43,12 @@ pub fn EditorShellCenter(
     project_editor: ProjectEditorView,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The FOCUSED fixture: mapping mode edits it through the same
-    // MappingAssetEditor wiring the fixture face uses (P5). Entered by
-    // double-click on the canvas or the toolbar button; exited by the
-    // breadcrumb. Journal events stamp every transition.
+    // The FOCUSED fixture — the DIVE (gate ruling: in-place, no separate
+    // screen): its mapping session mounts in the center with every other
+    // fixture rendered dimmed inside the same canvas, transformed into
+    // the focused doc's space. Entered by double-click on the canvas or
+    // the toolbar button; exited by the breadcrumb. Journal events stamp
+    // every transition.
     let mut focused = use_signal(|| None::<NodeId>);
     let Some(surface) = surface else {
         return rsx! {
@@ -322,14 +327,17 @@ pub fn EditorShellCenter(
             }
             div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                 if let Some((node, _, editor)) = focused_editor.clone() {
-                    // The focused fixture's mapping session — the SAME
-                    // component the fixture face embeds (fetch → session →
-                    // ApplyBody → SaveOverlay, refuse-don't-rewrite), with
-                    // committed edits stamped into the correlation journal
-                    // at this glue layer (the session stays project-unaware).
-                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:p-2",
-                        MappingAssetEditor {
+                    // The DIVE (gate ruling: no separate screen): the same
+                    // asset-pipeline session (fetch → session → ApplyBody →
+                    // SaveOverlay, refuse-don't-rewrite), with the OTHER
+                    // fixtures rendered dimmed inside the editor's own
+                    // canvas — transformed into the focused doc's space —
+                    // and committed edits stamped into the correlation
+                    // journal at this glue layer.
+                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden",
+                        MappingSessionHost {
                             editor,
+                            context: dive_context(&surface, &bodies, node),
                             on_action: {
                                 move |action: UiAction| {
                                     if action

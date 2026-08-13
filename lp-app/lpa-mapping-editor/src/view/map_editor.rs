@@ -111,6 +111,10 @@ pub fn MapEditor(
     /// host); the fixture face omits it and loses nothing.
     #[props(default)]
     reference_ops: Option<ReferenceOps>,
+    /// Neighbour fixtures rendered dimmed under the document (see
+    /// [`crate::ContextFixture`]) — the dive's "others still visible".
+    #[props(default)]
+    context: Vec<crate::view::context_layer::ContextFixture>,
 ) -> Element {
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
@@ -287,6 +291,7 @@ pub fn MapEditor(
                         live_feed,
                         on_committed,
                         reference,
+                        context: context.clone(),
                     }
                     PropertiesPopover { session, camera, viewport, drag, on_committed }
                     div { class: "lpme-hint", "{tool_hint}" }
