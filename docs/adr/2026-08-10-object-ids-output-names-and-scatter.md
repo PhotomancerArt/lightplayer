@@ -130,3 +130,16 @@ pretending the geometry moved.
   `engine_services`), mapping-editor universes toggle,
   `address_of`/`LAMPS_PER_UNIVERSE` — chipped separately.
 - Sim/hardware pulse on patch selection (Q27) — chipped.
+
+## Amendment 2026-08-13 — the one-window refusal exists
+
+The walk-up design's "one object = one contiguous wire window" rule is
+now enforced at resolve (unified-editor pass 1, P1): two entries
+addressing the same object path — regardless of sub-spans — are a
+per-entry degrade, not a document refusal. `resolve_patch` returns a
+`PatchResolution` whose `refusals` carry `PatchError::DuplicatePath`;
+the later entry drops to auto-flow (report, never a dead frame), the
+engine surfaces it as `patch_error`, and the verb layer blocks any
+document that would degrade. Range-grain entries stay exempt (the
+manual escape hatch). See
+`docs/adr/2026-08-13-editor-meta-and-unified-editor.md`.

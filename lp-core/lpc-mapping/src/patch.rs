@@ -285,6 +285,17 @@ pub enum PatchError {
     /// An entry's path names no object/instance in the mapping (unknown id,
     /// or an instance index beyond the repeat count).
     UnknownPath { entry: u32, path: String },
+    /// Two entries address the SAME object path — one object patches as ONE
+    /// contiguous wire window (ratified; `docs/design/walk-up-patching.md`).
+    /// A per-entry degrade, not a document refusal: the later entry drops
+    /// to auto-flow and resolution reports it in
+    /// [`PatchResolution::refusals`]. Range-grain entries are exempt (the
+    /// manual escape hatch).
+    DuplicatePath {
+        entry: u32,
+        other: u32,
+        path: String,
+    },
     /// An entry names an output outside the context's allowed set.
     DanglingOutput { entry: u32, name: String },
     /// Two entries claim the same fixture lamp.
@@ -312,6 +323,11 @@ impl core::fmt::Display for PatchError {
             Self::UnknownPath { entry, path } => write!(
                 f,
                 "patch entry {entry}: path {path} names no object or instance in the mapping"
+            ),
+            Self::DuplicatePath { entry, other, path } => write!(
+                f,
+                "patch entries {other} and {entry} both address {path}; one object patches \
+                 as one contiguous window, so the later entry is unplaced (its lamps auto-flow)"
             ),
             Self::DanglingOutput { entry, name } => {
                 write!(f, "patch entry {entry}: no output is named {name:?}")
@@ -757,6 +773,25 @@ fn v2_pretty(doc: &PatchDoc) -> String {
 
 // ---- resolution --------------------------------------------------------
 
+/// What [`resolve_patch`] produces: the placements plus any per-entry
+/// refusals that DEGRADED (dropped an entry to auto-flow) rather than
+/// refusing the whole document.
+///
+/// When `refusals` is non-empty, `ranges` no longer aligns index-for-index
+/// with `doc.entries` — degraded entries are simply absent (their lamps
+/// reflow). Callers that rely on that alignment must check `refusals`
+/// first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchResolution {
+    /// Every fixture lamp exactly once: surviving entries in authoring
+    /// order, then the reflow runs.
+    pub ranges: Vec<PatchedRange>,
+    /// Per-entry degrades — today only [`PatchError::DuplicatePath`]. The
+    /// document still lights honestly; these are the report half of
+    /// degrade-and-report.
+    pub refusals: Vec<PatchError>,
+}
+
 /// Resolve a patch against a fixture.
 ///
 /// Returns every lamp of the fixture exactly once: the document's entries
@@ -765,16 +800,36 @@ fn v2_pretty(doc: &PatchDoc) -> String {
 /// end. An empty document therefore resolves to the single full-length run
 /// at wire lamp 0 that auto-flow would have produced.
 ///
+/// One object = one contiguous wire window: entries addressing a path an
+/// earlier entry already addressed (regardless of sub-span) degrade — they
+/// are dropped to auto-flow and reported in [`PatchResolution::refusals`]
+/// rather than failing the document (report, never a dead frame).
+///
 /// The format gate is [`PatchDoc::from_json`]'s job, not this function's —
 /// a document that got this far was read by a build that understands it.
 pub fn resolve_patch(
     ctx: &PatchResolveContext<'_>,
     doc: &PatchDoc,
-) -> Result<Vec<PatchedRange>, PatchError> {
+) -> Result<PatchResolution, PatchError> {
     let mut anchored: Vec<PatchedRange> = Vec::with_capacity(doc.entries.len());
+    let mut refusals: Vec<PatchError> = Vec::new();
 
     for (index, entry) in doc.entries.iter().enumerate() {
         let index = index as u32;
+        // The one-window rule, checked on the DOCUMENT (not the lowered
+        // ranges) so non-overlapping sub-spans of one path still refuse.
+        if let PatchSource::Path { path, .. } = &entry.source
+            && let Some(other) = doc.entries[..index as usize].iter().position(
+                |earlier| matches!(&earlier.source, PatchSource::Path { path: p, .. } if p == path),
+            )
+        {
+            refusals.push(PatchError::DuplicatePath {
+                entry: index,
+                other: other as u32,
+                path: path.to_text(),
+            });
+            continue;
+        }
         let range = resolve_entry(index, entry, doc.format, ctx)?;
         for (other_index, other) in anchored.iter().enumerate() {
             // A fixture lamp exists once — claiming it twice is an error on
@@ -842,7 +897,10 @@ pub fn resolve_patch(
         lamp = lamp.max(range.end());
     }
 
-    Ok(resolved)
+    Ok(PatchResolution {
+        ranges: resolved,
+        refusals,
+    })
 }
 
 /// The collision/reflow group an output reference belongs to: `None` = the
@@ -1068,6 +1126,7 @@ mod tests {
 
     fn resolve_bare(count: u32, doc: &PatchDoc) -> Result<Vec<PatchedRange>, PatchError> {
         resolve_patch(&PatchResolveContext::for_fixture(count), doc)
+            .map(|resolution| resolution.ranges)
     }
 
     /// The mini-dome-shaped span table: `sector` = 5 instances of 30, then
@@ -1530,7 +1589,9 @@ mod tests {
             object_spans: &spans,
             ..Default::default()
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)])).unwrap();
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)]))
+            .unwrap()
+            .ranges;
         assert_eq!(resolved[0].start, 60);
         assert_eq!(resolved[0].count, 30);
         assert_eq!(resolved[0].lamp, 40);
@@ -1551,7 +1612,9 @@ mod tests {
             object_spans: &grown,
             ..Default::default()
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)])).unwrap();
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)]))
+            .unwrap()
+            .ranges;
         assert_eq!((resolved[0].start, resolved[0].count), (80, 40));
     }
 
@@ -1567,7 +1630,9 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/door", 100)])).unwrap();
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/door", 100)]))
+            .unwrap()
+            .ranges;
         assert_eq!((resolved[0].start, resolved[0].count), (150, 27));
 
         let mut sub = path_entry("/door/1", 0);
@@ -1578,7 +1643,7 @@ mod tests {
                 count: Some(3),
             }),
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![sub])).unwrap();
+        let resolved = resolve_patch(&ctx, &doc(vec![sub])).unwrap().ranges;
         assert_eq!((resolved[0].start, resolved[0].count), (162, 3));
 
         for path in ["/roof", "/sector/5", "/door/1/0"] {
@@ -1603,6 +1668,140 @@ mod tests {
             matches!(&error, PatchError::InvalidEntry { from: Some(from), .. } if from == "/door/1"),
             "{error}"
         );
+    }
+
+    // ---- one object = one contiguous wire window -----------------------
+
+    /// Two entries addressing one path: the later degrades to auto-flow
+    /// (dropped, its lamps reflow) and the resolution reports it — the
+    /// document still lights, never a dead frame.
+    #[test]
+    fn duplicate_path_entries_degrade_the_later_entry_and_report() {
+        let spans = dome_spans();
+        let ctx = PatchResolveContext {
+            fixture_lamp_count: 177,
+            object_spans: &spans,
+            ..Default::default()
+        };
+        let resolution = resolve_patch(
+            &ctx,
+            &doc(vec![
+                path_entry("/sector/1", 200),
+                path_entry("/sector/1", 400),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            resolution.refusals,
+            vec![PatchError::DuplicatePath {
+                entry: 1,
+                other: 0,
+                path: String::from("/sector/1"),
+            }]
+        );
+        // The first entry stands; the second is gone; sector 1's lamps are
+        // claimed once (by the first) and everything else reflows.
+        assert_eq!(resolution.ranges[0], {
+            let mut expected = range(30, 30, 200, false);
+            expected.output = None;
+            expected
+        });
+        assert!(
+            resolution.ranges[1..]
+                .iter()
+                .all(|placed| placed.lamp != 400),
+            "the degraded entry's anchor must not survive: {:?}",
+            resolution.ranges
+        );
+        let placed: u32 = resolution.ranges.iter().map(|r| r.count).sum();
+        assert_eq!(placed, 177, "every lamp still placed exactly once");
+    }
+
+    /// The one-window rule is about the PATH, not the lamps: two
+    /// non-overlapping sub-spans of one instance are still a duplicate.
+    #[test]
+    fn non_overlapping_sub_spans_of_one_path_still_degrade() {
+        let spans = dome_spans();
+        let ctx = PatchResolveContext {
+            fixture_lamp_count: 177,
+            object_spans: &spans,
+            ..Default::default()
+        };
+        let sub_span = |start: u32, count: u32, lamp: u32| {
+            let mut entry = path_entry("/sector/1", lamp);
+            entry.source = PatchSource::Path {
+                path: MapObjectPath::parse("/sector/1").unwrap(),
+                range: Some(PatchRange {
+                    start,
+                    count: Some(count),
+                }),
+            };
+            entry
+        };
+        let resolution = resolve_patch(
+            &ctx,
+            &doc(vec![sub_span(0, 10, 300), sub_span(15, 10, 500)]),
+        )
+        .unwrap();
+        assert_eq!(resolution.refusals.len(), 1, "{:?}", resolution.refusals);
+        assert!(matches!(
+            &resolution.refusals[0],
+            PatchError::DuplicatePath { entry: 1, other: 0, path } if path == "/sector/1"
+        ));
+    }
+
+    /// Distinct instance paths of one object are DIFFERENT windows, and
+    /// range-grain entries are exempt entirely (the manual escape hatch).
+    #[test]
+    fn distinct_instances_and_range_grain_entries_never_degrade() {
+        let spans = dome_spans();
+        let ctx = PatchResolveContext {
+            fixture_lamp_count: 177,
+            object_spans: &spans,
+            ..Default::default()
+        };
+        let resolution = resolve_patch(
+            &ctx,
+            &doc(vec![
+                path_entry("/sector/1", 200),
+                path_entry("/sector/2", 400),
+                path_entry("/door/0", 600),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(resolution.refusals, vec![]);
+
+        // Range-grain: the peach's two-halves document, plus a third range
+        // — no path, no duplicate rule, exactly as before.
+        let resolution = resolve_bare(
+            44,
+            &doc(vec![
+                entry(0, Some(22), 0, false),
+                entry(22, Some(22), 34, true),
+            ]),
+        );
+        assert!(resolution.is_ok());
+    }
+
+    /// The whole-object window and its instance windows are different
+    /// paths under the rule — their LAMP overlap is still the existing
+    /// claimed-twice error, which outranks nothing: it refuses the
+    /// document as it always did.
+    #[test]
+    fn a_whole_object_and_its_instance_still_collide_on_lamps() {
+        let spans = dome_spans();
+        let ctx = PatchResolveContext {
+            fixture_lamp_count: 177,
+            object_spans: &spans,
+            ..Default::default()
+        };
+        assert!(matches!(
+            resolve_patch(
+                &ctx,
+                &doc(vec![path_entry("/sector", 0), path_entry("/sector/1", 400)]),
+            ),
+            Err(PatchError::LampClaimedTwice { .. })
+        ));
     }
 
     // ---- outputs: grouping, reflow, dangling ---------------------------
@@ -1646,7 +1845,7 @@ mod tests {
             default_output: Some("Box 2"),
             ..Default::default()
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![named])).unwrap();
+        let resolved = resolve_patch(&ctx, &doc(vec![named])).unwrap().ranges;
         assert_eq!(resolved[1].lamp, 54);
     }
 
@@ -1806,7 +2005,8 @@ mod tests {
                 entries: vec![path_entry("/sector/1", 8)],
             },
         )
-        .unwrap();
+        .unwrap()
+        .ranges;
         assert_eq!(
             (resolved[0].start, resolved[0].count, resolved[0].lamp),
             (4, 4, 8)

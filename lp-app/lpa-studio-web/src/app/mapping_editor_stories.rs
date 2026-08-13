@@ -1,5 +1,6 @@
-//! Stories for the standalone mapping editor (`/mapping`,
-//! `lpa-mapping-editor`). Mount states are pinned via the editor's
+//! Stories for the mapping editor component (`lpa-mapping-editor`) — the
+//! canvas/tool visuals the unified editor mounts (the standalone
+//! `/mapping` page died in R1). Mount states are pinned via the editor's
 //! deterministic story props — no animation, no measured viewport.
 
 use dioxus::prelude::*;

@@ -333,14 +333,15 @@ impl FixtureNode {
             default_output: None,
         };
         match lpc_mapping::resolve_patch(&resolve_ctx, doc) {
-            Ok(ranges) => {
+            Ok(resolution) => {
                 // Degrade-and-report for dangling output names: the run is
                 // UNPLACED (no output would ever match it), the rest of the
                 // document stands, and the error names the fix. Skipped
                 // while no output has registered a name yet — the topology
                 // revision in the cache key re-runs this once one does.
                 let mut dangling: Option<alloc::string::String> = None;
-                let runs: alloc::vec::Vec<PatchedRun> = ranges
+                let runs: alloc::vec::Vec<PatchedRun> = resolution
+                    .ranges
                     .into_iter()
                     .filter_map(|range| {
                         if let Some(name) = &range.output
@@ -361,12 +362,19 @@ impl FixtureNode {
                     })
                     .collect();
                 self.resolved_patch = Some((key, runs));
-                self.patch_error = dangling.map(|name| {
-                    format!(
-                        "fixture patch places lamps on output {name:?}, but no output is \
-                         named {name:?}; those lamps are unplaced"
-                    )
-                });
+                // The kernel's own per-entry degrades (duplicate paths)
+                // outrank a dangling name: both leave lamps auto-flowing,
+                // but the duplicate names the entry to delete.
+                self.patch_error = resolution
+                    .refusals
+                    .first()
+                    .map(|refusal| format!("resolve fixture patch: {refusal}"))
+                    .or(dangling.map(|name| {
+                        format!(
+                            "fixture patch places lamps on output {name:?}, but no output is \
+                             named {name:?}; those lamps are unplaced"
+                        )
+                    }));
             }
             Err(error) => {
                 // No last-good placement to keep here — the document IS

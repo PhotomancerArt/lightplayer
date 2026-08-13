@@ -3909,3 +3909,521 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
         "redo restores the undone gesture byte-for-byte"
     );
 }
+
+/// The Arrange substrate end-to-end (unified-editor P2): the editor.json
+/// loaded-flag settles ABSENT through the fetch op (no file in a fresh
+/// project — never a read error), an [`crate::EditorMetaOp`] Set writes a
+/// byte-stable canonical document (with the dome's cached footprint
+/// refreshed as part of the write), the surface reflects the arrangement,
+/// arrange undo/redo replay exact bytes on their own mode-scoped stack,
+/// and every edit stamps the correlation journal.
+#[test]
+fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
+    use crate::{EditorMetaFixture, EditorMetaOp, EditorMetaVerb, UiArrangeTransform};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+    macro_rules! refresh_snapshot {
+        ($fallback:expr) => {{
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            let mut latest = None;
+            while let Some(next) = view.try_recv() {
+                latest = Some(next);
+            }
+            latest.unwrap_or($fallback)
+        }};
+    }
+
+    // Before the fetch: the flag says unloaded, the artifact says where.
+    let (dome, editor_artifact) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        assert!(
+            !surface.editor_meta_loaded,
+            "editor.json cannot be loaded before anything fetched it"
+        );
+        let dome = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+            .expect("dome fixture")
+            .clone();
+        assert_eq!(dome.arrange, None, "no arrange facts before the fetch");
+        (
+            dome,
+            surface
+                .editor_meta_artifact
+                .clone()
+                .expect("the surface names the editor.json artifact"),
+        )
+    };
+
+    // The fetch settles ABSENT (fresh project, no editor.json) — driven by
+    // the flag exactly as a page would.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh_snapshot!(snapshot);
+    {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        assert!(surface.editor_meta_loaded, "absence IS a settled state");
+        assert_eq!(surface.editor_meta_error, None);
+        let dome = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == dome.node)
+            .expect("dome");
+        let arrange = dome.arrange.as_ref().expect("arrange facts present");
+        assert!(!arrange.arranged, "nothing has been dragged yet");
+        assert_eq!(arrange.transform, UiArrangeTransform::default());
+    }
+
+    // Cache the dome's map2d so the write can refresh its footprint.
+    if let Some(artifact) = dome.mapping_artifact.clone() {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                ProjectController::NODE_ID,
+                crate::AssetContentFetchOp { artifact },
+            )));
+        drive(actor.run_one_batch_for_test());
+    }
+
+    // One drag gesture = one Set op.
+    let dome_key = dome.address.clone().expect("dome address");
+    let set_op = |transform: UiArrangeTransform| EditorMetaOp {
+        artifact: editor_artifact.clone(),
+        fixtures: vec![EditorMetaFixture {
+            node_key: dome_key.clone(),
+            mapping_artifact: dome.mapping_artifact.clone(),
+        }],
+        verb: EditorMetaVerb::Set {
+            node_key: dome_key.clone(),
+            node: Some(dome.node),
+            transform,
+        },
+    };
+    let dragged = UiArrangeTransform {
+        t: [40.0, -12.5],
+        r: 90.0,
+        s: 1.0,
+    };
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            set_op(dragged),
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    // Persist and read the file back: canonical, byte-stable, footprinted.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let editor_json = || {
+        let path = format!("{project_dir}/editor.json");
+        server
+            .borrow()
+            .base_fs()
+            .read_file(path.as_str().as_path())
+            .map(|bytes| String::from_utf8(bytes).expect("utf8 editor.json"))
+    };
+    let written = editor_json().expect("editor.json written on save");
+    let parsed = lpc_mapping::EditorMetaDoc::from_json(&written).expect("canonical doc parses");
+    assert_eq!(
+        format!("{}\n", parsed.to_json_pretty()),
+        written,
+        "the written bytes ARE the canonical form (byte-stable rewrite)"
+    );
+    let entry = parsed.mapping_surface(&dome_key).expect("dome arranged");
+    assert_eq!(entry.transform.t, [40.0, -12.5]);
+    assert_eq!(entry.transform.r, 90.0);
+    let footprint = entry
+        .footprint
+        .expect("footprint refreshed from the cached map2d");
+    assert_eq!(footprint.lamps, dome.patch.lamps, "footprint lamp count");
+    assert!(
+        footprint.bbox[2] > 0.0 && footprint.bbox[3] > 0.0,
+        "a real bbox: {:?}",
+        footprint.bbox
+    );
+
+    // The surface reflects the arrangement after a re-fetch (save dropped
+    // the local caches; the loaded-flag drives the re-fetch, page-parity).
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh_snapshot!(snapshot);
+    {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let dome_now = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == dome.node)
+            .expect("dome");
+        let arrange = dome_now.arrange.as_ref().expect("arrange facts");
+        assert!(arrange.arranged);
+        assert_eq!(arrange.transform, dragged);
+        assert_eq!(arrange.footprint.map(|fp| fp.lamps), Some(dome.patch.lamps));
+    }
+
+    // Undo restores the exact pre-arrange bytes (the canonical empty doc —
+    // the file did not exist, and file-existence is not user-facing state).
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: Vec::new(),
+                verb: EditorMetaVerb::Undo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        editor_json().expect("editor.json still exists after undo"),
+        "{\n  \"format\": 1\n}\n",
+        "undo walked back to the canonical empty document"
+    );
+
+    // Redo replays the arrangement byte-for-byte.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: Vec::new(),
+                verb: EditorMetaVerb::Redo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        editor_json().expect("editor.json exists"),
+        written,
+        "redo replays the arrangement byte-for-byte"
+    );
+
+    // The correlation journal recorded every step with increasing seq.
+    let snapshot = refresh_snapshot!(snapshot);
+    let journal = &project_editor(&snapshot).edit_journal;
+    assert!(
+        journal.len() >= 3,
+        "set + undo + redo all journal: {journal:?}"
+    );
+    assert!(
+        journal.windows(2).all(|pair| pair[0].seq < pair[1].seq),
+        "edit_seq strictly increases: {journal:?}"
+    );
+    assert!(
+        journal
+            .iter()
+            .all(|entry| entry.mode == crate::UiEditorMode::Arrange),
+        "arrange ops journal in Arrange mode: {journal:?}"
+    );
+}
+
+/// The one sequence spans every stack (unified-editor P2): patch verbs,
+/// arrange ops, and shell-dispatched switch events interleave into ONE
+/// strictly increasing `edit_seq`, each stamped with its own mode.
+#[test]
+fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
+    use crate::{
+        EditorMetaFixture, EditorMetaOp, EditorMetaVerb, PatchVerbKind, PatchVerbOp,
+        PatchVerbSubject, UiArrangeTransform, UiEditJournalEvent, UiEditorMode,
+    };
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let (dome, editor_artifact) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        (
+            surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .expect("dome")
+                .clone(),
+            surface.editor_meta_artifact.clone().expect("artifact"),
+        )
+    };
+
+    // Prefetch what the ops need: dome bodies + editor.json presence.
+    for artifact in [dome.patch_artifact.clone(), dome.mapping_artifact.clone()]
+        .into_iter()
+        .flatten()
+    {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                ProjectController::NODE_ID,
+                crate::AssetContentFetchOp { artifact },
+            )));
+        drive(actor.run_one_batch_for_test());
+    }
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    // Interleave: verb → mode switch → arrange set → node switch → verb undo.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            PatchVerbOp {
+                subject_fixture: Some(dome.node),
+                subject: PatchVerbSubject {
+                    path: Some("/sector/1".to_string()),
+                    range: None,
+                },
+                fixtures: vec![crate::PatchVerbFixture {
+                    node: dome.node,
+                    patch_artifact: dome.patch_artifact.clone().expect("patch artifact"),
+                    mapping_artifact: dome.mapping_artifact.clone(),
+                    lamp_count: dome.patch.lamps,
+                }],
+                assign_output_name: None,
+                verb: PatchVerbKind::Reverse,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            crate::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal {
+                event: UiEditJournalEvent::ModeSwitch,
+                node: None,
+                mode: UiEditorMode::Arrange,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: vec![EditorMetaFixture {
+                    node_key: dome.address.clone().expect("address"),
+                    mapping_artifact: dome.mapping_artifact.clone(),
+                }],
+                verb: EditorMetaVerb::Set {
+                    node_key: dome.address.clone().expect("address"),
+                    node: Some(dome.node),
+                    transform: UiArrangeTransform {
+                        t: [10.0, 10.0],
+                        r: 0.0,
+                        s: 1.0,
+                    },
+                },
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            crate::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal {
+                event: UiEditJournalEvent::NodeSwitch,
+                node: Some(dome.node),
+                mode: UiEditorMode::Mapping,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            PatchVerbOp {
+                subject_fixture: None,
+                subject: PatchVerbSubject::default(),
+                fixtures: Vec::new(),
+                assign_output_name: None,
+                verb: PatchVerbKind::Undo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("snapshot");
+    let journal = &project_editor(&snapshot).edit_journal;
+    assert_eq!(journal.len(), 5, "{journal:?}");
+    assert!(
+        journal.windows(2).all(|pair| pair[0].seq < pair[1].seq),
+        "one strictly increasing sequence across every stack: {journal:?}"
+    );
+    let modes: Vec<UiEditorMode> = journal.iter().map(|entry| entry.mode).collect();
+    assert_eq!(
+        modes,
+        vec![
+            UiEditorMode::Patching,
+            UiEditorMode::Arrange,
+            UiEditorMode::Arrange,
+            UiEditorMode::Mapping,
+            UiEditorMode::Patching,
+        ],
+        "each event carries its own mode"
+    );
+    let events: Vec<UiEditJournalEvent> = journal.iter().map(|entry| entry.event).collect();
+    assert_eq!(
+        events,
+        vec![
+            UiEditJournalEvent::Edit,
+            UiEditJournalEvent::ModeSwitch,
+            UiEditJournalEvent::Edit,
+            UiEditJournalEvent::NodeSwitch,
+            UiEditJournalEvent::Edit,
+        ],
+    );
+}
+
+/// Every selection arm round-trips through core state (the port and range
+/// arms are pass-2 substrate: stored and echoed even before any UI reads
+/// them).
+#[test]
+fn every_patch_target_arm_round_trips_through_selection() {
+    use crate::UiPatchTarget;
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let node = lpc_model::NodeId::new(3);
+    let targets = [
+        UiPatchTarget::Output { node },
+        UiPatchTarget::Port { node, port: 2 },
+        UiPatchTarget::Cell {
+            id: "3:1:0:0".to_string(),
+        },
+        UiPatchTarget::Instance {
+            node,
+            path: "/sector/2".to_string(),
+        },
+        UiPatchTarget::Fixture { node },
+        UiPatchTarget::Range {
+            node,
+            start: 22,
+            count: None,
+        },
+    ];
+    for target in targets {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                crate::ProjectEditorTarget::NodeTree.node_id(),
+                ProjectEditorOp::PatchSelect {
+                    target: Some(target.clone()),
+                },
+            )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let mut latest = None;
+        while let Some(next) = view.try_recv() {
+            latest = Some(next);
+        }
+        let snapshot = latest.expect("selection emits a snapshot");
+        assert_eq!(
+            project_editor(&snapshot).patch_selection,
+            Some(target),
+            "the arm echoes through core state"
+        );
+    }
+}

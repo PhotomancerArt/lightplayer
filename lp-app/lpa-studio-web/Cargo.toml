@@ -9,7 +9,7 @@ publish = false
 description = "Static Dioxus web shell for LightPlayer Studio"
 
 [features]
-stories = ["dep:lpa-studio-web-story-macros", "dep:lpc-mapping"]
+stories = ["dep:lpa-studio-web-story-macros"]
 
 [dependencies]
 async-trait = "0.1"
@@ -29,7 +29,7 @@ lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpa-palettes = { path = "../lpa-palettes" }
 # Story fixtures build lamp layouts from the shared mapping corpus.
-lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, optional = true }
+lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false }
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
 lpa-mapping-editor = { path = "../lpa-mapping-editor" }
 # Board catalog data + the BoardDiagram row-engine renderer.
