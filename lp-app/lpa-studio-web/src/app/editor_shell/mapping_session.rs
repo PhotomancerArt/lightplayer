@@ -34,6 +34,16 @@ pub fn MappingSessionHost(
     /// context under the dive).
     #[props(default)]
     context: Vec<lpa_mapping_editor::ContextFixture>,
+    /// The workbench-owned session, shared with the Fixtures tree and the
+    /// Props pane (one selection, one document).
+    #[props(default)]
+    external_session: Option<Signal<lpa_mapping_editor::MapEditorSession>>,
+    /// Bumped by OUTSIDE editors of the shared session (the Props pane):
+    /// each bump applies the session's document through the SAME
+    /// echo-suppressed pipeline as a canvas commit — undo history
+    /// survives the round-trip either way.
+    #[props(default)]
+    commit_requests: Option<Signal<u64>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // One-shot base-body fetch per artifact (the code editor's guard).
@@ -107,6 +117,19 @@ pub fn MappingSessionHost(
         }
     };
 
+    // Props-pane commits: same pipeline, driven by a bump instead of the
+    // canvas's own callback (plain data crosses the dock boundary, never
+    // handlers).
+    let mut seen_commit = use_signal(|| commit_requests.map(|requests| *requests.peek()));
+    if let (Some(requests), Some(session)) = (commit_requests, external_session) {
+        let now = *requests.read();
+        if *seen_commit.peek() != Some(now) {
+            seen_commit.set(Some(now));
+            let json = session.peek().doc().to_json();
+            on_doc_change(json);
+        }
+    }
+
     // File in/out: mappings are worth keeping as local files. Download is a
     // data-URL of the current (applied) body, pretty-printed; upload parses
     // the picked file and applies it whole-body — the editor re-seeds from
@@ -143,6 +166,7 @@ pub fn MappingSessionHost(
                     doc_epoch: epoch,
                     doc,
                     context: context.clone(),
+                    external_session,
                     on_doc_change,
                 }
                 div { class: "lpme-face-editor-bar",

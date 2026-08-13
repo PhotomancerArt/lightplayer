@@ -6,9 +6,10 @@
 //! own only the center; the **user owns visibility** through the edge
 //! strips. Nothing rearranges itself:
 //!
-//! - Four panels with FIXED homes — left: Nodes (the project pane) ·
-//!   Fixtures; right: Device · Outputs. The assignment lives in
-//!   [`PanelId::side`], a data table by design, so experiments are a
+//! - Panels with FIXED homes — left: Nodes (the project pane) · Fixtures;
+//!   right: Device · Outputs · Props (Mapping view only — the selection's
+//!   properties, R4). The assignment lives in [`PanelId::side`] and
+//!   [`PanelId::strip`], data tables by design, so experiments are a
 //!   constant edit — but there is deliberately no user arrangement in v1
 //!   ("things have one home", spike round-2 ruling).
 //! - Panels toggle **radio-per-side**. An EXPANDED dock says so with a
@@ -22,7 +23,8 @@
 //!   rail never shares a column).
 //! - Panel visibility is remembered **per view** ([`PanelMemory`]),
 //!   seeded by each view's defaults — the Nodes view opens the Nodes
-//!   tree + Device, the Mapping view opens Fixtures + Outputs — so
+//!   tree + Device, the Mapping view opens Fixtures + Props (the fixture
+//!   tree and the object properties: what actual mapping wants) — so
 //!   switching views feels like the view helping, never like the room
 //!   rearranging. The memory is ephemeral by design (spike A2): losing
 //!   it on reload costs one click.
@@ -37,8 +39,9 @@ pub mod panels;
 pub(crate) mod workbench_stories;
 
 use dioxus::prelude::*;
+use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
+    NodeId, ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
     UiViewContent,
 };
 
@@ -56,7 +59,7 @@ pub enum WorkbenchView {
     Mapping,
 }
 
-/// The four dockable panels. `side` is the fixed-home table (ratified:
+/// The dockable panels. `side` is the fixed-home table (ratified:
 /// content/structure left, hardware right).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelId {
@@ -69,6 +72,10 @@ pub enum PanelId {
     Device,
     /// box → port → wire-window cells (P2).
     Outputs,
+    /// The selection's properties (R4, Figma prior art): the dived
+    /// object's fields, or the selected fixture's placement facts.
+    /// Mapping view only.
+    Props,
 }
 
 /// Which dock a panel lives in. Panels never move sides (v1).
@@ -83,7 +90,7 @@ impl PanelId {
     pub fn side(self) -> DockSide {
         match self {
             PanelId::Nodes | PanelId::Fixtures => DockSide::Left,
-            PanelId::Device | PanelId::Outputs => DockSide::Right,
+            PanelId::Device | PanelId::Outputs | PanelId::Props => DockSide::Right,
         }
     }
 
@@ -94,14 +101,19 @@ impl PanelId {
             PanelId::Fixtures => "Fixtures",
             PanelId::Device => "Device",
             PanelId::Outputs => "Outputs",
+            PanelId::Props => "Props",
         }
     }
 
-    /// Strip order per side (top to bottom).
-    fn strip(side: DockSide) -> [PanelId; 2] {
-        match side {
-            DockSide::Left => [PanelId::Nodes, PanelId::Fixtures],
-            DockSide::Right => [PanelId::Device, PanelId::Outputs],
+    /// Strip order per side (top to bottom), per view: Props exists only
+    /// where a canvas selection exists to describe (the Mapping view).
+    fn strip(side: DockSide, view: WorkbenchView) -> &'static [PanelId] {
+        match (side, view) {
+            (DockSide::Left, _) => &[PanelId::Nodes, PanelId::Fixtures],
+            (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
+            (DockSide::Right, WorkbenchView::Mapping) => {
+                &[PanelId::Props, PanelId::Outputs, PanelId::Device]
+            }
         }
     }
 }
@@ -145,7 +157,9 @@ impl Default for PanelMemory {
             },
             mapping: DockState {
                 left: Some(PanelId::Fixtures),
-                right: Some(PanelId::Outputs),
+                // The mapping defaults (R4 ruling): the fixture tree and
+                // the object props — what actual mapping wants open.
+                right: Some(PanelId::Props),
             },
         }
     }
@@ -202,6 +216,13 @@ pub fn WorkbenchFrame(
 ) -> Element {
     let mut memory = use_signal(move || initial_memory.unwrap_or_default());
     let docks = memory.read().view(view);
+    // The DIVE's shared state (R4): the focused fixture, its mapping
+    // session (one selection/document for the canvas, the Fixtures tree,
+    // and the Props pane), and the Props pane's commit bump (plain data
+    // across the dock boundary; the session host applies on change).
+    let dive_focused = use_signal(|| None::<NodeId>);
+    let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
+    let dive_commits = use_signal(|| 0u64);
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
@@ -234,6 +255,7 @@ pub fn WorkbenchFrame(
                 if docks.left.is_none() {
                     EdgeStrip {
                         side: DockSide::Left,
+                        view,
                         open: docks.left,
                         on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
                     }
@@ -241,10 +263,14 @@ pub fn WorkbenchFrame(
                 if let Some(panel) = docks.left {
                     PanelDock {
                         panel,
+                        view,
                         panes: panes.clone(),
                         lens_card: lens_card.clone(),
                         surface: surface.clone(),
                         patch_selection: patch_selection.clone(),
+                        dive_focused,
+                        dive_session,
+                        dive_commits,
                         running,
                         now_secs,
                         on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
@@ -285,6 +311,9 @@ pub fn WorkbenchFrame(
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
                                 project_editor,
+                                dive_focused,
+                                dive_session,
+                                dive_commits,
                                 on_action,
                             }
                         },
@@ -309,6 +338,9 @@ pub fn WorkbenchFrame(
                                     lens_card: lens_card.clone(),
                                     surface: surface.clone(),
                                     patch_selection: patch_selection.clone(),
+                                    dive_focused,
+                                    dive_session,
+                                    dive_commits,
                                     running,
                                     now_secs,
                                     on_action,
@@ -322,10 +354,14 @@ pub fn WorkbenchFrame(
                 if let Some(panel) = docks.right {
                     PanelDock {
                         panel,
+                        view,
                         panes: panes.clone(),
                         lens_card: lens_card.clone(),
                         surface: surface.clone(),
                         patch_selection: patch_selection.clone(),
+                        dive_focused,
+                        dive_session,
+                        dive_commits,
                         running,
                         now_secs,
                         on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
@@ -335,6 +371,7 @@ pub fn WorkbenchFrame(
                 if docks.right.is_none() {
                     EdgeStrip {
                         side: DockSide::Right,
+                        view,
                         open: docks.right,
                         on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
                     }
@@ -442,7 +479,12 @@ fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
 /// open it is all that remains of the side.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<PanelId>) -> Element {
+fn EdgeStrip(
+    side: DockSide,
+    view: WorkbenchView,
+    open: Option<PanelId>,
+    on_toggle: EventHandler<PanelId>,
+) -> Element {
     let border = match side {
         DockSide::Left => "tw:border-r",
         DockSide::Right => "tw:border-l",
@@ -455,7 +497,7 @@ fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<Pane
     };
     rsx! {
         div { class: "tw:flex tw:w-[27px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5 tw:py-2 {border} tw:border-border-subtle tw:bg-card-muted",
-            for panel in PanelId::strip(side) {
+            for panel in PanelId::strip(side, view).iter().copied() {
                 button {
                     class: if open == Some(panel) {
                         "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-accent"
@@ -485,10 +527,14 @@ fn EdgeStrip(side: DockSide, open: Option<PanelId>, on_toggle: EventHandler<Pane
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelDock(
     panel: PanelId,
+    view: WorkbenchView,
     panes: Vec<UiPaneView>,
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: Option<UiPatchTarget>,
+    dive_focused: Signal<Option<NodeId>>,
+    dive_session: Signal<MapEditorSession>,
+    dive_commits: Signal<u64>,
     running: bool,
     now_secs: Option<f64>,
     /// A tab press: the SAME radio toggle the strip sends — the active
@@ -514,7 +560,7 @@ fn PanelDock(
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
             div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-subtle tw:bg-card-muted",
-                for tab in PanelId::strip(side) {
+                for tab in PanelId::strip(side, view).iter().copied() {
                     DockTab {
                         key: "{tab.title()}",
                         panel: tab,
@@ -537,6 +583,9 @@ fn PanelDock(
                     lens_card,
                     surface,
                     patch_selection,
+                    dive_focused,
+                    dive_session,
+                    dive_commits,
                     running,
                     now_secs,
                     on_action,
@@ -584,6 +633,9 @@ fn PanelBody(
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: Option<UiPatchTarget>,
+    dive_focused: Signal<Option<NodeId>>,
+    dive_session: Signal<MapEditorSession>,
+    dive_commits: Signal<u64>,
     running: bool,
     now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
@@ -633,7 +685,17 @@ fn PanelBody(
             FixturesPanel {
                 surface,
                 selection: patch_selection,
+                dive: (*dive_focused.read()).map(|node| (node, dive_session)),
                 on_action,
+            }
+        },
+        PanelId::Props => rsx! {
+            panels::PropsPanel {
+                surface,
+                selection: patch_selection,
+                dive_focused,
+                dive_session,
+                dive_commits,
             }
         },
         PanelId::Outputs => rsx! {

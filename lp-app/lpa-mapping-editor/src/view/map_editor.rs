@@ -8,7 +8,6 @@
 //! face won't).
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::List;
 use lpc_mapping::{Map2dDoc, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
@@ -17,8 +16,6 @@ use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
-use crate::view::object_list::ObjectList;
-use crate::view::properties_popover::PropertiesPopover;
 use crate::view::reference::ReferenceImage;
 
 /// Host-provided file operations (the header renders new/open/save when
@@ -115,8 +112,13 @@ pub fn MapEditor(
     /// [`crate::ContextFixture`]) — the dive's "others still visible".
     #[props(default)]
     context: Vec<crate::view::context_layer::ContextFixture>,
+    /// Host-owned session, so panels OUTSIDE the editor (the workbench's
+    /// Fixtures tree and Props pane) read and drive the same selection and
+    /// document. When absent the editor owns its session (stories).
+    #[props(default)]
+    external_session: Option<Signal<MapEditorSession>>,
 ) -> Element {
-    let mut session = use_signal(|| {
+    let internal_session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
         for index in &initial_selection {
             session.selection.insert_path(ShapePath::root(*index));
@@ -131,6 +133,14 @@ pub fn MapEditor(
         }
         session
     });
+    // An external session arrives EMPTY the first time: seed it from the
+    // doc prop once; epoch bumps reseed it exactly like the internal one.
+    let mut external_seeded = use_signal(|| false);
+    let mut session = external_session.unwrap_or(internal_session);
+    if external_session.is_some() && !*external_seeded.peek() {
+        external_seeded.set(true);
+        session.write().set_doc(doc.clone());
+    }
     let camera = use_signal(|| {
         initial_camera
             .map(|[x, y, scale]| Camera { x, y, scale })
@@ -144,11 +154,6 @@ pub fn MapEditor(
     let viewport = use_signal(|| None::<[f32; 2]>);
     let mut fit_pending = use_signal(|| initial_camera.is_none());
     let drag = use_signal(|| None::<CanvasDrag>);
-    // The wiring-order rail: closed by default (it hides the canvas), and
-    // docked as a right-side pane that shrinks the view rather than
-    // floating over it (M5 gate direction).
-    let mut rail_open = use_signal(|| false);
-
     // The live feed crosses into the canvas as a SIGNAL so a 60Hz color
     // frame re-renders only this thin component, never the 1500-node lamp
     // tree (P2 of the view/edit-split plan; the canvas applies colors as
@@ -293,88 +298,13 @@ pub fn MapEditor(
                         reference,
                         context: context.clone(),
                     }
-                    PropertiesPopover { session, camera, viewport, drag, on_committed }
                     div { class: "lpme-hint", "{tool_hint}" }
                     ZoomFloat { camera, viewport, fit_pending }
-                    div { class: "lpme-rail-float",
-                        button {
-                            class: if rail_open() { "lpme-btn lpme-btn-on" } else { "lpme-btn" },
-                            title: "wiring order",
-                            onclick: move |_| {
-                                let now = *rail_open.peek();
-                                rail_open.set(!now);
-                                // The dock resizes the canvas: drop the
-                                // stale measurement and re-fit so the
-                                // content stays in view (same dance as
-                                // full-page expand).
-                                let mut viewport = viewport;
-                                viewport.set(None);
-                                fit_pending.set(true);
-                            },
-                            List { size: 13 }
-                        }
-                    }
                     HelpFloat {}
-                }
-                if rail_open() {
-                    ObjectList {
-                        session,
-                        on_committed,
-                        on_focus: move |index: usize| {
-                            focus_object_in_view(session, camera, viewport, index);
-                        },
-                    }
                 }
             }
         }
     }
-}
-
-/// Center the camera on one object's lamps (rail row click).
-fn focus_object_in_view(
-    session: Signal<MapEditorSession>,
-    mut camera: Signal<Camera>,
-    viewport: Signal<Option<[f32; 2]>>,
-    object_index: usize,
-) {
-    let Some([width, height]) = *viewport.peek() else {
-        return;
-    };
-    let bounds = {
-        let session_read = session.read();
-        let doc = session_read.doc();
-        resolve(doc).ok().and_then(|resolved| {
-            let points: Vec<[f32; 2]> = resolved
-                .lamps
-                .iter()
-                .filter(|lamp| lamp.object as usize == object_index)
-                .map(|lamp| lamp.pos)
-                .collect();
-            bounds_of_points(&points)
-        })
-    };
-    if let Some(bounds) = bounds {
-        camera.set(focus_camera(bounds, width, height));
-    }
-}
-
-/// The camera that frames `bounds` for a rail-row focus: generous 20%
-/// padding, capped well below max zoom so a small object doesn't slam the
-/// view to 8× — capped focus stays centered on the object.
-fn focus_camera(bounds: lpc_mapping::Bounds2d, width: f32, height: f32) -> Camera {
-    const FOCUS_MAX_SCALE: f32 = 3.0;
-    let mut cam = Camera::new();
-    cam.fit(bounds, width, height, 0.20 * width.min(height));
-    if cam.scale > FOCUS_MAX_SCALE {
-        let center = [
-            bounds.min_x + bounds.width / 2.0,
-            bounds.min_y + bounds.height / 2.0,
-        ];
-        cam.scale = FOCUS_MAX_SCALE;
-        cam.x = width / 2.0 - center[0] * FOCUS_MAX_SCALE;
-        cam.y = height / 2.0 - center[1] * FOCUS_MAX_SCALE;
-    }
-    cam
 }
 
 /// Floating "?" toggling a compact keyboard-shortcut reference, next to
@@ -564,47 +494,5 @@ fn handle_key(
             }
         }
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lpc_mapping::Bounds2d;
-
-    #[test]
-    fn focus_camera_frames_large_bounds_with_padding() {
-        let bounds = Bounds2d {
-            min_x: 100.0,
-            min_y: 100.0,
-            width: 800.0,
-            height: 200.0,
-        };
-        let cam = focus_camera(bounds, 600.0, 400.0);
-        // Width-limited: usable 600 - 2*80 padding = 440 over 800 wide.
-        assert!(
-            (cam.scale - 440.0 / 800.0).abs() < 1e-3,
-            "scale {}",
-            cam.scale
-        );
-        // Bounds center lands on the viewport center.
-        let center = cam.doc_to_view([500.0, 200.0]);
-        assert!((center[0] - 300.0).abs() < 1e-2);
-        assert!((center[1] - 200.0).abs() < 1e-2);
-    }
-
-    #[test]
-    fn focus_camera_caps_zoom_on_tiny_objects_and_stays_centered() {
-        let bounds = Bounds2d {
-            min_x: 40.0,
-            min_y: 40.0,
-            width: 10.0,
-            height: 10.0,
-        };
-        let cam = focus_camera(bounds, 600.0, 400.0);
-        assert!((cam.scale - 3.0).abs() < 1e-6, "capped, got {}", cam.scale);
-        let center = cam.doc_to_view([45.0, 45.0]);
-        assert!((center[0] - 300.0).abs() < 1e-2);
-        assert!((center[1] - 200.0).abs() < 1e-2);
     }
 }
