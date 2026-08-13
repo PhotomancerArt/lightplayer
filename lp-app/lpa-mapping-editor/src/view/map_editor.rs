@@ -14,7 +14,7 @@ use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::shape_path::ShapePath;
-use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
+use crate::view::canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
 use crate::view::reference::ReferenceImage;
 
