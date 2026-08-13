@@ -92,6 +92,10 @@ pub fn ArrangeCanvas(
     /// stories inject embedded-example bytes directly).
     bodies: BTreeMap<ArtifactLocation, String>,
     selection: Option<UiPatchTarget>,
+    /// Double-click on a fixture: the shell focuses it for mapping edits
+    /// (P5). Absent = the canvas is arrange-only (stories).
+    #[props(default)]
+    on_focus: Option<EventHandler<NodeId>>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Geometry is derived per (surface, bodies) change — resolver runs are
@@ -309,6 +313,14 @@ pub fn ArrangeCanvas(
                             }));
                         }
                     },
+                    on_open: {
+                        let node = render.node;
+                        move |()| {
+                            if let Some(on_focus) = &on_focus {
+                                on_focus.call(node);
+                            }
+                        }
+                    },
                 }
             }
         }
@@ -329,6 +341,8 @@ fn FixtureGroup(
     /// Pointer-down: `(client_xy, current_transform)` — the canvas owns
     /// the gesture from here.
     on_press: EventHandler<([f64; 2], UiArrangeTransform)>,
+    /// Double-click: open this fixture for mapping edits.
+    on_open: EventHandler<()>,
 ) -> Element {
     let [bx, by, bw, bh] = render.bounds;
     let group_transform = format!(
@@ -360,6 +374,10 @@ fn FixtureGroup(
                 capture_pointer(&evt);
                 let point = evt.data().client_coordinates();
                 on_press.call(([point.x, point.y], press_transform));
+            },
+            ondoubleclick: move |evt| {
+                evt.stop_propagation();
+                on_open.call(());
             },
             // The frame: hit target + selection highlight.
             rect {

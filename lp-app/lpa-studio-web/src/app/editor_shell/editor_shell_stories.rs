@@ -82,6 +82,45 @@ fn arrange_canvas_mini_dome() -> Element {
 }
 
 #[story(
+    description = "The center with the dome FOCUSED for mapping edits (double-click or the toolbar's edit-mapping): the breadcrumb strip leads back to the arranged space, and the fixture's own MapEditor — the same session the face embed mounts, tools and all — takes the center. ⌘Z here is the mapping session's undo; the arrange stack answers only in the arranged space."
+)]
+fn editor_shell_focused_mapping() -> Element {
+    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+        .expect("mini-dome embedded");
+    let body = example
+        .files
+        .iter()
+        .find(|(path, _)| *path == "dome/dome.map2d.json")
+        .map(|(_, bytes)| *bytes)
+        .expect("dome map2d");
+    let artifact = ArtifactLocation::file("/dome/dome.map2d.json");
+    let editor = lpa_studio_core::UiAssetEditor {
+        artifact,
+        kind: lpa_studio_core::UiAssetEditorKind::Map2d,
+        source: "dome.map2d.json".to_string(),
+        content: Some(lpa_studio_core::UiAssetContent::from_bytes(body, false, 0)),
+        in_flight: false,
+        failure: None,
+        shader_error: None,
+        uniforms: Vec::new(),
+        agent: None,
+    };
+    canvas_frame(rsx! {
+        div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
+            button { class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
+                "‹ Arrange"
+            }
+            span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
+                "dome · mapping"
+            }
+        }
+        div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:p-2",
+            crate::app::node::mapping_asset_editor::MappingAssetEditor { editor }
+        }
+    })
+}
+
+#[story(
     description = "The canvas's three honesty levels in one space: the loaded dome (real geometry), the doors as a PLACEHOLDER block (body not loaded — the cached footprint's size and lamp count, clearly a block), and the peach fixtures as dashed range strips (no map2d at all). Everything unarranged auto-packs into the bottom row with dashed frames until first dragged."
 )]
 fn arrange_canvas_mixed_states() -> Element {
