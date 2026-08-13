@@ -9,10 +9,12 @@
 //! placement inverse. Screen-constant sizing divides by the EFFECTIVE
 //! scale (`camera.scale × placement.s`).
 //!
-//! Layers (bottom → top): dot-grid background, dimmed context fixtures,
-//! the authored canvas rect, the fit-preview overlay, wiring arrows,
-//! lamps, wiring numbers, the selection outline + corner resize handles,
-//! path vertex handles, the path-draft preview, and the marquee.
+//! Layers (bottom → top): dot-grid background, fixture sprites (project
+//! space; dived, the focused sprite's body yields to the live doc layers
+//! and neighbours dim), the authored canvas rect, the fit-preview overlay,
+//! wiring arrows, lamps, wiring numbers, the selection outline + corner
+//! resize handles, path vertex handles, the path-draft preview, and the
+//! marquee.
 //!
 //! Every mutation flows through `MapEditorSession` ops: drags run
 //! `begin_gesture` → `*_from_gesture` (totals, no drift) → `commit_gesture`
@@ -33,7 +35,7 @@ use crate::editor_core::editor_session::{MapEditorSession, editable_path};
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::placement::Placement;
 use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
-use crate::view::map_editor::EditorViewOptions;
+use crate::view::view_options::EditorViewOptions;
 
 pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{fit_region, lamp_display_radius};
@@ -115,11 +117,11 @@ pub fn EditorCanvas(
     view_opts: Signal<EditorViewOptions>,
     viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
-    /// Live lamp colors indexed by wiring index (host feed, written by
-    /// [`super::map_editor::MapEditor`]). A color frame must NOT re-render
-    /// this component: the VDOM owns each lamp's palette `fill` attribute,
-    /// and a post-render effect overrides via inline `style` — per-frame
-    /// colors are direct DOM writes, never a 1500-node diff.
+    /// Live lamp colors indexed by wiring index (host feed). A color frame
+    /// must NOT re-render this component: the VDOM owns each lamp's
+    /// palette `fill` attribute, and a post-render effect overrides via
+    /// inline `style` — per-frame colors are direct DOM writes, never a
+    /// 1500-node diff.
     live_feed: Signal<Vec<[u8; 3]>>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
@@ -147,10 +149,6 @@ pub fn EditorCanvas(
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
     reference: Option<crate::view::reference::ReferenceImage>,
-    /// Neighbour fixtures rendered dimmed under the document (points
-    /// already in THIS doc's space) — the dive's "others still visible".
-    #[props(default)]
-    context: Vec<crate::view::context_layer::ContextFixture>,
 ) -> Element {
     // Pointer/wheel math anchors to the mounted svg's live rect, and the
     // measured size feeds the host's viewport signal (fit needs real
@@ -803,24 +801,6 @@ pub fn EditorCanvas(
                 if !fixture_mode {
                 g {
                     transform: "{placement.svg_transform()}",
-                    // Neighbour fixtures, dimmed, under everything authored:
-                    // context for the dive, never targets (no pointer events).
-                    for (context_index, neighbour) in context.iter().enumerate() {
-                        g {
-                            key: "ctx-{context_index}",
-                            opacity: "0.3",
-                            "pointer-events": "none",
-                            for (point_index, point) in neighbour.points.iter().enumerate() {
-                                circle {
-                                    key: "{point_index}",
-                                    cx: "{point[0]}",
-                                    cy: "{point[1]}",
-                                    r: "{radius * 0.8}",
-                                    fill: "{neighbour.color}",
-                                }
-                            }
-                        }
-                    }
                     {doc_layers(&DocLayersInput {
                         interact,
                         opts,

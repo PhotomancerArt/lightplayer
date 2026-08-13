@@ -15,7 +15,8 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
     Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureEvent, FixtureSprite,
-    MapEditorSession, Placement, object_color,
+    HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding, object_color,
+    tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -80,12 +81,24 @@ pub(crate) fn transform_of(placement: &Placement) -> UiArrangeTransform {
     }
 }
 
-/// The fixture-view host: mounts the ONE crate canvas over sprites built
-/// from the surface, owns the project camera (fit-all seed, then frozen —
-/// arranging never moves the camera), and runs the override lifecycle.
+/// The dived fixture, as the canvas host needs it: which node, whose
+/// session, and whether the asset pipeline has it editable (a refused or
+/// still-loading body keeps the fixture a sprite).
+#[derive(Clone, PartialEq)]
+pub(crate) struct DiveHost {
+    pub node: NodeId,
+    pub session: Signal<MapEditorSession>,
+    pub editable: bool,
+}
+
+/// The one-canvas host for BOTH activities: sprites built from the
+/// surface, the project camera (fit-all seed, then frozen — neither
+/// arranging nor DIVING ever moves it), the override lifecycle, and — when
+/// dived — the live session rendered through the focused fixture's
+/// placement with the editor furniture (hint, zoom, help) around it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn ArrangeCanvasHost(
+pub(crate) fn ProjectCanvasHost(
     surface: UiPatchSurface,
     /// map2d bodies by artifact (extracted from the snapshot's node views;
     /// stories inject embedded-example bytes directly).
@@ -95,8 +108,25 @@ pub(crate) fn ArrangeCanvasHost(
     /// omit it and get the ad-hoc packing.
     #[props(default)]
     pack: PackSlots,
-    /// Double-click on a fixture: the shell dives into it for mapping
-    /// edits. Absent = the canvas is arrange-only (stories).
+    /// The dive: layer state, not component identity — the same mounted
+    /// canvas takes the session + placement when set.
+    #[props(default)]
+    dive: Option<DiveHost>,
+    /// Center-owned view toggles (the toolbar drives them). Stories omit
+    /// it and get defaults.
+    #[props(default)]
+    view_opts: Option<Signal<EditorViewOptions>>,
+    /// Center-owned fit request (the `0` key and the zoom float's percent
+    /// button arm it). Stories omit it.
+    #[props(default)]
+    fit_pending: Option<Signal<bool>>,
+    /// Fired after any committed session change while dived (the center
+    /// bumps the commit pipeline).
+    #[props(default)]
+    on_committed: Option<EventHandler<()>>,
+    /// Double-click on a fixture (or a NEIGHBOUR while dived — the
+    /// dive-switch): the shell dives into it. Absent = arrange-only
+    /// (stories).
     #[props(default)]
     on_focus: Option<EventHandler<NodeId>>,
     on_action: EventHandler<UiAction>,
@@ -126,16 +156,18 @@ pub(crate) fn ArrangeCanvasHost(
         (sprites, nodes)
     }));
     // The project camera: seeded from fit-all when content first appears,
-    // then FROZEN — arranging a fixture must never move the camera (the
-    // gate's drift bug). The fit button re-frames on demand.
-    let camera = use_signal(Camera::new);
+    // then FROZEN — neither arranging a fixture nor DIVING into one ever
+    // moves the camera (the drift bug + the one-canvas ruling). The zoom
+    // float's fit re-frames on demand.
+    let mut camera = use_signal(Camera::new);
     let viewport = use_signal(|| None::<[f32; 2]>);
-    let mut fit_pending = use_signal(|| true);
-    // The canvas's session-shaped props idle in fixture view: no fixture
-    // is dived here (P3 parity checkpoint — the dive still runs the old
-    // MappingSessionHost path).
+    let local_fit = use_signal(|| true);
+    let mut fit_pending = fit_pending.unwrap_or(local_fit);
+    let local_view = use_signal(EditorViewOptions::default);
+    let view_opts = view_opts.unwrap_or(local_view);
+    // The canvas's session prop idles on an empty document while no
+    // fixture is dived (there is nothing to edit in fixture view).
     let arrange_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
-    let arrange_view = use_signal(EditorViewOptions::default);
     let arrange_drag = use_signal(|| None::<CanvasDrag>);
     let arrange_live = use_signal(Vec::<[u8; 3]>::new);
     // Live drag override, held until the snapshot confirms the write.
@@ -163,22 +195,59 @@ pub(crate) fn ArrangeCanvasHost(
         sprite.placement = placement_of(&over.transform);
     }
 
-    // Fit-all runs as an effect once a real viewport measurement AND real
-    // bounds exist, then arms only on demand (the ⤢ fit button).
-    {
-        let renders = renders;
-        let mut camera = camera;
-        let mut fit_pending_effect = fit_pending;
-        use_effect(move || {
-            let viewport_now = viewport();
-            if fit_pending_effect()
-                && let Some([width, height]) = viewport_now
-                && let Some(bounds) = fit_bounds(&renders.read().0)
-            {
-                camera.write().fit(bounds, width, height, 0.0);
-                fit_pending_effect.set(false);
-            }
+    // The dive as the canvas sees it: the focused fixture's key, effective
+    // placement, and own-space bounds — only once the asset pipeline made
+    // it editable (a loading/refused body keeps the fixture a sprite).
+    let dive_focus: Option<(String, Placement, [f64; 4])> = dive
+        .as_ref()
+        .filter(|dive| dive.editable)
+        .and_then(|dive| {
+            nodes
+                .iter()
+                .find(|(_, node)| **node == dive.node)
+                .map(|(key, _)| key.clone())
+        })
+        .and_then(|key| {
+            sprites
+                .iter()
+                .find(|sprite| sprite.key == key)
+                .map(|sprite| (key, sprite.placement, sprite.bounds))
         });
+
+    // Fit runs at render, guarded: armed at mount and by the zoom float /
+    // `0` key, waiting for a real viewport measurement and real bounds.
+    // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
+    // "snap viewport to fixture" affordance); otherwise it fits all.
+    {
+        let viewport_now = *viewport.read();
+        if *fit_pending.read()
+            && let Some([width, height]) = viewport_now
+        {
+            let bounds = match &dive_focus {
+                Some((_, placement, own_bounds)) => {
+                    let corners = placement.corners(*own_bounds);
+                    let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
+                    let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
+                    let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
+                    let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
+                    Some(lpc_mapping::Bounds2d {
+                        min_x: min_x as f32,
+                        min_y: min_y as f32,
+                        width: (max_x - min_x).max(1.0) as f32,
+                        height: (max_y - min_y).max(1.0) as f32,
+                    })
+                }
+                None => fit_bounds(&sprites),
+            };
+            if let Some(bounds) = bounds {
+                let padding = match &dive_focus {
+                    Some(_) => display_inset_padding(bounds, width, height),
+                    None => 0.0,
+                };
+                camera.write().fit(bounds, width, height, padding);
+                fit_pending.set(false);
+            }
+        }
     }
 
     let dispatch_set = arrange_set_dispatch(&surface);
@@ -239,25 +308,41 @@ pub(crate) fn ArrangeCanvasHost(
         }
     };
 
+    let canvas_session = dive
+        .as_ref()
+        .filter(|_| dive_focus.is_some())
+        .map(|dive| dive.session)
+        .unwrap_or(arrange_session);
+    let dive_placement = dive_focus
+        .as_ref()
+        .map(|(_, placement, _)| *placement)
+        .unwrap_or_default();
+    let focused_key = dive_focus.as_ref().map(|(key, _, _)| key.clone());
+    let hint = dive_focus
+        .is_some()
+        .then(|| tool_hint(&canvas_session.read()));
+    let committed = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
     rsx! {
         div { class: "lpme-canvas-wrap",
-            button {
-                class: "tw:absolute tw:right-2 tw:top-2 tw:z-10 tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-subtle tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
-                title: "Fit everything in view",
-                onclick: move |_| fit_pending.set(true),
-                "⤢ fit"
-            }
             EditorCanvas {
-                session: arrange_session,
+                session: canvas_session,
                 camera,
-                view_opts: arrange_view,
+                view_opts,
                 viewport,
                 drag: arrange_drag,
                 live_feed: arrange_live,
-                on_committed: move |()| {},
+                on_committed: committed,
+                placement: dive_placement,
                 fixtures: sprites,
-                focused: None::<String>,
+                focused: focused_key,
                 on_fixture,
+            }
+            if let Some(hint) = hint {
+                div { class: "lpme-hint", "{hint}" }
+            }
+            ZoomFloat { camera, viewport, fit_pending }
+            if dive_focus.is_some() {
+                HelpFloat {}
             }
         }
     }
@@ -503,46 +588,6 @@ fn auto_pack(renders: &mut [FixtureRender], held: &PackSlots) {
         };
         cursor_x += bw + PACK_GAP;
     }
-}
-
-/// The dive's context layer (the P3 parity checkpoint still runs the old
-/// MappingSessionHost dive): every OTHER fixture's display points carried
-/// into the focused fixture's doc space (inverse focused placement ∘ their
-/// placement) — "others still visible", correctly placed. Placeholder and
-/// strip bodies contribute nothing: context is honest geometry only.
-pub(crate) fn dive_context(
-    surface: &UiPatchSurface,
-    bodies: &BTreeMap<ArtifactLocation, String>,
-    pack: &PackSlots,
-    focused: NodeId,
-) -> Vec<lpa_mapping_editor::ContextFixture> {
-    let renders = build_renders(surface, bodies, pack);
-    let Some(focus) = renders.iter().find(|render| render.node == focused) else {
-        return Vec::new();
-    };
-    let focus_placement = placement_of(&focus.transform);
-    renders
-        .iter()
-        .filter(|render| render.node != focused)
-        .filter_map(|render| {
-            let FixtureBody::Lamps { points, .. } = &render.body else {
-                return None;
-            };
-            let placement = placement_of(&render.transform);
-            let points = points
-                .iter()
-                .map(|point| {
-                    let world = placement.apply([f64::from(point[0]), f64::from(point[1])]);
-                    let local = focus_placement.inverse(world);
-                    [local[0] as f32, local[1] as f32]
-                })
-                .collect();
-            Some(lpa_mapping_editor::ContextFixture {
-                color: render.color.to_string(),
-                points,
-            })
-        })
-        .collect()
 }
 
 /// Fit-all: the union of every fixture's transformed frame in project

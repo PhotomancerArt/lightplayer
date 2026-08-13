@@ -1,51 +1,56 @@
-//! The unified editor's mapping session host (the fixture-face embed's
-//! asset wiring, re-homed by R3): the embeddable [`MapEditor`] wired to
-//! the asset pipeline — fetch the `.map2d.json` body, edit locally
-//! (editor-owned undo), apply committed documents whole-body
-//! (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`, Revert =
-//! drop the applied edit. Mounts in the Mapping view's center as the
-//! DIVE: the neighbour fixtures ride along as a dimmed context layer.
+//! The dive's asset pipeline, re-housed as a NON-VISUAL coordinator (the
+//! one-project-canvas P4): fetch the `.map2d.json` body, seed the
+//! workbench-owned session with parsed-doc echo suppression (undo survives
+//! its own round-trips), and apply committed documents whole-body
+//! (`AssetEditOp::ApplyBody`) on every commit bump. The canvas host renders
+//! the session; the toolbar renders the save state; this component renders
+//! NOTHING — it only coordinates bytes.
 //!
 //! Refuse-don't-rewrite: a body this build cannot parse — malformed, or
-//! written by a newer LightPlayer — renders as a refusal instead of an
-//! editor. Nothing mounts, nothing is applied, nothing is saved, so the
-//! stored asset survives open → close byte-identical.
+//! written by a newer LightPlayer — surfaces as [`DiveAssetState::Refused`]
+//! instead of a session. Nothing seeds, nothing is applied, nothing is
+//! saved, so the stored asset survives open → close byte-identical.
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use base64::Engine as _;
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Download, Upload};
-use lpa_mapping_editor::{DocOpen, DocRefusal, Map2dDoc, MapEditor};
-use lpa_studio_core::{UiAction, UiAssetEditor};
+use lpa_mapping_editor::{DocOpen, DocRefusal, Map2dDoc, MapEditorSession};
+use lpa_studio_core::{ArtifactLocation, UiAction, UiAssetEditor};
 
-use crate::base::icon::{StudioIcon, StudioIconName};
-
-/// Monotonic ids for the hidden upload inputs (one per mounted editor).
-static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
+/// Where the dive's asset stands, for the canvas host and the toolbar.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub(crate) enum DiveAssetState {
+    /// The body has not landed (or a switch is in flight): the fixture
+    /// stays a sprite; tools wait.
+    #[default]
+    Loading,
+    /// The session is seeded with this fixture's document: editable.
+    Ready,
+    /// The body cannot be read by this build. The fixture stays visible,
+    /// tools stay disabled, and the stored file is never rewritten.
+    Refused(DocRefusal),
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn MappingSessionHost(
+pub(crate) fn MappingAssetPipeline(
     editor: UiAssetEditor,
-    /// Neighbour fixtures, already in this document's space (dimmed
-    /// context under the dive).
-    #[props(default)]
-    context: Vec<lpa_mapping_editor::ContextFixture>,
-    /// The workbench-owned session, shared with the Fixtures tree and the
-    /// Props pane (one selection, one document).
-    #[props(default)]
-    external_session: Option<Signal<lpa_mapping_editor::MapEditorSession>>,
-    /// Bumped by OUTSIDE editors of the shared session (the Props pane):
-    /// each bump applies the session's document through the SAME
-    /// echo-suppressed pipeline as a canvas commit — undo history
-    /// survives the round-trip either way.
-    #[props(default)]
-    commit_requests: Option<Signal<u64>>,
+    /// The workbench-owned session (one selection/document for the canvas,
+    /// the Fixtures tree, and the Props pane).
+    session: Signal<MapEditorSession>,
+    /// Bumped by ANY committed change — canvas gestures, editor keys, and
+    /// the Props pane alike: each bump applies the session's document
+    /// through the same echo-suppressed pipeline, so undo history survives
+    /// the round-trip whatever the writer.
+    commit_requests: Signal<u64>,
+    /// Written by this coordinator; read by the center (canvas host +
+    /// toolbar).
+    state: Signal<DiveAssetState>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let mut session = session;
+    let mut state = state;
     // One-shot base-body fetch per artifact (the code editor's guard).
     let fetch_requested = use_hook(|| Rc::new(RefCell::new(None::<String>)));
     if editor.content.is_none() {
@@ -62,11 +67,11 @@ pub fn MappingSessionHost(
         }
     }
 
-    // Seed / re-seed the editor from pipeline content, suppressing the echo
-    // of our own applies so in-editor undo history survives its round-trip.
-    let mut seeded = use_signal(|| None::<(u64, Map2dDoc)>);
+    // Seed / re-seed the session from pipeline content, suppressing the
+    // echo of our own applies so in-editor undo history survives its
+    // round-trip. All signal writes are guarded — this runs during render.
+    let mut seeded = use_signal(|| None::<(ArtifactLocation, Map2dDoc)>);
     let last_applied = use_hook(|| Rc::new(RefCell::new(None::<String>)));
-    let mut parse_failure = use_signal(|| None::<DocRefusal>);
     let content_text = editor
         .content
         .as_ref()
@@ -76,200 +81,68 @@ pub fn MappingSessionHost(
         if !echo {
             // Compare PARSED documents, never serialized text: the stored
             // file is pretty-printed while the editor emits compact JSON,
-            // so text comparison never matches and every render would bump
-            // the epoch — re-seeding the session (wiping selection/undo)
-            // and re-arming fit on every host re-render (per-frame, now
-            // that the live color feed re-renders this component).
-            // All signal writes below are guarded: this runs during render.
+            // so text comparison never matches and every render would
+            // re-seed the session (wiping selection/undo).
             let decision = {
                 let current = seeded.peek();
-                decide_seed(&editor.source, text, current.as_ref().map(|(_, doc)| doc))
+                let current_doc = current
+                    .as_ref()
+                    .and_then(|(artifact, doc)| (*artifact == editor.artifact).then_some(doc));
+                decide_seed(&editor.source, text, current_doc)
             };
             match decision {
                 SeedDecision::Keep => {
-                    if parse_failure.peek().is_some() {
-                        parse_failure.set(None);
+                    if *state.peek() != DiveAssetState::Ready {
+                        state.set(DiveAssetState::Ready);
                     }
                 }
                 SeedDecision::Seed(doc) => {
-                    let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
-                    seeded.set(Some((epoch, doc)));
-                    if parse_failure.peek().is_some() {
-                        parse_failure.set(None);
+                    seeded.set(Some((editor.artifact.clone(), doc.clone())));
+                    session.write().set_doc(doc);
+                    if *state.peek() != DiveAssetState::Ready {
+                        state.set(DiveAssetState::Ready);
                     }
                 }
                 SeedDecision::Refuse(refusal) => {
-                    if parse_failure.peek().as_ref() != Some(&refusal) {
-                        parse_failure.set(Some(refusal));
+                    if *state.peek() != DiveAssetState::Refused(refusal.clone()) {
+                        state.set(DiveAssetState::Refused(refusal));
                     }
+                }
+            }
+        }
+    } else {
+        // A switch is in flight (content not landed): the session still
+        // holds the PREVIOUS fixture's document — nothing may render or
+        // apply it against this artifact.
+        let loading = matches!(
+            seeded.peek().as_ref(),
+            Some((artifact, _)) if *artifact != editor.artifact
+        ) || seeded.peek().is_none();
+        if loading && *state.peek() != DiveAssetState::Loading {
+            state.set(DiveAssetState::Loading);
+        }
+    }
+
+    // Commit bumps: serialize the session's document and apply it
+    // whole-body, remembering the bytes so the echo never re-seeds. Only
+    // while Ready — a bump racing a dive-switch must not write the old
+    // fixture's document to the new artifact.
+    let mut seen_commit = use_signal(|| *commit_requests.peek());
+    {
+        let now = *commit_requests.read();
+        if *seen_commit.peek() != now {
+            seen_commit.set(now);
+            if *state.peek() == DiveAssetState::Ready {
+                let json = session.peek().doc().to_json();
+                *last_applied.borrow_mut() = Some(json.clone());
+                if let Some(handler) = &on_action {
+                    handler.call(editor.apply_action(&json));
                 }
             }
         }
     }
 
-    let dirty = editor.content.as_ref().is_some_and(|content| content.dirty);
-    let apply_editor = editor.clone();
-    let apply_last = Rc::clone(&last_applied);
-    let on_doc_change = move |json: String| {
-        *apply_last.borrow_mut() = Some(json.clone());
-        if let Some(handler) = &on_action {
-            handler.call(apply_editor.apply_action(&json));
-        }
-    };
-
-    // Props-pane commits: same pipeline, driven by a bump instead of the
-    // canvas's own callback (plain data crosses the dock boundary, never
-    // handlers).
-    let mut seen_commit = use_signal(|| commit_requests.map(|requests| *requests.peek()));
-    if let (Some(requests), Some(session)) = (commit_requests, external_session) {
-        let now = *requests.read();
-        if *seen_commit.peek() != Some(now) {
-            seen_commit.set(Some(now));
-            let json = session.peek().doc().to_json();
-            on_doc_change(json);
-        }
-    }
-
-    // File in/out: mappings are worth keeping as local files. Download is a
-    // data-URL of the current (applied) body, pretty-printed; upload parses
-    // the picked file and applies it whole-body — the editor re-seeds from
-    // the pipeline echo like any external change.
-    let upload_input_id = use_hook(|| {
-        format!(
-            "lpme-upload-{}",
-            NEXT_UPLOAD_INPUT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
-    let mut upload_error = use_signal(|| None::<String>);
-    let download_href = content_text.as_ref().map(|text| {
-        let pretty = Map2dDoc::from_json(text)
-            .map(|doc| doc.to_json_pretty())
-            .unwrap_or_else(|_| text.clone());
-        format!(
-            "data:application/json;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(pretty.as_bytes())
-        )
-    });
-    let upload_editor = editor.clone();
-
-    rsx! {
-        div { class: "lpme-dive-editor",
-            if let Some(refusal) = parse_failure() {
-                div { class: "lpme-refusal",
-                    div { class: "lpme-refusal-message", "{refusal.message}" }
-                    div { class: "lpme-refusal-note",
-                        "This mapping is not being edited, and the stored file has been left exactly as it is."
-                    }
-                }
-            } else if let Some((epoch, doc)) = seeded() {
-                MapEditor {
-                    doc_epoch: epoch,
-                    doc,
-                    context: context.clone(),
-                    external_session,
-                    on_doc_change,
-                }
-                div { class: "lpme-dive-editor-bar",
-                    span { class: "lpme-status", "{editor.source}" }
-                    if editor.in_flight {
-                        span { class: "lpme-status", "applying…" }
-                    }
-                    if let Some(failure) = &editor.failure {
-                        span { class: "lpme-dive-editor-failure", "{failure}" }
-                    }
-                    if let Some(failure) = upload_error() {
-                        span { class: "lpme-dive-editor-failure", "{failure}" }
-                    }
-                    div { class: "lpme-spacer" }
-                    button {
-                        class: "lpme-btn",
-                        title: "load a .map2d.json from disk (applies to this fixture)",
-                        onclick: {
-                            let input_id = upload_input_id.clone();
-                            move |_| click_element(&input_id)
-                        },
-                        Upload { size: 13 }
-                    }
-                    if let Some(href) = &download_href {
-                        a {
-                            class: "lpme-btn",
-                            title: "download the current mapping document",
-                            href: "{href}",
-                            download: "{editor.source}",
-                            Download { size: 13 }
-                        }
-                    }
-                    input {
-                        id: "{upload_input_id}",
-                        class: "lpme-hidden-input",
-                        r#type: "file",
-                        accept: ".json,application/json",
-                        onchange: move |evt| {
-                            let file = evt.files().first().cloned();
-                            let editor = upload_editor.clone();
-                            async move {
-                                let Some(file) = file else { return };
-                                let name = file.name();
-                                match file.read_string().await {
-                                    Ok(text) => match DocOpen::parse(&name, &text) {
-                                        DocOpen::Ready(parsed) => {
-                                            upload_error.set(None);
-                                            if let Some(handler) = &on_action {
-                                                handler.call(editor.apply_action(&parsed.to_json()));
-                                            }
-                                        }
-                                        // A file this build cannot read is
-                                        // never applied to the fixture.
-                                        DocOpen::Refused(refusal) => {
-                                            upload_error.set(Some(refusal.message));
-                                        }
-                                    },
-                                    Err(error) => {
-                                        upload_error.set(Some(format!("could not read {name}: {error}")));
-                                    }
-                                }
-                            }
-                        },
-                    }
-                    span {
-                        class: if dirty { "lpme-status lpme-dirty" } else { "lpme-status" },
-                        if dirty { "Unsaved" } else { "Saved" }
-                    }
-                    button {
-                        class: "lpme-btn",
-                        title: "discard the applied edit and return to the saved file",
-                        disabled: !dirty,
-                        onclick: {
-                            let editor = editor.clone();
-                            let last = Rc::clone(&last_applied);
-                            move |_| {
-                                *last.borrow_mut() = None;
-                                if let Some(handler) = &on_action {
-                                    handler.call(editor.revert_action());
-                                }
-                            }
-                        },
-                        StudioIcon { name: StudioIconName::Revert, size: 13 }
-                        "Revert"
-                    }
-                    button {
-                        class: "lpme-btn",
-                        title: "save the project (writes the applied mapping to disk)",
-                        disabled: !dirty,
-                        onclick: move |_| {
-                            if let Some(handler) = &on_action {
-                                handler.call(save_overlay_action());
-                            }
-                        },
-                        StudioIcon { name: StudioIconName::Save, size: 13 }
-                        "Save"
-                    }
-                }
-            } else {
-                div { class: "lpme-dive-editor-loading", "loading {editor.source}…" }
-            }
-        }
-    }
+    rsx! {}
 }
 
 /// What the host does with a fetched asset body.
@@ -294,8 +167,8 @@ fn decide_seed(source: &str, body: &str, seeded: Option<&Map2dDoc>) -> SeedDecis
 }
 
 /// Click a DOM element by id (file dialogs only open from a user gesture,
-/// which the bar button provides).
-fn click_element(id: &str) {
+/// which a toolbar button provides).
+pub(crate) fn click_element(id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
@@ -313,7 +186,29 @@ fn click_element(id: &str) {
     }
 }
 
-fn save_overlay_action() -> UiAction {
+/// Programmatic file download: a transient anchor with a `download`
+/// attribute, clicked from the toolbar action (a user gesture).
+pub(crate) fn trigger_download(filename: &str, data_url: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(document) = web_sys::window().and_then(|window| window.document())
+            && let Ok(anchor) = document.create_element("a")
+        {
+            let _ = anchor.set_attribute("href", data_url);
+            let _ = anchor.set_attribute("download", filename);
+            if let Ok(anchor) = anchor.dyn_into::<web_sys::HtmlElement>() {
+                anchor.click();
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (filename, data_url);
+    }
+}
+
+pub(crate) fn save_overlay_action() -> UiAction {
     use lpa_studio_core::{ControllerId, ProjectController, ProjectOp};
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
@@ -328,14 +223,13 @@ mod tests {
     const SOURCE: &str = "fixture.map2d.json";
 
     /// A body written by a newer LightPlayer refuses with upgrade wording,
-    /// and — because the editor never mounts — the stored body survives an
+    /// and — because the session never seeds — the stored body survives an
     /// open → close round trip byte for byte, with nothing applied.
     #[test]
     fn a_newer_body_is_refused_and_never_rewritten() {
-        // Open: the host decides what to do with the fetched body. A refusal
-        // renders in place of the editor, so the only writer of this asset —
-        // `on_doc_change` → `apply_action`, owned by the MapEditor — is never
-        // mounted and emits nothing.
+        // Open: the host decides what to do with the fetched body. A
+        // refusal surfaces instead of a session, so the only writer of
+        // this asset — the commit path's `apply_action` — never runs.
         let mut stored = NEWER_BODY.to_string();
         let applied: Vec<String> = Vec::new();
         let SeedDecision::Refuse(refusal) = decide_seed(SOURCE, &stored, None) else {
@@ -390,7 +284,7 @@ mod tests {
         let SeedDecision::Seed(doc) = decide_seed(SOURCE, &stored, None) else {
             panic!("a valid body must seed the editor");
         };
-        // Re-render with the editor mounted: the same body decides Keep, so
+        // Re-render with the session seeded: the same body decides Keep, so
         // nothing re-seeds and — with no edit to commit — nothing is applied.
         assert_eq!(decide_seed(SOURCE, &stored, Some(&doc)), SeedDecision::Keep);
         assert_eq!(

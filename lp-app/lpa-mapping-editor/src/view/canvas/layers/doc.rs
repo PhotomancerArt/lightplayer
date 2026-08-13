@@ -12,8 +12,8 @@ use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::MapArrowOverlay;
 use crate::view::canvas::palette::{OBJECT_COLORS, SELECTION_COLOR, object_color};
 use crate::view::canvas::{CanvasInteract, secondary_button, select_and_start_move};
-use crate::view::map_editor::EditorViewOptions;
 use crate::view::reference::ReferenceImage;
+use crate::view::view_options::EditorViewOptions;
 
 /// Everything the doc layers render from, derived once by the canvas.
 pub(crate) struct DocLayersInput<'a> {

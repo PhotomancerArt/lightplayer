@@ -1,12 +1,14 @@
-//! Stories for the mapping editor component (`lpa-mapping-editor`) — the
-//! canvas/tool visuals the unified editor mounts (the standalone
-//! `/mapping` page died in R1). Mount states are pinned via the editor's
-//! deterministic story props — no animation, no measured viewport.
+//! Stories for the mapping-editor crate — the canvas/tool visuals the
+//! unified editor composes (there is no wrapper editor component: the
+//! canvas + floats + hint ARE the editor). Mount states are pinned via
+//! deterministic session seeding; framing comes from the same doc-fit
+//! math the shell uses.
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureSprite, MapEditor,
-    MapEditorSession, Placement, ReferenceImage,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureSprite, HelpFloat,
+    Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath, ZoomFloat,
+    display_inset_padding, doc_fit_bounds, tool_hint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -18,6 +20,76 @@ fn EditorCanvasFrame(children: Element) -> Element {
     rsx! {
         div { style: "height: 620px; display: flex; flex-direction: column; border: 1px solid var(--studio-color-border-strong); border-radius: 10px; overflow: hidden;",
             {children}
+        }
+    }
+}
+
+/// The composed editor, as the unified center mounts it: canvas + hint +
+/// zoom/help floats over one deterministically seeded session, framed by
+/// the shared doc-fit math once the canvas measures itself.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ComposedEditorStory(
+    doc: Map2dDoc,
+    #[props(default)] initial_selection: Vec<usize>,
+    #[props(default = false)] initial_descend: bool,
+    #[props(default)] initial_draft: Vec<[f32; 2]>,
+    #[props(default)] initial_view: Option<EditorViewOptions>,
+    #[props(default)] reference: Option<ReferenceImage>,
+) -> Element {
+    let session = use_signal(|| {
+        let mut session = MapEditorSession::new(doc.clone());
+        for index in &initial_selection {
+            session.selection.insert_path(ShapePath::root(*index));
+        }
+        if initial_descend {
+            session.descend();
+        }
+        if !initial_draft.is_empty() {
+            session.tool = MapTool::Path {
+                draft: initial_draft.clone(),
+            };
+        }
+        session
+    });
+    let camera = use_signal(Camera::new);
+    let view_opts = use_signal(move || initial_view.unwrap_or_default());
+    let viewport = use_signal(|| None::<[f32; 2]>);
+    let mut fit_pending = use_signal(|| true);
+    let drag = use_signal(|| None::<CanvasDrag>);
+    let live_feed = use_signal(Vec::<[u8; 3]>::new);
+    // Deterministic framing: fit once the canvas measures itself, with
+    // the same bounds + inset the display mode uses.
+    {
+        let viewport_now = *viewport.read();
+        if *fit_pending.read()
+            && let Some([width, height]) = viewport_now
+            && let Some(bounds) = doc_fit_bounds(session.peek().doc())
+        {
+            let padding = display_inset_padding(bounds, width, height);
+            let mut camera = camera;
+            camera.write().fit(bounds, width, height, padding);
+            fit_pending.set(false);
+        }
+    }
+    let hint = tool_hint(&session.read());
+    rsx! {
+        EditorCanvasFrame {
+            div { class: "lpme-canvas-wrap",
+                EditorCanvas {
+                    session,
+                    camera,
+                    view_opts,
+                    viewport,
+                    drag,
+                    live_feed,
+                    on_committed: move |()| {},
+                    reference,
+                }
+                div { class: "lpme-hint", "{hint}" }
+                ZoomFloat { camera, viewport, fit_pending }
+                HelpFloat {}
+            }
         }
     }
 }
@@ -190,9 +262,7 @@ pub(crate) fn fixture_dive_neighbours() -> Element {
 )]
 pub(crate) fn editor_panel_wiring() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor { doc_epoch: 0, doc: lpc_mapping::corpus::panel_16x16() }
-        }
+        ComposedEditorStory { doc: lpc_mapping::corpus::panel_16x16() }
     }
 }
 
@@ -201,12 +271,9 @@ pub(crate) fn editor_panel_wiring() -> Element {
 )]
 pub(crate) fn editor_selection_popover() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::cat_ears(),
-                initial_selection: vec![2],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::cat_ears(),
+            initial_selection: vec![2],
         }
     }
 }
@@ -216,12 +283,9 @@ pub(crate) fn editor_selection_popover() -> Element {
 )]
 pub(crate) fn editor_group_selected() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: fyeah_presentable_doc(),
-                initial_selection: vec![0, 1, 2, 3, 4, 5, 6],
-            }
+        ComposedEditorStory {
+            doc: fyeah_presentable_doc(),
+            initial_selection: vec![0, 1, 2, 3, 4, 5, 6],
         }
     }
 }
@@ -231,12 +295,9 @@ pub(crate) fn editor_group_selected() -> Element {
 )]
 pub(crate) fn editor_path_draft() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::cat_ears(),
-                initial_draft: vec![[460.0, 320.0], [520.0, 240.0], [580.0, 320.0]],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::cat_ears(),
+            initial_draft: vec![[460.0, 320.0], [520.0, 240.0], [580.0, 320.0]],
         }
     }
 }
@@ -246,18 +307,15 @@ pub(crate) fn editor_path_draft() -> Element {
 )]
 pub(crate) fn editor_fit_preview() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: fyeah_presentable_doc(),
-                initial_view: Some(EditorViewOptions {
-                    numbers: false,
-                    arrows: true,
-                    live: false,
-                    fit_preview: true,
-                    reference: true,
-                }),
-            }
+        ComposedEditorStory {
+            doc: fyeah_presentable_doc(),
+            initial_view: Some(EditorViewOptions {
+                numbers: false,
+                arrows: true,
+                live: false,
+                fit_preview: true,
+                reference: true,
+            }),
         }
     }
 }
@@ -267,12 +325,9 @@ pub(crate) fn editor_fit_preview() -> Element {
 )]
 pub(crate) fn editor_repeated_sector() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                initial_selection: vec![0],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            initial_selection: vec![0],
         }
     }
 }
@@ -282,13 +337,10 @@ pub(crate) fn editor_repeated_sector() -> Element {
 )]
 pub(crate) fn editor_repeat_scoped() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                initial_selection: vec![0],
-                initial_descend: true,
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            initial_selection: vec![0],
+            initial_descend: true,
         }
     }
 }
@@ -311,12 +363,9 @@ pub(crate) fn editor_reference_trace() -> Element {
         size: [400.0, 400.0],
     };
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                reference: Some(reference),
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            reference: Some(reference),
         }
     }
 }
