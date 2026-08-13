@@ -153,7 +153,7 @@ pub fn MappingSessionHost(
     let upload_editor = editor.clone();
 
     rsx! {
-        div { class: "lpme-face-editor",
+        div { class: "lpme-dive-editor",
             if let Some(refusal) = parse_failure() {
                 div { class: "lpme-refusal",
                     div { class: "lpme-refusal-message", "{refusal.message}" }
@@ -169,16 +169,16 @@ pub fn MappingSessionHost(
                     external_session,
                     on_doc_change,
                 }
-                div { class: "lpme-face-editor-bar",
+                div { class: "lpme-dive-editor-bar",
                     span { class: "lpme-status", "{editor.source}" }
                     if editor.in_flight {
                         span { class: "lpme-status", "applying…" }
                     }
                     if let Some(failure) = &editor.failure {
-                        span { class: "lpme-face-editor-failure", "{failure}" }
+                        span { class: "lpme-dive-editor-failure", "{failure}" }
                     }
                     if let Some(failure) = upload_error() {
-                        span { class: "lpme-face-editor-failure", "{failure}" }
+                        span { class: "lpme-dive-editor-failure", "{failure}" }
                     }
                     div { class: "lpme-spacer" }
                     button {
@@ -266,7 +266,7 @@ pub fn MappingSessionHost(
                     }
                 }
             } else {
-                div { class: "lpme-face-editor-loading", "loading {editor.source}…" }
+                div { class: "lpme-dive-editor-loading", "loading {editor.source}…" }
             }
         }
     }

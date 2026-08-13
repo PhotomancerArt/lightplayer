@@ -106,7 +106,12 @@ fn editor_shell_focused_mapping() -> Element {
         agent: None,
     };
     let context =
-        super::arrange_canvas::dive_context(&surface, &bodies, lpa_studio_core::NodeId::new(2));
+        super::arrange_canvas::dive_context(
+        &surface,
+        &bodies,
+        &super::arrange_canvas::PackSlots::new(),
+        lpa_studio_core::NodeId::new(2),
+    );
     canvas_frame(rsx! {
         div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
             button { class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",

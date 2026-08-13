@@ -2122,12 +2122,6 @@ label:has(> input:not(:disabled)) {
     overflow: hidden;
 }
 
-.ux-map-home-full .lpme-face-editor {
-    height: auto;
-    flex: 1;
-    min-height: 0;
-}
-
 /* The output face's board diagram (P5). The renderer sizes its SVG from the
    pin pitch, which is a DRAWING decision, not a layout one — a card is
    whatever width the workspace gives it. Letting the diagram scale down to
@@ -2145,20 +2139,25 @@ label:has(> input:not(:disabled)) {
 }
 
 /* The face-embedded mapping editor (one-home edit mode). */
-.lpme-face-editor {
+.lpme-dive-editor {
+    /* The dive fills the Mapping view's center — full height, like the
+       arrange level it replaces (the face embed's 460px card sizing died
+       with the embed). */
     display: flex;
     flex-direction: column;
-    height: 460px;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
 }
 
-.lpme-face-editor .lpme-editor {
+.lpme-dive-editor .lpme-editor {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
 
-.lpme-face-editor-bar {
+.lpme-dive-editor-bar {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2166,12 +2165,12 @@ label:has(> input:not(:disabled)) {
     border-top: 1px solid var(--studio-color-border);
 }
 
-.lpme-face-editor-failure {
+.lpme-dive-editor-failure {
     font-size: 11px;
     color: #ef5350;
 }
 
-.lpme-face-editor-loading {
+.lpme-dive-editor-loading {
     padding: 18px;
     font-size: 12px;
     color: var(--studio-color-text-muted);
