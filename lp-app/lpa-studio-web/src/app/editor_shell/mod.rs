@@ -1,28 +1,35 @@
 //! The unified editor's center — the coordinator mounted in the
-//! workbench Mapping view (unified-editor P3/P4, workbench-amended).
+//! workbench Mapping view.
 //!
 //! The workbench chrome (#413) owns the docks, panels, and view tabs;
-//! this module owns only the CENTER: the editor toolbar strip and the
-//! one crate canvas (mounted through [`arrange::ArrangeCanvasHost`] for
-//! the fixture activity). The Fixtures/Outputs panels are the editor's
-//! rails — they are grown in place, never forked.
+//! this module owns only the CENTER: the ONE data-driven toolbar row and
+//! the ONE crate canvas ([`arrange::ProjectCanvasHost`]) carrying both
+//! activities. The Fixtures/Outputs panels are the editor's rails — they
+//! are grown in place, never forked.
 //!
-//! Mode note (Yona, 2026-08-12 gate rulings): mapping lands FIRST;
-//! patching becomes its OWN workbench view later (R5), so there is no
-//! mode segment here and the interim `/patch` page stays untouched until
-//! then. Diving into a fixture is IN-PLACE (no separate screen): the
-//! focused fixture's session mounts with the other fixtures dimmed
-//! inside the same canvas, and the camera snaps to the fixture's frame —
-//! the "snap viewport to fixture" solution.
+//! The DIVE is layer state, not component identity (the one-project-canvas
+//! plan): double-clicking a fixture makes its lamps editable IN PLACE —
+//! same canvas, same camera, no chrome swap. The asset pipeline
+//! ([`mapping_session::MappingAssetPipeline`]) seeds the workbench-owned
+//! session and applies commits; the toolbar morphs between the fixture
+//! and mapping item lists; esc walks the editor ladder and, at its end,
+//! leaves the dive. Patching becomes its own workbench view later (R5) by
+//! mounting the same canvas with different furniture.
 
 pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
 pub(crate) mod mapping_session;
+pub(crate) mod toolbar;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use base64::Engine as _;
 use dioxus::prelude::*;
+use lpa_mapping_editor::{
+    DocOpen, EditorKeyOutcome, EditorViewOptions, Map2dDoc, MapTool, handle_editor_key,
+};
 use lpa_studio_core::{
     ArtifactLocation, AssetEditOp, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
     ProjectEditorOp, ProjectEditorView, UiAction, UiArrangeTransform, UiAssetEditor,
@@ -30,10 +37,16 @@ use lpa_studio_core::{
     UiPatchTarget,
 };
 
-use arrange::{ArrangeCanvasHost, PackSlots, dive_context, refresh_pack_slots};
-use mapping_session::MappingSessionHost;
+use arrange::{DiveHost, PackSlots, ProjectCanvasHost, refresh_pack_slots};
+use mapping_session::{
+    DiveAssetState, MappingAssetPipeline, click_element, save_overlay_action, trigger_download,
+};
+use toolbar::{StatusKind, ToolbarGroup, ToolbarIcon, ToolbarItem, ToolbarStrip};
 
-/// The Mapping view's center: toolbar + arrange canvas.
+/// Monotonic ids for the hidden upload inputs (one per mounted center).
+static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
+
+/// The Mapping view's center: the morphing toolbar + the one canvas.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn EditorShellCenter(
@@ -49,13 +62,20 @@ pub fn EditorShellCenter(
     dive_commits: Signal<u64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The FOCUSED fixture — the DIVE (gate ruling: in-place, no separate
-    // screen): its mapping session mounts in the center with every other
-    // fixture rendered dimmed inside the same canvas, transformed into
-    // the focused doc's space. Entered by double-click on the canvas or
-    // the toolbar button; exited by the breadcrumb. Journal events stamp
-    // every transition.
     let mut focused = dive_focused;
+    // Dive-scoped UI state: the asset pipeline's verdict, the view
+    // toggles, the fit request, and upload plumbing. Held here (not in the
+    // canvas host) so the toolbar and keyboard read the same signals.
+    let dive_state = use_signal(DiveAssetState::default);
+    let view_opts = use_signal(EditorViewOptions::default);
+    let fit_pending = use_signal(|| true);
+    let mut upload_error = use_signal(|| None::<String>);
+    let upload_input_id = use_hook(|| {
+        format!(
+            "lpme-upload-{}",
+            NEXT_UPLOAD_INPUT_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    });
     let Some(surface) = surface else {
         return rsx! {
             div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
@@ -193,7 +213,139 @@ pub fn EditorShellCenter(
         }
     };
 
-    const TOOL: &str = "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-subtle tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-40";
+    // One commit path for every session writer: canvas gestures, editor
+    // keys, and the Props pane all bump the same counter, and the pipeline
+    // applies the session's document once per bump.
+    let mut dive_commits_signal = dive_commits;
+    let on_committed = EventHandler::new(move |()| {
+        let now = *dive_commits_signal.peek();
+        dive_commits_signal.set(now + 1);
+    });
+
+    let dive_ready = *dive_state.read() == DiveAssetState::Ready;
+    let dive_refusal = match &*dive_state.read() {
+        DiveAssetState::Refused(refusal) => Some(refusal.clone()),
+        _ => None,
+    };
+    let dived = focused_editor.is_some();
+
+    // The toolbar: one strip, per-activity item lists (D1 — the morph is
+    // a data swap).
+    let groups = if let Some((_, label, editor)) = &focused_editor {
+        let session_read = dive_session.read();
+        dive_toolbar(
+            label,
+            &session_read.tool,
+            *view_opts.read(),
+            editor,
+            dive_ready,
+            upload_error.read().as_deref(),
+        )
+    } else {
+        fixture_toolbar(
+            selected_has_mapping(&surface, &selected),
+            selected.is_some(),
+            fixtures,
+            arranged,
+        )
+    };
+    let on_toolbar_item = {
+        let adjust = adjust.clone();
+        let arrange_verb = arrange_verb.clone();
+        let selected = selected.clone();
+        let focused_editor = focused_editor.clone();
+        let surface_fixtures: Vec<(NodeId, bool)> = surface
+            .fixtures
+            .iter()
+            .map(|fixture| (fixture.node, fixture.mapping_artifact.is_some()))
+            .collect();
+        let upload_input_id = upload_input_id.clone();
+        let mut dive_session = dive_session;
+        move |id: &'static str| match id {
+            "dive.exit" => exit_focus(&on_action),
+            "arrange.edit-mapping" => {
+                if let Some((_, node, _)) = &selected
+                    && surface_fixtures.iter().any(|(n, has)| n == node && *has)
+                {
+                    enter_focus(&on_action, *node);
+                }
+            }
+            "arrange.rot-ccw" => adjust(&on_action, -15.0, 0.0),
+            "arrange.rot-cw" => adjust(&on_action, 15.0, 0.0),
+            "arrange.shrink" => adjust(&on_action, 0.0, 1.0 / 1.15),
+            "arrange.grow" => adjust(&on_action, 0.0, 1.15),
+            "arrange.undo" => arrange_verb(&on_action, EditorMetaVerb::Undo),
+            "arrange.redo" => arrange_verb(&on_action, EditorMetaVerb::Redo),
+            "tool.select" => dive_session.write().tool = MapTool::Select,
+            "tool.grid" => dive_session.write().tool = MapTool::Grid,
+            "tool.ring" => dive_session.write().tool = MapTool::Ring,
+            "tool.path" => dive_session.write().tool = MapTool::path(),
+            "view.numbers" => {
+                let current = view_opts.peek().numbers;
+                let mut view_opts = view_opts;
+                view_opts.write().numbers = !current;
+            }
+            "view.arrows" => {
+                let current = view_opts.peek().arrows;
+                let mut view_opts = view_opts;
+                view_opts.write().arrows = !current;
+            }
+            "view.live" => {
+                let current = view_opts.peek().live;
+                let mut view_opts = view_opts;
+                view_opts.write().live = !current;
+            }
+            "view.fit-preview" => {
+                let current = view_opts.peek().fit_preview;
+                let mut view_opts = view_opts;
+                view_opts.write().fit_preview = !current;
+            }
+            "file.upload" => click_element(&upload_input_id),
+            "file.download" => {
+                if let Some((_, _, editor)) = &focused_editor
+                    && let Some(text) = editor.content.as_ref().and_then(|content| content.text())
+                {
+                    let pretty = Map2dDoc::from_json(text)
+                        .map(|doc| doc.to_json_pretty())
+                        .unwrap_or_else(|_| text.to_string());
+                    let href = format!(
+                        "data:application/json;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(pretty.as_bytes())
+                    );
+                    trigger_download(&editor.source, &href);
+                }
+            }
+            "save.revert" => {
+                if let Some((_, _, editor)) = &focused_editor {
+                    on_action.call(editor.revert_action());
+                }
+            }
+            "save.save" => on_action.call(save_overlay_action()),
+            _ => {}
+        }
+    };
+
+    // Journal stamping rides the pipeline's action stream: every ApplyBody
+    // is an Edit on the focused node.
+    let pipeline_action = focused_editor.as_ref().map(|(node, _, _)| {
+        let node = *node;
+        EventHandler::new(move |action: UiAction| {
+            if action
+                .op_as::<AssetEditOp>()
+                .is_some_and(|op| matches!(op, AssetEditOp::ApplyBody { .. }))
+            {
+                focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::Edit,
+                    Some(node),
+                    UiEditorMode::Mapping,
+                );
+            }
+            on_action.call(action);
+        })
+    });
+
+    let upload_editor = focused_editor.as_ref().map(|(_, _, editor)| editor.clone());
 
     rsx! {
         div {
@@ -202,10 +354,27 @@ pub fn EditorShellCenter(
             onkeydown: {
                 let arrange_verb = arrange_verb.clone();
                 move |evt: KeyboardEvent| {
-                    // Mode-scoped ⌘Z (ratified): with a fixture focused the
-                    // mapping session owns undo (the MapEditor's own
-                    // handler); the arrange stack answers only in arrange.
+                    // Mode-scoped keys (ratified): dived, the session owns
+                    // the whole editor grammar — and esc's last rung exits
+                    // the dive (Q4). Not dived, the arrange byte stack
+                    // answers ⌘Z alone.
                     if focused.peek().is_some() {
+                        if dived && dive_ready {
+                            let outcome = handle_editor_key(
+                                dive_session,
+                                view_opts,
+                                fit_pending,
+                                on_committed,
+                                &evt,
+                            );
+                            if outcome == EditorKeyOutcome::ExitDive {
+                                exit_focus(&on_action);
+                            }
+                        } else if matches!(evt.data().key(), Key::Escape) {
+                            // A refused or still-loading dive: esc still
+                            // leaves.
+                            exit_focus(&on_action);
+                        }
                         return;
                     }
                     let meta = evt.data().modifiers().meta() || evt.data().modifiers().ctrl();
@@ -225,163 +394,82 @@ pub fn EditorShellCenter(
                     }
                 }
             },
-            // The editor toolbar. Focused: the breadcrumb back to the
-            // arranged space (the MapEditor below brings its own tool
-            // strip). Arrange: transform verbs for the selection, undo /
-            // redo, and the reserved right-end slot for whatever
-            // patching's home turns out to be.
-            if let Some((_, label, _)) = &focused_editor {
-                div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
-                    button {
-                        class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
-                        title: "Back to the arranged space",
-                        onclick: move |_| exit_focus(&on_action),
-                        "‹ Arrange"
-                    }
-                    span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
-                        "{label} · mapping"
-                    }
-                }
-            } else {
-            div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
-                span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
-                    "Arrange"
-                }
-                button {
-                    class: "{TOOL}",
-                    disabled: !selected_has_mapping(&surface, &selected),
-                    title: "Edit the selected fixture's mapping (double-click on the canvas does too)",
-                    onclick: {
-                        let selected = selected.clone();
-                        let surface_fixtures: Vec<(NodeId, bool)> = surface
-                            .fixtures
-                            .iter()
-                            .map(|fixture| (fixture.node, fixture.mapping_artifact.is_some()))
-                            .collect();
-                        move |_| {
-                            if let Some((_, node, _)) = &selected
-                                && surface_fixtures
-                                    .iter()
-                                    .any(|(n, has)| n == node && *has)
-                            {
-                                enter_focus(&on_action, *node);
-                            }
-                        }
-                    },
-                    "edit mapping"
-                }
-                button {
-                    class: "{TOOL}",
-                    disabled: selected.is_none(),
-                    title: "Rotate the selected fixture 15° counter-clockwise",
-                    onclick: {
-                        let adjust = adjust.clone();
-                        move |_| adjust(&on_action, -15.0, 0.0)
-                    },
-                    "⟲ 15°"
-                }
-                button {
-                    class: "{TOOL}",
-                    disabled: selected.is_none(),
-                    title: "Rotate the selected fixture 15° clockwise",
-                    onclick: {
-                        let adjust = adjust.clone();
-                        move |_| adjust(&on_action, 15.0, 0.0)
-                    },
-                    "⟳ 15°"
-                }
-                button {
-                    class: "{TOOL}",
-                    disabled: selected.is_none(),
-                    title: "Shrink the selected fixture",
-                    onclick: {
-                        let adjust = adjust.clone();
-                        move |_| adjust(&on_action, 0.0, 1.0 / 1.15)
-                    },
-                    "−"
-                }
-                button {
-                    class: "{TOOL}",
-                    disabled: selected.is_none(),
-                    title: "Grow the selected fixture",
-                    onclick: {
-                        let adjust = adjust.clone();
-                        move |_| adjust(&on_action, 0.0, 1.15)
-                    },
-                    "+"
-                }
-                span { class: "tw:mx-1 tw:h-4 tw:w-px tw:bg-border-strong" }
-                button {
-                    class: "{TOOL}",
-                    title: "Undo the last arrange edit (⌘Z)",
-                    onclick: {
-                        let arrange_verb = arrange_verb.clone();
-                        move |_| arrange_verb(&on_action, EditorMetaVerb::Undo)
-                    },
-                    "↶"
-                }
-                button {
-                    class: "{TOOL}",
-                    title: "Redo the last undone arrange edit (⇧⌘Z)",
-                    onclick: {
-                        let arrange_verb = arrange_verb.clone();
-                        move |_| arrange_verb(&on_action, EditorMetaVerb::Redo)
-                    },
-                    "↷"
-                }
-                span { class: "tw:ml-auto tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-                    "{fixtures} fixtures · {arranged} arranged"
-                }
-            }
-            }
+            ToolbarStrip { groups, on_item: on_toolbar_item }
             if let Some(error) = surface.editor_meta_error.clone() {
                 div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-status-attention-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-status-attention-foreground",
                     "editor.json refused: {error} — arranging is disabled so the file is never rewritten blind."
                 }
             }
+            if let Some(refusal) = &dive_refusal {
+                // Refuse-don't-rewrite, in place of editability: the
+                // fixture stays a visible sprite, tools stay disabled, and
+                // the stored file is never touched.
+                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-status-attention-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-status-attention-foreground",
+                    "{refusal.message} — this mapping is not being edited, and the stored file has been left exactly as it is."
+                }
+            }
             div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
-                if let Some((node, _, editor)) = focused_editor.clone() {
-                    // The DIVE (gate ruling: no separate screen): the same
-                    // asset-pipeline session (fetch → session → ApplyBody →
-                    // SaveOverlay, refuse-don't-rewrite), with the OTHER
-                    // fixtures rendered dimmed inside the editor's own
-                    // canvas — transformed into the focused doc's space —
-                    // and committed edits stamped into the correlation
-                    // journal at this glue layer.
-                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden",
-                        MappingSessionHost {
-                            editor,
-                            context: dive_context(&surface, &bodies, &pack, node),
-                            external_session: dive_session,
-                            commit_requests: dive_commits,
-                            on_action: {
-                                move |action: UiAction| {
-                                    if action
-                                        .op_as::<AssetEditOp>()
-                                        .is_some_and(|op| matches!(op, AssetEditOp::ApplyBody { .. }))
-                                    {
-                                        focus_journal(
-                                            &on_action,
-                                            UiEditJournalEvent::Edit,
-                                            Some(node),
-                                            UiEditorMode::Mapping,
-                                        );
-                                    }
-                                    on_action.call(action);
-                                }
-                            },
-                        }
+                // The non-visual asset pipeline: fetch → seed the shared
+                // session (echo-suppressed) → apply on commit bumps.
+                if let Some((_, _, editor)) = focused_editor.clone() {
+                    MappingAssetPipeline {
+                        editor,
+                        session: dive_session,
+                        commit_requests: dive_commits,
+                        state: dive_state,
+                        on_action: pipeline_action,
                     }
-                } else if !surface.editor_meta_loaded {
+                }
+                if let Some(editor) = upload_editor {
+                    input {
+                        id: "{upload_input_id}",
+                        class: "lpme-hidden-input",
+                        r#type: "file",
+                        accept: ".json,application/json",
+                        onchange: move |evt| {
+                            let file = evt.files().first().cloned();
+                            let editor = editor.clone();
+                            async move {
+                                let Some(file) = file else { return };
+                                let name = file.name();
+                                match file.read_string().await {
+                                    Ok(text) => match DocOpen::parse(&name, &text) {
+                                        DocOpen::Ready(parsed) => {
+                                            upload_error.set(None);
+                                            on_action.call(editor.apply_action(&parsed.to_json()));
+                                        }
+                                        // A file this build cannot read is
+                                        // never applied to the fixture.
+                                        DocOpen::Refused(refusal) => {
+                                            upload_error.set(Some(refusal.message));
+                                        }
+                                    },
+                                    Err(error) => {
+                                        upload_error.set(Some(format!("could not read {name}: {error}")));
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+                if !surface.editor_meta_loaded && !dived {
                     div { class: "tw:flex tw:flex-1 tw:items-center tw:justify-center",
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Loading the arrangement…" }
                     }
                 } else {
-                    ArrangeCanvasHost {
+                    ProjectCanvasHost {
                         surface: surface.clone(),
                         bodies,
                         selection: selection.clone(),
                         pack,
+                        dive: focused_editor.as_ref().map(|(node, _, _)| DiveHost {
+                            node: *node,
+                            session: dive_session,
+                            editable: dive_ready,
+                        }),
+                        view_opts,
+                        fit_pending,
+                        on_committed,
                         on_focus: move |node| enter_focus(&on_action, node),
                         on_action,
                     }
@@ -389,6 +477,276 @@ pub fn EditorShellCenter(
             }
         }
     }
+}
+
+/// The fixture activity's toolbar: breadcrumb root, arrange verbs for the
+/// selection, history, and the counts readout.
+fn fixture_toolbar(
+    can_edit_mapping: bool,
+    has_selection: bool,
+    fixtures: usize,
+    arranged: usize,
+) -> Vec<ToolbarGroup> {
+    vec![
+        ToolbarGroup {
+            id: "breadcrumb",
+            trailing: false,
+            items: vec![ToolbarItem::Status {
+                text: "Project".to_string(),
+                kind: StatusKind::Label,
+            }],
+        },
+        ToolbarGroup {
+            id: "arrange",
+            trailing: false,
+            items: vec![
+                ToolbarItem::Button {
+                    id: "arrange.edit-mapping",
+                    icon: None,
+                    label: Some("edit mapping".to_string()),
+                    title:
+                        "Edit the selected fixture's mapping (double-click on the canvas does too)"
+                            .to_string(),
+                    active: false,
+                    enabled: can_edit_mapping,
+                },
+                ToolbarItem::Button {
+                    id: "arrange.rot-ccw",
+                    icon: None,
+                    label: Some("⟲ 15°".to_string()),
+                    title: "Rotate the selected fixture 15° counter-clockwise".to_string(),
+                    active: false,
+                    enabled: has_selection,
+                },
+                ToolbarItem::Button {
+                    id: "arrange.rot-cw",
+                    icon: None,
+                    label: Some("⟳ 15°".to_string()),
+                    title: "Rotate the selected fixture 15° clockwise".to_string(),
+                    active: false,
+                    enabled: has_selection,
+                },
+                ToolbarItem::Button {
+                    id: "arrange.shrink",
+                    icon: None,
+                    label: Some("−".to_string()),
+                    title: "Shrink the selected fixture".to_string(),
+                    active: false,
+                    enabled: has_selection,
+                },
+                ToolbarItem::Button {
+                    id: "arrange.grow",
+                    icon: None,
+                    label: Some("+".to_string()),
+                    title: "Grow the selected fixture".to_string(),
+                    active: false,
+                    enabled: has_selection,
+                },
+            ],
+        },
+        ToolbarGroup {
+            id: "history",
+            trailing: false,
+            items: vec![
+                ToolbarItem::Button {
+                    id: "arrange.undo",
+                    icon: None,
+                    label: Some("↶".to_string()),
+                    title: "Undo the last arrange edit (⌘Z)".to_string(),
+                    active: false,
+                    enabled: true,
+                },
+                ToolbarItem::Button {
+                    id: "arrange.redo",
+                    icon: None,
+                    label: Some("↷".to_string()),
+                    title: "Redo the last undone arrange edit (⇧⌘Z)".to_string(),
+                    active: false,
+                    enabled: true,
+                },
+            ],
+        },
+        ToolbarGroup {
+            id: "counts",
+            trailing: true,
+            items: vec![ToolbarItem::Status {
+                text: format!("{fixtures} fixtures · {arranged} arranged"),
+                kind: StatusKind::Mono,
+            }],
+        },
+    ]
+}
+
+/// The dive's toolbar: breadcrumb (root exits), tools, view toggles, and
+/// the save cluster — ONE chrome row total.
+fn dive_toolbar(
+    label: &str,
+    tool: &MapTool,
+    opts: EditorViewOptions,
+    editor: &UiAssetEditor,
+    editable: bool,
+    upload_error: Option<&str>,
+) -> Vec<ToolbarGroup> {
+    let dirty = editor.content.as_ref().is_some_and(|content| content.dirty);
+    let has_content = editor
+        .content
+        .as_ref()
+        .is_some_and(|content| content.text().is_some());
+    let mut save_items = Vec::new();
+    if let Some(failure) = &editor.failure {
+        save_items.push(ToolbarItem::Status {
+            text: failure.clone(),
+            kind: StatusKind::Attention,
+        });
+    }
+    if let Some(failure) = upload_error {
+        save_items.push(ToolbarItem::Status {
+            text: failure.to_string(),
+            kind: StatusKind::Attention,
+        });
+    }
+    if editor.in_flight {
+        save_items.push(ToolbarItem::Status {
+            text: "applying…".to_string(),
+            kind: StatusKind::Mono,
+        });
+    }
+    save_items.extend([
+        ToolbarItem::Button {
+            id: "file.upload",
+            icon: Some(ToolbarIcon::Upload),
+            label: None,
+            title: "load a .map2d.json from disk (applies to this fixture)".to_string(),
+            active: false,
+            enabled: editable,
+        },
+        ToolbarItem::Button {
+            id: "file.download",
+            icon: Some(ToolbarIcon::Download),
+            label: None,
+            title: "download the current mapping document".to_string(),
+            active: false,
+            enabled: has_content,
+        },
+        ToolbarItem::Status {
+            text: if dirty { "Unsaved" } else { "Saved" }.to_string(),
+            kind: StatusKind::Mono,
+        },
+        ToolbarItem::Button {
+            id: "save.revert",
+            icon: Some(ToolbarIcon::Revert),
+            label: Some("Revert".to_string()),
+            title: "discard the applied edit and return to the saved file".to_string(),
+            active: false,
+            enabled: dirty,
+        },
+        ToolbarItem::Button {
+            id: "save.save",
+            icon: Some(ToolbarIcon::Save),
+            label: Some("Save".to_string()),
+            title: "save the project (writes the applied mapping to disk)".to_string(),
+            active: false,
+            enabled: dirty,
+        },
+    ]);
+    vec![
+        ToolbarGroup {
+            id: "breadcrumb",
+            trailing: false,
+            items: vec![
+                ToolbarItem::Link {
+                    id: "dive.exit",
+                    label: "Project".to_string(),
+                    title: "Back to the project canvas (esc)".to_string(),
+                },
+                ToolbarItem::Status {
+                    text: format!("▸ {label}"),
+                    kind: StatusKind::Label,
+                },
+            ],
+        },
+        ToolbarGroup {
+            id: "tools",
+            trailing: false,
+            items: vec![
+                ToolbarItem::Button {
+                    id: "tool.select",
+                    icon: Some(ToolbarIcon::Select),
+                    label: None,
+                    title: "select (V)".to_string(),
+                    active: matches!(tool, MapTool::Select),
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "tool.grid",
+                    icon: Some(ToolbarIcon::Grid),
+                    label: None,
+                    title: "grid tool (G): click to drop a default grid".to_string(),
+                    active: matches!(tool, MapTool::Grid),
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "tool.ring",
+                    icon: Some(ToolbarIcon::Ring),
+                    label: None,
+                    title: "ring tool (R): click to drop a default ring".to_string(),
+                    active: matches!(tool, MapTool::Ring),
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "tool.path",
+                    icon: Some(ToolbarIcon::Path),
+                    label: None,
+                    title: "path tool (P): click vertices, Enter finishes".to_string(),
+                    active: matches!(tool, MapTool::Path { .. }),
+                    enabled: editable,
+                },
+            ],
+        },
+        ToolbarGroup {
+            id: "views",
+            trailing: false,
+            items: vec![
+                ToolbarItem::Button {
+                    id: "view.numbers",
+                    icon: Some(ToolbarIcon::Numbers),
+                    label: None,
+                    title: "wiring numbers (N)".to_string(),
+                    active: opts.numbers,
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "view.arrows",
+                    icon: Some(ToolbarIcon::Arrows),
+                    label: None,
+                    title: "wiring arrows (A)".to_string(),
+                    active: opts.arrows,
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "view.live",
+                    icon: None,
+                    label: Some("live".to_string()),
+                    title: "live output colors (L)".to_string(),
+                    active: opts.live,
+                    enabled: editable,
+                },
+                ToolbarItem::Button {
+                    id: "view.fit-preview",
+                    icon: Some(ToolbarIcon::FitPreview),
+                    label: None,
+                    title: "texture-frame preview — how the doc fits shader space (F)".to_string(),
+                    active: opts.fit_preview,
+                    enabled: editable,
+                },
+            ],
+        },
+        ToolbarGroup {
+            id: "save",
+            trailing: true,
+            items: save_items,
+        },
+    ]
 }
 
 /// Prebuild the arrange-op factory: `editor.json` artifact + the fixture
@@ -419,8 +777,8 @@ fn arrange_dispatch(
 
 /// Every fixture mapping editor the snapshot carries, keyed by artifact:
 /// resolved body text (the canvas's geometry source) plus the face-editor
-/// DTO whole (the focused mode's fetch/apply/refusal wiring). Same bytes
-/// the face embeds edit; the canvas renders placeholders until they land.
+/// DTO whole (the dive's fetch/apply/refusal wiring). Same bytes the face
+/// embeds edited; the canvas renders placeholders until they land.
 type MappingAssets = (
     BTreeMap<ArtifactLocation, String>,
     BTreeMap<ArtifactLocation, UiAssetEditor>,
