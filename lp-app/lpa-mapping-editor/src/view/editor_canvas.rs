@@ -564,23 +564,16 @@ pub fn EditorCanvas(
             },
             onwheel: move |evt| {
                 evt.prevent_default();
-                let delta = evt.data().delta();
-                let (dx, dy) = match delta {
-                    dioxus::html::geometry::WheelDelta::Pixels(v) => (v.x as f32, v.y as f32),
-                    dioxus::html::geometry::WheelDelta::Lines(v) => {
-                        (v.x as f32 * 16.0, v.y as f32 * 16.0)
+                // The house wheel grammar, shared with the arrange level
+                // (one control scheme via one code).
+                match crate::view::wheel::wheel_gesture(&evt) {
+                    crate::view::wheel::WheelGesture::Zoom { factor } => {
+                        let view_point = event_view_point_wheel(&anchor, &evt);
+                        camera.write().zoom_at(view_point, factor);
                     }
-                    dioxus::html::geometry::WheelDelta::Pages(v) => {
-                        (v.x as f32 * 100.0, v.y as f32 * 100.0)
+                    crate::view::wheel::WheelGesture::Pan { dx, dy } => {
+                        camera.write().pan(dx, dy);
                     }
-                };
-                let modifiers = evt.data().modifiers();
-                if modifiers.ctrl() || modifiers.meta() {
-                    let factor = (1.004f32).powf(-dy);
-                    let view_point = event_view_point_wheel(&anchor, &evt);
-                    camera.write().zoom_at(view_point, factor);
-                } else {
-                    camera.write().pan(-dx, -dy);
                 }
             },
             defs {

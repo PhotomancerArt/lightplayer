@@ -6,3 +6,4 @@ pub mod map_editor;
 pub mod object_list;
 pub mod properties_popover;
 pub mod reference;
+pub mod wheel;
