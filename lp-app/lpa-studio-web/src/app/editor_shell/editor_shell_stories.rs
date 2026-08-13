@@ -1,14 +1,15 @@
-//! Arrange-canvas stories: the conceptual project space at its three
-//! honesty levels (loaded geometry, placeholder blocks, peach strips) and
-//! the auto-pack row. Real mini-dome map2d bytes from the embedded
-//! example feed the loaded fixtures — the same resolver the device runs.
+//! Fixture-view stories on the one crate canvas: the project space at its
+//! three honesty levels (loaded geometry, placeholder blocks, peach
+//! strips) and the auto-pack row. Real mini-dome map2d bytes from the
+//! embedded example feed the loaded fixtures — the same resolver the
+//! device runs.
 
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use super::arrange_canvas::ArrangeCanvas;
+use super::arrange::ArrangeCanvasHost;
 use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
 use lpa_studio_core::{
     ArtifactLocation, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
@@ -69,7 +70,7 @@ fn canvas_frame(body: Element) -> Element {
 fn arrange_canvas_mini_dome() -> Element {
     let (surface, bodies) = dome_canvas_inputs();
     canvas_frame(rsx! {
-        ArrangeCanvas {
+        ArrangeCanvasHost {
             surface,
             bodies,
             selection: Some(UiPatchTarget::Instance {
@@ -105,10 +106,10 @@ fn editor_shell_focused_mapping() -> Element {
         uniforms: Vec::new(),
         agent: None,
     };
-    let context = super::arrange_canvas::dive_context(
+    let context = super::arrange::dive_context(
         &surface,
         &bodies,
-        &super::arrange_canvas::PackSlots::new(),
+        &super::arrange::PackSlots::new(),
         lpa_studio_core::NodeId::new(2),
     );
     canvas_frame(rsx! {
@@ -151,7 +152,7 @@ fn arrange_canvas_mixed_states() -> Element {
     let peach = peach_surface();
     surface.fixtures.extend(peach.fixtures);
     canvas_frame(rsx! {
-        ArrangeCanvas {
+        ArrangeCanvasHost {
             surface,
             bodies,
             selection: None,
