@@ -3504,6 +3504,64 @@ fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
     face.brightness
 }
 
+/// A gallery example must open with no warning badge on any card.
+///
+/// The badge that used to be here was the untouched panel knob: a value
+/// uniform bound to a bus channel nobody writes yet, running on its declared
+/// default. Six of the packages wore one on their shader card the moment
+/// they opened (`reach`/`sparks`, `scale`, `tail`, `depth`, `count`/`speed`)
+/// while the panel's own control for the very same channel read "default" —
+/// `modules.md` R6 calls that an invitation, and the engine now agrees
+/// (`unwritten_channel_at_rest`).
+///
+/// Warning tone only, deliberately: `fyeah-sign`'s radio card reports an
+/// Error here because this in-process server carries no radio service, which
+/// is a property of the harness rather than of the package.
+#[test]
+fn no_gallery_example_opens_onto_a_warning_badge() {
+    fn warnings(items: &[crate::ProjectNodeTreeItem], found: &mut Vec<String>) {
+        for item in items {
+            if item.status.tone == crate::ProjectNodeStatusTone::Warning {
+                found.push(format!(
+                    "{} [{}]: {}",
+                    item.label,
+                    item.kind,
+                    item.status.detail.clone().unwrap_or_default()
+                ));
+            }
+            warnings(&item.children, found);
+        }
+    }
+
+    for example in crate::app::home::embedded_examples() {
+        let server = Rc::new(RefCell::new(example_e2e_server(example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+        let mut found = Vec::new();
+        warnings(&project_editor(&snapshot).tree.roots, &mut found);
+        assert!(
+            found.is_empty(),
+            "{}: opens onto {} warning badge(s): {found:?}",
+            example.id,
+            found.len()
+        );
+    }
+}
+
 /// The patch surface (D36, slice 2), end to end at BOTH grains: on
 /// mini-dome (instance grain: two named outputs, sectors + doors,
 /// instance chips with strides) and on peach-1d (range grain: one unnamed

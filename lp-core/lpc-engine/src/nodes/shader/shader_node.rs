@@ -27,7 +27,7 @@ use lpc_model::{
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
-use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
+use crate::dataflow::resolver::{QueryKey, ResolveError, resolver::model_value_to_lps_value_f32};
 use crate::dataflow::timebase::PhasorKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
@@ -1982,11 +1982,15 @@ fn resolve_gradient_config(
 /// Resolve one consumed shader input, falling back to its authored default
 /// when the binding fails to resolve — with the failure *reported*, not
 /// swallowed. An unbound slot resolves `Ok` through the authored-default
-/// production, so any `Err` here means a genuinely broken binding (no bus
-/// provider, ambiguous providers, dangling target, cycle); returning the
-/// default silently would freeze e.g. a `bus:time`-driven shader with zero
-/// diagnostics. Shared by the visual and compute shader nodes; `context`
-/// labels error messages ("visual shader" / "compute shader").
+/// production, so an `Err` here means a broken binding (ambiguous
+/// providers, dangling target, cycle) or a channel nothing writes;
+/// returning the default silently would freeze e.g. a `bus:time`-driven
+/// shader with zero diagnostics. Shared by the visual and compute shader
+/// nodes; `context` labels error messages ("visual shader" / "compute
+/// shader").
+///
+/// The one `Err` shape that is *not* reported is the panel-knob idiom at
+/// rest — see [`unwritten_channel_at_rest`].
 ///
 /// That "an unbound slot resolves `Ok`" is a claim about the *host*, not
 /// this function: it holds only because
@@ -2025,6 +2029,7 @@ pub(super) fn resolve_or_default_input(
         slot: slot_path,
     }) {
         Ok(production) => (Some(production), None),
+        Err(e) if unwritten_channel_at_rest(slot, &e) => (None, None),
         Err(e) => (None, Some(e.message)),
     };
     let materialized = materialize_shader_input(
@@ -2050,6 +2055,52 @@ pub(super) fn resolve_or_default_input(
         Err(e) => return Err(NodeError::msg(format!("{context} input {name:?}: {e}"))),
     };
     Ok((value, failure))
+}
+
+/// Whether a failed consumed-slot resolve is the **panel-knob idiom at
+/// rest** rather than a fault worth a badge: nothing anywhere in the scope
+/// chain writes the channel this value input reads, so it runs on its own
+/// authored default.
+///
+/// That is the shipped shape of a knob — a shader declares `bus:reach`, the
+/// panel derives a control for the channel (panel.md P1), and until someone
+/// touches it the control sits in `UiPanelControlState::ReadDefault` while
+/// the uniform takes the slot's default. `modules.md` R6 rules exactly that
+/// healthy: "an unfilled public input is an *invitation*, not an error". The
+/// node badge was the one surface still calling it a warning, so every
+/// gallery example that shipped a knob opened onto a Warn (`reach`/`sparks`,
+/// `scale`, `tail`, `depth`, `count`) — the panel said "default", the card
+/// said "problem". It is the same conflation
+/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.md` fixed one step
+/// earlier, for an *unbound* uniform.
+///
+/// Deliberately narrow, so the diagnosable faults stay loud:
+///
+/// - **Only the no-provider shape.** A channel with a writer whose value
+///   this uniform cannot hold still warns (the kind mismatch above, D12 and
+///   every un-migrated `float time`), as do ambiguous writers, cycles, and
+///   dangling non-bus targets.
+/// - **Only the value kind.** A value slot always has a scalar answer to
+///   run on; a `map` or `buffer` does not — the empty fill materialization
+///   invents is not authored intent — so a typo'd channel name on one of
+///   those keeps reporting.
+///
+/// The kind is the whole test on purpose. "Declares its own `default`" would
+/// be the truer statement of intent, but it is not observable here: the
+/// authored side's absent `default` option reads as `0.0` through
+/// [`sync_optional_value_from_authored`], which then *creates* the runtime
+/// option, so every value slot carries a default by the time this runs.
+/// Consequence worth naming: a typo'd channel on a **value** input is now
+/// silent, diagnosed by its panel control reading "default" rather than by a
+/// badge. Making it loud again needs the authored-vs-materialized
+/// distinction to survive the sync first.
+///
+/// The `phasor` and `palette` paths need no such test: they only resolve at
+/// all once `consumed_slot_bus_provenance` finds a scope that writes the
+/// channel, so "nothing writes it anywhere" already returns their slot-local
+/// config with no failure.
+fn unwritten_channel_at_rest(slot: &ShaderSlotDef, error: &ResolveError) -> bool {
+    error.is_no_bus_provider() && matches!(slot.kind.value(), ShaderSlotKind::Value)
 }
 
 /// Fold the per-slot resolve failures into one status message, or `None`
@@ -2106,6 +2157,49 @@ fn validate_shader_visual_product(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod input_status_policy_tests {
+    use super::*;
+
+    fn error(message: &str) -> ResolveError {
+        ResolveError::new(message)
+    }
+
+    /// The whole policy on one screen: only the no-provider shape, and only
+    /// the value kind. Tested on the predicate rather than end to end for
+    /// `map`/`buffer` because both kinds declare an array the composed shader
+    /// source has to consume — the shape of the def, not the tone rule, would
+    /// be doing the work.
+    #[test]
+    fn only_a_value_input_rests_on_an_unwritten_channel() {
+        let no_provider = error("no bus provider for channel ChannelName(\"reach\")");
+        let value = ShaderSlotDef::value_f32("Reach", "", 0.35, None);
+        assert!(unwritten_channel_at_rest(&value, &no_provider));
+
+        // Every other failure shape is a fault the card must keep naming.
+        for message in [
+            "ambiguous bus binding (equal top priority) for channel ChannelName(\"reach\")",
+            "resolve cycle at ConsumedSlot",
+            "NodeProp target node not found: /show/knob",
+        ] {
+            assert!(
+                !unwritten_channel_at_rest(&value, &error(message)),
+                "must stay loud: {message}"
+            );
+        }
+
+        // Non-value kinds: an empty map / zeroed buffer is not authored
+        // intent, so a typo'd channel name on one keeps reporting.
+        let map = ShaderSlotDef::map_u32_native(
+            "lp::fluid::Emitter",
+            ShaderSlotMappingDef::sentinel(4, "id", 0),
+        );
+        assert!(!unwritten_channel_at_rest(&map, &no_provider));
+        let buffer = ShaderSlotDef::buffer_builtin("f32", 8);
+        assert!(!unwritten_channel_at_rest(&buffer, &no_provider));
+    }
 }
 
 #[cfg(test)]
