@@ -46,11 +46,38 @@ fn instance(path: &str, label: &str, start: u32, lamps: u32, stride: u32) -> UiP
         start,
         lamps,
         stride,
+        // Stamped by `finish_surface`, the way `build_patch_surface`
+        // derives it in production.
+        placed: false,
     }
+}
+
+/// What `build_patch_surface` stamps in production: per-instance placed
+/// state from the fixture's runs, and a settled editor.json (stories show
+/// the loaded state; the arrange facts default to unarranged).
+fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
+    for fixture in &mut surface.fixtures {
+        let cells = fixture.patch.cells.clone();
+        for instance in &mut fixture.instances {
+            instance.placed = cells.iter().any(|cell| {
+                cell.source_start < instance.start + instance.lamps
+                    && cell.source_start + cell.lamps > instance.start
+            });
+        }
+        fixture.arrange = Some(lpa_studio_core::UiArrangeMeta::default());
+    }
+    surface.editor_meta_loaded = true;
+    surface.editor_meta_artifact = Some(lpa_studio_core::editor_meta_artifact());
+    surface
 }
 
 /// The mini-dome's shape: two named outputs sharing sectors and doors.
 pub(crate) fn mini_dome_surface(contested: bool) -> UiPatchSurface {
+    let surface = build_mini_dome_surface(contested);
+    finish_surface(surface)
+}
+
+fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
     let mut sector2 = cell("dome:0:60:0", "dome", 60, 30, 0);
     sector2.contested = contested;
     let mut door0 = cell("doors:0:0:30", "doors", 0, 9, 30);
@@ -153,6 +180,7 @@ pub(crate) fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                         )
                     })
                     .collect(),
+                arrange: None,
             },
             UiPatchSurfaceFixture {
                 node: NodeId::new(3),
@@ -175,14 +203,20 @@ pub(crate) fn mini_dome_surface(contested: bool) -> UiPatchSurface {
                 instances: (0..3)
                     .map(|k| instance(&format!("/door/{k}"), &format!("door {k}"), k * 9, 9, 3))
                     .collect(),
+                arrange: None,
             },
         ],
+        ..Default::default()
     }
 }
 
 /// The peach: one output, two fixtures, NO instance grain (format-1 range
 /// entries over docs without ids) — the surface's second first-class shape.
 pub(crate) fn peach_surface() -> UiPatchSurface {
+    finish_surface(build_peach_surface())
+}
+
+fn build_peach_surface() -> UiPatchSurface {
     UiPatchSurface {
         outputs: vec![UiPatchSurfaceOutput {
             node: NodeId::new(10),
@@ -231,6 +265,7 @@ pub(crate) fn peach_surface() -> UiPatchSurface {
                     single_output: true,
                 },
                 instances: Vec::new(),
+                arrange: None,
             },
             UiPatchSurfaceFixture {
                 node: NodeId::new(3),
@@ -247,8 +282,10 @@ pub(crate) fn peach_surface() -> UiPatchSurface {
                     single_output: true,
                 },
                 instances: Vec::new(),
+                arrange: None,
             },
         ],
+        ..Default::default()
     }
 }
 
