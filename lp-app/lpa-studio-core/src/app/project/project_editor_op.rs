@@ -16,6 +16,15 @@ pub enum ProjectEditorOp {
     PatchSelect {
         target: Option<crate::UiPatchTarget>,
     },
+    /// Record an event into the undo-correlation journal (unified-editor
+    /// P2): node/mode switches, and the mapping session's step commits
+    /// observed at the shell layer (P5's glue — `lpa-mapping-editor`
+    /// stays project-unaware). Applied synchronously.
+    EditorJournal {
+        event: crate::UiEditJournalEvent,
+        node: Option<lpc_model::NodeId>,
+        mode: crate::UiEditorMode,
+    },
 }
 
 impl ControllerOp for ProjectEditorOp {
@@ -36,6 +45,11 @@ impl ControllerOp for ProjectEditorOp {
                 "Point the patch surface's selection.",
                 ActionPriority::Tertiary,
             ),
+            Self::EditorJournal { .. } => ActionMeta::new(
+                "Record editor event",
+                "Stamp a node/mode switch or edit into the undo journal.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -47,7 +61,10 @@ impl ControllerOp for ProjectEditorOp {
         // `NodeUi` is likewise a purely local mutation: the handler never
         // awaits, so the deadline never engages.
         match self {
-            Self::Focus | Self::NodeUi(_) | Self::PatchSelect { .. } => ActionClass::Foreground {
+            Self::Focus
+            | Self::NodeUi(_)
+            | Self::PatchSelect { .. }
+            | Self::EditorJournal { .. } => ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             },
         }

@@ -1,9 +1,10 @@
-//! The fixture face's in-place mapping editor: the embeddable
-//! [`MapEditor`] wired to the asset pipeline — fetch the `.map2d.json`
-//! body, edit locally (editor-owned undo), apply committed documents
-//! whole-body (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`,
-//! Revert = drop the applied edit. The "one home" flip: this mounts inside
-//! the fixture face's output section, no separate pane.
+//! The unified editor's mapping session host (the fixture-face embed's
+//! asset wiring, re-homed by R3): the embeddable [`MapEditor`] wired to
+//! the asset pipeline — fetch the `.map2d.json` body, edit locally
+//! (editor-owned undo), apply committed documents whole-body
+//! (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`, Revert =
+//! drop the applied edit. Mounts in the Mapping view's center as the
+//! DIVE: the neighbour fixtures ride along as a dimmed context layer.
 //!
 //! Refuse-don't-rewrite: a body this build cannot parse — malformed, or
 //! written by a newer LightPlayer — renders as a refusal instead of an
@@ -17,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use base64::Engine as _;
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Download, Upload};
-use lpa_mapping_editor::{DocOpen, DocRefusal, EditorViewOptions, Map2dDoc, MapEditor};
+use lpa_mapping_editor::{DocOpen, DocRefusal, Map2dDoc, MapEditor};
 use lpa_studio_core::{UiAction, UiAssetEditor};
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -27,17 +28,22 @@ static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn MappingAssetEditor(
+pub fn MappingSessionHost(
     editor: UiAssetEditor,
-    /// Face-owned view options (the output section's toggle bar).
+    /// Neighbour fixtures, already in this document's space (dimmed
+    /// context under the dive).
     #[props(default)]
-    shared_view: Option<Signal<EditorViewOptions>>,
-    /// Live lamp colors by wiring index (the face's control preview feed).
+    context: Vec<lpa_mapping_editor::ContextFixture>,
+    /// The workbench-owned session, shared with the Fixtures tree and the
+    /// Props pane (one selection, one document).
     #[props(default)]
-    live_colors: Vec<[u8; 3]>,
-    /// Bumped by the face to request a zoom-to-fit (full-page expand).
+    external_session: Option<Signal<lpa_mapping_editor::MapEditorSession>>,
+    /// Bumped by OUTSIDE editors of the shared session (the Props pane):
+    /// each bump applies the session's document through the SAME
+    /// echo-suppressed pipeline as a canvas commit — undo history
+    /// survives the round-trip either way.
     #[props(default)]
-    refit_epoch: u64,
+    commit_requests: Option<Signal<u64>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // One-shot base-body fetch per artifact (the code editor's guard).
@@ -111,6 +117,19 @@ pub fn MappingAssetEditor(
         }
     };
 
+    // Props-pane commits: same pipeline, driven by a bump instead of the
+    // canvas's own callback (plain data crosses the dock boundary, never
+    // handlers).
+    let mut seen_commit = use_signal(|| commit_requests.map(|requests| *requests.peek()));
+    if let (Some(requests), Some(session)) = (commit_requests, external_session) {
+        let now = *requests.read();
+        if *seen_commit.peek() != Some(now) {
+            seen_commit.set(Some(now));
+            let json = session.peek().doc().to_json();
+            on_doc_change(json);
+        }
+    }
+
     // File in/out: mappings are worth keeping as local files. Download is a
     // data-URL of the current (applied) body, pretty-printed; upload parses
     // the picked file and applies it whole-body — the editor re-seeds from
@@ -134,7 +153,7 @@ pub fn MappingAssetEditor(
     let upload_editor = editor.clone();
 
     rsx! {
-        div { class: "lpme-face-editor",
+        div { class: "lpme-dive-editor",
             if let Some(refusal) = parse_failure() {
                 div { class: "lpme-refusal",
                     div { class: "lpme-refusal-message", "{refusal.message}" }
@@ -146,21 +165,20 @@ pub fn MappingAssetEditor(
                 MapEditor {
                     doc_epoch: epoch,
                     doc,
-                    shared_view,
-                    live_colors: live_colors.clone(),
-                    refit_epoch,
+                    context: context.clone(),
+                    external_session,
                     on_doc_change,
                 }
-                div { class: "lpme-face-editor-bar",
+                div { class: "lpme-dive-editor-bar",
                     span { class: "lpme-status", "{editor.source}" }
                     if editor.in_flight {
                         span { class: "lpme-status", "applying…" }
                     }
                     if let Some(failure) = &editor.failure {
-                        span { class: "lpme-face-editor-failure", "{failure}" }
+                        span { class: "lpme-dive-editor-failure", "{failure}" }
                     }
                     if let Some(failure) = upload_error() {
-                        span { class: "lpme-face-editor-failure", "{failure}" }
+                        span { class: "lpme-dive-editor-failure", "{failure}" }
                     }
                     div { class: "lpme-spacer" }
                     button {
@@ -248,7 +266,7 @@ pub fn MappingAssetEditor(
                     }
                 }
             } else {
-                div { class: "lpme-face-editor-loading", "loading {editor.source}…" }
+                div { class: "lpme-dive-editor-loading", "loading {editor.source}…" }
             }
         }
     }

@@ -15,6 +15,13 @@
 //!
 //! Read-only in P5: the DTO carries selection TARGETS (stable strings the
 //! ui-state stores), not slot addresses. P6 fills in the verb actions.
+//!
+//! Since the unified-editor pass this surface is also the **editor shell's**
+//! view DTO (extend, don't fork): the same fixtures/outputs feed the
+//! workbench panels and the Arrange canvas, and the surface carries the
+//! project-level `editor.json` facts — per-fixture [`UiArrangeMeta`] plus
+//! the loaded-flag/artifact pair pages drive the editor-meta prefetch from
+//! (never hand-code a fetch a flag doesn't ask for — the #409 lesson).
 
 use lpc_model::NodeId;
 
@@ -29,6 +36,16 @@ pub struct UiPatchSurface {
     /// Every producing fixture on any of those wires, with its runs and its
     /// instance table.
     pub fixtures: Vec<UiPatchSurfaceFixture>,
+    /// The project-level `editor.json` settled locally (cached content, or
+    /// the file is known absent). While false, pages dispatch
+    /// [`crate::EditorMetaFetchOp`] against [`Self::editor_meta_artifact`]
+    /// and fixtures carry `arrange: None`.
+    pub editor_meta_loaded: bool,
+    /// A present-but-unreadable `editor.json` (newer format, parse error).
+    /// Arrange edits refuse rather than rewrite over it.
+    pub editor_meta_error: Option<String>,
+    /// Where `editor.json` lives — the prefetch and write target.
+    pub editor_meta_artifact: Option<lpc_model::ArtifactLocation>,
 }
 
 impl UiPatchSurface {
@@ -104,6 +121,10 @@ pub struct UiPatchSurfaceFixture {
     /// (the peach), which the surface renders honestly rather than
     /// inventing instances.
     pub instances: Vec<UiPatchInstance>,
+    /// The fixture's Arrange-canvas facts from `editor.json`. `None` until
+    /// the editor-meta fetch settles (see
+    /// [`UiPatchSurface::editor_meta_loaded`]).
+    pub arrange: Option<UiArrangeMeta>,
 }
 
 /// One addressable node of a fixture's object tree: an instance (or a
@@ -121,6 +142,56 @@ pub struct UiPatchInstance {
     /// The rotation stride the UI steps offsets by (the addressed node's
     /// shape stride — a polygon door's lamps-per-side).
     pub stride: u32,
+    /// Some patch entry places this instance's lamps on a wire (derived
+    /// from the fixture's resolved runs, never stored) — the tree's
+    /// mapped/unmapped dot.
+    pub placed: bool,
+}
+
+/// A fixture's Arrange-canvas placement facts, from the project-level
+/// `editor.json` — presentation only, NEVER a sampling input.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UiArrangeMeta {
+    /// The fixture has a `"mapping"` entry in `editor.json`. False = it has
+    /// never been dragged: the canvas auto-packs it in the bottom row, and
+    /// the first drag writes its entry.
+    pub arranged: bool,
+    /// Placement in the conceptual space (identity while unarranged).
+    pub transform: UiArrangeTransform,
+    /// Cached placeholder footprint (doc-space bbox + lamps) for rendering
+    /// the fixture before its map2d body loads. `None` = never cached; the
+    /// canvas falls back to the fixture's lamp count alone.
+    pub footprint: Option<UiArrangeFootprint>,
+}
+
+/// Translate + rotate + uniform scale, no shear (ratified) — the DTO twin
+/// of [`lpc_mapping::EditorTransform`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiArrangeTransform {
+    /// Translation in doc-space units.
+    pub t: [f64; 2],
+    /// Rotation in degrees.
+    pub r: f64,
+    /// Uniform scale.
+    pub s: f64,
+}
+
+impl Default for UiArrangeTransform {
+    fn default() -> Self {
+        Self {
+            t: [0.0, 0.0],
+            r: 0.0,
+            s: 1.0,
+        }
+    }
+}
+
+/// The cached placeholder facts mirrored from `editor.json`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiArrangeFootprint {
+    /// `[x, y, w, h]` in the fixture's own doc space.
+    pub bbox: [f64; 4],
+    pub lamps: u32,
 }
 
 /// What the surface's one shared selection points at (P5: highlight only;
@@ -137,6 +208,13 @@ pub enum UiPatchTarget {
     Instance { node: NodeId, path: String },
     /// A whole fixture.
     Fixture { node: NodeId },
+    /// A fixture-relative lamp range (the range-grain fixtures' selection
+    /// unit — the peach; `count: None` = to the end).
+    Range {
+        node: NodeId,
+        start: u32,
+        count: Option<u32>,
+    },
 }
 
 /// Parse a fixture's map2d body into its instance table.
@@ -198,6 +276,9 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
                 start: span.start,
                 lamps: span.count,
                 stride,
+                // Derived against the fixture's resolved runs at surface
+                // build; parsing alone cannot know.
+                placed: false,
             })
         })
         .collect()

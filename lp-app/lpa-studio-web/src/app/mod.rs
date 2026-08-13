@@ -11,6 +11,7 @@ pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_editor_stories;
 pub mod docs;
+pub mod editor_shell;
 pub mod home;
 pub mod layout;
 #[cfg(feature = "stories")]

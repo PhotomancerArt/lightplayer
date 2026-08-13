@@ -130,6 +130,10 @@ pub(crate) fn LampView(
 
 /// Live lamp colors indexed by wiring index — the same sample decode the
 /// display renderer uses, packaged for the mapping editor's live view.
+#[allow(
+    dead_code,
+    reason = "the face embed's live feed died with it (R1); the unified canvas re-feeds live colors in R3"
+)]
 pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
     let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return Vec::new();

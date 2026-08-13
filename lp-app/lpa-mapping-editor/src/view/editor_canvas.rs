@@ -129,6 +129,10 @@ pub fn EditorCanvas(
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
     reference: Option<crate::view::reference::ReferenceImage>,
+    /// Neighbour fixtures rendered dimmed under the document (points
+    /// already in THIS doc's space) — the dive's "others still visible".
+    #[props(default)]
+    context: Vec<crate::view::context_layer::ContextFixture>,
 ) -> Element {
     // Pointer/wheel math anchors to the mounted svg's live rect, and the
     // measured size feeds the host's viewport signal (fit needs real
@@ -564,23 +568,16 @@ pub fn EditorCanvas(
             },
             onwheel: move |evt| {
                 evt.prevent_default();
-                let delta = evt.data().delta();
-                let (dx, dy) = match delta {
-                    dioxus::html::geometry::WheelDelta::Pixels(v) => (v.x as f32, v.y as f32),
-                    dioxus::html::geometry::WheelDelta::Lines(v) => {
-                        (v.x as f32 * 16.0, v.y as f32 * 16.0)
+                // The house wheel grammar, shared with the arrange level
+                // (one control scheme via one code).
+                match crate::view::wheel::wheel_gesture(&evt) {
+                    crate::view::wheel::WheelGesture::Zoom { factor } => {
+                        let view_point = event_view_point_wheel(&anchor, &evt);
+                        camera.write().zoom_at(view_point, factor);
                     }
-                    dioxus::html::geometry::WheelDelta::Pages(v) => {
-                        (v.x as f32 * 100.0, v.y as f32 * 100.0)
+                    crate::view::wheel::WheelGesture::Pan { dx, dy } => {
+                        camera.write().pan(dx, dy);
                     }
-                };
-                let modifiers = evt.data().modifiers();
-                if modifiers.ctrl() || modifiers.meta() {
-                    let factor = (1.004f32).powf(-dy);
-                    let view_point = event_view_point_wheel(&anchor, &evt);
-                    camera.write().zoom_at(view_point, factor);
-                } else {
-                    camera.write().pan(-dx, -dy);
                 }
             },
             defs {
@@ -622,6 +619,24 @@ pub fn EditorCanvas(
                     width: "200000",
                     height: "200000",
                     fill: "url(#lpme-dots)",
+                }
+                // Neighbour fixtures, dimmed, under everything authored:
+                // context for the dive, never targets (no pointer events).
+                for (context_index, neighbour) in context.iter().enumerate() {
+                    g {
+                        key: "ctx-{context_index}",
+                        opacity: "0.3",
+                        "pointer-events": "none",
+                        for (point_index, point) in neighbour.points.iter().enumerate() {
+                            circle {
+                                key: "{point_index}",
+                                cx: "{point[0]}",
+                                cy: "{point[1]}",
+                                r: "{radius * 0.8}",
+                                fill: "{neighbour.color}",
+                            }
+                        }
+                    }
                 }
                 // Tracing layer: under everything authored, over the grid.
                 // Explicit width/height — a viewBox-only SVG has no usable
@@ -1129,8 +1144,16 @@ pub struct CanvasAnchor {
 }
 
 impl CanvasAnchor {
+    /// Anchor to a mounted element (the host's `onmounted` handler).
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_element(element: web_sys::Element) -> Self {
+        Self {
+            element: Some(element),
+        }
+    }
+
     /// Top-left of the canvas in client coordinates.
-    fn origin(&self) -> [f32; 2] {
+    pub fn origin(&self) -> [f32; 2] {
         #[cfg(target_arch = "wasm32")]
         if let Some(element) = &self.element {
             let rect = element.get_bounding_client_rect();
@@ -1140,7 +1163,7 @@ impl CanvasAnchor {
     }
 
     /// Measured canvas size in CSS pixels, when mounted.
-    fn size(&self) -> Option<[f32; 2]> {
+    pub fn size(&self) -> Option<[f32; 2]> {
         #[cfg(target_arch = "wasm32")]
         if let Some(element) = &self.element {
             let rect = element.get_bounding_client_rect();
@@ -1188,7 +1211,7 @@ impl Drop for CanvasResizeObserver {
 /// Route the rest of this pointer stream to the pressed element even when
 /// the cursor crosses overlays (rail, popover) or leaves the window — drags
 /// must not die at the first overlay edge.
-fn capture_pointer(evt: &Event<PointerData>) {
+pub fn capture_pointer(evt: &Event<PointerData>) {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;

@@ -23,9 +23,12 @@ pub use editor_core::shape_path::ShapePath;
 pub use editor_core::view_geometry::{
     ArrowInput, MapArrowOverlay, MapArrowSeg, neutral_lamp_rgb, wiring_arrows,
 };
+pub use view::context_layer::ContextFixture;
+pub use view::editor_canvas::{CanvasAnchor, capture_pointer, object_color};
 pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor, ReferenceOps};
+pub use view::object_properties::{ObjectPropertiesPane, shape_kind_label};
 pub use view::reference::ReferenceImage;
+pub use view::wheel::{WheelGesture, wheel_gesture};
 // The document type IS the component input type; re-exported so hosts that
 // only embed the editor need no direct lpc-mapping dependency.
 pub use lpc_mapping::Map2dDoc;
-pub use view::map_editor_page::MapEditorPage;

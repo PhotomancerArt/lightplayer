@@ -1,85 +1,35 @@
-//! The properties popover: anchored beside the selection bbox (parent
-//! decision D8 — popover, not sidebar).
+//! The selected object's properties, as a dockable PANE — re-housed from
+//! the floating popover by the R4 ruling (Figma prior art: the fixture
+//! tree on the left, object properties on the right; nothing floats over
+//! the canvas). Same fields, same session ops; the host (the workbench's
+//! Props panel) owns placement and scrolling.
 //!
-//! Field edits use the gesture pattern: `oninput` previews through
+//! Fields use the gesture pattern: `oninput` previews through
 //! `edit_uncommitted` (live canvas update, no undo spam), `onchange`
 //! commits one undo step. Segmented switches and delete are single-step
-//! `edit`s. Hidden while a canvas drag is live.
+//! `edit`s.
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{ChevronDown, ChevronUp, Minimize2, RotateCw, Trash2, Ungroup};
-use lpc_mapping::{
-    GridCorner, GridRouting, Map2dShape, RingDir, RingOrder, bounds_of_points, resolve,
-};
+use lpc_mapping::{GridCorner, GridRouting, Map2dShape, RingDir, RingOrder, resolve};
 
-use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
 use crate::editor_core::shape_path::ShapePath;
-use crate::view::editor_canvas::CanvasDrag;
-
-const POPOVER_WIDTH: f32 = 236.0;
-
-/// What the stored popover anchor is keyed to: it may move only when the
-/// SELECTION IDENTITY or the camera moves — never because a property edit
-/// reshaped the selection's bbox (the G2 stepper defect).
-#[derive(Clone, PartialEq)]
-struct AnchorKey {
-    paths: Vec<ShapePath>,
-    camera: [f32; 3],
-}
-
-#[derive(Clone, PartialEq)]
-struct StoredAnchor {
-    key: AnchorKey,
-    position: [f32; 2],
-}
-
-/// The anchor policy, pure for tests: reuse the stored position (re-clamped
-/// to the viewport) while the key stands; compute fresh from the selection
-/// bbox otherwise.
-fn resolve_anchor(
-    stored: Option<&StoredAnchor>,
-    key: &AnchorKey,
-    bounds: lpc_mapping::Bounds2d,
-    cam: &Camera,
-    viewport: [f32; 2],
-) -> [f32; 2] {
-    if let Some(stored) = stored
-        && stored.key == *key
-    {
-        return clamp_anchor(stored.position, viewport);
-    }
-    let right = cam.doc_to_view([bounds.min_x + bounds.width, bounds.min_y]);
-    let left = cam.doc_to_view([bounds.min_x, bounds.min_y]);
-    let mut x = right[0] + 22.0;
-    if x + POPOVER_WIDTH > viewport[0] - 10.0 {
-        x = left[0] - POPOVER_WIDTH - 22.0;
-    }
-    clamp_anchor([x, right[1]], viewport)
-}
-
-fn clamp_anchor(position: [f32; 2], viewport: [f32; 2]) -> [f32; 2] {
-    [
-        position[0].clamp(10.0, (viewport[0] - POPOVER_WIDTH - 10.0).max(10.0)),
-        position[1].clamp(10.0, (viewport[1] - 120.0).max(10.0)),
-    ]
-}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn PropertiesPopover(
+pub fn ObjectPropertiesPane(
     session: Signal<MapEditorSession>,
-    camera: Signal<Camera>,
-    viewport: Signal<Option<[f32; 2]>>,
-    drag: Signal<Option<CanvasDrag>>,
     on_committed: EventHandler<()>,
 ) -> Element {
-    // Hook order: created before any early return.
-    let mut stored_anchor = use_signal(|| None::<StoredAnchor>);
     let session_read = session.read();
     let selection = session_read.selection.clone();
-    if selection.is_empty() || drag().is_some() {
-        return rsx! {};
+    if selection.is_empty() {
+        return rsx! {
+            p { class: "lpme-props-empty",
+                "Select an object on the canvas — its properties edit here."
+            }
+        };
     }
     let doc = session_read.doc();
     let resolved = resolve(doc).ok();
@@ -94,38 +44,6 @@ pub fn PropertiesPopover(
                 .collect()
         })
         .unwrap_or_default();
-    let Some(bounds) = bounds_of_points(&selected_positions) else {
-        return rsx! {};
-    };
-
-    let cam = camera();
-    let [viewport_width, viewport_height] = viewport().unwrap_or([1200.0, 800.0]);
-    // STABLE anchor: computed when the selection identity or camera moves,
-    // reused (re-clamped only) across doc edits — a count stepper that
-    // reshapes the selection bbox must not move the box out from under a
-    // double-click (G2 defect, 2026-08-05).
-    let anchor_key = AnchorKey {
-        paths: selection.paths().cloned().collect(),
-        camera: [cam.x, cam.y, cam.scale],
-    };
-    let [x, y] = resolve_anchor(
-        stored_anchor.peek().as_ref(),
-        &anchor_key,
-        bounds,
-        &cam,
-        [viewport_width, viewport_height],
-    );
-    if stored_anchor
-        .peek()
-        .as_ref()
-        .is_none_or(|stored| stored.key != anchor_key || stored.position != [x, y])
-    {
-        stored_anchor.set(Some(StoredAnchor {
-            key: anchor_key,
-            position: [x, y],
-        }));
-    }
-
     let lamp_total = selected_positions.len();
     // The popover presents the SELECTED NODE: its fields at the selection's
     // depth, with a breadcrumb standing in for the name row when descended
@@ -195,8 +113,7 @@ pub fn PropertiesPopover(
 
     rsx! {
         div {
-            class: "lpme-popover",
-            style: "left: {x}px; top: {y}px; width: {POPOVER_WIDTH}px;",
+            class: "lpme-props-pane",
             // Keep canvas shortcuts out of field typing.
             onkeydown: move |evt| evt.stop_propagation(),
             if let (Some(index), Some(object), Some(selected_shape)) =
@@ -343,7 +260,8 @@ pub fn PropertiesPopover(
     }
 }
 
-pub(crate) fn shape_kind_label(shape: &Map2dShape) -> &'static str {
+/// The one-word kind label every surface shows for a shape.
+pub fn shape_kind_label(shape: &Map2dShape) -> &'static str {
     match shape {
         Map2dShape::Grid(_) => "grid",
         Map2dShape::Ring(_) => "ring",
@@ -773,87 +691,5 @@ fn RingCountsField(
                 },
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lpc_mapping::Bounds2d;
-
-    fn key(paths: Vec<ShapePath>) -> AnchorKey {
-        AnchorKey {
-            paths,
-            camera: [0.0, 0.0, 1.0],
-        }
-    }
-
-    fn bounds(width: f32) -> Bounds2d {
-        Bounds2d {
-            min_x: 100.0,
-            min_y: 100.0,
-            width,
-            height: 50.0,
-        }
-    }
-
-    /// The G2 stepper defect: a doc edit that reshapes the bbox must not
-    /// move the box while the selection (and camera) stand still.
-    #[test]
-    fn unchanged_selection_keeps_the_stored_anchor_across_bbox_changes() {
-        let key = key(vec![ShapePath::root(0)]);
-        let camera = Camera::new();
-        let viewport = [1200.0, 800.0];
-        let first = resolve_anchor(None, &key, bounds(200.0), &camera, viewport);
-        let stored = StoredAnchor {
-            key: key.clone(),
-            position: first,
-        };
-        // The count stepper grew the selection bbox; the anchor stays put.
-        let second = resolve_anchor(Some(&stored), &key, bounds(600.0), &camera, viewport);
-        assert_eq!(second, first);
-    }
-
-    #[test]
-    fn a_new_selection_re_anchors() {
-        let old_key = key(vec![ShapePath::root(0)]);
-        let camera = Camera::new();
-        let viewport = [1200.0, 800.0];
-        let first = resolve_anchor(None, &old_key, bounds(200.0), &camera, viewport);
-        let stored = StoredAnchor {
-            key: old_key,
-            position: first,
-        };
-        let new_key = key(vec![ShapePath::root(0).child(0)]);
-        let fresh = resolve_anchor(Some(&stored), &new_key, bounds(600.0), &camera, viewport);
-        assert_ne!(fresh, first, "a different selection computes fresh");
-    }
-
-    #[test]
-    fn a_camera_move_re_anchors_and_clamping_keeps_the_box_in_view() {
-        let paths = vec![ShapePath::root(1)];
-        let camera = Camera::new();
-        let viewport = [1200.0, 800.0];
-        let stored = StoredAnchor {
-            key: key(paths.clone()),
-            position: [1500.0, -50.0],
-        };
-        // Same selection, moved camera: fresh anchor.
-        let moved = AnchorKey {
-            paths,
-            camera: [40.0, 0.0, 1.0],
-        };
-        let fresh = resolve_anchor(Some(&stored), &moved, bounds(200.0), &camera, viewport);
-        assert!(fresh[0] <= viewport[0] - POPOVER_WIDTH - 10.0);
-        // And a stored anchor outside the viewport re-clamps without moving
-        // its key.
-        let clamped = resolve_anchor(
-            Some(&stored),
-            &stored.key.clone(),
-            bounds(200.0),
-            &camera,
-            viewport,
-        );
-        assert_eq!(clamped, clamp_anchor([1500.0, -50.0], viewport));
     }
 }

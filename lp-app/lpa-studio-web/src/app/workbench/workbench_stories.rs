@@ -153,7 +153,7 @@ fn workbench_nodes_view() -> Element {
 }
 
 #[story(
-    description = "The workbench's Mapping view: the honest placeholder center (the arrange canvas is the unified-editor plan's mount), with the view's default docks — Fixtures left, Outputs right — each under its own tab row."
+    description = "The workbench's Mapping view with the unified editor's coordinator mounted in the center: the Arrange toolbar strip (fixture/arranged counts on the right, the reserved tool slot on the left) over the canvas pane's honest placeholder — the arrange canvas itself is the next mount. Docks default to Fixtures left, Outputs right."
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)

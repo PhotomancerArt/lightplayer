@@ -79,18 +79,9 @@ pub fn App() -> Element {
         };
     }
 
-    // The standalone mapping editor is a separate page, like the story
-    // book: an early return before any hooks (route changes into/out of it
-    // hard-reload — see the route listener below).
-    if matches!(router::current_route(), StudioRoute::MappingEditor) {
-        return rsx! {
-            style { "{STYLE}" }
-            document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            lpa_mapping_editor::MapEditorPage {}
-        };
-    }
-
-    // The board display-def editor: same standalone-page pattern.
+    // The board display-def editor: a standalone page, like the story
+    // book — an early return before any hooks (route changes into/out of
+    // it hard-reload — see the route listener below).
     if matches!(router::current_route(), StudioRoute::BoardEditor) {
         return rsx! {
             style { "{STYLE}" }
@@ -585,10 +576,8 @@ pub fn App() -> Element {
                     // render the shell, and the shell shows the editor
                     // whenever a lens is attached.)
                 }
-                StudioRoute::Stories { .. }
-                | StudioRoute::MappingEditor
-                | StudioRoute::BoardEditor => {
-                    // the story book, mapping editor, and board editor mount
+                StudioRoute::Stories { .. } | StudioRoute::BoardEditor => {
+                    // the story book and board editor mount
                     // on fresh page loads only (their early returns in App
                     // run before any hooks); reload to keep the hook order
                     // sound
@@ -675,7 +664,6 @@ pub fn App() -> Element {
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Stories { .. }
-                | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
                 | StudioRoute::BoardEditor
                 | StudioRoute::Docs { .. } => {}

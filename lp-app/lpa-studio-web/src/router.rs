@@ -197,9 +197,6 @@ pub(crate) enum StudioRoute {
     Device { uid: String, play: bool },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
-    /// The standalone 2D mapping editor (project-free; edits
-    /// `.map2d.json` documents with localStorage autosave).
-    MappingEditor,
     /// The public boards catalog (project-free, renders the checked-in
     /// board display metadata). `board` deep-links one board's detail view
     /// (`vendor/product`).
@@ -296,7 +293,6 @@ impl StudioRoute {
             Some("projects") if segments.next().is_none() => StudioRoute::Projects,
             Some("explore") if segments.next().is_none() => StudioRoute::Explore,
             Some("account") if segments.next().is_none() => StudioRoute::Account,
-            Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
             Some("boards") => {
                 let rest: Vec<&str> = segments.collect();
                 if rest == ["edit"] {
@@ -374,7 +370,6 @@ impl StudioRoute {
             StudioRoute::Device { uid, play: true } => format!("/device/{uid}/play"),
             StudioRoute::Stories { story_id: None } => "/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("/stories/{id}"),
-            StudioRoute::MappingEditor => "/mapping".to_string(),
             StudioRoute::Boards { board: None } => "/boards".to_string(),
             StudioRoute::Boards { board: Some(board) } => format!("/boards/{board}"),
             StudioRoute::BoardEditor => "/boards/edit".to_string(),
@@ -715,6 +710,25 @@ pub(crate) fn replace_with_query_param(route: &StudioRoute, key: &str, value: &s
     }
 }
 
+/// Programmatic same-session navigation: push the route and wake the
+/// route listener (a manual `push_state` fires no `popstate`, so one is
+/// dispatched by hand — the listener treats it like any back/forward).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn navigate_push(route: &StudioRoute) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    write_history(&window, HistoryWrite::Push, &route.path());
+    if let Ok(event) = web_sys::Event::new("popstate") {
+        let _ = window.dispatch_event(&event);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn navigate_push(route: &StudioRoute) {
+    let _ = route;
+}
+
 #[cfg(target_arch = "wasm32")]
 fn write_history(window: &web_sys::Window, mode: HistoryWrite, url: &str) {
     use wasm_bindgen::JsValue;
@@ -999,7 +1013,6 @@ mod tests {
             StudioRoute::Stories {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
             },
-            StudioRoute::MappingEditor,
             StudioRoute::Boards { board: None },
             StudioRoute::Boards {
                 board: Some("domraem/dom-z-102".to_string()),
@@ -1194,9 +1207,10 @@ mod tests {
             ProjectView::Play,
             "entering play leaves the mapping view"
         );
-        // a bare `/mapping` (no project segment) is the standalone
-        // editor's address, never a project guess
-        assert_eq!(StudioRoute::parse("/mapping"), StudioRoute::MappingEditor);
+        // the standalone editor is deleted (R1): a bare `/mapping` (no
+        // project segment) is user input like any unknown path — Home,
+        // never a project guess
+        assert_eq!(StudioRoute::parse("/mapping"), StudioRoute::Home);
     }
 
     // -----------------------------------------------------------------
