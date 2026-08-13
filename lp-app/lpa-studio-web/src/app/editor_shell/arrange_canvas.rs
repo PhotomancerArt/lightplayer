@@ -80,8 +80,8 @@ enum CanvasDrag {
         original: UiArrangeTransform,
         moved: bool,
     },
-    /// Background pan.
-    Pan { last_client: [f64; 2] },
+    /// Background pan (`moved` distinguishes a pan from a deselect tap).
+    Pan { last_client: [f64; 2], moved: bool },
 }
 
 #[component]
@@ -191,24 +191,53 @@ pub fn ArrangeCanvas(
                 let _ = &evt;
             },
             onpointerdown: move |evt| {
-                // Background press: pan. Fixture presses stopped propagation.
+                // ONE hit-test at the canvas level decides fixture-drag vs
+                // pan — SVG child-event propagation proved unreliable under
+                // Dioxus's delegation, and the canvas already knows every
+                // fixture's transformed frame anyway.
                 capture_pointer(&evt);
                 let point = evt.data().client_coordinates();
-                drag.set(Some(CanvasDrag::Pan {
-                    last_client: [point.x, point.y],
-                }));
+                let client = [point.x, point.y];
+                let hit = event_doc_point(&anchor.peek(), vb, client)
+                    .and_then(|doc| hit_fixture(&renders.peek(), doc).cloned());
+                match hit {
+                    Some(render) => {
+                        let transform = drag_override
+                            .peek()
+                            .as_ref()
+                            .filter(|(key, _)| *key == render.key)
+                            .map(|(_, transform)| *transform)
+                            .unwrap_or(render.transform);
+                        drag.set(Some(CanvasDrag::Fixture {
+                            key: render.key,
+                            node: render.node,
+                            start_client: client,
+                            original: transform,
+                            moved: false,
+                        }));
+                    }
+                    None => {
+                        drag.set(Some(CanvasDrag::Pan {
+                            last_client: client,
+                            moved: false,
+                        }));
+                    }
+                }
             },
             onpointermove: move |evt| {
                 let Some(state) = drag.peek().clone() else { return };
                 let point = evt.data().client_coordinates();
                 match state {
-                    CanvasDrag::Pan { last_client } => {
+                    CanvasDrag::Pan { last_client, moved } => {
+                        let dx = point.x - last_client[0];
+                        let dy = point.y - last_client[1];
                         let mut next = view_box.peek().or(fit_box).unwrap_or(vb);
-                        next[0] -= (point.x - last_client[0]) * units_per_px;
-                        next[1] -= (point.y - last_client[1]) * units_per_px;
+                        next[0] -= dx * units_per_px;
+                        next[1] -= dy * units_per_px;
                         view_box.set(Some(next));
                         drag.set(Some(CanvasDrag::Pan {
                             last_client: [point.x, point.y],
+                            moved: moved || dx.abs() > 1.0 || dy.abs() > 1.0,
                         }));
                     }
                     CanvasDrag::Fixture {
@@ -258,12 +287,23 @@ pub fn ArrangeCanvas(
                             select(Some(UiPatchTarget::Fixture { node }));
                         }
                     }
-                    Some(CanvasDrag::Pan { .. }) | None => {}
+                    // A background tap (a pan that never moved) deselects.
+                    Some(CanvasDrag::Pan { moved: false, .. }) => select(None),
+                    Some(CanvasDrag::Pan { moved: true, .. }) | None => {}
                 }
             },
             onpointercancel: move |_| {
                 drag.set(None);
                 drag_override.set(None);
+            },
+            ondoubleclick: move |evt| {
+                let point = evt.data().client_coordinates();
+                if let Some(doc) = event_doc_point(&anchor.peek(), vb, [point.x, point.y])
+                    && let Some(render) = hit_fixture(&renders.peek(), doc)
+                    && let Some(on_focus) = &on_focus
+                {
+                    on_focus.call(render.node);
+                }
             },
             onwheel: move |evt| {
                 evt.prevent_default();
@@ -280,13 +320,6 @@ pub fn ArrangeCanvas(
                 next[1] = cy - next[3] / 2.0;
                 view_box.set(Some(next));
             },
-            // Deselect on a background click (a pan that never moved).
-            onclick: move |_| {
-                if drag.peek().is_none() && drag_override.peek().is_none() {
-                    select(None);
-                }
-            },
-
             for render in renders_now.iter() {
                 FixtureGroup {
                     key: "{render.key}",
@@ -300,31 +333,51 @@ pub fn ArrangeCanvas(
                     selected: selection_touches(&selection, render.node),
                     selected_instance: selected_instance_range(&selection, render),
                     units_per_px,
-                    on_press: {
-                        let key = render.key.clone();
-                        let node = render.node;
-                        move |(client, original): ([f64; 2], UiArrangeTransform)| {
-                            drag.set(Some(CanvasDrag::Fixture {
-                                key: key.clone(),
-                                node,
-                                start_client: client,
-                                original,
-                                moved: false,
-                            }));
-                        }
-                    },
-                    on_open: {
-                        let node = render.node;
-                        move |()| {
-                            if let Some(on_focus) = &on_focus {
-                                on_focus.call(node);
-                            }
-                        }
-                    },
                 }
             }
         }
     }
+}
+
+/// Client coordinates → conceptual-space coordinates, through the mounted
+/// rect and the viewBox (`xMidYMid meet`: uniform scale, centered).
+fn event_doc_point(anchor: &CanvasAnchor, vb: [f64; 4], client: [f64; 2]) -> Option<[f64; 2]> {
+    let origin = anchor.origin();
+    let size = anchor.size()?;
+    let scale = (f64::from(size[0]) / vb[2]).min(f64::from(size[1]) / vb[3]);
+    if scale <= 0.0 {
+        return None;
+    }
+    let offset = [
+        (f64::from(size[0]) - vb[2] * scale) / 2.0,
+        (f64::from(size[1]) - vb[3] * scale) / 2.0,
+    ];
+    Some([
+        vb[0] + (client[0] - f64::from(origin[0]) - offset[0]) / scale,
+        vb[1] + (client[1] - f64::from(origin[1]) - offset[1]) / scale,
+    ])
+}
+
+/// Topmost fixture whose (padded) transformed frame contains the point —
+/// the inverse of the group transform, tested in the fixture's own space.
+fn hit_fixture(renders: &[FixtureRender], doc: [f64; 2]) -> Option<&FixtureRender> {
+    const HIT_PAD: f64 = 8.0;
+    renders.iter().rev().find(|render| {
+        let transform = &render.transform;
+        let rad = transform.r.to_radians();
+        let (sin, cos) = rad.sin_cos();
+        let dx = doc[0] - transform.t[0];
+        let dy = doc[1] - transform.t[1];
+        let scale = transform.s.max(1e-9);
+        // Inverse of translate ∘ rotate ∘ scale.
+        let lx = (dx * cos + dy * sin) / scale;
+        let ly = (-dx * sin + dy * cos) / scale;
+        let [bx, by, bw, bh] = render.bounds;
+        lx >= bx - HIT_PAD
+            && lx <= bx + bw + HIT_PAD
+            && ly >= by - HIT_PAD
+            && ly <= by + bh + HIT_PAD
+    })
 }
 
 /// One fixture on the canvas: name-tag frame above the content (labels
@@ -338,11 +391,6 @@ fn FixtureGroup(
     /// Selected instance's `(start, lamps)` window, for lamp rings.
     selected_instance: Option<(u32, u32)>,
     units_per_px: f64,
-    /// Pointer-down: `(client_xy, current_transform)` — the canvas owns
-    /// the gesture from here.
-    on_press: EventHandler<([f64; 2], UiArrangeTransform)>,
-    /// Double-click: open this fixture for mapping edits.
-    on_open: EventHandler<()>,
 ) -> Element {
     let [bx, by, bw, bh] = render.bounds;
     let group_transform = format!(
@@ -364,21 +412,11 @@ fn FixtureGroup(
     };
     let frame_pad = 6.0 * upp;
     let tag_y = by - frame_pad - 4.0 * upp;
-    let press_transform = transform;
     rsx! {
+        // Purely visual: the canvas-level hit-test owns every gesture.
         g {
             transform: "{group_transform}",
-            style: "cursor: grab;",
-            onpointerdown: move |evt| {
-                evt.stop_propagation();
-                capture_pointer(&evt);
-                let point = evt.data().client_coordinates();
-                on_press.call(([point.x, point.y], press_transform));
-            },
-            ondoubleclick: move |evt| {
-                evt.stop_propagation();
-                on_open.call(());
-            },
+            style: "cursor: grab; pointer-events: none;",
             // The frame: hit target + selection highlight.
             rect {
                 x: "{bx - frame_pad}",
