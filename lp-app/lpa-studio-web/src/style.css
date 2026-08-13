@@ -1754,14 +1754,18 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 4 3;
 }
 
-.lpme-popover {
-    position: absolute;
-    z-index: 6;
-    background: var(--studio-color-surface);
-    border: 1px solid var(--studio-color-border-strong);
-    border-radius: 10px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+.lpme-props-pane {
+    /* The re-housed object properties (R4): a dock pane, not a floating
+       card — the pop-* internals keep their band layout, so the pane
+       carries the padding the popover used to. */
     padding: 10px 12px 12px;
+}
+
+.lpme-props-empty {
+    margin: 14px 8px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
 }
 
 .lpme-pop-head {

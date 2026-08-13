@@ -41,6 +41,11 @@ pub fn EditorShellCenter(
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views (the same bytes the face embeds hold).
     project_editor: ProjectEditorView,
+    /// The workbench-owned dive state, shared with the Fixtures tree and
+    /// the Props pane (R4): focused fixture, session, Props commit bumps.
+    dive_focused: Signal<Option<NodeId>>,
+    dive_session: Signal<lpa_mapping_editor::MapEditorSession>,
+    dive_commits: Signal<u64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The FOCUSED fixture — the DIVE (gate ruling: in-place, no separate
@@ -49,7 +54,7 @@ pub fn EditorShellCenter(
     // the focused doc's space. Entered by double-click on the canvas or
     // the toolbar button; exited by the breadcrumb. Journal events stamp
     // every transition.
-    let mut focused = use_signal(|| None::<NodeId>);
+    let mut focused = dive_focused;
     let Some(surface) = surface else {
         return rsx! {
             div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
@@ -338,6 +343,8 @@ pub fn EditorShellCenter(
                         MappingSessionHost {
                             editor,
                             context: dive_context(&surface, &bodies, node),
+                            external_session: dive_session,
+                            commit_requests: dive_commits,
                             on_action: {
                                 move |action: UiAction| {
                                     if action

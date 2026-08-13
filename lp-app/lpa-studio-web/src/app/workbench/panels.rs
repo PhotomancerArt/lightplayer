@@ -16,9 +16,12 @@
 //! its 10×32 back under control).
 
 use dioxus::prelude::*;
+use lpa_mapping_editor::{
+    MapEditorSession, ObjectPropertiesPane, ShapePath, object_color as editor_object_color,
+};
 use lpa_studio_core::{
-    ProjectController, ProjectEditorOp, UiAction, UiPatchCell, UiPatchInstance, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+    NodeId, ProjectController, ProjectEditorOp, UiAction, UiPatchCell, UiPatchInstance,
+    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
 };
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
@@ -114,6 +117,11 @@ const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5
 pub fn FixturesPanel(
     surface: Option<UiPatchSurface>,
     selection: Option<UiPatchTarget>,
+    /// The dive, when one is live: `(focused node, shared session)` — the
+    /// focused fixture's row grows its OBJECT tree (the editor's old
+    /// wiring-order rail, unified here; one tree, one selection).
+    #[props(default)]
+    dive: Option<(NodeId, Signal<MapEditorSession>)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let Some(surface) = surface else {
@@ -135,6 +143,9 @@ pub fn FixturesPanel(
             for (index, fixture) in fixtures.into_iter().enumerate() {
                 FixtureRows {
                     key: "{fixture.node.0}",
+                    dive_session: dive
+                        .filter(|(node, _)| *node == fixture.node)
+                        .map(|(_, session)| session),
                     fixture,
                     color: object_color(index),
                     selection: selection.clone(),
@@ -152,6 +163,10 @@ fn FixtureRows(
     fixture: UiPatchSurfaceFixture,
     color: &'static str,
     selection: Option<UiPatchTarget>,
+    /// Present while this fixture is the dive: its object tree renders
+    /// from (and selects through) the shared session.
+    #[props(default)]
+    dive_session: Option<Signal<MapEditorSession>>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let fixture_target = UiPatchTarget::Fixture { node: fixture.node };
@@ -179,7 +194,51 @@ fn FixtureRows(
                 "{fixture.patch.lamps} · {kind}"
             }
         }
-        if range_grain {
+        if let Some(mut session) = dive_session {
+            // The DIVE's object tree (one tree, one selection): the edited
+            // document's objects in wiring order, selecting through the
+            // session the canvas and Props pane share.
+            {
+                let session_read = session.read();
+                let objects: Vec<(usize, String, &'static str, bool)> = session_read
+                    .doc()
+                    .objects
+                    .iter()
+                    .enumerate()
+                    .map(|(object_index, object)| {
+                        (
+                            object_index,
+                            object.name.clone(),
+                            lpa_mapping_editor::shape_kind_label(&object.shape),
+                            session_read.selection.object_selected(object_index),
+                        )
+                    })
+                    .collect();
+                drop(session_read);
+                rsx! {
+                    for (object_index, name, kind, object_selected) in objects {
+                        div {
+                            key: "obj-{object_index}",
+                            class: if object_selected { "{ROW_SELECTED} tw:ml-4 tw:py-0.5" } else { "{ROW_IDLE} tw:ml-4 tw:py-0.5" },
+                            onclick: move |_| {
+                                session
+                                    .write()
+                                    .selection
+                                    .select_only_path(ShapePath::root(object_index));
+                            },
+                            span {
+                                class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
+                                style: "background: {editor_object_color(object_index)};",
+                            }
+                            span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{name}" }
+                            span { class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9.5px] tw:text-dim-foreground",
+                                "{kind}"
+                            }
+                        }
+                    }
+                }
+            }
+        } else if range_grain {
             // The peach case: no instance grain — one honest row for the
             // fixture's whole channel range, chips from its cells.
             div { class: "tw:ml-4 tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
@@ -494,6 +553,73 @@ fn PortCell(
                 move |_| select(&on_action, Some(target.clone()))
             },
             span { class: "tw:truncate tw:font-mono tw:text-[8.5px] tw:text-subtle-foreground", "{label}" }
+        }
+    }
+}
+
+/// The Props panel (R4, Figma prior art): while a dive is live, the
+/// selected OBJECT's fields — the floating popover re-housed, editing the
+/// shared session and committing through the session host's pipeline.
+/// At the arranged level it reads out the selected fixture's placement.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn PropsPanel(
+    surface: Option<UiPatchSurface>,
+    selection: Option<UiPatchTarget>,
+    dive_focused: Signal<Option<NodeId>>,
+    dive_session: Signal<MapEditorSession>,
+    mut dive_commits: Signal<u64>,
+) -> Element {
+    if dive_focused.read().is_some() {
+        return rsx! {
+            ObjectPropertiesPane {
+                session: dive_session,
+                on_committed: move |()| {
+                    let next = *dive_commits.peek() + 1;
+                    dive_commits.set(next);
+                },
+            }
+        };
+    }
+    let fixture = match (&surface, &selection) {
+        (
+            Some(surface),
+            Some(
+                UiPatchTarget::Fixture { node }
+                | UiPatchTarget::Instance { node, .. }
+                | UiPatchTarget::Range { node, .. },
+            ),
+        ) => surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == *node),
+        _ => None,
+    };
+    let Some(fixture) = fixture else {
+        return rsx! {
+            p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
+                "Select a fixture on the canvas — its placement reads out here; dive in (double-click) for object properties."
+            }
+        };
+    };
+    let arrange = fixture.arrange.clone().unwrap_or_default();
+    let transform = arrange.transform;
+    rsx! {
+        div { class: "tw:grid tw:content-start tw:gap-1 tw:px-1.5 tw:text-sm",
+            p { class: "tw:m-0 tw:font-medium tw:text-foreground", "{fixture.label}" }
+            p { class: "tw:m-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
+                "{fixture.patch.lamps} lamps · {fixture.instances.len()} instances"
+            }
+            p { class: "tw:m-0 tw:mt-1 tw:font-mono tw:text-[10.5px] tw:text-dim-foreground",
+                if arrange.arranged {
+                    "placed at {transform.t[0]:.1}, {transform.t[1]:.1} · {transform.r:.0}° · ×{transform.s:.2}"
+                } else {
+                    "unarranged — drag it on the canvas to place it"
+                }
+            }
+            p { class: "tw:m-0 tw:mt-2 tw:text-[11px] tw:text-dim-foreground",
+                "Double-click the fixture to dive into its mapping."
+            }
         }
     }
 }

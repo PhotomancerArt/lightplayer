@@ -26,6 +26,7 @@ pub use editor_core::view_geometry::{
 pub use view::context_layer::ContextFixture;
 pub use view::editor_canvas::{CanvasAnchor, capture_pointer, object_color};
 pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor, ReferenceOps};
+pub use view::object_properties::{ObjectPropertiesPane, shape_kind_label};
 pub use view::reference::ReferenceImage;
 pub use view::wheel::{WheelGesture, wheel_gesture};
 // The document type IS the component input type; re-exported so hosts that
