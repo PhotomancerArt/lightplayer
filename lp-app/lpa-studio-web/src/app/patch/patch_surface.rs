@@ -101,6 +101,16 @@ fn verb_subject(
                 1,
             ))
         }
+        // The range arm (P2 substrate): a fixture-relative lamp range is
+        // its own verb subject — the peach's grain.
+        UiPatchTarget::Range { node, start, count } => Some((
+            *node,
+            PatchVerbSubject {
+                path: None,
+                range: Some((*start, *count)),
+            },
+            1,
+        )),
         UiPatchTarget::Output { .. } | UiPatchTarget::Port { .. } => None,
     }
 }

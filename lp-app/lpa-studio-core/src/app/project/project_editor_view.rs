@@ -90,6 +90,9 @@ pub struct ProjectEditorView {
     /// The surface's one shared selection (core-owned so e2e can drive it
     /// and P6's verbs can read it; hover stays a web-side context).
     pub patch_selection: Option<crate::UiPatchTarget>,
+    /// The undo-correlation journal's retained entries (unified-editor P2:
+    /// substrate for future tooling and the e2e proofs; v1 UI ignores it).
+    pub edit_journal: Vec<crate::UiEditJournalEntry>,
 }
 
 impl ProjectEditorView {
@@ -122,6 +125,7 @@ impl ProjectEditorView {
             edits_in_flight: 0,
             patch_surface: None,
             patch_selection: None,
+            edit_journal: Vec::new(),
         }
     }
 
@@ -200,6 +204,12 @@ impl ProjectEditorView {
     ) -> Self {
         self.patch_surface = surface;
         self.patch_selection = selection;
+        self
+    }
+
+    /// Attach the undo-correlation journal's retained entries.
+    pub fn with_edit_journal(mut self, edit_journal: Vec<crate::UiEditJournalEntry>) -> Self {
+        self.edit_journal = edit_journal;
         self
     }
 
