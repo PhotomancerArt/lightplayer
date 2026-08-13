@@ -89,7 +89,28 @@ fn arrange_canvas_mini_dome() -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn DiveInPlaceStory() -> Element {
-    let (surface, bodies) = dome_canvas_inputs();
+    let (mut surface, bodies) = dome_canvas_inputs();
+    // A non-identity focused placement (the seam is the point), with the
+    // doors close enough that the focused-fixture fit keeps the dimmed
+    // neighbour in frame.
+    surface.fixtures[0].arrange = Some(UiArrangeMeta {
+        arranged: true,
+        transform: UiArrangeTransform {
+            t: [10.0, 20.0],
+            r: -8.0,
+            s: 0.9,
+        },
+        footprint: None,
+    });
+    surface.fixtures[1].arrange = Some(UiArrangeMeta {
+        arranged: true,
+        transform: UiArrangeTransform {
+            t: [150.0, 120.0],
+            r: 15.0,
+            s: 1.0,
+        },
+        footprint: None,
+    });
     let dome_node = surface.fixtures[0].node;
     let dome_artifact = surface.fixtures[0]
         .mapping_artifact
