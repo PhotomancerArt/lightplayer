@@ -28,9 +28,9 @@
 //!   it on reload costs one click.
 //!
 //! Design record: `spikes/studio-chrome/index.html` (rounds 1–3, ratified
-//! 2026-08-12). The Mapping view's center is a placeholder until the
-//! unified-editor plan mounts the arrange canvas here; the Fixtures and
-//! Outputs panels arrive with that plan's substrate (this module's P2).
+//! 2026-08-12). The Mapping view's center mounts the unified editor's
+//! coordinator ([`crate::app::editor_shell::EditorShellCenter`]); the
+//! Fixtures and Outputs panels are that editor's rails, grown in place.
 
 pub mod panels;
 #[cfg(feature = "stories")]
@@ -278,15 +278,13 @@ pub fn WorkbenchFrame(
                             }
                         },
                         WorkbenchView::Mapping => rsx! {
-                            // The honest placeholder: the arrange canvas is the
-                            // unified-editor plan's first mount here.
-                            div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
-                                div { class: "tw:rounded-lg tw:border tw:border-dashed tw:border-border-strong tw:px-8 tw:py-6 tw:text-center",
-                                    p { class: "tw:m-0 tw:text-sm tw:font-semibold tw:text-muted-foreground", "Mapping" }
-                                    p { class: "tw:m-0 tw:mt-1 tw:text-xs tw:text-dim-foreground",
-                                        "The arrange canvas lands here next — the Fixtures and Outputs panels are already live."
-                                    }
-                                }
+                            // The unified editor's coordinator: toolbar +
+                            // canvas pane + the editor.json prefetch
+                            // (unified-editor P3).
+                            crate::app::editor_shell::EditorShellCenter {
+                                surface: surface.clone(),
+                                selection: patch_selection.clone(),
+                                on_action,
                             }
                         },
                     }

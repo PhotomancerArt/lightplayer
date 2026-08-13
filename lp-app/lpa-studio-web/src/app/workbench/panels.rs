@@ -227,7 +227,9 @@ fn InstanceRow(
     } else {
         ROW_IDLE
     };
-    let mapped = !cells.is_empty();
+    // The DTO's derived fact (P2), not a chip-list inference — the two
+    // agree today, but `placed` is the one the core owns.
+    let mapped = instance.placed;
     let dot = if mapped {
         "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
     } else {
