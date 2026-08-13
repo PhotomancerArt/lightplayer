@@ -20,11 +20,13 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ArtifactLocation, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController, ProjectEditorView,
-    UiAction, UiArrangeTransform, UiNodeChild, UiNodeFace, UiNodeView, UiPatchSurface,
+    ArtifactLocation, AssetEditOp, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
+    ProjectEditorOp, ProjectEditorView, UiAction, UiArrangeTransform, UiAssetEditor,
+    UiEditJournalEvent, UiEditorMode, UiNodeChild, UiNodeFace, UiNodeView, UiPatchSurface,
     UiPatchTarget,
 };
 
+use crate::app::node::mapping_asset_editor::MappingAssetEditor;
 use arrange_canvas::ArrangeCanvas;
 
 /// The Mapping view's center: toolbar + arrange canvas.
@@ -38,6 +40,11 @@ pub fn EditorShellCenter(
     project_editor: ProjectEditorView,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // The FOCUSED fixture: mapping mode edits it through the same
+    // MappingAssetEditor wiring the fixture face uses (P5). Entered by
+    // double-click on the canvas or the toolbar button; exited by the
+    // breadcrumb. Journal events stamp every transition.
+    let mut focused = use_signal(|| None::<NodeId>);
     let Some(surface) = surface else {
         return rsx! {
             div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
@@ -48,7 +55,58 @@ pub fn EditorShellCenter(
         };
     };
     prefetch_editor_meta(&on_action, &surface);
-    let bodies = mapping_bodies(&project_editor);
+    prefetch_selected_body(&on_action, &surface, &selection);
+    let (bodies, asset_editors) = mapping_assets(&project_editor);
+    let focus_journal = move |on_action: &EventHandler<UiAction>,
+                              event: UiEditJournalEvent,
+                              node: Option<NodeId>,
+                              mode: UiEditorMode| {
+        on_action.call(UiAction::from_op(
+            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal { event, node, mode },
+        ));
+    };
+    let mut enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
+        if focused.peek().is_none() {
+            focus_journal(
+                on_action,
+                UiEditJournalEvent::ModeSwitch,
+                Some(node),
+                UiEditorMode::Mapping,
+            );
+        } else if *focused.peek() != Some(node) {
+            focus_journal(
+                on_action,
+                UiEditJournalEvent::NodeSwitch,
+                Some(node),
+                UiEditorMode::Mapping,
+            );
+        }
+        focused.set(Some(node));
+    };
+    let mut exit_focus = move |on_action: &EventHandler<UiAction>| {
+        if focused.peek().is_some() {
+            focus_journal(
+                on_action,
+                UiEditJournalEvent::ModeSwitch,
+                None,
+                UiEditorMode::Arrange,
+            );
+        }
+        focused.set(None);
+    };
+    // The focused fixture's face-editor DTO (fetch/refusal/apply wiring
+    // rides it); a fixture that loses its editor (node removed) drops
+    // focus honestly.
+    let focused_editor: Option<(NodeId, String, UiAssetEditor)> = focused.read().and_then(|node| {
+        let fixture = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == node)?;
+        let artifact = fixture.mapping_artifact.as_ref()?;
+        let editor = asset_editors.get(artifact)?.clone();
+        Some((node, fixture.label.clone(), editor))
+    });
     let fixtures = surface.fixtures.len();
     let arranged = surface
         .fixtures
@@ -125,6 +183,12 @@ pub fn EditorShellCenter(
             onkeydown: {
                 let arrange_verb = arrange_verb.clone();
                 move |evt: KeyboardEvent| {
+                    // Mode-scoped ⌘Z (ratified): with a fixture focused the
+                    // mapping session owns undo (the MapEditor's own
+                    // handler); the arrange stack answers only in arrange.
+                    if focused.peek().is_some() {
+                        return;
+                    }
                     let meta = evt.data().modifiers().meta() || evt.data().modifiers().ctrl();
                     // Shift+z arrives as "Z", so match case-insensitively.
                     let is_z = matches!(
@@ -142,12 +206,50 @@ pub fn EditorShellCenter(
                     }
                 }
             },
-            // The editor toolbar: arrange verbs for the selection, undo /
-            // redo, and the reserved right-end slot for whatever patching's
-            // home turns out to be. Mapping tools join in P5.
+            // The editor toolbar. Focused: the breadcrumb back to the
+            // arranged space (the MapEditor below brings its own tool
+            // strip). Arrange: transform verbs for the selection, undo /
+            // redo, and the reserved right-end slot for whatever
+            // patching's home turns out to be.
+            if let Some((_, label, _)) = &focused_editor {
+                div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
+                    button {
+                        class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
+                        title: "Back to the arranged space",
+                        onclick: move |_| exit_focus(&on_action),
+                        "‹ Arrange"
+                    }
+                    span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
+                        "{label} · mapping"
+                    }
+                }
+            } else {
             div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
                 span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
                     "Arrange"
+                }
+                button {
+                    class: "{TOOL}",
+                    disabled: !selected_has_mapping(&surface, &selected),
+                    title: "Edit the selected fixture's mapping (double-click on the canvas does too)",
+                    onclick: {
+                        let selected = selected.clone();
+                        let surface_fixtures: Vec<(NodeId, bool)> = surface
+                            .fixtures
+                            .iter()
+                            .map(|fixture| (fixture.node, fixture.mapping_artifact.is_some()))
+                            .collect();
+                        move |_| {
+                            if let Some((_, node, _)) = &selected
+                                && surface_fixtures
+                                    .iter()
+                                    .any(|(n, has)| n == node && *has)
+                            {
+                                enter_focus(&on_action, *node);
+                            }
+                        }
+                    },
+                    "edit mapping"
                 }
                 button {
                     class: "{TOOL}",
@@ -212,13 +314,41 @@ pub fn EditorShellCenter(
                     "{fixtures} fixtures · {arranged} arranged"
                 }
             }
+            }
             if let Some(error) = surface.editor_meta_error.clone() {
                 div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-status-attention-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-status-attention-foreground",
                     "editor.json refused: {error} — arranging is disabled so the file is never rewritten blind."
                 }
             }
-            div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1",
-                if !surface.editor_meta_loaded {
+            div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                if let Some((node, _, editor)) = focused_editor.clone() {
+                    // The focused fixture's mapping session — the SAME
+                    // component the fixture face embeds (fetch → session →
+                    // ApplyBody → SaveOverlay, refuse-don't-rewrite), with
+                    // committed edits stamped into the correlation journal
+                    // at this glue layer (the session stays project-unaware).
+                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:p-2",
+                        MappingAssetEditor {
+                            editor,
+                            on_action: {
+                                move |action: UiAction| {
+                                    if action
+                                        .op_as::<AssetEditOp>()
+                                        .is_some_and(|op| matches!(op, AssetEditOp::ApplyBody { .. }))
+                                    {
+                                        focus_journal(
+                                            &on_action,
+                                            UiEditJournalEvent::Edit,
+                                            Some(node),
+                                            UiEditorMode::Mapping,
+                                        );
+                                    }
+                                    on_action.call(action);
+                                }
+                            },
+                        }
+                    }
+                } else if !surface.editor_meta_loaded {
                     div { class: "tw:flex tw:flex-1 tw:items-center tw:justify-center",
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Loading the arrangement…" }
                     }
@@ -227,6 +357,7 @@ pub fn EditorShellCenter(
                         surface: surface.clone(),
                         bodies,
                         selection: selection.clone(),
+                        on_focus: move |node| enter_focus(&on_action, node),
                         on_action,
                     }
                 }
@@ -261,33 +392,83 @@ fn arrange_dispatch(
     }
 }
 
-/// Every fixture map2d body the snapshot carries, keyed by artifact — the
-/// same bytes the face embeds edit (fetched by the panels' prefetch or the
-/// face's own mount; the canvas renders placeholders until they land).
-fn mapping_bodies(project_editor: &ProjectEditorView) -> BTreeMap<ArtifactLocation, String> {
-    let mut bodies = BTreeMap::new();
-    fn face(bodies: &mut BTreeMap<ArtifactLocation, String>, face: &Option<UiNodeFace>) {
+/// Every fixture mapping editor the snapshot carries, keyed by artifact:
+/// resolved body text (the canvas's geometry source) plus the face-editor
+/// DTO whole (the focused mode's fetch/apply/refusal wiring). Same bytes
+/// the face embeds edit; the canvas renders placeholders until they land.
+type MappingAssets = (
+    BTreeMap<ArtifactLocation, String>,
+    BTreeMap<ArtifactLocation, UiAssetEditor>,
+);
+
+fn mapping_assets(project_editor: &ProjectEditorView) -> MappingAssets {
+    let mut assets = MappingAssets::default();
+    fn face(assets: &mut MappingAssets, face: &Option<UiNodeFace>) {
         if let Some(UiNodeFace::Fixture(fixture)) = face
             && let Some(editor) = &fixture.mapping_editor
-            && let Some(text) = editor.content.as_ref().and_then(|content| content.text())
         {
-            bodies.insert(editor.artifact.clone(), text.to_string());
+            if let Some(text) = editor.content.as_ref().and_then(|content| content.text()) {
+                assets.0.insert(editor.artifact.clone(), text.to_string());
+            }
+            assets.1.insert(editor.artifact.clone(), editor.clone());
         }
     }
-    fn walk_children(bodies: &mut BTreeMap<ArtifactLocation, String>, children: &[UiNodeChild]) {
+    fn walk_children(assets: &mut MappingAssets, children: &[UiNodeChild]) {
         for child in children {
-            face(bodies, &child.face);
-            walk_children(bodies, &child.children);
+            face(assets, &child.face);
+            walk_children(assets, &child.children);
         }
     }
-    fn walk_nodes(bodies: &mut BTreeMap<ArtifactLocation, String>, nodes: &[UiNodeView]) {
+    fn walk_nodes(assets: &mut MappingAssets, nodes: &[UiNodeView]) {
         for node in nodes {
-            face(bodies, &node.face);
-            walk_children(bodies, &node.children);
+            face(assets, &node.face);
+            walk_children(assets, &node.children);
         }
     }
-    walk_nodes(&mut bodies, &project_editor.nodes);
-    bodies
+    walk_nodes(&mut assets, &project_editor.nodes);
+    assets
+}
+
+/// Does the current selection name a fixture whose mapping can be edited?
+fn selected_has_mapping(
+    surface: &UiPatchSurface,
+    selected: &Option<(String, NodeId, UiArrangeTransform)>,
+) -> bool {
+    selected.as_ref().is_some_and(|(_, node, _)| {
+        surface
+            .fixtures
+            .iter()
+            .any(|fixture| fixture.node == *node && fixture.mapping_artifact.is_some())
+    })
+}
+
+/// Lazy loading on SELECTION (P5): selecting a fixture whose body has not
+/// landed dispatches the fetch, flag-driven — the canvas swaps its
+/// placeholder for real geometry when the snapshot catches up.
+fn prefetch_selected_body(
+    on_action: &EventHandler<UiAction>,
+    surface: &UiPatchSurface,
+    selection: &Option<UiPatchTarget>,
+) {
+    let node = match selection {
+        Some(
+            UiPatchTarget::Fixture { node }
+            | UiPatchTarget::Instance { node, .. }
+            | UiPatchTarget::Range { node, .. },
+        ) => *node,
+        _ => return,
+    };
+    let Some(fixture) = surface.fixtures.iter().find(|fixture| fixture.node == node) else {
+        return;
+    };
+    if !fixture.mapping_loaded
+        && let Some(artifact) = fixture.mapping_artifact.clone()
+    {
+        on_action.call(UiAction::from_op(
+            ProjectController::NODE_ID,
+            lpa_studio_core::AssetContentFetchOp { artifact },
+        ));
+    }
 }
 
 /// Flag-driven prefetch (the #409 lesson: never hand-code a fetch a flag
