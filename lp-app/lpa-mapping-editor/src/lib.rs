@@ -26,6 +26,7 @@ pub use editor_core::view_geometry::{
 pub use view::editor_canvas::{CanvasAnchor, capture_pointer, object_color};
 pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor, ReferenceOps};
 pub use view::reference::ReferenceImage;
+pub use view::wheel::{WheelGesture, wheel_gesture};
 // The document type IS the component input type; re-exported so hosts that
 // only embed the editor need no direct lpc-mapping dependency.
 pub use lpc_mapping::Map2dDoc;

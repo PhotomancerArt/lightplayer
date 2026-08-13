@@ -69,7 +69,9 @@ enum FixtureBody {
     Strip { lamps: u32 },
 }
 
-/// What a pointer stream is doing.
+/// What a pointer stream is doing. Panning is NOT here: under the house
+/// wheel grammar (scroll pans, ⌘scroll zooms) a background drag is only a
+/// deselect tap in waiting.
 #[derive(Clone, PartialEq)]
 enum CanvasDrag {
     /// Maybe-drag on a fixture: becomes a real drag past the threshold.
@@ -80,8 +82,20 @@ enum CanvasDrag {
         original: UiArrangeTransform,
         moved: bool,
     },
-    /// Background pan (`moved` distinguishes a pan from a deselect tap).
-    Pan { last_client: [f64; 2], moved: bool },
+    /// Background press: pointer-up without movement deselects.
+    Tap { start_client: [f64; 2], moved: bool },
+}
+
+/// A committed drag held on screen until the snapshot confirms it: the
+/// override survives pointer-up so the fixture never snaps back while the
+/// write round-trips (the gate's jump-back bug).
+#[derive(Clone, PartialEq)]
+struct DragOverride {
+    key: String,
+    transform: UiArrangeTransform,
+    /// True after pointer-up: the override retires once the surface
+    /// carries (approximately — the kernel quantizes) this transform.
+    committed: bool,
 }
 
 #[component]
@@ -106,13 +120,13 @@ pub fn ArrangeCanvas(
         &memo_surface,
         &memo_bodies
     )));
-    // The camera window: None = fit-all follows the content; Some = the
-    // user's own window (pan/zoom touched it).
+    // The camera window: seeded from fit-all when content first appears,
+    // then FROZEN — arranging a fixture must never move the camera (the
+    // gate's drift bug). The fit button re-frames on demand.
     let mut view_box = use_signal(|| None::<[f64; 4]>);
     let mut drag = use_signal(|| None::<CanvasDrag>);
-    // Live drag override: (key, transform) applied to the dragged group
-    // only — the op writes once, on release.
-    let mut drag_override = use_signal(|| None::<(String, UiArrangeTransform)>);
+    // Live drag override, held until the snapshot confirms the write.
+    let mut drag_override = use_signal(|| None::<DragOverride>);
     #[cfg_attr(
         not(target_arch = "wasm32"),
         allow(unused_mut, reason = "only the wasm mount handler writes it")
@@ -121,10 +135,25 @@ pub fn ArrangeCanvas(
 
     let renders_now = renders.read().clone();
     let fit_box = fit_view_box(&renders_now);
-    let vb = view_box
-        .read()
-        .or(fit_box)
-        .unwrap_or([0.0, 0.0, 100.0, 62.5]);
+    // Seed once; never follow content afterwards.
+    if view_box.peek().is_none()
+        && let Some(fit) = fit_box
+    {
+        view_box.set(Some(fit));
+    }
+    // Retire a committed override once the surface caught up (the kernel
+    // quantizes to 4 decimals, so compare loosely).
+    let retire_override = {
+        let over = drag_override.peek().clone();
+        matches!(over, Some(over) if over.committed
+        && renders_now.iter().any(|render| {
+            render.key == over.key && transforms_close(&render.transform, &over.transform)
+        }))
+    };
+    if retire_override {
+        drag_override.set(None);
+    }
+    let vb = view_box.read().unwrap_or([0.0, 0.0, 100.0, 62.5]);
     // CSS px → doc units, from the mounted rect (fallback: 1000px wide).
     let units_per_px = {
         let size = anchor.peek().size().unwrap_or([1000.0, 625.0]);
@@ -178,6 +207,17 @@ pub fn ArrangeCanvas(
     };
 
     rsx! {
+        div { class: "tw:relative tw:min-h-0 tw:flex-1",
+        button {
+            class: "tw:absolute tw:right-2 tw:top-2 tw:z-10 tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-subtle tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:hover:text-strong-foreground",
+            title: "Fit everything in view",
+            onclick: move |_| {
+                if let Some(fit) = fit_view_box(&renders.peek()) {
+                    view_box.set(Some(fit));
+                }
+            },
+            "⤢ fit"
+        }
         svg {
             class: "tw:h-full tw:w-full tw:touch-none tw:select-none tw:bg-background",
             view_box: "{vb[0]} {vb[1]} {vb[2]} {vb[3]}",
@@ -205,8 +245,8 @@ pub fn ArrangeCanvas(
                         let transform = drag_override
                             .peek()
                             .as_ref()
-                            .filter(|(key, _)| *key == render.key)
-                            .map(|(_, transform)| *transform)
+                            .filter(|over| over.key == render.key)
+                            .map(|over| over.transform)
                             .unwrap_or(render.transform);
                         drag.set(Some(CanvasDrag::Fixture {
                             key: render.key,
@@ -217,8 +257,8 @@ pub fn ArrangeCanvas(
                         }));
                     }
                     None => {
-                        drag.set(Some(CanvasDrag::Pan {
-                            last_client: client,
+                        drag.set(Some(CanvasDrag::Tap {
+                            start_client: client,
                             moved: false,
                         }));
                     }
@@ -228,17 +268,18 @@ pub fn ArrangeCanvas(
                 let Some(state) = drag.peek().clone() else { return };
                 let point = evt.data().client_coordinates();
                 match state {
-                    CanvasDrag::Pan { last_client, moved } => {
-                        let dx = point.x - last_client[0];
-                        let dy = point.y - last_client[1];
-                        let mut next = view_box.peek().or(fit_box).unwrap_or(vb);
-                        next[0] -= dx * units_per_px;
-                        next[1] -= dy * units_per_px;
-                        view_box.set(Some(next));
-                        drag.set(Some(CanvasDrag::Pan {
-                            last_client: [point.x, point.y],
-                            moved: moved || dx.abs() > 1.0 || dy.abs() > 1.0,
-                        }));
+                    CanvasDrag::Tap {
+                        start_client,
+                        moved,
+                    } => {
+                        let dx = point.x - start_client[0];
+                        let dy = point.y - start_client[1];
+                        if !moved && (dx.abs() > DRAG_THRESHOLD_PX || dy.abs() > DRAG_THRESHOLD_PX) {
+                            drag.set(Some(CanvasDrag::Tap {
+                                start_client,
+                                moved: true,
+                            }));
+                        }
                     }
                     CanvasDrag::Fixture {
                         key,
@@ -255,7 +296,11 @@ pub fn ArrangeCanvas(
                             let mut dragged = original;
                             dragged.t[0] += dx * units_per_px;
                             dragged.t[1] += dy * units_per_px;
-                            drag_override.set(Some((key.clone(), dragged)));
+                            drag_override.set(Some(DragOverride {
+                                key: key.clone(),
+                                transform: dragged,
+                                committed: false,
+                            }));
                         }
                         drag.set(Some(CanvasDrag::Fixture {
                             key,
@@ -274,22 +319,27 @@ pub fn ArrangeCanvas(
                     Some(CanvasDrag::Fixture {
                         key, node, moved, ..
                     }) => {
-                        let over = drag_override.peek().clone();
-                        drag_override.set(None);
                         if moved {
-                            // One gesture = one op = one undo step.
-                            if let Some((over_key, transform)) = over
-                                && over_key == key
+                            // One gesture = one op = one undo step. The
+                            // override stays up (committed) until the
+                            // snapshot echoes the write — no snap-back.
+                            let over = drag_override.peek().clone();
+                            if let Some(mut over) = over
+                                && over.key == key
                             {
+                                over.committed = true;
+                                let transform = over.transform;
+                                drag_override.set(Some(over));
                                 dispatch_set(&on_action, &key, node, transform);
                             }
                         } else {
+                            drag_override.set(None);
                             select(Some(UiPatchTarget::Fixture { node }));
                         }
                     }
-                    // A background tap (a pan that never moved) deselects.
-                    Some(CanvasDrag::Pan { moved: false, .. }) => select(None),
-                    Some(CanvasDrag::Pan { moved: true, .. }) | None => {}
+                    // A background tap that never moved deselects.
+                    Some(CanvasDrag::Tap { moved: false, .. }) => select(None),
+                    Some(CanvasDrag::Tap { moved: true, .. }) | None => {}
                 }
             },
             onpointercancel: move |_| {
@@ -307,17 +357,33 @@ pub fn ArrangeCanvas(
             },
             onwheel: move |evt| {
                 evt.prevent_default();
-                let delta = evt.data().delta().strip_units().y;
-                let factor = if delta > 0.0 { 1.12 } else { 1.0 / 1.12 };
-                let mut next = view_box.peek().or(fit_box).unwrap_or(vb);
-                // Zoom about the window center (v1: anchor-at-pointer needs
-                // nothing the feel gate tests).
-                let cx = next[0] + next[2] / 2.0;
-                let cy = next[1] + next[3] / 2.0;
-                next[2] = (next[2] * factor).clamp(1.0, 1_000_000.0);
-                next[3] = (next[3] * factor).clamp(1.0, 1_000_000.0);
-                next[0] = cx - next[2] / 2.0;
-                next[1] = cy - next[3] / 2.0;
+                // The house wheel grammar (shared code with the mapping
+                // editor): scroll pans, ⌘/Ctrl-scroll zooms at the pointer.
+                let point = evt.data().client_coordinates();
+                let mut next = view_box.peek().unwrap_or(vb);
+                match lpa_mapping_editor::wheel_gesture(&evt) {
+                    lpa_mapping_editor::WheelGesture::Pan { dx, dy } => {
+                        next[0] -= f64::from(dx) * units_per_px;
+                        next[1] -= f64::from(dy) * units_per_px;
+                    }
+                    lpa_mapping_editor::WheelGesture::Zoom { factor } => {
+                        let anchor_doc =
+                            event_doc_point(&anchor.peek(), next, [point.x, point.y])
+                                .unwrap_or([next[0] + next[2] / 2.0, next[1] + next[3] / 2.0]);
+                        let factor = f64::from(factor).clamp(0.5, 2.0);
+                        let width = (next[2] / factor).clamp(1.0, 1_000_000.0);
+                        let height = (next[3] / factor).clamp(1.0, 1_000_000.0);
+                        // Keep the doc point under the pointer fixed.
+                        let fx = (anchor_doc[0] - next[0]) / next[2];
+                        let fy = (anchor_doc[1] - next[1]) / next[3];
+                        next = [
+                            anchor_doc[0] - fx * width,
+                            anchor_doc[1] - fy * height,
+                            width,
+                            height,
+                        ];
+                    }
+                }
                 view_box.set(Some(next));
             },
             for render in renders_now.iter() {
@@ -327,8 +393,8 @@ pub fn ArrangeCanvas(
                     transform: drag_override
                         .read()
                         .as_ref()
-                        .filter(|(key, _)| *key == render.key)
-                        .map(|(_, transform)| *transform)
+                        .filter(|over| over.key == render.key)
+                        .map(|over| over.transform)
                         .unwrap_or(render.transform),
                     selected: selection_touches(&selection, render.node),
                     selected_instance: selected_instance_range(&selection, render),
@@ -336,7 +402,15 @@ pub fn ArrangeCanvas(
                 }
             }
         }
+        }
     }
+}
+
+/// Loose transform equality at the kernel's canonical precision (writes
+/// quantize to 4 decimals).
+fn transforms_close(a: &UiArrangeTransform, b: &UiArrangeTransform) -> bool {
+    let close = |x: f64, y: f64| (x - y).abs() < 1e-3;
+    close(a.t[0], b.t[0]) && close(a.t[1], b.t[1]) && close(a.r, b.r) && close(a.s, b.s)
 }
 
 /// Client coordinates → conceptual-space coordinates, through the mounted
