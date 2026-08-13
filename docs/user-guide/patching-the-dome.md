@@ -9,10 +9,13 @@
 ```embed panel sim=main mode=interactive
 ```
 
-That's a dome — a miniature of a real one. Five identical strut sectors of
-thirty lamps radiating from the apex, and three triangular door panels
-around the rim that stay warmly lit no matter what the show does. Two
-control boxes drive it: **"1"** with three ports, **"Box 2"** with two.
+That's a dome — a miniature of a real one: a 2-frequency geodesic shell
+of bare struts, hoisted on a riser ring, with glowing triangular panels
+suspended inside all forty strut triangles. Five identical sectors of
+thirty lamps — eight panels each, one strand jumpered panel-to-panel —
+and three chevron doors around the rim that stay warmly lit no matter
+what the show does. Two control boxes drive it: **"1"** with three
+ports, **"Box 2"** with two.
 
 Here's the thing about domes: the mapping never changes — the geometry was
 decided when the struts were cut — but the **plugging changes every single
@@ -28,14 +31,17 @@ three things a repeated structure needs.
 
 ## Instances, by name
 
-Open `dome/dome.map2d.json` and there is exactly **one** strut in it — a
-path with thirty lamps, repeated five ways around the center:
+Open `dome/dome.map2d.json` and there is exactly **one** sector in it —
+eight triangle panels (one per 2V face) traced by a single thirty-lamp
+path whose connector segments are `gaps`: jumper wire that carries no
+lamps — repeated five ways around the center. (The geometry is
+generated from the real dome's structure by `cargo run -p lpt-geodome`.)
 
 ```json
 {
   "name": "sector",
   "id": "sector",
-  "shape": { "repeat": { "shape": { "path": { "...": "..." } }, "count": 5 } }
+  "shape": { "repeat": { "shape": { "path": { "...": "...", "gaps": [3, 7, 11, 15, 19, 23, 27] } }, "count": 5 } }
 }
 ```
 
@@ -72,22 +78,24 @@ Two of the rows carry more:
 - `"r"` on `/sector/1` — that sector was plugged in at its **far end**, so
   its run is laid down the wire back-to-front. One flag, not a rewired
   strut.
-- the `10` on `/sector/2` — rotation. The sector reads ten lamps
-  further around than the design says. The dome doesn't care where a
-  symmetric part starts; **offset** turns it in software the way the crew
-  seated it in hardware.
+- the `10` on `/sector/2` — rotation. That sector's strand was fed a
+  few panels along, so its run reads ten lamps further around than the
+  design says. **Offset** turns it in software the way the crew plugged
+  it in hardware.
 
-The doors are where rotation earns its keep. Each door is a **polygon** —
-a closed triangular outline with nine lamps, three per side. A door seated
-one side off is a *rotation by three*, and the patch says exactly that:
+The doors put a number on that turn. Each door is a **chevron** — a big
+open triangle with no bottom edge, nine lamps up one leg and over to the
+other. A door re-seated one strap-point along is a *rotation by three*,
+and the patch says exactly that:
 
 ```json
 ["/door/1",1,30,"",3]
 ```
 
-Three is the door's **stride** — the polygon's lamps-per-side, derived
-from its shape. Rotating by strides is how "it's on, just turned" becomes
-one edit instead of nine.
+Three is the door's **stride** — authored on the door object
+(`"stride": 3`), because an open chevron has no intrinsic period the way
+a closed polygon's lamps-per-side is. Rotating by strides is how "it's
+on, just turned" becomes one edit instead of nine.
 
 ## Two boxes, shared ports
 
