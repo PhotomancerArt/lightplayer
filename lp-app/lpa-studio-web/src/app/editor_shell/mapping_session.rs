@@ -68,21 +68,42 @@ pub(crate) fn MappingAssetPipeline(
     }
 
     // Seed / re-seed the session from pipeline content, suppressing the
-    // echo of our own applies so in-editor undo history survives its
-    // round-trip. All signal writes are guarded — this runs during render.
+    // echoes of our own applies so in-editor undo history survives its
+    // round-trips. `applied` is a QUEUE, not a slot: rapid commits mean
+    // several applies can be in flight at once, and an EARLIER apply's
+    // echo landing after a LATER apply must still read as ours — a
+    // single-slot compare made that stale echo look external, re-seeded
+    // the session, and threw undo into a two-state loop (G1 bug 2).
+    // All signal writes are guarded — this runs during render.
     let mut seeded = use_signal(|| None::<(ArtifactLocation, Map2dDoc)>);
-    let last_applied = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let applied = use_hook(|| Rc::new(RefCell::new(Vec::<String>::new())));
     let content_text = editor
         .content
         .as_ref()
         .and_then(|content| content.text().map(str::to_string));
     if let Some(text) = &content_text {
-        let echo = last_applied.borrow().as_deref() == Some(text.as_str());
+        let echo = {
+            let mut queue = applied.borrow_mut();
+            match queue.iter().position(|entry| entry == text) {
+                Some(position) => {
+                    // Ours: drop every SUPERSEDED apply before it (their
+                    // echoes were skipped by the store) but KEEP the match
+                    // — the settled content re-renders many times, and
+                    // each one must keep reading as our own echo (the old
+                    // single-slot compare was persistent for the same
+                    // reason). Newer in-flight applies stay armed after it.
+                    queue.drain(..position);
+                    true
+                }
+                None => false,
+            }
+        };
         if !echo {
             // Compare PARSED documents, never serialized text: the stored
             // file is pretty-printed while the editor emits compact JSON,
-            // so text comparison never matches and every render would
-            // re-seed the session (wiping selection/undo).
+            // so text comparison never matches — and the compare is
+            // against the last SEEDED doc, never the live session doc,
+            // which mutates mid-gesture.
             let decision = {
                 let current = seeded.peek();
                 let current_doc = current
@@ -109,24 +130,26 @@ pub(crate) fn MappingAssetPipeline(
                     }
                 }
             }
+        } else if *state.peek() != DiveAssetState::Ready {
+            state.set(DiveAssetState::Ready);
         }
     } else {
         // A switch is in flight (content not landed): the session still
         // holds the PREVIOUS fixture's document — nothing may render or
         // apply it against this artifact.
-        let loading = matches!(
+        let loading = !matches!(
             seeded.peek().as_ref(),
-            Some((artifact, _)) if *artifact != editor.artifact
-        ) || seeded.peek().is_none();
+            Some((artifact, _)) if *artifact == editor.artifact
+        );
         if loading && *state.peek() != DiveAssetState::Loading {
             state.set(DiveAssetState::Loading);
         }
     }
 
     // Commit bumps: serialize the session's document and apply it
-    // whole-body, remembering the bytes so the echo never re-seeds. Only
-    // while Ready — a bump racing a dive-switch must not write the old
-    // fixture's document to the new artifact.
+    // whole-body, arming the echo queue so the round-trip never re-seeds.
+    // Only while Ready — a bump racing a dive-switch must not write the
+    // old fixture's document to the new artifact.
     let mut seen_commit = use_signal(|| *commit_requests.peek());
     {
         let now = *commit_requests.read();
@@ -134,7 +157,16 @@ pub(crate) fn MappingAssetPipeline(
             seen_commit.set(now);
             if *state.peek() == DiveAssetState::Ready {
                 let json = session.peek().doc().to_json();
-                *last_applied.borrow_mut() = Some(json.clone());
+                {
+                    let mut queue = applied.borrow_mut();
+                    queue.push(json.clone());
+                    // A bounded queue: anything this deep in flight is
+                    // long superseded.
+                    let overflow = queue.len().saturating_sub(16);
+                    if overflow > 0 {
+                        queue.drain(..overflow);
+                    }
+                }
                 if let Some(handler) = &on_action {
                     handler.call(editor.apply_action(&json));
                 }
