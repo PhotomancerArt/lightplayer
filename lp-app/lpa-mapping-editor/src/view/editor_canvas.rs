@@ -1129,8 +1129,16 @@ pub struct CanvasAnchor {
 }
 
 impl CanvasAnchor {
+    /// Anchor to a mounted element (the host's `onmounted` handler).
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_element(element: web_sys::Element) -> Self {
+        Self {
+            element: Some(element),
+        }
+    }
+
     /// Top-left of the canvas in client coordinates.
-    fn origin(&self) -> [f32; 2] {
+    pub fn origin(&self) -> [f32; 2] {
         #[cfg(target_arch = "wasm32")]
         if let Some(element) = &self.element {
             let rect = element.get_bounding_client_rect();
@@ -1140,7 +1148,7 @@ impl CanvasAnchor {
     }
 
     /// Measured canvas size in CSS pixels, when mounted.
-    fn size(&self) -> Option<[f32; 2]> {
+    pub fn size(&self) -> Option<[f32; 2]> {
         #[cfg(target_arch = "wasm32")]
         if let Some(element) = &self.element {
             let rect = element.get_bounding_client_rect();
@@ -1188,7 +1196,7 @@ impl Drop for CanvasResizeObserver {
 /// Route the rest of this pointer stream to the pressed element even when
 /// the cursor crosses overlays (rail, popover) or leaves the window — drags
 /// must not die at the first overlay edge.
-fn capture_pointer(evt: &Event<PointerData>) {
+pub fn capture_pointer(evt: &Event<PointerData>) {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;

@@ -23,6 +23,7 @@ pub use editor_core::shape_path::ShapePath;
 pub use editor_core::view_geometry::{
     ArrowInput, MapArrowOverlay, MapArrowSeg, neutral_lamp_rgb, wiring_arrows,
 };
+pub use view::editor_canvas::{CanvasAnchor, capture_pointer, object_color};
 pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor, ReferenceOps};
 pub use view::reference::ReferenceImage;
 // The document type IS the component input type; re-exported so hosts that
