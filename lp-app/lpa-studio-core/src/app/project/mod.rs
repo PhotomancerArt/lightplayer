@@ -25,6 +25,8 @@ pub(crate) mod agent_support;
 pub mod asset;
 pub mod demo_project;
 pub mod dirty_summary;
+pub(crate) mod edit_journal;
+pub(crate) mod editor_meta_op;
 pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
@@ -62,6 +64,11 @@ pub use asset::{
     UiAssetContentBody, UiShaderError,
 };
 pub use dirty_summary::DirtySummary;
+pub use edit_journal::{EDIT_JOURNAL_CAP, UiEditJournalEntry, UiEditJournalEvent, UiEditorMode};
+pub use editor_meta_op::{
+    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaVerb,
+    editor_meta_artifact,
+};
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
@@ -108,6 +115,7 @@ pub use slot::{
 };
 pub use ui_affordance::UiAffordance;
 pub use ui_patch_surface::{
-    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+    UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchInstance, UiPatchSurface,
+    UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
 };
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

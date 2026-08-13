@@ -494,6 +494,13 @@ pub struct StudioFsRead {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// A directory listing through the server filesystem
+/// (`FsRequest::ListDir`).
+pub struct StudioFsListing {
+    pub entries: Vec<lpc_model::LpPathBuf>,
+    pub logs: Vec<UiLogDraft>,
+}
+
 impl StudioServerClient {
     /// Ask the connected server to apply `level` as its process-global log
     /// level (via the wire `SetLogLevel` command). Not persisted device-side;
@@ -698,6 +705,27 @@ impl StudioServerClient {
         logs.extend(self.take_pending_logs());
         Ok(StudioFsRead {
             data: read.value,
+            logs,
+        })
+    }
+
+    /// List a directory through the server filesystem (`FsRequest::ListDir`)
+    /// — how optional project files (`editor.json`) settle presence without
+    /// turning "no such file" into a read error.
+    pub async fn fs_list_dir(
+        &mut self,
+        path: &lpc_model::LpPath,
+        recursive: bool,
+    ) -> Result<StudioFsListing, UiError> {
+        let listing = self
+            .client
+            .fs_list_dir(path, recursive)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = self.absorb_events(listing.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioFsListing {
+            entries: listing.value,
             logs,
         })
     }

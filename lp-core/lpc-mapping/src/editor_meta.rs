@@ -311,8 +311,11 @@ fn parse_surface(
     node_id: &str,
     value: &serde_json::Value,
 ) -> Result<EditorSurfaceMeta, EditorMetaError> {
-    let surface_error =
-        |reason: &str| parse_error(&alloc::format!("node {node_id:?} mapping surface: {reason}"));
+    let surface_error = |reason: &str| {
+        parse_error(&alloc::format!(
+            "node {node_id:?} mapping surface: {reason}"
+        ))
+    };
     let serde_json::Value::Object(fields) = value else {
         return Err(surface_error("must be an object"));
     };
@@ -321,8 +324,9 @@ fn parse_surface(
         Some(serde_json::Value::Object(t)) => EditorTransform {
             t: match t.get("t") {
                 None => [0.0, 0.0],
-                Some(value) => parse_floats::<2>(value)
-                    .ok_or_else(|| surface_error("\"t\" must be [x, y]"))?,
+                Some(value) => {
+                    parse_floats::<2>(value).ok_or_else(|| surface_error("\"t\" must be [x, y]"))?
+                }
             },
             r: match t.get("r") {
                 None => 0.0,
@@ -375,20 +379,32 @@ fn parse_floats<const N: usize>(value: &serde_json::Value) -> Option<[f64; N]> {
 
 /// One node's surfaces as a JSON value: `"mapping"` typed, unknown surfaces
 /// verbatim, sorted keys (serde_json maps sort by construction).
+///
+/// Floats are QUANTIZED to canonical precision before the default checks,
+/// so a value that quantizes to a default is omitted on the first write,
+/// not the second — write → parse → write must be the identity.
 fn node_value(node: &EditorNodeMeta) -> serde_json::Value {
     let mut surfaces = serde_json::Map::new();
     if let Some(mapping) = &node.mapping {
+        let transform = EditorTransform {
+            t: [
+                quantize(mapping.transform.t[0]),
+                quantize(mapping.transform.t[1]),
+            ],
+            r: quantize(mapping.transform.r),
+            s: quantize(mapping.transform.s),
+        };
         let mut fields = serde_json::Map::new();
-        if !mapping.transform.is_identity() {
+        if !transform.is_identity() {
             let mut t = serde_json::Map::new();
-            if mapping.transform.t != [0.0, 0.0] {
-                t.insert("t".into(), float_array(&mapping.transform.t));
+            if transform.t != [0.0, 0.0] {
+                t.insert("t".into(), float_array(&transform.t));
             }
-            if mapping.transform.r != 0.0 {
-                t.insert("r".into(), float_value(mapping.transform.r));
+            if transform.r != 0.0 {
+                t.insert("r".into(), float_value(transform.r));
             }
-            if mapping.transform.s != 1.0 {
-                t.insert("s".into(), float_value(mapping.transform.s));
+            if transform.s != 1.0 {
+                t.insert("s".into(), float_value(transform.s));
             }
             fields.insert("transform".into(), serde_json::Value::Object(t));
         }
@@ -407,13 +423,24 @@ fn node_value(node: &EditorNodeMeta) -> serde_json::Value {
 }
 
 fn float_array(values: &[f64]) -> serde_json::Value {
-    serde_json::Value::Array(values.iter().map(|v| float_value(*v)).collect())
+    serde_json::Value::Array(values.iter().map(|v| float_value(quantize(*v))).collect())
+}
+
+/// Canonical float precision: 4 decimals of a doc-space unit —
+/// presentation data needs no more, hand-edited diffs stay readable, and
+/// the short mantissa keeps serde_json's fast-path parse EXACT (the
+/// `float_roundtrip` parser feature is off workspace-wide, and 17-digit
+/// mantissas can come back one ulp different — measured on the dome's f32
+/// bounds).
+fn quantize(value: f64) -> f64 {
+    libm::round(value * 10_000.0) / 10_000.0
 }
 
 /// Whole-valued floats write as integers (`40` not `40.0`) — hand-authored
-/// documents and the writer agree on the shorter spelling.
+/// documents and the writer agree on the shorter spelling. Callers pass
+/// [`quantize`]d values.
 fn float_value(value: f64) -> serde_json::Value {
-    if value.fract() == 0.0 && value.abs() < 1e15 {
+    if value == libm::trunc(value) && libm::fabs(value) < 1e15 {
         serde_json::Value::from(value as i64)
     } else {
         serde_json::Value::from(value)
@@ -480,8 +507,8 @@ mod tests {
         assert_eq!(surface.transform.r, 45.0);
         assert_eq!(surface.transform.s, 1.0);
 
-        let empty = EditorMetaDoc::from_json(r#"{"format":1,"nodes":{"n":{"mapping":{}}}}"#)
-            .unwrap();
+        let empty =
+            EditorMetaDoc::from_json(r#"{"format":1,"nodes":{"n":{"mapping":{}}}}"#).unwrap();
         assert!(
             empty.mapping_surface("n").unwrap().transform.is_identity(),
             "an empty mapping surface is arranged at identity"
@@ -545,7 +572,10 @@ mod tests {
             r#"{"format":1,"nodes":{"n":{"mapping":{"footprint":{"bbox":[0,0,1,1]}}}}}"#,
         ] {
             assert!(
-                matches!(EditorMetaDoc::from_json(text), Err(EditorMetaError::Parse(_))),
+                matches!(
+                    EditorMetaDoc::from_json(text),
+                    Err(EditorMetaError::Parse(_))
+                ),
                 "{text}"
             );
         }
@@ -559,6 +589,42 @@ mod tests {
         let written = doc.to_json_pretty();
         assert!(!written.contains("hollow"), "{written}");
         assert!(written.contains(r#""t":[1,2]"#), "{written}");
+    }
+
+    /// High-precision floats (an f32-derived bbox) quantize to canonical
+    /// 4-decimal form on the FIRST write and stay byte-stable after — the
+    /// fast-path JSON parse must never perturb the canonical bytes.
+    #[test]
+    fn floats_quantize_once_and_rewrite_byte_stably() {
+        let mut doc = EditorMetaDoc::new();
+        *doc.mapping_surface_mut("n") = EditorSurfaceMeta {
+            transform: EditorTransform {
+                t: [13.683_242_797_851_562, 0.000_04],
+                r: 0.0,
+                s: 1.000_04,
+            },
+            footprint: Some(EditorFootprint {
+                bbox: [
+                    13.683_242_797_851_562,
+                    10.0,
+                    95.105_651_855_468_76,
+                    92.801_986_694_335_94,
+                ],
+                lamps: 150,
+            }),
+        };
+        let written = doc.to_json_pretty();
+        assert!(written.contains(r#""t":[13.6832,0]"#), "{written}");
+        assert!(
+            !written.contains(r#""s""#),
+            "a scale that quantizes to 1 is omitted on the FIRST write: {written}"
+        );
+        assert!(
+            written.contains(r#""bbox":[13.6832,10,95.1057,92.802]"#),
+            "{written}"
+        );
+        let reparsed = EditorMetaDoc::from_json(&written).unwrap();
+        assert_eq!(reparsed.to_json_pretty(), written, "byte-stable rewrite");
     }
 
     #[test]

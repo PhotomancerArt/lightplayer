@@ -291,7 +291,11 @@ pub enum PatchError {
     /// to auto-flow and resolution reports it in
     /// [`PatchResolution::refusals`]. Range-grain entries are exempt (the
     /// manual escape hatch).
-    DuplicatePath { entry: u32, other: u32, path: String },
+    DuplicatePath {
+        entry: u32,
+        other: u32,
+        path: String,
+    },
     /// An entry names an output outside the context's allowed set.
     DanglingOutput { entry: u32, name: String },
     /// Two entries claim the same fixture lamp.
@@ -1585,7 +1589,9 @@ mod tests {
             object_spans: &spans,
             ..Default::default()
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)])).unwrap().ranges;
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)]))
+            .unwrap()
+            .ranges;
         assert_eq!(resolved[0].start, 60);
         assert_eq!(resolved[0].count, 30);
         assert_eq!(resolved[0].lamp, 40);
@@ -1606,7 +1612,9 @@ mod tests {
             object_spans: &grown,
             ..Default::default()
         };
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)])).unwrap().ranges;
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/sector/2", 40)]))
+            .unwrap()
+            .ranges;
         assert_eq!((resolved[0].start, resolved[0].count), (80, 40));
     }
 
@@ -1622,7 +1630,9 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/door", 100)])).unwrap().ranges;
+        let resolved = resolve_patch(&ctx, &doc(vec![path_entry("/door", 100)]))
+            .unwrap()
+            .ranges;
         assert_eq!((resolved[0].start, resolved[0].count), (150, 27));
 
         let mut sub = path_entry("/door/1", 0);
