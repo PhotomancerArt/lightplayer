@@ -656,8 +656,8 @@ fn dive_toolbar(
             items: vec![
                 ToolbarItem::Link {
                     id: "dive.exit",
-                    label: "Project".to_string(),
-                    title: "Back to the project canvas (esc)".to_string(),
+                    label: "‹ Project".to_string(),
+                    title: "Leave the dive — back to the project canvas (esc)".to_string(),
                 },
                 ToolbarItem::Status {
                     text: format!("▸ {label}"),
