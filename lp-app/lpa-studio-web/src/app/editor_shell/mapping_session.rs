@@ -1,9 +1,10 @@
-//! The fixture face's in-place mapping editor: the embeddable
-//! [`MapEditor`] wired to the asset pipeline — fetch the `.map2d.json`
-//! body, edit locally (editor-owned undo), apply committed documents
-//! whole-body (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`,
-//! Revert = drop the applied edit. The "one home" flip: this mounts inside
-//! the fixture face's output section, no separate pane.
+//! The unified editor's mapping session host (the fixture-face embed's
+//! asset wiring, re-homed by R3): the embeddable [`MapEditor`] wired to
+//! the asset pipeline — fetch the `.map2d.json` body, edit locally
+//! (editor-owned undo), apply committed documents whole-body
+//! (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`, Revert =
+//! drop the applied edit. Mounts in the Mapping view's center as the
+//! DIVE: the neighbour fixtures ride along as a dimmed context layer.
 //!
 //! Refuse-don't-rewrite: a body this build cannot parse — malformed, or
 //! written by a newer LightPlayer — renders as a refusal instead of an
@@ -17,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use base64::Engine as _;
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Download, Upload};
-use lpa_mapping_editor::{DocOpen, DocRefusal, EditorViewOptions, Map2dDoc, MapEditor};
+use lpa_mapping_editor::{DocOpen, DocRefusal, Map2dDoc, MapEditor};
 use lpa_studio_core::{UiAction, UiAssetEditor};
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -27,17 +28,12 @@ static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn MappingAssetEditor(
+pub fn MappingSessionHost(
     editor: UiAssetEditor,
-    /// Face-owned view options (the output section's toggle bar).
+    /// Neighbour fixtures, already in this document's space (dimmed
+    /// context under the dive).
     #[props(default)]
-    shared_view: Option<Signal<EditorViewOptions>>,
-    /// Live lamp colors by wiring index (the face's control preview feed).
-    #[props(default)]
-    live_colors: Vec<[u8; 3]>,
-    /// Bumped by the face to request a zoom-to-fit (full-page expand).
-    #[props(default)]
-    refit_epoch: u64,
+    context: Vec<lpa_mapping_editor::ContextFixture>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // One-shot base-body fetch per artifact (the code editor's guard).
@@ -146,9 +142,7 @@ pub fn MappingAssetEditor(
                 MapEditor {
                     doc_epoch: epoch,
                     doc,
-                    shared_view,
-                    live_colors: live_colors.clone(),
-                    refit_epoch,
+                    context: context.clone(),
                     on_doc_change,
                 }
                 div { class: "lpme-face-editor-bar",

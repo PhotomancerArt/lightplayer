@@ -437,15 +437,7 @@ fn event_doc_point(anchor: &CanvasAnchor, vb: [f64; 4], client: [f64; 2]) -> Opt
 fn hit_fixture(renders: &[FixtureRender], doc: [f64; 2]) -> Option<&FixtureRender> {
     const HIT_PAD: f64 = 8.0;
     renders.iter().rev().find(|render| {
-        let transform = &render.transform;
-        let rad = transform.r.to_radians();
-        let (sin, cos) = rad.sin_cos();
-        let dx = doc[0] - transform.t[0];
-        let dy = doc[1] - transform.t[1];
-        let scale = transform.s.max(1e-9);
-        // Inverse of translate ∘ rotate ∘ scale.
-        let lx = (dx * cos + dy * sin) / scale;
-        let ly = (-dx * sin + dy * cos) / scale;
+        let [lx, ly] = inverse_transform_point(&render.transform, doc);
         let [bx, by, bw, bh] = render.bounds;
         lx >= bx - HIT_PAD
             && lx <= bx + bw + HIT_PAD
@@ -750,24 +742,79 @@ fn auto_pack(renders: &mut [FixtureRender]) {
     }
 }
 
+/// A doc-space point through translate ∘ rotate ∘ scale.
+fn transform_point(transform: &UiArrangeTransform, point: [f64; 2]) -> [f64; 2] {
+    let rad = transform.r.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let sx = point[0] * transform.s;
+    let sy = point[1] * transform.s;
+    [
+        transform.t[0] + sx * cos - sy * sin,
+        transform.t[1] + sx * sin + sy * cos,
+    ]
+}
+
+/// The inverse of [`transform_point`].
+fn inverse_transform_point(transform: &UiArrangeTransform, point: [f64; 2]) -> [f64; 2] {
+    let rad = transform.r.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let dx = point[0] - transform.t[0];
+    let dy = point[1] - transform.t[1];
+    let scale = transform.s.max(1e-9);
+    [
+        (dx * cos + dy * sin) / scale,
+        (-dx * sin + dy * cos) / scale,
+    ]
+}
+
+/// The dive's context layer: every OTHER fixture's display points carried
+/// into the focused fixture's doc space (inverse focused placement ∘ their
+/// placement) — "others still visible", correctly placed. Placeholder and
+/// strip bodies contribute nothing: context is honest geometry only.
+pub(crate) fn dive_context(
+    surface: &UiPatchSurface,
+    bodies: &BTreeMap<ArtifactLocation, String>,
+    focused: NodeId,
+) -> Vec<lpa_mapping_editor::ContextFixture> {
+    let renders = build_renders(surface, bodies);
+    let Some(focus) = renders.iter().find(|render| render.node == focused) else {
+        return Vec::new();
+    };
+    let focus_transform = focus.transform;
+    renders
+        .iter()
+        .filter(|render| render.node != focused)
+        .filter_map(|render| {
+            let FixtureBody::Lamps { points, .. } = &render.body else {
+                return None;
+            };
+            let points = points
+                .iter()
+                .map(|point| {
+                    let world = transform_point(
+                        &render.transform,
+                        [f64::from(point[0]), f64::from(point[1])],
+                    );
+                    let local = inverse_transform_point(&focus_transform, world);
+                    [local[0] as f32, local[1] as f32]
+                })
+                .collect();
+            Some(lpa_mapping_editor::ContextFixture {
+                color: render.color.to_string(),
+                points,
+            })
+        })
+        .collect()
+}
+
 /// The four corners of `bounds` through translate·rotate·scale.
 fn corners(bounds: [f64; 4], transform: &UiArrangeTransform) -> [[f64; 2]; 4] {
     let [bx, by, bw, bh] = bounds;
-    let rad = transform.r.to_radians();
-    let (sin, cos) = rad.sin_cos();
-    let map = |x: f64, y: f64| {
-        let sx = x * transform.s;
-        let sy = y * transform.s;
-        [
-            transform.t[0] + sx * cos - sy * sin,
-            transform.t[1] + sx * sin + sy * cos,
-        ]
-    };
     [
-        map(bx, by),
-        map(bx + bw, by),
-        map(bx, by + bh),
-        map(bx + bw, by + bh),
+        transform_point(transform, [bx, by]),
+        transform_point(transform, [bx + bw, by]),
+        transform_point(transform, [bx, by + bh]),
+        transform_point(transform, [bx + bw, by + bh]),
     ]
 }
 

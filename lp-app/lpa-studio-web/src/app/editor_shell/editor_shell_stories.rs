@@ -82,29 +82,31 @@ fn arrange_canvas_mini_dome() -> Element {
 }
 
 #[story(
-    description = "The center with the dome FOCUSED for mapping edits (double-click or the toolbar's edit-mapping): the breadcrumb strip leads back to the arranged space, and the fixture's own MapEditor — the same session the face embed mounts, tools and all — takes the center. ⌘Z here is the mapping session's undo; the arrange stack answers only in the arranged space."
+    description = "The DIVE (in-place, no separate screen): the dome focused for mapping edits — its own MapEditor with tools, ⌘Z scoped to the session — while the doors render dimmed INSIDE the canvas at their true arranged position (transformed into the dome's doc space, 15° tilt and all). The breadcrumb strip leads back to the arranged space."
 )]
 fn editor_shell_focused_mapping() -> Element {
-    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
-        .expect("mini-dome embedded");
-    let body = example
-        .files
-        .iter()
-        .find(|(path, _)| *path == "dome/dome.map2d.json")
-        .map(|(_, bytes)| *bytes)
-        .expect("dome map2d");
-    let artifact = ArtifactLocation::file("/dome/dome.map2d.json");
+    let (surface, bodies) = dome_canvas_inputs();
+    let dome_artifact = surface.fixtures[0]
+        .mapping_artifact
+        .clone()
+        .expect("dome artifact");
     let editor = lpa_studio_core::UiAssetEditor {
-        artifact,
+        artifact: dome_artifact.clone(),
         kind: lpa_studio_core::UiAssetEditorKind::Map2d,
         source: "dome.map2d.json".to_string(),
-        content: Some(lpa_studio_core::UiAssetContent::from_bytes(body, false, 0)),
+        content: Some(lpa_studio_core::UiAssetContent::from_bytes(
+            bodies[&dome_artifact].as_bytes(),
+            false,
+            0,
+        )),
         in_flight: false,
         failure: None,
         shader_error: None,
         uniforms: Vec::new(),
         agent: None,
     };
+    let context =
+        super::arrange_canvas::dive_context(&surface, &bodies, lpa_studio_core::NodeId::new(2));
     canvas_frame(rsx! {
         div { class: "tw:flex tw:min-h-[30px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2.5",
             button { class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
@@ -114,8 +116,8 @@ fn editor_shell_focused_mapping() -> Element {
                 "dome · mapping"
             }
         }
-        div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:p-2",
-            crate::app::node::mapping_asset_editor::MappingAssetEditor { editor }
+        div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden",
+            super::mapping_session::MappingSessionHost { editor, context }
         }
     })
 }

@@ -129,6 +129,10 @@ pub fn EditorCanvas(
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
     reference: Option<crate::view::reference::ReferenceImage>,
+    /// Neighbour fixtures rendered dimmed under the document (points
+    /// already in THIS doc's space) — the dive's "others still visible".
+    #[props(default)]
+    context: Vec<crate::view::context_layer::ContextFixture>,
 ) -> Element {
     // Pointer/wheel math anchors to the mounted svg's live rect, and the
     // measured size feeds the host's viewport signal (fit needs real
@@ -615,6 +619,24 @@ pub fn EditorCanvas(
                     width: "200000",
                     height: "200000",
                     fill: "url(#lpme-dots)",
+                }
+                // Neighbour fixtures, dimmed, under everything authored:
+                // context for the dive, never targets (no pointer events).
+                for (context_index, neighbour) in context.iter().enumerate() {
+                    g {
+                        key: "ctx-{context_index}",
+                        opacity: "0.3",
+                        "pointer-events": "none",
+                        for (point_index, point) in neighbour.points.iter().enumerate() {
+                            circle {
+                                key: "{point_index}",
+                                cx: "{point[0]}",
+                                cy: "{point[1]}",
+                                r: "{radius * 0.8}",
+                                fill: "{neighbour.color}",
+                            }
+                        }
+                    }
                 }
                 // Tracing layer: under everything authored, over the grid.
                 // Explicit width/height — a viewBox-only SVG has no usable
