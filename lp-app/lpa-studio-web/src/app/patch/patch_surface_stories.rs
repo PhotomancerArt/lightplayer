@@ -65,6 +65,9 @@ fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
             });
         }
         fixture.arrange = Some(lpa_studio_core::UiArrangeMeta::default());
+        if fixture.address.is_none() {
+            fixture.address = Some(format!("/{}", fixture.label));
+        }
     }
     surface.editor_meta_loaded = true;
     surface.editor_meta_artifact = Some(lpa_studio_core::editor_meta_artifact());

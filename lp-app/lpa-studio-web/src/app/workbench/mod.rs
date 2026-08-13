@@ -279,11 +279,12 @@ pub fn WorkbenchFrame(
                         },
                         WorkbenchView::Mapping => rsx! {
                             // The unified editor's coordinator: toolbar +
-                            // canvas pane + the editor.json prefetch
-                            // (unified-editor P3).
+                            // arrange canvas + the editor.json prefetch
+                            // (unified-editor P3/P4).
                             crate::app::editor_shell::EditorShellCenter {
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
+                                project_editor,
                                 on_action,
                             }
                         },
