@@ -105,8 +105,7 @@ fn editor_shell_focused_mapping() -> Element {
         uniforms: Vec::new(),
         agent: None,
     };
-    let context =
-        super::arrange_canvas::dive_context(
+    let context = super::arrange_canvas::dive_context(
         &surface,
         &bodies,
         &super::arrange_canvas::PackSlots::new(),

@@ -121,13 +121,9 @@ pub fn ArrangeCanvas(
     let memo_surface = surface.clone();
     let memo_bodies = bodies.clone();
     let memo_pack = pack.clone();
-    let renders = use_memo(use_reactive!(
-        |(memo_surface, memo_bodies, memo_pack)| build_renders(
-            &memo_surface,
-            &memo_bodies,
-            &memo_pack
-        )
-    ));
+    let renders = use_memo(use_reactive!(|(memo_surface, memo_bodies, memo_pack)| {
+        build_renders(&memo_surface, &memo_bodies, &memo_pack)
+    }));
     // The camera window: seeded from fit-all when content first appears,
     // then FROZEN — arranging a fixture must never move the camera (the
     // gate's drift bug). The fit button re-frames on demand.
@@ -650,7 +646,9 @@ pub(crate) fn refresh_pack_slots(
     let unarranged: Vec<&FixtureRender> =
         renders.iter().filter(|render| !render.arranged).collect();
     if unarranged.len() == held.len()
-        && unarranged.iter().all(|render| held.contains_key(&render.key))
+        && unarranged
+            .iter()
+            .all(|render| held.contains_key(&render.key))
     {
         return None;
     }
