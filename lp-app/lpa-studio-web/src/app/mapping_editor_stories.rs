@@ -4,7 +4,10 @@
 //! deterministic story props — no animation, no measured viewport.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{EditorViewOptions, MapEditor, ReferenceImage};
+use lpa_mapping_editor::{
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureSprite, MapEditor,
+    MapEditorSession, Placement, ReferenceImage,
+};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::fyeah_presentable_doc;
@@ -16,6 +19,169 @@ fn EditorCanvasFrame(children: Element) -> Element {
         div { style: "height: 620px; display: flex; flex-direction: column; border: 1px solid var(--studio-color-border-strong); border-radius: 10px; overflow: hidden;",
             {children}
         }
+    }
+}
+
+/// Synthetic sprites for the fixture-layer stories: a loaded panel
+/// (rotated + scaled, selected, instance-ringed), a scaled halo, a dashed
+/// unarranged placeholder, and a range strip — the three honest bodies
+/// plus every placement quirk the seam must survive.
+fn fixture_story_sprites() -> Vec<FixtureSprite> {
+    let resolved =
+        lpc_mapping::resolve(&lpc_mapping::corpus::panel_16x16()).expect("corpus resolves");
+    let panel_points = resolved.positions();
+    let panel_total = panel_points.len() as u32;
+    let panel_bounds = lpc_mapping::bounds_of_points(&panel_points)
+        .map(|b| {
+            [
+                f64::from(b.min_x),
+                f64::from(b.min_y),
+                f64::from(b.width),
+                f64::from(b.height),
+            ]
+        })
+        .expect("panel has lamps");
+    let halo_points: Vec<[f32; 2]> = (0..24)
+        .map(|slot| {
+            let angle = (slot as f32) / 24.0 * std::f32::consts::TAU;
+            [angle.cos() * 40.0, angle.sin() * 40.0]
+        })
+        .collect();
+    vec![
+        FixtureSprite {
+            key: "panel".to_string(),
+            label: "dome panel".to_string(),
+            color: "#5aa9e6".to_string(),
+            placement: Placement {
+                t: [60.0, 50.0],
+                r: 25.0,
+                s: 0.5,
+            },
+            bounds: panel_bounds,
+            body: FixtureBody::Lamps {
+                points: panel_points,
+                total: panel_total,
+            },
+            arranged: true,
+            selected: true,
+            selected_range: Some((32, 16)),
+        },
+        FixtureSprite {
+            key: "halo".to_string(),
+            label: "halo".to_string(),
+            color: "#3fd68e".to_string(),
+            placement: Placement {
+                t: [360.0, 90.0],
+                r: -10.0,
+                s: 1.4,
+            },
+            bounds: [-40.0, -40.0, 80.0, 80.0],
+            body: FixtureBody::Lamps {
+                points: halo_points,
+                total: 24,
+            },
+            arranged: true,
+            selected: false,
+            selected_range: None,
+        },
+        FixtureSprite {
+            key: "block".to_string(),
+            label: "matrix (pending)".to_string(),
+            color: "#e4c065".to_string(),
+            placement: Placement {
+                t: [70.0, 320.0],
+                r: 0.0,
+                s: 1.0,
+            },
+            bounds: [0.0, 0.0, 120.0, 74.0],
+            body: FixtureBody::Placeholder { lamps: 256 },
+            arranged: false,
+            selected: false,
+            selected_range: None,
+        },
+        FixtureSprite {
+            key: "strip".to_string(),
+            label: "shelf strip".to_string(),
+            color: "#c792ea".to_string(),
+            placement: Placement {
+                t: [250.0, 330.0],
+                r: 0.0,
+                s: 1.0,
+            },
+            bounds: [0.0, 0.0, 180.0, 10.0],
+            body: FixtureBody::Strip { lamps: 60 },
+            arranged: true,
+            selected: false,
+            selected_range: None,
+        },
+    ]
+}
+
+/// Mount the one canvas directly with deterministic signals (fixed camera,
+/// no fit effect) — the fixture-layer stories' harness.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FixtureCanvasStory(focused: Option<String>, dived: bool) -> Element {
+    let sprites = fixture_story_sprites();
+    let placement = if dived {
+        sprites
+            .iter()
+            .find(|sprite| Some(sprite.key.as_str()) == focused.as_deref())
+            .map(|sprite| sprite.placement)
+            .unwrap_or_default()
+    } else {
+        Placement::default()
+    };
+    let session = use_signal(|| {
+        MapEditorSession::new(if dived {
+            lpc_mapping::corpus::panel_16x16()
+        } else {
+            lpc_mapping::Map2dDoc::new()
+        })
+    });
+    let camera = use_signal(|| Camera {
+        x: 30.0,
+        y: 40.0,
+        scale: 1.1,
+    });
+    let view_opts = use_signal(EditorViewOptions::default);
+    let viewport = use_signal(|| None::<[f32; 2]>);
+    let drag = use_signal(|| None::<CanvasDrag>);
+    let live_feed = use_signal(Vec::<[u8; 3]>::new);
+    rsx! {
+        EditorCanvasFrame {
+            EditorCanvas {
+                session,
+                camera,
+                view_opts,
+                viewport,
+                drag,
+                live_feed,
+                on_committed: move |()| {},
+                placement,
+                fixtures: sprites,
+                focused,
+                on_fixture: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The fixture view on the one canvas: arranged sprites rendered from data in project space — a rotated+scaled panel (selected, instance ring), a scaled halo, a dashed unarranged placeholder, and a range strip."
+)]
+pub(crate) fn fixture_view_arrangement() -> Element {
+    rsx! {
+        FixtureCanvasStory { focused: None, dived: false }
+    }
+}
+
+#[story(
+    description = "Dived in place: the focused panel's live document renders through its rotated+scaled placement on the same canvas — same camera — while neighbour sprites dim to context."
+)]
+pub(crate) fn fixture_dive_neighbours() -> Element {
+    rsx! {
+        FixtureCanvasStory { focused: Some("panel".to_string()), dived: true }
     }
 }
 

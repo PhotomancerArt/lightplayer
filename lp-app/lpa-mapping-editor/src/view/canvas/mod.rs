@@ -39,17 +39,36 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{fit_region, lamp_display_radius};
 pub use palette::object_color;
 
+pub use layers::fixtures::{FixtureBody, FixtureEvent, FixtureSprite};
+
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
+use layers::fixtures::{
+    FixtureLayerInput, dragged_placement, exceeds_drag_threshold, fixture_layer, hit_fixture,
+};
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
 use live_fills::apply_live_fills;
 
 /// An in-flight canvas drag.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CanvasDrag {
     Pan {
         last: [f32; 2],
+    },
+    /// Maybe-drag on a fixture sprite (fixture grammar): becomes a real
+    /// move past the CSS-pixel threshold; under it, pointer-up selects.
+    FixturePress {
+        key: String,
+        start_client: [f64; 2],
+        original: Placement,
+        moved: bool,
+    },
+    /// Background press under the fixture grammar: pointer-up without
+    /// movement deselects.
+    FixtureTap {
+        start_client: [f64; 2],
+        moved: bool,
     },
     /// Group move: totals from the gesture-start doc point.
     Move {
@@ -110,6 +129,20 @@ pub fn EditorCanvas(
     /// nests inside the placement group and pointer math inverts it.
     #[props(default)]
     placement: Placement,
+    /// The project's fixtures, rendered as sprites in project space above
+    /// the grid and below the doc layers. Empty = no fixture layer.
+    #[props(default)]
+    fixtures: Vec<FixtureSprite>,
+    /// The dived fixture's sprite key: its body is hidden (the live doc
+    /// layers replace it at `placement`), neighbours dim, and the fixture
+    /// grammar goes inert except neighbour double-click (dive-switch).
+    #[props(default)]
+    focused: Option<String>,
+    /// Fixture gesture events (select / move / dive). Present *and* not
+    /// dived ⇒ svg-level pointerdown runs ONLY the fixture grammar — the
+    /// editor grammar needs a dived session.
+    #[props(default)]
+    on_fixture: Option<EventHandler<FixtureEvent>>,
     /// Host-owned reference image, rendered doc-space at the origin between
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
@@ -182,6 +215,15 @@ pub fn EditorCanvas(
         anchor,
         placement,
     };
+    // The activity discriminator: the fixture grammar owns svg-level
+    // presses when the shell listens for fixture events and nothing is
+    // dived (there is no session to edit). Dived, the editor grammar runs
+    // and fixtures stay inert to single clicks (neighbour double-click is
+    // the one exception — the dive-switch).
+    let fixture_mode = on_fixture.is_some() && focused.is_none();
+    let fixtures_down = fixtures.clone();
+    let fixtures_dbl = fixtures.clone();
+    let focused_dbl = focused.clone();
     let cam = camera();
     // Screen-constant sizing folds in the placement scale: a doc unit
     // reaches the screen through camera × placement.
@@ -433,6 +475,31 @@ pub fn EditorCanvas(
                     return;
                 }
                 capture_pointer(&evt);
+                if fixture_mode {
+                    // Fixture grammar, one canvas-level hit test: press on
+                    // a sprite arms a maybe-move, background press arms a
+                    // deselect tap. No editor grammar runs — no session.
+                    let point = evt.data().client_coordinates();
+                    let client = [point.x, point.y];
+                    let view = event_view_point(&anchor, &evt);
+                    let project = camera.peek().view_to_doc(view);
+                    let hit =
+                        hit_fixture(&fixtures_down, [f64::from(project[0]), f64::from(project[1])])
+                            .map(|sprite| (sprite.key.clone(), sprite.placement));
+                    match hit {
+                        Some((key, original)) => drag.set(Some(CanvasDrag::FixturePress {
+                            key,
+                            start_client: client,
+                            original,
+                            moved: false,
+                        })),
+                        None => drag.set(Some(CanvasDrag::FixtureTap {
+                            start_client: client,
+                            moved: false,
+                        })),
+                    }
+                    return;
+                }
                 let doc_point = event_doc_point(&interact, &evt);
                 let shift = evt.data().modifiers().shift();
                 let tool_now = session.read().tool.clone();
@@ -466,6 +533,46 @@ pub fn EditorCanvas(
                 };
                 let doc_point = event_doc_point(&interact, &evt);
                 match current_drag {
+                    CanvasDrag::FixturePress {
+                        key,
+                        start_client,
+                        original,
+                        moved,
+                    } => {
+                        let point = evt.data().client_coordinates();
+                        let client = [point.x, point.y];
+                        let now_moved = moved || exceeds_drag_threshold(start_client, client);
+                        if now_moved && let Some(handler) = &on_fixture {
+                            handler.call(FixtureEvent::Move {
+                                key: key.clone(),
+                                placement: dragged_placement(
+                                    original,
+                                    start_client,
+                                    client,
+                                    camera.peek().scale,
+                                ),
+                                commit: false,
+                            });
+                        }
+                        drag.set(Some(CanvasDrag::FixturePress {
+                            key,
+                            start_client,
+                            original,
+                            moved: now_moved,
+                        }));
+                    }
+                    CanvasDrag::FixtureTap {
+                        start_client,
+                        moved,
+                    } => {
+                        let point = evt.data().client_coordinates();
+                        if !moved && exceeds_drag_threshold(start_client, [point.x, point.y]) {
+                            drag.set(Some(CanvasDrag::FixtureTap {
+                                start_client,
+                                moved: true,
+                            }));
+                        }
+                    }
                     CanvasDrag::Pan { last } => {
                         let view_point = event_view_point(&anchor, &evt);
                         camera.write().pan(view_point[0] - last[0], view_point[1] - last[1]);
@@ -503,13 +610,46 @@ pub fn EditorCanvas(
                     }
                 }
             },
-            onpointerup: move |_| {
+            onpointerup: move |evt| {
                 let Some(current_drag) = drag() else {
                     return;
                 };
                 drag.set(None);
                 match current_drag {
                     CanvasDrag::Pan { .. } => {}
+                    CanvasDrag::FixturePress {
+                        key,
+                        start_client,
+                        original,
+                        moved,
+                    } => {
+                        if let Some(handler) = &on_fixture {
+                            if moved {
+                                // One gesture = one committed move. The
+                                // shell holds the override until the write
+                                // echoes — no snap-back.
+                                let point = evt.data().client_coordinates();
+                                handler.call(FixtureEvent::Move {
+                                    key,
+                                    placement: dragged_placement(
+                                        original,
+                                        start_client,
+                                        [point.x, point.y],
+                                        camera.peek().scale,
+                                    ),
+                                    commit: true,
+                                });
+                            } else {
+                                handler.call(FixtureEvent::Select(Some(key)));
+                            }
+                        }
+                    }
+                    // A background tap that never moved deselects.
+                    CanvasDrag::FixtureTap { moved, .. } => {
+                        if !moved && let Some(handler) = &on_fixture {
+                            handler.call(FixtureEvent::Select(None));
+                        }
+                    }
                     CanvasDrag::Move { moved, collapse, .. } => {
                         if moved {
                             commit_drag(session);
@@ -548,13 +688,50 @@ pub fn EditorCanvas(
                     drag.set(None);
                 }
             },
-            onpointercancel: move |_| drag.set(None),
-            oncontextmenu: move |evt| evt.prevent_default(),
-            ondoubleclick: move |_| {
-                if matches!(session.read().tool, MapTool::Path { .. })
-                    && session.write().path_finish().is_some()
+            onpointercancel: move |_| {
+                // A cancelled fixture drag resets the shell's override to
+                // the press-time placement (nothing was committed).
+                if let Some(CanvasDrag::FixturePress {
+                    key,
+                    original,
+                    moved: true,
+                    ..
+                }) = drag.peek().clone()
+                    && let Some(handler) = &on_fixture
                 {
-                    on_committed.call(());
+                    handler.call(FixtureEvent::Move {
+                        key,
+                        placement: original,
+                        commit: false,
+                    });
+                }
+                drag.set(None);
+            },
+            oncontextmenu: move |evt| evt.prevent_default(),
+            ondoubleclick: move |evt| {
+                // Path-tool finish keeps priority (editor grammar; never
+                // in fixture mode — there is no tool without a session).
+                if !fixture_mode && matches!(session.read().tool, MapTool::Path { .. }) {
+                    if session.write().path_finish().is_some() {
+                        on_committed.call(());
+                    }
+                    return;
+                }
+                // Fixture dive / dive-switch: a sprite double-click dives
+                // when not dived; a NEIGHBOUR while dived switches the
+                // dive (D2). Lamp handlers stop propagation first, so the
+                // focused document's own double-click grammar (descend)
+                // always wins over this.
+                let Some(handler) = &on_fixture else { return };
+                let point = evt.data().client_coordinates();
+                let origin = anchor.peek().origin();
+                let view = [point.x as f32 - origin[0], point.y as f32 - origin[1]];
+                let project = camera.peek().view_to_doc(view);
+                if let Some(sprite) =
+                    hit_fixture(&fixtures_dbl, [f64::from(project[0]), f64::from(project[1])])
+                    && focused_dbl.as_deref() != Some(sprite.key.as_str())
+                {
+                    handler.call(FixtureEvent::Dive(sprite.key.clone()));
                 }
             },
             onwheel: move |evt| {
@@ -613,6 +790,17 @@ pub fn EditorCanvas(
                     height: "200000",
                     fill: "url(#lpme-dots)",
                 }
+                // Fixture sprites: project space, above the grid, below the
+                // placed doc layers. Dived, the focused sprite's body yields
+                // to the live doc layers and neighbours dim.
+                {fixture_layer(&FixtureLayerInput {
+                    sprites: &fixtures,
+                    focused: focused.as_deref(),
+                    cam_scale: cam.scale,
+                })}
+                // Doc layers render only with a session to show: dived, or
+                // hosted without the fixture grammar (the plain editor).
+                if !fixture_mode {
                 g {
                     transform: "{placement.svg_transform()}",
                     // Neighbour fixtures, dimmed, under everything authored:
@@ -672,6 +860,7 @@ pub fn EditorCanvas(
                         draft_ghosts: &draft_ghosts,
                     })}
                     {marquee_layer(eff, marquee_rect)}
+                }
                 }
             }
         }
