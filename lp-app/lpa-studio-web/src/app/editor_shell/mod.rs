@@ -29,7 +29,7 @@ use lpa_studio_core::{
     UiPatchTarget,
 };
 
-use arrange_canvas::{ArrangeCanvas, dive_context};
+use arrange_canvas::{ArrangeCanvas, PackSlots, dive_context, refresh_pack_slots};
 use mapping_session::MappingSessionHost;
 
 /// The Mapping view's center: toolbar + arrange canvas.
@@ -67,6 +67,14 @@ pub fn EditorShellCenter(
     prefetch_editor_meta(&on_action, &surface);
     prefetch_selected_body(&on_action, &surface, &selection);
     let (bodies, asset_editors) = mapping_assets(&project_editor);
+    // Sticky auto-pack slots: refreshed only when the unarranged set
+    // changes, so arranging one fixture never moves another.
+    let mut pack_slots = use_signal(PackSlots::new);
+    let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
+    if let Some(next) = refreshed {
+        pack_slots.set(next);
+    }
+    let pack = pack_slots.read().clone();
     let focus_journal = move |on_action: &EventHandler<UiAction>,
                               event: UiEditJournalEvent,
                               node: Option<NodeId>,
@@ -342,7 +350,7 @@ pub fn EditorShellCenter(
                     div { class: "tw:min-h-0 tw:flex-1 tw:overflow-hidden",
                         MappingSessionHost {
                             editor,
-                            context: dive_context(&surface, &bodies, node),
+                            context: dive_context(&surface, &bodies, &pack, node),
                             external_session: dive_session,
                             commit_requests: dive_commits,
                             on_action: {
@@ -372,6 +380,7 @@ pub fn EditorShellCenter(
                         surface: surface.clone(),
                         bodies,
                         selection: selection.clone(),
+                        pack,
                         on_focus: move |node| enter_focus(&on_action, node),
                         on_action,
                     }

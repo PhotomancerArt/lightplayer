@@ -106,6 +106,10 @@ pub fn ArrangeCanvas(
     /// stories inject embedded-example bytes directly).
     bodies: BTreeMap<ArtifactLocation, String>,
     selection: Option<UiPatchTarget>,
+    /// Sticky auto-pack slots (shell-owned; see [`PackSlots`]). Stories
+    /// omit it and get the ad-hoc packing.
+    #[props(default)]
+    pack: PackSlots,
     /// Double-click on a fixture: the shell focuses it for mapping edits
     /// (P5). Absent = the canvas is arrange-only (stories).
     #[props(default)]
@@ -116,10 +120,14 @@ pub fn ArrangeCanvas(
     // cheap at fixture grain and the memo keeps camera work off that path.
     let memo_surface = surface.clone();
     let memo_bodies = bodies.clone();
-    let renders = use_memo(use_reactive!(|(memo_surface, memo_bodies)| build_renders(
-        &memo_surface,
-        &memo_bodies
-    )));
+    let memo_pack = pack.clone();
+    let renders = use_memo(use_reactive!(
+        |(memo_surface, memo_bodies, memo_pack)| build_renders(
+            &memo_surface,
+            &memo_bodies,
+            &memo_pack
+        )
+    ));
     // The camera window: seeded from fit-all when content first appears,
     // then FROZEN — arranging a fixture must never move the camera (the
     // gate's drift bug). The fit button re-frames on demand.
@@ -623,12 +631,44 @@ fn selected_instance_range(
     }
 }
 
+/// Sticky auto-pack slots for the UNARRANGED fixtures, keyed by editor
+/// key. Owned by the shell and refreshed only when the unarranged SET
+/// changes — dragging an arranged fixture must never move its neighbours
+/// (the second gate's movement bug: the pack row used to follow the
+/// arranged content every render).
+pub(crate) type PackSlots = BTreeMap<String, UiArrangeTransform>;
+
+/// The pack layout for the CURRENT unarranged set: `None` when the held
+/// slots already cover exactly that set (keep them — stability is the
+/// point), else a freshly packed row below the arranged content.
+pub(crate) fn refresh_pack_slots(
+    surface: &UiPatchSurface,
+    bodies: &BTreeMap<ArtifactLocation, String>,
+    held: &PackSlots,
+) -> Option<PackSlots> {
+    let renders = build_renders(surface, bodies, &PackSlots::new());
+    let unarranged: Vec<&FixtureRender> =
+        renders.iter().filter(|render| !render.arranged).collect();
+    if unarranged.len() == held.len()
+        && unarranged.iter().all(|render| held.contains_key(&render.key))
+    {
+        return None;
+    }
+    Some(
+        unarranged
+            .into_iter()
+            .map(|render| (render.key.clone(), render.transform))
+            .collect(),
+    )
+}
+
 /// Build every fixture's render facts: resolve loaded bodies, fall back to
 /// footprint blocks and range strips, then auto-pack the unarranged into
-/// the bottom row.
+/// the bottom row (held slots win — see [`PackSlots`]).
 fn build_renders(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
+    pack: &PackSlots,
 ) -> Vec<FixtureRender> {
     let mut renders: Vec<FixtureRender> = Vec::new();
     for (index, fixture) in surface.fixtures.iter().enumerate() {
@@ -699,7 +739,12 @@ fn build_renders(
                 .collect(),
         });
     }
-    auto_pack(&mut renders);
+    for render in renders.iter_mut().filter(|render| !render.arranged) {
+        if let Some(slot) = pack.get(&render.key) {
+            render.transform = *slot;
+        }
+    }
+    auto_pack(&mut renders, pack);
     renders
 }
 
@@ -709,10 +754,10 @@ fn placeholder_bounds(lamps: u32) -> [f64; 4] {
     [0.0, 0.0, side.max(24.0), (side * 0.62).max(16.0)]
 }
 
-/// Place every unarranged fixture in a bottom row (stable order = surface
-/// order) under the arranged content. Ephemeral: nothing is written until
-/// a fixture is first dragged.
-fn auto_pack(renders: &mut [FixtureRender]) {
+/// Place every unarranged fixture WITHOUT a held slot in a bottom row
+/// (stable order = surface order) under the arranged content. Ephemeral:
+/// nothing is written until a fixture is first dragged.
+fn auto_pack(renders: &mut [FixtureRender], held: &PackSlots) {
     let arranged_max_y = renders
         .iter()
         .filter(|render| render.arranged)
@@ -730,7 +775,10 @@ fn auto_pack(renders: &mut [FixtureRender]) {
         arranged_max_y + PACK_GAP * 2.0
     };
     let mut cursor_x = 0.0;
-    for render in renders.iter_mut().filter(|render| !render.arranged) {
+    for render in renders
+        .iter_mut()
+        .filter(|render| !render.arranged && !held.contains_key(&render.key))
+    {
         let [bx, by, bw, bh] = render.bounds;
         let _ = bh;
         render.transform = UiArrangeTransform {
@@ -774,9 +822,10 @@ fn inverse_transform_point(transform: &UiArrangeTransform, point: [f64; 2]) -> [
 pub(crate) fn dive_context(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
+    pack: &PackSlots,
     focused: NodeId,
 ) -> Vec<lpa_mapping_editor::ContextFixture> {
-    let renders = build_renders(surface, bodies);
+    let renders = build_renders(surface, bodies, pack);
     let Some(focus) = renders.iter().find(|render| render.node == focused) else {
         return Vec::new();
     };
@@ -879,7 +928,7 @@ mod tests {
             render("b", false, [10.0, 10.0, 30.0, 20.0]),
             render("c", false, [0.0, 0.0, 20.0, 20.0]),
         ];
-        auto_pack(&mut renders);
+        auto_pack(&mut renders, &PackSlots::new());
         // The arranged fixture is untouched.
         assert_eq!(renders[0].transform.t, [50.0, 60.0]);
         // Unarranged fixtures pack left-to-right in order, below the
@@ -889,10 +938,41 @@ mod tests {
         assert_eq!(renders[2].transform.t, [30.0 + PACK_GAP, row_y]);
         // Recomputing changes nothing (stable).
         let again = renders.clone();
-        auto_pack(&mut renders);
+        auto_pack(&mut renders, &PackSlots::new());
         assert_eq!(
             renders.iter().map(|r| r.transform).collect::<Vec<_>>(),
             again.iter().map(|r| r.transform).collect::<Vec<_>>(),
+        );
+    }
+
+    /// The movement bug's regression test: held slots survive arranged
+    /// content moving; only a CHANGED unarranged set re-packs.
+    #[test]
+    fn held_pack_slots_pin_unarranged_fixtures() {
+        let mut renders = vec![
+            render("a", true, [0.0, 0.0, 40.0, 40.0]),
+            render("b", false, [0.0, 0.0, 20.0, 20.0]),
+        ];
+        let held: PackSlots = [(
+            "b".to_string(),
+            UiArrangeTransform {
+                t: [7.0, 9.0],
+                r: 0.0,
+                s: 1.0,
+            },
+        )]
+        .into_iter()
+        .collect();
+        for item in renders.iter_mut().filter(|item| !item.arranged) {
+            if let Some(slot) = held.get(&item.key) {
+                item.transform = *slot;
+            }
+        }
+        auto_pack(&mut renders, &held);
+        assert_eq!(
+            renders[1].transform.t,
+            [7.0, 9.0],
+            "the held slot pins the fixture regardless of arranged bounds"
         );
     }
 
