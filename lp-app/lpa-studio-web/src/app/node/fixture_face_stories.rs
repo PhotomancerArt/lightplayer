@@ -186,25 +186,10 @@ fn button_rings_view() -> Element {
     }
 }
 
-#[story(
-    description = "One home, edit mode: the output section flipped into the in-place mapping editor (asset-pipeline synced), pencil toggle active."
-)]
-fn mapping_edit_mode() -> Element {
-    rsx! {
-        FixtureCardCanvas {
-            FixtureFace {
-                face: map2d_fixture_face_editing(&fyeah_presentable_doc()),
-                edit_initially_open: true,
-                on_action: move |_| {},
-            }
-        }
-    }
-}
-
 // -- the Shape declaration moment (plan-B P5 / gate G2) ----------------------
 
 #[story(
-    description = "The Shape declaration moment (D13): a FRESHLY CREATED fixture renders its dimensionality drawer in guided clothing — 'What shape is this fixture?' over four preset tiles (Strip / Matrix / Mapped shape / 3D-soon-disabled) and a skip link. The trigger is card-UI state set by the create/paste paths, so existing fixtures never see it. Each tile is a batch of the SAME slot ops the compact section and advanced drawer send (strip-order bit, mapping, render size) — no parallel write path; the Mapped tile opens the in-place mapping editor (the map IS the shape). No strip-order follow-up question: that bit is the dropdown's first choice, one state away."
+    description = "The Shape declaration moment (D13): a FRESHLY CREATED fixture renders its dimensionality drawer in guided clothing — 'What shape is this fixture?' over four preset tiles (Strip / Matrix / Mapped shape / 3D-soon-disabled) and a skip link. The trigger is card-UI state set by the create/paste paths, so existing fixtures never see it. Each tile is a batch of the SAME slot ops the compact section and advanced drawer send (strip-order bit, mapping, render size) — no parallel write path; the Mapped tile opens the Mapping view (the map IS the shape; the in-place embed died with R1). No strip-order follow-up question: that bit is the dropdown's first choice, one state away."
 )]
 fn shape_moment_guided() -> Element {
     let doc = fyeah_presentable_doc();
