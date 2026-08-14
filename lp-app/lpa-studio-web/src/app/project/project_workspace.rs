@@ -1,30 +1,20 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectEditorView, ProjectSyncPhase, UiAction, UiChannelChoice, UiStatus};
+use lpa_studio_core::{ProjectEditorView, ProjectSyncPhase, UiAction, UiChannelChoice};
 
 use crate::app::node::{
     HoveredPatchCell, NodePane, PaletteCatalog, WorkspaceAddNodeButton, project_palette_choices,
 };
-use crate::app::project::ProjectDetailContent;
 
 /// The node-body column of the project editor: one `NodePane` per synced
 /// node. The sidebar column is the [`ProjectPane`](super::ProjectPane) —
 /// one `StudioPane` carrying the project header and the node tree.
 ///
-/// The FIRST card is the workspace root, and it carries the project's detail
-/// popup (workbench ruling 2): the dock renders the project pane flat, with no
-/// header of its own, so the project's identity/settings/share/save sections
-/// hang off the root card's [i] instead.
+/// The project's detail popup lives on the site header's project chip
+/// (D8/D5 — the root card's [i] mount retired with it); the cards here
+/// carry only their own node popups.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProjectNodeWorkspace(
-    view: ProjectEditorView,
-    /// The project pane's controller status ("Ready", "Syncing", …), so the
-    /// root card's popup reads the same status word the pane's did. The
-    /// editor view does not carry it — the pane view does.
-    #[props(default)]
-    project_status: Option<UiStatus>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
+pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiAction>) -> Element {
     // Channel choices context: every bindable row's binding picker reads
     // this shared list (observed ∪ well-known, M4).
     let mut channel_choices = use_context_provider(|| Signal::new(Vec::<UiChannelChoice>::new()));
@@ -54,10 +44,6 @@ pub fn ProjectNodeWorkspace(
     // completes; afterwards it is a real (and normal) empty project.
     let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);
     let add_node_menu = view.add_node_menu.clone();
-    let project_detail = ProjectDetailContent::new(
-        &view,
-        project_status.unwrap_or_else(|| UiStatus::neutral("Project")),
-    );
     let nodes = view.nodes;
     let empty = nodes.is_empty();
     let pending_edits = view.pending_edits;
@@ -77,15 +63,12 @@ pub fn ProjectNodeWorkspace(
                     }
                 }
             } else {
-                for (index, node) in nodes.into_iter().enumerate() {
+                for node in nodes.into_iter() {
                     NodePane {
                         key: "{node.node_id}",
                         view: node,
                         on_action,
                         pending_edits: pending_edits.clone(),
-                        // The root card is the project's own card — it hosts
-                        // the project popup; every other card leaves it None.
-                        project: (index == 0).then(|| project_detail.clone()),
                     }
                 }
             }

@@ -10,17 +10,14 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::module::module_fixtures::root_module_node_view;
-use crate::app::node::NodeDetailPopover;
 use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
-use crate::app::project::ProjectDetailContent;
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
     ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
-    UiPatchTarget, UiStatus, UiStudioView, UiViewContent,
+    UiPatchTarget, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what
@@ -264,25 +261,6 @@ fn workbench_mixed_dock_states() -> Element {
                 },
             ),
     )
-}
-
-#[story(
-    description = "The re-housed project popup (ruling 2): the workspace ROOT card's ⓘ now carries what the project pane's header used to — project identity with the status word, the Project settings rows, Share, pending edits, and the project stats — because the workbench's Nodes dock renders the project pane flat, with no header to hang a popup from. Same component, same ops; the pane's own [i] is untouched on every other route."
-)]
-fn workbench_root_card_project_popup() -> Element {
-    let editor = project_editor_fixture(ProjectSyncPhase::Ready);
-    let root = root_module_node_view();
-    rsx! {
-        div { class: "tw:flex tw:min-h-[760px] tw:items-start tw:justify-end",
-            NodeDetailPopover {
-                header: root.header,
-                pending_edits: editor.pending_edits.clone(),
-                project: Some(ProjectDetailContent::new(&editor, UiStatus::good("Ready"))),
-                on_action: move |_| {},
-                initially_open: true,
-            }
-        }
-    }
 }
 
 /// The Nodes-view frame with preset dock memory — the strip/tab stories'

@@ -70,6 +70,20 @@ pub(crate) fn affordance_pane_tone(affordance: UiAffordance, status: UiStatusKin
     }
 }
 
+/// Foreground class for the header project chip's state glyph (D8): the
+/// same vocabulary the boxed detail triggers wear, without the box — the
+/// silent `Info` keeps a quiet "i" rather than disappearing, because the
+/// chip's job is to be present on every view.
+pub(crate) fn affordance_glyph_class(affordance: UiAffordance) -> &'static str {
+    match affordance {
+        UiAffordance::Info => "tw:text-subtle-foreground",
+        UiAffordance::Busy => "tw:text-status-working-foreground",
+        UiAffordance::Debug => "lp-debug-indicator",
+        UiAffordance::Unsaved => "tw:text-status-warning-foreground",
+        UiAffordance::Error => "tw:text-status-error-foreground",
+    }
+}
+
 /// Foreground color class for the tree row's small affordance indicator;
 /// `None` for the silent `Info` affordance (clean rows show nothing).
 pub(crate) fn affordance_indicator_class(affordance: UiAffordance) -> Option<&'static str> {
