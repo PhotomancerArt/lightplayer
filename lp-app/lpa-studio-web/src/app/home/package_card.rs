@@ -15,6 +15,7 @@ use lpc_cloud_api::share_link::slugify;
 use crate::router::canonical_share_path;
 
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::gallery_preview::ThumbMode;
 use crate::app::home::package_export::export_package_to_download;
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
@@ -114,6 +115,9 @@ pub(crate) fn PackageCard(
                 source: blocked
                     .is_none()
                     .then(|| PreviewSource::ProjectUid(card.uid.clone())),
+                // Poster-first, like the example shelf: the library page is
+                // for finding a project, not for watching twelve of them.
+                mode: ThumbMode::PosterFirst,
             }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",

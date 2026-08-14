@@ -164,11 +164,76 @@ pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -
     })
 }
 
-/// Rasterize the lamp field into `buffer` and blit it onto the canvas.
+/// The box one lamp field rasterizes into: backing-store size in device
+/// pixels, plus the CSS width and device-pixel ratio the dot geometry is
+/// measured in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LampRasterBox {
+    /// CSS width of the lamp box — lamp diameter is a percentage of it.
+    pub css_width: f64,
+    /// Device pixels per CSS pixel for this rasterization.
+    pub dpr: f64,
+    /// Backing-store width in device pixels.
+    pub width: u32,
+    /// Backing-store height in device pixels.
+    pub height: u32,
+}
+
+/// Rasterize `preview`'s lamps into `buffer` as RGBA at the box's
+/// device-pixel size, screen-blended over transparent black.
 ///
-/// Geometry matches the renderer this replaces so the view ⇄ edit flip lands
-/// on the same framing: lamp centers are fractions of the (already inset)
-/// canvas box, and diameter is a percentage of its width floored at 5 CSS px.
+/// Geometry matches the renderer [`LampView`] replaces so the view ⇄ edit
+/// flip lands on the same framing: lamp centers are fractions of the
+/// (already inset) box, and diameter is a percentage of its width floored
+/// at 5 CSS px.
+///
+/// Split out of [`paint_lamp_canvas`] so a gallery poster capture can
+/// rasterize the same field into an offscreen canvas of its own size: the
+/// card's live lamp layer and the poster standing in for it must be the
+/// same picture, or the hover swap would jump.
+pub(crate) fn rasterize_lamp_field(
+    preview: &UiControlProductPreview,
+    live: bool,
+    raster: LampRasterBox,
+    buffer: &mut Vec<u8>,
+) -> Result<(), String> {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
+        return Err("control preview has no 2D display layout".to_string());
+    };
+    let LampRasterBox {
+        css_width,
+        dpr,
+        width,
+        height,
+    } = raster;
+
+    // Transparent black: the frame behind the canvas is black, so unlit
+    // background needs no fill and lamp pixels blend as they did under
+    // `mix-blend-mode: screen`.
+    buffer.clear();
+    buffer.resize(width as usize * height as usize * 4, 0);
+    let neutral = neutral_lamp_rgb();
+    for lamp in &layout.lamps {
+        let color = if live {
+            control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
+        } else {
+            neutral
+        };
+        // A black lamp screen-blends to nothing over the black frame — the
+        // same nothing the div renderer drew, at none of the cost.
+        if color == [0, 0, 0] {
+            continue;
+        }
+        let diameter_pct = f64::from(lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
+        let radius = (diameter_pct / 100.0 * css_width).max(5.0) / 2.0 * dpr;
+        let center_x = f64::from(lamp.center[0].clamp(0.0, 1.0)) * f64::from(width);
+        let center_y = f64::from(lamp.center[1].clamp(0.0, 1.0)) * f64::from(height);
+        paint_lamp_dot(buffer, width, height, [center_x, center_y], radius, color);
+    }
+    Ok(())
+}
+
+/// Rasterize the lamp field into `buffer` and blit it onto the canvas.
 fn paint_lamp_canvas(
     canvas_id: &str,
     preview: &UiControlProductPreview,
@@ -181,9 +246,6 @@ fn paint_lamp_canvas(
         .ok_or_else(|| format!("canvas #{canvas_id} not mounted"))?
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .map_err(|_| format!("element #{canvas_id} is not a canvas"))?;
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
-        return Err("control preview has no 2D display layout".to_string());
-    };
 
     let css_width = f64::from(canvas.client_width());
     let css_height = f64::from(canvas.client_height());
@@ -210,29 +272,17 @@ fn paint_lamp_canvas(
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .map_err(|_| "2d context has an unexpected type".to_string())?;
 
-    // Transparent black: the frame behind the canvas is black, so unlit
-    // background needs no fill and lamp pixels blend as they did under
-    // `mix-blend-mode: screen`.
-    buffer.clear();
-    buffer.resize(width as usize * height as usize * 4, 0);
-    let neutral = neutral_lamp_rgb();
-    for lamp in &layout.lamps {
-        let color = if live {
-            control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
-        } else {
-            neutral
-        };
-        // A black lamp screen-blends to nothing over the black frame — the
-        // same nothing the div renderer drew, at none of the cost.
-        if color == [0, 0, 0] {
-            continue;
-        }
-        let diameter_pct = f64::from(lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
-        let radius = (diameter_pct / 100.0 * css_width).max(5.0) / 2.0 * dpr;
-        let center_x = f64::from(lamp.center[0].clamp(0.0, 1.0)) * f64::from(width);
-        let center_y = f64::from(lamp.center[1].clamp(0.0, 1.0)) * f64::from(height);
-        paint_lamp_dot(buffer, width, height, [center_x, center_y], radius, color);
-    }
+    rasterize_lamp_field(
+        preview,
+        live,
+        LampRasterBox {
+            css_width,
+            dpr,
+            width,
+            height,
+        },
+        buffer,
+    )?;
 
     let image =
         web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(buffer), width, height)
