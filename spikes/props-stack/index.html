@@ -365,16 +365,35 @@ function ctxLine() {
     <span class="nodes" title="modules are edited on the Nodes view">Nodes ↗</span></div>`;
 }
 
-/* B — full stack: every level expanded, always */
-function conceptB() {
-  const c = chain();
-  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
+/* one always-expanded level card (concepts B and B′) */
+function fullCard(lvl, i) {
+  return `
     <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
       <div class="lvl-head" onclick="setSel(${i})">
         ${headBits(lvl, i)}
       </div>
       <div class="lvl-body">${levelBody(lvl, i)}</div>
-    </div>`).join('') + `</div>`;
+    </div>`;
+}
+
+/* B — full stack, root first: reads like the tree beside it */
+function conceptB() {
+  const c = chain();
+  return ctxLine() + `<div class="stack">` +
+    c.map((lvl, i) => fullCard(lvl, i)).join('') + `</div>`;
+}
+
+/* B′ — full stack, DEEPEST first: the selection is always the TOP card
+   (call-stack / devtools-styles order — stable locus of interaction),
+   ancestors unwind beneath, root context at the very bottom */
+function conceptB2() {
+  const c = chain();
+  return `<div class="stack">` +
+    c.map((lvl, i) => fullCard(lvl, i)).reverse().join('') + `</div>` +
+    `<div style="margin-top:8px">${ctxLine()}</div>` +
+    `<p class="depthnote">Selection always lands at the top — it never wanders
+    down the pane as you descend. Trade: vertical order CONTRADICTS the
+    Fixtures tree beside it.</p>`;
 }
 
 /* C — selection stack: headers always, ONE body — the selected level's.
@@ -427,7 +446,8 @@ function firstObjIndex() {
 /* ---------- shell ---------- */
 const CONCEPTS = [
   ['A', 'Breadcrumb (production)', 'One level at a time; ancestors are a crumb trail. Faithful baseline — the option "keep what we have".', conceptA],
-  ['B', 'Full stack', 'Every level of the path, expanded, always. Maximum context, maximum scrolling.', conceptB],
+  ['B', 'Full stack — root first', 'Every level expanded, tree order: fixture on top, selection deepest. Matches the Fixtures tree.', conceptB],
+  ['B′', 'Full stack — deepest first', 'Same cards, inverted: the SELECTION is always the top card, ancestors unwind below (call-stack order).', conceptB2],
   ['C', 'Selection stack', 'Every level as a header; ONE open body that mirrors the selection. The stack IS the selection.', conceptC],
   ['D', 'Accordion stack', 'Headers always; open/close is local, selection stays put. Peek at an ancestor without ascending.', conceptD],
 ];
