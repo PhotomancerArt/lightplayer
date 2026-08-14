@@ -83,6 +83,13 @@ self.onmessage = async (event) => {
         requireBooted();
         previewFrame(message);
         break;
+      case "capture_poster":
+        requireBooted();
+        // Async on purpose: the GPU readback awaits a buffer map on this
+        // event loop. The promise carries its own error reporting; ordinary
+        // messages keep dispatching while it is in flight.
+        capturePoster(message);
+        break;
       case "drain":
         requireBooted();
         postMany(fwBrowser.drain_output_json(targetRuntime(message)));
@@ -207,6 +214,43 @@ function previewFrame(message) {
     }
     self.postMessage({
       kind: "preview_error",
+      runtime_id: runtimeId,
+      frame_id: frameId,
+      message: String(error?.stack || error),
+    });
+  }
+}
+
+// One-shot poster capture: render at the requested size and transfer the
+// RGBA8 buffer back. GPU tier awaits an async readback inside the wasm
+// export; failures answer poster_error so the host can stop waiting.
+async function capturePoster(message) {
+  const runtimeId = message.runtime_id;
+  const frameId = message.frame_id || 0;
+  try {
+    const pixels = await fwBrowser.capture_poster_rgba8(
+      runtimeId,
+      message.channel || "visual.out",
+      message.width,
+      message.height,
+    );
+    self.postMessage(
+      {
+        kind: "poster_pixels",
+        runtime_id: runtimeId,
+        frame_id: frameId,
+        width: message.width,
+        height: message.height,
+        pixels: pixels.buffer,
+      },
+      [pixels.buffer],
+    );
+  } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
+    self.postMessage({
+      kind: "poster_error",
       runtime_id: runtimeId,
       frame_id: frameId,
       message: String(error?.stack || error),

@@ -1,12 +1,10 @@
-use alloc::vec::Vec;
-
 use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::hir::{scalar_ir_types, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 use super::single_lane;
 
 pub(in crate::lower) fn lower_index(
@@ -29,7 +27,7 @@ pub(in crate::lower) fn lower_index(
     };
     let source_count = base.lanes.len() / source_width;
     let index = clamp_index(ctx, index, source_count);
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for component in 0..result_width {
         let Some(mut selected) = base.lanes.get(component).copied() else {
             return Err(Diagnostic::error(span, "index base has no lanes"));

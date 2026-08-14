@@ -5,13 +5,13 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 
 pub(in crate::lower::ops) fn lower_matrix_multiply(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    lhs: LowerValue,
-    rhs: LowerValue,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = result_ty.matrix_dims() else {
@@ -23,7 +23,7 @@ pub(in crate::lower::ops) fn lower_matrix_multiply(
     if cols != rows || lhs.lanes.len() != cols * rows || rhs.lanes.len() != cols * rows {
         return Err(Diagnostic::error(span, "unsupported matrix multiply shape"));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for col in 0..cols {
         for row in 0..rows {
             let mut acc = None;
@@ -58,8 +58,8 @@ pub(in crate::lower::ops) fn lower_matrix_multiply(
 pub(in crate::lower::ops) fn lower_matrix_vector_multiply(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    lhs: LowerValue,
-    rhs: LowerValue,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     if lhs.ty.is_matrix() {
@@ -77,7 +77,7 @@ pub(in crate::lower::ops) fn lower_matrix_vector_multiply(
 pub(in crate::lower::ops) fn lower_matrix_transpose(
     _ctx: &mut LowerCtx<'_>,
     span: Span,
-    value: LowerValue,
+    value: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = value.ty.matrix_dims() else {
@@ -86,7 +86,7 @@ pub(in crate::lower::ops) fn lower_matrix_transpose(
     if cols != rows || result_ty.matrix_dims() != Some((cols, rows)) {
         return Err(Diagnostic::error(span, "unsupported transpose shape"));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for col in 0..cols {
         for row in 0..rows {
             lanes.push(value.lanes[row * rows + col]);
@@ -101,7 +101,7 @@ pub(in crate::lower::ops) fn lower_matrix_transpose(
 pub(in crate::lower::ops) fn lower_matrix_determinant(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    value: LowerValue,
+    value: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = value.ty.matrix_dims() else {
@@ -113,14 +113,14 @@ pub(in crate::lower::ops) fn lower_matrix_determinant(
     let det = determinant_lanes(ctx, rows, &value.lanes)?;
     Ok(LowerValue {
         ty: LpsType::Float,
-        lanes: alloc::vec![det],
+        lanes: Lanes::one(det),
     })
 }
 
 pub(in crate::lower::ops) fn lower_matrix_inverse(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    value: LowerValue,
+    value: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = value.ty.matrix_dims() else {
@@ -140,8 +140,8 @@ pub(in crate::lower::ops) fn lower_matrix_inverse(
 fn lower_matrix_times_vector(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    matrix: LowerValue,
-    vector: LowerValue,
+    matrix: &LowerValue,
+    vector: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = matrix.ty.matrix_dims() else {
@@ -153,7 +153,7 @@ fn lower_matrix_times_vector(
             "unsupported matrix-vector multiply shape",
         ));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for row in 0..rows {
         let mut acc = None;
         for col in 0..cols {
@@ -263,7 +263,7 @@ fn inverse_lanes(
     size: usize,
     lanes: &[lpir::VReg],
     det: lpir::VReg,
-) -> Result<Vec<lpir::VReg>, Diagnostic> {
+) -> Result<Lanes, Diagnostic> {
     match size {
         2 => inverse2(ctx, lanes, det),
         3 | 4 => inverse_by_cofactors(ctx, span, size, lanes, det),
@@ -275,19 +275,19 @@ fn inverse2(
     ctx: &mut LowerCtx<'_>,
     lanes: &[lpir::VReg],
     det: lpir::VReg,
-) -> Result<Vec<lpir::VReg>, Diagnostic> {
+) -> Result<Lanes, Diagnostic> {
     if lanes.len() != 4 {
         return Err(Diagnostic::error(Span::new(0, 0), "invalid mat2 inverse"));
     }
     let inv_det = fdiv_one(ctx, det);
     let neg_b = fneg(ctx, lanes[1]);
     let neg_c = fneg(ctx, lanes[2]);
-    Ok(alloc::vec![
+    Ok(Lanes::from_slice(&[
         fmul(ctx, lanes[3], inv_det),
         fmul(ctx, neg_b, inv_det),
         fmul(ctx, neg_c, inv_det),
         fmul(ctx, lanes[0], inv_det),
-    ])
+    ]))
 }
 
 fn inverse_by_cofactors(
@@ -296,9 +296,9 @@ fn inverse_by_cofactors(
     size: usize,
     lanes: &[lpir::VReg],
     det: lpir::VReg,
-) -> Result<Vec<lpir::VReg>, Diagnostic> {
+) -> Result<Lanes, Diagnostic> {
     let inv_det = fdiv_one(ctx, det);
-    let mut out = Vec::new();
+    let mut out = Lanes::new();
     for col in 0..size {
         for row in 0..size {
             let cofactor = cofactor(ctx, span, lanes, size, col, row)?;
@@ -336,8 +336,8 @@ fn cofactor(
 fn lower_vector_times_matrix(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    vector: LowerValue,
-    matrix: LowerValue,
+    vector: &LowerValue,
+    matrix: &LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let Some((cols, rows)) = matrix.ty.matrix_dims() else {
@@ -349,7 +349,7 @@ fn lower_vector_times_matrix(
             "unsupported vector-matrix multiply shape",
         ));
     }
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for col in 0..cols {
         let mut acc = None;
         for row in 0..rows {

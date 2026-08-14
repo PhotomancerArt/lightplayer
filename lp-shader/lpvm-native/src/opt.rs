@@ -54,9 +54,9 @@ pub fn fold_immediates(lowered: &mut LoweredFunction, isa: IsaTarget) {
     let loop_defs = compute_loop_def_sets(lowered, max_vreg);
     let inside_loop_with_def = |i: usize, v: VReg| -> bool {
         let vidx = v.0 as usize;
-        loop_defs.iter().any(|ld| {
-            i >= ld.header_idx && i <= ld.backedge_idx && vidx < ld.defs.len() && ld.defs[vidx]
-        })
+        loop_defs
+            .iter()
+            .any(|ld| i >= ld.header_idx && i <= ld.backedge_idx && ld.defs.contains(vidx))
     };
 
     for i in 0..lowered.vinsts.len() {
@@ -151,24 +151,52 @@ pub fn fold_immediates(lowered: &mut LoweredFunction, isa: IsaTarget) {
 struct LoopDefSet {
     header_idx: usize,
     backedge_idx: usize,
-    /// `defs[v.0 as usize]` is true iff `v` is def'd at least once in
+    /// Bit `v.0` is set iff `v` is def'd at least once in
     /// `vinsts[header_idx..=backedge_idx]`.
-    defs: Vec<bool>,
+    ///
+    /// Packed rather than `Vec<bool>`: every loop's set is resident for the
+    /// whole pass, so a byte per vreg per loop was eight times the memory a
+    /// one-bit answer needs — and loop-dense shader functions with a few
+    /// thousand vregs are exactly where the device heap is tightest.
+    defs: DefBits,
+}
+
+/// A vreg-indexed bitmap (see [`LoopDefSet::defs`]). Indices at or past `len`
+/// are ignored on both sides, exactly as the `Vec<bool>` this replaced did.
+struct DefBits {
+    words: Vec<u32>,
+    len: usize,
+}
+
+impl DefBits {
+    fn new(max_vreg: usize) -> Self {
+        let len = max_vreg + 1;
+        Self {
+            words: alloc::vec![0u32; len.div_ceil(32)],
+            len,
+        }
+    }
+
+    fn insert(&mut self, vidx: usize) {
+        if vidx < self.len {
+            self.words[vidx / 32] |= 1 << (vidx % 32);
+        }
+    }
+
+    fn contains(&self, vidx: usize) -> bool {
+        vidx < self.len && self.words[vidx / 32] & (1 << (vidx % 32)) != 0
+    }
 }
 
 fn compute_loop_def_sets(lowered: &LoweredFunction, max_vreg: usize) -> Vec<LoopDefSet> {
     let mut out = Vec::with_capacity(lowered.loop_regions.len());
     for lr in &lowered.loop_regions {
-        let mut defs = Vec::new();
-        defs.resize(max_vreg + 1, false);
+        let mut defs = DefBits::new(max_vreg);
         let end = lr.backedge_idx.min(lowered.vinsts.len().saturating_sub(1));
         if lr.header_idx <= end {
             for inst in &lowered.vinsts[lr.header_idx..=end] {
                 inst.for_each_def(&lowered.vreg_pool, |v| {
-                    let idx = v.0 as usize;
-                    if idx < defs.len() {
-                        defs[idx] = true;
-                    }
+                    defs.insert(v.0 as usize);
                 });
             }
         }

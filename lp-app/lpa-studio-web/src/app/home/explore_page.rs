@@ -9,6 +9,7 @@ use crate::base::HelpLink;
 use lpa_studio_core::{UiAction, UiExampleCard, UiHomeView};
 
 use crate::app::home::example_card::ExampleCard;
+use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::{card_grid_class, section_title_class};
 
 /// The example grid. `home` is `None` while a project is open (the view
@@ -21,6 +22,9 @@ pub fn ExplorePage(
     #[props(default)] home: Option<UiHomeView>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // Hover-to-play is page-scoped: one signal names one hovered card, so
+    // the whole grid holds at most one live lease at a time.
+    use_context_provider(|| HoveredCard(Signal::new(None)));
     let (examples, opening, busy) = match &home {
         Some(home) => (
             home.examples.clone(),

@@ -70,7 +70,10 @@ one vertex. Selection is **tree-path based** (`ShapePath` +
 `MapSelection`): double-click descends into a group, edits through a
 descended path write through to the authored shape (every repeat
 instance follows) — rationale:
-`docs/adr/2026-08-05-map2d-editor-selection-tree-model.md`. Click,
+`docs/adr/2026-08-05-map2d-editor-selection-tree-model.md`. The
+properties pane renders the selected path as a STACK of editable cards,
+deepest first (the B′ ruling amending that ADR) — the host shell
+composes its own placement card and context strip around it. Click,
 shift-click, marquee, ⌘A select; corner handles resize uniformly;
 single-path vertices drag; Delete removes. The esc ladder: path backout
 → drop vertex → ascend group → clear selection → reset tool → exit the

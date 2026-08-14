@@ -14,15 +14,17 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureEvent, FixtureSprite,
-    HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding, object_color,
-    tool_hint,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureEvent,
+    FixtureSprite, HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding,
+    object_color, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
     ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget,
 };
 use lpc_mapping::Bounds2d;
+
+use crate::app::node::lamp_view::fixture_live_colors;
 
 /// Display cap: a fixture with more lamps than this renders every k-th
 /// lamp (display subsampling only — dome-scale fixtures must not melt the
@@ -161,6 +163,9 @@ pub(crate) fn ProjectCanvasHost(
     // float's fit re-frames on demand.
     let mut camera = use_signal(Camera::new);
     let viewport = use_signal(|| None::<[f32; 2]>);
+    // Which measurement the current fit consumed — so a viewport that
+    // settles AFTER the fit re-runs it (see the fit block below).
+    let mut fit_done = use_signal(FitReconcile::default);
     let local_fit = use_signal(|| true);
     let mut fit_pending = fit_pending.unwrap_or(local_fit);
     let local_view = use_signal(EditorViewOptions::default);
@@ -169,7 +174,10 @@ pub(crate) fn ProjectCanvasHost(
     // fixture is dived (there is nothing to edit in fixture view).
     let arrange_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let arrange_drag = use_signal(|| None::<CanvasDrag>);
-    let arrange_live = use_signal(Vec::<[u8; 3]>::new);
+    let mut arrange_live = use_signal(Vec::<[u8; 3]>::new);
+    // Which fixture the live feed's colors belong to — a dive SWITCH must
+    // drop them (another fixture's colors on this doc's lamps would lie).
+    let mut live_source = use_signal(|| None::<NodeId>);
     // Live drag override, held until the snapshot confirms the write.
     let mut drag_override = use_signal(|| None::<DragOverride>);
 
@@ -214,14 +222,48 @@ pub(crate) fn ProjectCanvasHost(
                 .map(|sprite| (key, sprite.placement, sprite.bounds))
         });
 
+    // The live feed (the toolbar's `live` / L): while dived, decode the
+    // focused fixture's lamp colors out of its output's published wire
+    // frame and WRITE them into the canvas's live signal — a signal, never
+    // a prop, so a frame tick re-renders nothing (the canvas applies them
+    // as direct DOM writes). Keep-last-good: an apply round-trip can drop
+    // the frame for a tick or two, and falling back to the palette would
+    // read as live mode dropping out.
+    if dive_focus.is_some()
+        && let Some(dive) = dive.as_ref()
+    {
+        if *live_source.peek() != Some(dive.node) {
+            live_source.set(Some(dive.node));
+            arrange_live.set(Vec::new());
+        }
+        if view_opts.read().live {
+            let colors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.node == dive.node)
+                .map(|fixture| fixture_live_colors(&fixture.patch))
+                .unwrap_or_default();
+            if !colors.is_empty() && *arrange_live.peek() != colors {
+                arrange_live.set(colors);
+            }
+        }
+    }
+
     // Fit runs at render, guarded: armed at mount and by the zoom float /
     // `0` key, waiting for a real viewport measurement and real bounds.
     // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
     // "snap viewport to fixture" affordance); otherwise it fits all.
+    // The fit ALSO re-runs when the measurement moves while the camera is
+    // still exactly the value the last fit produced: the first
+    // measurement races container layout settling (docks, the mobile
+    // fold), and freezing the camera on it baked a nondeterministic zoom
+    // into story baselines (the churner —
+    // docs/debt/story-capture-pipeline.md). Once the user pans or zooms,
+    // the camera is theirs and reconciliation stops.
     {
         let viewport_now = *viewport.read();
-        if *fit_pending.read()
-            && let Some([width, height]) = viewport_now
+        if let Some([width, height]) = viewport_now
+            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
         {
             let bounds = match &dive_focus {
                 Some((_, placement, own_bounds)) => {
@@ -245,7 +287,18 @@ pub(crate) fn ProjectCanvasHost(
                     None => 0.0,
                 };
                 camera.write().fit(bounds, width, height, padding);
-                fit_pending.set(false);
+                if *fit_pending.peek() {
+                    fit_pending.set(false);
+                }
+            }
+            // Reconcile even with nothing to frame — the default camera is
+            // deterministic too, and the capture guard must clear on an
+            // empty canvas. Change-guarded: a bare signal write at render
+            // would re-render forever.
+            let mut next = *fit_done.peek();
+            next.record([width, height], *camera.peek());
+            if *fit_done.peek() != next {
+                fit_done.set(next);
             }
         }
     }
@@ -323,7 +376,13 @@ pub(crate) fn ProjectCanvasHost(
         .then(|| tool_hint(&canvas_session.read()));
     let committed = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
     rsx! {
-        div { class: "lpme-canvas-wrap",
+        div {
+            class: "lpme-canvas-wrap",
+            // The geometry guard (clock-face precedent): the size the
+            // camera's fit was reconciled against. The story capture's
+            // ready gate refuses to photograph a visible canvas whose
+            // real box disagrees with this stamp.
+            "data-fit-viewport": fit_done.read().guard_attr(),
             EditorCanvas {
                 session: canvas_session,
                 camera,
@@ -428,37 +487,43 @@ fn selected_instance_range(
     }
 }
 
-/// Sticky auto-pack slots for the UNARRANGED fixtures, keyed by editor
-/// key. Owned by the shell and refreshed only when the unarranged SET
-/// changes — dragging an arranged fixture must never move its neighbours
-/// (the second gate's movement bug: the pack row used to follow the
-/// arranged content every render).
+/// Sticky auto-pack slots, keyed by editor key. Owned by the shell; a
+/// fixture keeps its slot for the LIFE OF THE MOUNT once assigned — even
+/// while arranged, so undoing an arrange returns it to its old slot — and
+/// no event ever re-packs an existing slot (the G1 jump bug: re-packing
+/// the whole set whenever it changed made every neighbour move when one
+/// fixture was dragged).
 pub(crate) type PackSlots = BTreeMap<String, UiArrangeTransform>;
 
-/// The pack layout for the CURRENT unarranged set: `None` when the held
-/// slots already cover exactly that set (keep them — stability is the
-/// point), else a freshly packed row below the arranged content.
+/// Grow the held slots to cover the current unarranged set: `None` when
+/// every unarranged fixture already has a slot (keep them — stability is
+/// the point), else the held slots plus freshly packed positions for the
+/// fixtures that have NEVER had one. Existing slots are never moved or
+/// dropped.
 pub(crate) fn refresh_pack_slots(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
     held: &PackSlots,
 ) -> Option<PackSlots> {
-    let renders = build_renders(surface, bodies, &PackSlots::new());
-    let unarranged: Vec<&FixtureRender> =
-        renders.iter().filter(|render| !render.arranged).collect();
-    if unarranged.len() == held.len()
-        && unarranged
-            .iter()
-            .all(|render| held.contains_key(&render.key))
-    {
+    let renders = build_renders(surface, bodies, held);
+    merge_pack_slots(&renders, held)
+}
+
+/// The pure half of [`refresh_pack_slots`]: adopt the auto-packed
+/// transform of every unarranged fixture without a held slot.
+fn merge_pack_slots(renders: &[FixtureRender], held: &PackSlots) -> Option<PackSlots> {
+    let fresh: Vec<&FixtureRender> = renders
+        .iter()
+        .filter(|render| !render.arranged && !held.contains_key(&render.key))
+        .collect();
+    if fresh.is_empty() {
         return None;
     }
-    Some(
-        unarranged
-            .into_iter()
-            .map(|render| (render.key.clone(), render.transform))
-            .collect(),
-    )
+    let mut next = held.clone();
+    for render in fresh {
+        next.insert(render.key.clone(), render.transform);
+    }
+    Some(next)
 }
 
 /// Build every fixture's render facts: resolve loaded bodies, fall back to
@@ -554,27 +619,51 @@ fn placeholder_bounds(lamps: u32) -> [f64; 4] {
 }
 
 /// Place every unarranged fixture WITHOUT a held slot in a bottom row
-/// (stable order = surface order) under the arranged content. Ephemeral:
-/// nothing is written until a fixture is first dragged.
+/// (stable order = surface order). When held slots exist their fixtures
+/// define the live row, and new fixtures CONTINUE it to the right —
+/// re-deriving a row from the arranged extent would collide with (or sit
+/// away from) the held neighbours. Ephemeral: nothing is written until a
+/// fixture is first dragged.
 fn auto_pack(renders: &mut [FixtureRender], held: &PackSlots) {
-    let arranged_max_y = renders
-        .iter()
-        .filter(|render| render.arranged)
-        .map(|render| {
-            // Conservative world-space extent: transformed bounds corners.
-            placement_of(&render.transform)
-                .corners(render.bounds)
-                .iter()
-                .map(|point| point[1])
-                .fold(f64::MIN, f64::max)
-        })
-        .fold(f64::MIN, f64::max);
-    let row_y = if arranged_max_y == f64::MIN {
-        0.0
+    // The held row: every held slot's world-space top edge and right
+    // extent — measured at the SLOT placement even for fixtures currently
+    // arranged, because an undone arrange returns them to that slot (the
+    // slot stays reserved). Held slots are always pack-made (r=0, s=1,
+    // tops aligned), so the min top recovers the row's y.
+    let mut row_top = f64::MAX;
+    let mut held_right = f64::MIN;
+    for render in renders.iter() {
+        let Some(slot) = held.get(&render.key) else {
+            continue;
+        };
+        for point in placement_of(slot).corners(render.bounds) {
+            row_top = row_top.min(point[1]);
+            held_right = held_right.max(point[0]);
+        }
+    }
+    let (row_y, mut cursor_x) = if row_top < f64::MAX {
+        (row_top, held_right + PACK_GAP)
     } else {
-        arranged_max_y + PACK_GAP * 2.0
+        // No held row yet: start one below the arranged content.
+        let arranged_max_y = renders
+            .iter()
+            .filter(|render| render.arranged)
+            .map(|render| {
+                // Conservative world-space extent: transformed bounds corners.
+                placement_of(&render.transform)
+                    .corners(render.bounds)
+                    .iter()
+                    .map(|point| point[1])
+                    .fold(f64::MIN, f64::max)
+            })
+            .fold(f64::MIN, f64::max);
+        let row_y = if arranged_max_y == f64::MIN {
+            0.0
+        } else {
+            arranged_max_y + PACK_GAP * 2.0
+        };
+        (row_y, 0.0)
     };
-    let mut cursor_x = 0.0;
     for render in renders
         .iter_mut()
         .filter(|render| !render.arranged && !held.contains_key(&render.key))
@@ -670,7 +759,7 @@ mod tests {
     }
 
     /// The movement bug's regression test: held slots survive arranged
-    /// content moving; only a CHANGED unarranged set re-packs.
+    /// content moving; a held fixture is NEVER re-packed.
     #[test]
     fn held_pack_slots_pin_unarranged_fixtures() {
         let mut renders = vec![
@@ -698,6 +787,92 @@ mod tests {
             [7.0, 9.0],
             "the held slot pins the fixture regardless of arranged bounds"
         );
+    }
+
+    /// The G1 jump bug's regression test: one fixture leaving the
+    /// unarranged set (first drag) must not move anyone else — the merge
+    /// keeps every held slot and reports nothing new.
+    #[test]
+    fn arranging_a_fixture_never_repacks_its_neighbours() {
+        let slot = |x: f64| UiArrangeTransform {
+            t: [x, 90.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let held: PackSlots = [("b".to_string(), slot(0.0)), ("c".to_string(), slot(44.0))]
+            .into_iter()
+            .collect();
+        // "b" was just dragged: arranged now, but its slot stays held.
+        let renders = vec![
+            render("b", true, [0.0, 0.0, 20.0, 20.0]),
+            render("c", false, [0.0, 0.0, 20.0, 20.0]),
+        ];
+        assert_eq!(
+            merge_pack_slots(&renders, &held),
+            None,
+            "no fresh fixtures: held slots (including b's, for undo) stay put"
+        );
+    }
+
+    /// Undo of a first drag: the fixture returns to the unarranged set and
+    /// its RETAINED slot places it exactly where it was.
+    #[test]
+    fn undone_arrange_returns_to_the_old_slot() {
+        let held: PackSlots = [(
+            "b".to_string(),
+            UiArrangeTransform {
+                t: [7.0, 9.0],
+                r: 0.0,
+                s: 1.0,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let mut renders = vec![render("b", false, [0.0, 0.0, 20.0, 20.0])];
+        assert_eq!(merge_pack_slots(&renders, &held), None);
+        for item in renders.iter_mut().filter(|item| !item.arranged) {
+            if let Some(slot) = held.get(&item.key) {
+                item.transform = *slot;
+            }
+        }
+        auto_pack(&mut renders, &held);
+        assert_eq!(renders[0].transform.t, [7.0, 9.0]);
+    }
+
+    /// A NEW fixture continues the held row to the right — including past
+    /// slots reserved by fixtures currently arranged (undo returns them
+    /// there), never into or below them.
+    #[test]
+    fn new_fixtures_continue_the_held_row() {
+        let slot = |x: f64| UiArrangeTransform {
+            t: [x, 90.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let held: PackSlots = [("b".to_string(), slot(0.0)), ("c".to_string(), slot(44.0))]
+            .into_iter()
+            .collect();
+        // "c" is arranged away; its slot (right edge x=64) stays reserved.
+        let mut renders = vec![
+            render("b", false, [0.0, 0.0, 20.0, 20.0]),
+            render("c", true, [0.0, 0.0, 20.0, 20.0]),
+            render("d", false, [0.0, 0.0, 20.0, 20.0]),
+        ];
+        for item in renders.iter_mut().filter(|item| !item.arranged) {
+            if let Some(slot) = held.get(&item.key) {
+                item.transform = *slot;
+            }
+        }
+        auto_pack(&mut renders, &held);
+        assert_eq!(
+            renders[2].transform.t,
+            [64.0 + PACK_GAP, 90.0],
+            "d appends after c's reserved slot, on the held row's y"
+        );
+        let merged = merge_pack_slots(&renders, &held).expect("d is fresh");
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged["b"], slot(0.0));
+        assert_eq!(merged["d"].t, [64.0 + PACK_GAP, 90.0]);
     }
 
     #[test]

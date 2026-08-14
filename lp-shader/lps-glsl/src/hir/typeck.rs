@@ -17,7 +17,7 @@ use super::function::{FunctionSig, GlobalConst, ImportRegistry};
 use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use super::types::StructTypes;
 use super::types::{
-    GlobalInfo, HirExpr, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
+    GlobalInfo, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
     HirTextureOperand, HirUserCallWriteback, UniformInfo,
 };
 use super::typing::builtin_has_out_args;
@@ -29,9 +29,15 @@ use super::typing::{
 };
 use super::{
     fixed_array_from_base, infer_array_constructor_type, infer_array_decl_type,
-    parse_array_type_name, resolve_init_list_lens, scalar_or_struct_type_name_to_lps,
-    type_name_to_lps_with_structs,
+    is_scalar_or_struct_type_name, parse_array_type_name, resolve_init_list_lens,
+    scalar_or_struct_type_name_to_lps, type_name_to_lps_with_structs,
 };
+
+/// The LPFN signature tokens of one call.
+///
+/// Every supported LPFN signature is at most five parameters wide
+/// (`lpfn_psrdnoise`), so the token list never reaches the heap.
+type GlslParams = crate::small::InlineVec<&'static str, 6>;
 
 pub(super) struct TypeCtx<'a> {
     params: &'a [HirParam],
@@ -357,7 +363,9 @@ impl<'a> TypeCtx<'a> {
                 "initializer list requires declaration type",
             )),
             ParsedExprKind::Swizzle { base, fields } => {
-                if let Ok(place) = self.type_place(expr, AccessMode::Read) {
+                if self.roots_in_a_place(expr)
+                    && let Ok(place) = self.type_place(expr, AccessMode::Read)
+                {
                     let ty = self.arena.place(place).ty.clone();
                     return Ok(self.arena.push_expr(
                         expr.span,
@@ -386,7 +394,9 @@ impl<'a> TypeCtx<'a> {
                 ))
             }
             ParsedExprKind::Index { base, index } => {
-                if let Ok(place) = self.type_place(expr, AccessMode::Read) {
+                if self.roots_in_a_place(expr)
+                    && let Ok(place) = self.type_place(expr, AccessMode::Read)
+                {
                     let ty = self.arena.place(place).ty.clone();
                     return Ok(self.arena.push_expr(
                         expr.span,
@@ -514,7 +524,11 @@ impl<'a> TypeCtx<'a> {
                 .arena
                 .push_expr(span, param.ty.clone(), HirExprKind::Param { index }));
         }
-        if let Some(global) = self.globals.get(name).cloned() {
+        // `self.globals` is a shared borrow that outlives `&mut self`, so the
+        // const's arena can be read in place: only the copy into this
+        // function's arena below is semantically required.
+        let globals = self.globals;
+        if let Some(global) = globals.get(name) {
             return Ok(self.clone_expr_from(&global.arena, global.expr));
         }
         if let Some(global) = self.global_vars.get(name) {
@@ -642,7 +656,9 @@ impl<'a> TypeCtx<'a> {
 
         if let Some(kind) = builtin_kind(name) {
             let (args, ty) = type_builtin_args(&mut self.arena, span, kind, args)?;
-            if let Some(folded) = fold_builtin_call(span, kind, &self.exprs(args), &ty) {
+            if let Some(folded) =
+                fold_builtin_call(span, kind, &self.arena, self.arena.expr_list(args), &ty)
+            {
                 return Ok(self.arena.push_expr(folded.span, folded.ty, folded.kind));
             }
             return Ok(self.arena.push_expr(
@@ -658,7 +674,9 @@ impl<'a> TypeCtx<'a> {
 
         if is_glsl_import(name) {
             let (args, ty) = type_glsl_import_args(&mut self.arena, span, name, args)?;
-            if let Some(folded) = fold_glsl_import_call(span, name, &self.exprs(args), &ty) {
+            if let Some(folded) =
+                fold_glsl_import_call(span, name, &self.arena, self.arena.expr_list(args), &ty)
+            {
                 return Ok(self.arena.push_expr(folded.span, folded.ty, folded.kind));
             }
             let key = self.imports.glsl(name, args.len());
@@ -850,22 +868,22 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: ExprList,
     ) -> Result<ExprId, Diagnostic> {
-        let arg_ids = self.arena.expr_list(args).to_vec();
-        let glsl_params = arg_ids
-            .iter()
-            .map(|arg| glsl_param_token(self.arena.expr_ty(*arg), span))
-            .collect::<Result<Vec<_>, _>>()?;
+        // The argument ids already live in the arena and the signature
+        // tokens are static spellings, so neither needs an owned per-call
+        // copy: only the joined signature (which the import key keeps) and
+        // the IR parameter-type list are built here.
+        let mut glsl_params = GlslParams::new();
+        for arg in self.arena.expr_list(args) {
+            glsl_params.push(glsl_param_token(self.arena.expr_ty(*arg), span)?);
+        }
         let glsl_params_csv = glsl_params.join(",");
         let mut out = None;
-        let mut import_args = arg_ids.clone();
-        let mut param_types = arg_ids
-            .iter()
-            .flat_map(|arg| scalar_ir_types(self.arena.expr_ty(*arg)).unwrap_or_default())
-            .collect::<Vec<_>>();
+        let mut gradient_arg = None;
         let return_ty = if let Some(gradient_ty) = lpfn_psrdnoise_gradient_type(&glsl_params) {
-            let HirExprKind::Local { index } = self.arena.expr(arg_ids[3]).kind else {
+            let arg = self.arena.expr_list(args)[3];
+            let HirExprKind::Local { index } = self.arena.expr(arg).kind else {
                 return Err(Diagnostic::error(
-                    self.arena.expr_span(arg_ids[3]),
+                    self.arena.expr_span(arg),
                     format!("lpfn_psrdnoise gradient argument must be a local {gradient_ty:?}"),
                 ));
             };
@@ -874,8 +892,7 @@ impl<'a> TypeCtx<'a> {
                 ty: gradient_ty,
                 arg_index: 3,
             });
-            import_args.remove(3);
-            param_types = psrdnoise_param_types(&glsl_params);
+            gradient_arg = Some(3);
             LpsType::Float
         } else if let Some(return_ty) = lpfn_return_type(name, &glsl_params) {
             return_ty
@@ -885,13 +902,29 @@ impl<'a> TypeCtx<'a> {
                 format!("unsupported LPFN signature `{name}({glsl_params_csv})`"),
             ));
         };
-        let key = self.imports.lpfn(
-            name,
-            glsl_params_csv,
-            param_types,
-            scalar_ir_types(&return_ty)?,
-        );
-        let args = self.arena.push_expr_list(import_args);
+        let param_types = if gradient_arg.is_some() {
+            psrdnoise_param_types(&glsl_params)
+        } else {
+            self.arena
+                .expr_list(args)
+                .iter()
+                .flat_map(|arg| scalar_ir_types(self.arena.expr_ty(*arg)).unwrap_or_default())
+                .collect::<Vec<_>>()
+        };
+        let return_types = scalar_ir_types(&return_ty)?.to_vec();
+        let key = self
+            .imports
+            .lpfn(name, glsl_params_csv, param_types, return_types);
+        // Without the gradient out-argument the import takes exactly the
+        // typed argument list, so the existing arena range serves as-is.
+        let args = match gradient_arg {
+            None => args,
+            Some(skip) => {
+                let mut ids = self.arena.expr_list(args).to_vec();
+                ids.remove(skip);
+                self.arena.push_expr_list(ids)
+            }
+        };
         Ok(self.arena.push_expr(
             span,
             return_ty,
@@ -1093,6 +1126,36 @@ impl<'a> TypeCtx<'a> {
         Ok(place)
     }
 
+    /// Cheap syntactic precheck for the speculative `type_place` probes on
+    /// the rvalue swizzle/index paths.
+    ///
+    /// Those two sites try the place route and fall back to the value route
+    /// when it fails. When this returns `false`, `type_place` is guaranteed
+    /// to fail — either at the `_ =>` arm (a non-place root such as a call or
+    /// literal) or at [`Self::type_name_place`]'s "unknown local" arm — and
+    /// it fails before typing anything into the arena, so skipping the probe
+    /// only avoids the discarded diagnostic. Roots that do resolve still go
+    /// through `type_place` unchanged, so real errors keep their text and
+    /// order.
+    fn roots_in_a_place(&self, expr: &ParsedExpr) -> bool {
+        match &expr.kind {
+            ParsedExprKind::Name(name) => self.is_place_name(name),
+            ParsedExprKind::Swizzle { base, .. } | ParsedExprKind::Index { base, .. } => {
+                self.roots_in_a_place(base)
+            }
+            _ => false,
+        }
+    }
+
+    /// The names [`Self::type_name_place`] resolves — deliberately excluding
+    /// global consts, which it does not resolve either.
+    fn is_place_name(&self, name: &str) -> bool {
+        self.resolve_local(name).is_some()
+            || self.params.iter().any(|p| p.name.as_deref() == Some(name))
+            || self.uniforms.contains_key(name)
+            || self.global_vars.contains_key(name)
+    }
+
     fn type_name_place(&self, span: Span, name: &str) -> Result<HirPlace, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
             let ty = self.locals[local].ty.clone();
@@ -1238,16 +1301,33 @@ impl<'a> TypeCtx<'a> {
                 ));
             }
             let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
-            let args = self.exprs(args);
-            return infer_array_constructor_type(span, base, &lens, &args);
+            return infer_array_constructor_type(
+                span,
+                base,
+                &lens,
+                &self.arena,
+                self.arena.expr_list(args),
+            );
         }
         self.type_name_to_lps(name, span)
     }
 
+    /// Whether `name(...)` spells a constructor rather than a call.
+    ///
+    /// Equivalent to `type_name_to_lps(name).is_ok() || unsized-array
+    /// spelling`, but it neither builds the type nor the discarded
+    /// "unsupported type" diagnostic: this runs for every call expression in
+    /// the shader, and every builtin and user-function call answers `false`.
     fn is_constructor_name(&self, name: &str) -> bool {
-        self.type_name_to_lps(name, Span::new(0, 0)).is_ok()
-            || parse_array_type_name(name, self.array_size_consts)
-                .is_some_and(|(_, lens)| lens.iter().any(Option::is_none))
+        match parse_array_type_name(name, self.array_size_consts) {
+            // An unsized spelling (`float[](..)`) is always a constructor;
+            // a sized one is a constructor iff its base names a type.
+            Some((base_name, lens)) => {
+                lens.iter().any(Option::is_none)
+                    || is_scalar_or_struct_type_name(base_name, self.structs)
+            }
+            None => is_scalar_or_struct_type_name(name, self.structs),
+        }
     }
 
     fn resolve_local(&self, name: &str) -> Option<usize> {
@@ -1255,14 +1335,6 @@ impl<'a> TypeCtx<'a> {
             .iter()
             .rev()
             .find_map(|scope| scope.get(name).copied())
-    }
-
-    fn exprs(&self, list: ExprList) -> Vec<HirExpr> {
-        self.arena
-            .expr_list(list)
-            .iter()
-            .map(|expr| self.arena.expr(*expr).clone())
-            .collect()
     }
 
     fn clone_expr_from(&mut self, source: &HirArena, expr: ExprId) -> ExprId {
@@ -1398,58 +1470,58 @@ impl<'a> TypeCtx<'a> {
     }
 }
 
-fn lpfn_return_type(name: &str, glsl_params: &[String]) -> Option<LpsType> {
+fn lpfn_return_type(name: &str, glsl_params: &[&str]) -> Option<LpsType> {
     match name {
-        "lpfn_hash" if matches!(glsl_params, [a, b] if (a == "UInt" || a == "UVec2" || a == "UVec3") && b == "UInt") => {
+        "lpfn_hash" if matches!(glsl_params, [a, b] if (*a == "UInt" || *a == "UVec2" || *a == "UVec3") && *b == "UInt") => {
             Some(LpsType::UInt)
         }
-        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Float") => Some(LpsType::Float),
-        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
-        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
-        "lpfn_hue2rgb" if matches!(glsl_params, [a] if a == "Float") => Some(LpsType::Vec3),
-        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
-        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
-        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
-        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
-        "lpfn_fbm" if matches!(glsl_params, [a, b, c] if (a == "Vec2" || a == "Vec3") && b == "Int" && c == "UInt") => {
+        "lpfn_saturate" if matches!(glsl_params, [a] if *a == "Float") => Some(LpsType::Float),
+        "lpfn_saturate" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_saturate" if matches!(glsl_params, [a] if *a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_hue2rgb" if matches!(glsl_params, [a] if *a == "Float") => Some(LpsType::Vec3),
+        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if *a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if *a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_fbm" if matches!(glsl_params, [a, b, c] if (*a == "Vec2" || *a == "Vec3") && *b == "Int" && *c == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_fbm" if matches!(glsl_params, [a, b, c, d] if a == "Vec3" && b == "Float" && c == "Int" && d == "UInt") => {
+        "lpfn_fbm" if matches!(glsl_params, [a, b, c, d] if *a == "Vec3" && *b == "Float" && *c == "Int" && *d == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_gnoise" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+        "lpfn_gnoise" if matches!(glsl_params, [a, b] if (*a == "Float" || *a == "Vec2" || *a == "Vec3") && *b == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_gnoise" if matches!(glsl_params, [a, b, c] if a == "Vec3" && b == "Float" && c == "UInt") => {
+        "lpfn_gnoise" if matches!(glsl_params, [a, b, c] if *a == "Vec3" && *b == "Float" && *c == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_random" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+        "lpfn_random" if matches!(glsl_params, [a, b] if (*a == "Float" || *a == "Vec2" || *a == "Vec3") && *b == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_snoise" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+        "lpfn_snoise" if matches!(glsl_params, [a, b] if (*a == "Float" || *a == "Vec2" || *a == "Vec3") && *b == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_srandom" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+        "lpfn_srandom" if matches!(glsl_params, [a, b] if (*a == "Float" || *a == "Vec2" || *a == "Vec3") && *b == "UInt") => {
             Some(LpsType::Float)
         }
-        "lpfn_srandom3_tile" if matches!(glsl_params, [a, b, c] if a == "Vec3" && b == "Float" && c == "UInt") => {
+        "lpfn_srandom3_tile" if matches!(glsl_params, [a, b, c] if *a == "Vec3" && *b == "Float" && *c == "UInt") => {
             Some(LpsType::Vec3)
         }
-        "lpfn_srandom3_vec" if matches!(glsl_params, [a, b] if a == "Vec3" && b == "UInt") => {
+        "lpfn_srandom3_vec" if matches!(glsl_params, [a, b] if *a == "Vec3" && *b == "UInt") => {
             Some(LpsType::Vec3)
         }
-        "lpfn_worley" | "lpfn_worley_value" if matches!(glsl_params, [a, b] if (a == "Vec2" || a == "Vec3") && b == "UInt") => {
+        "lpfn_worley" | "lpfn_worley_value" if matches!(glsl_params, [a, b] if (*a == "Vec2" || *a == "Vec3") && *b == "UInt") => {
             Some(LpsType::Float)
         }
         _ => None,
     }
 }
 
-fn lpfn_psrdnoise_gradient_type(glsl_params: &[String]) -> Option<LpsType> {
-    if matches!(glsl_params, [a, b, c, d, e] if a == "Vec2" && b == "Vec2" && c == "Float" && d == "Vec2" && e == "UInt")
+fn lpfn_psrdnoise_gradient_type(glsl_params: &[&str]) -> Option<LpsType> {
+    if matches!(glsl_params, [a, b, c, d, e] if *a == "Vec2" && *b == "Vec2" && *c == "Float" && *d == "Vec2" && *e == "UInt")
     {
         Some(LpsType::Vec2)
-    } else if matches!(glsl_params, [a, b, c, d, e] if a == "Vec3" && b == "Vec3" && c == "Float" && d == "Vec3" && e == "UInt")
+    } else if matches!(glsl_params, [a, b, c, d, e] if *a == "Vec3" && *b == "Vec3" && *c == "Float" && *d == "Vec3" && *e == "UInt")
     {
         Some(LpsType::Vec3)
     } else {
@@ -1457,8 +1529,8 @@ fn lpfn_psrdnoise_gradient_type(glsl_params: &[String]) -> Option<LpsType> {
     }
 }
 
-fn psrdnoise_param_types(glsl_params: &[String]) -> Vec<lpir::IrType> {
-    let vector_lanes = if glsl_params.first().is_some_and(|p| p == "Vec3") {
+fn psrdnoise_param_types(glsl_params: &[&str]) -> Vec<lpir::IrType> {
+    let vector_lanes = if glsl_params.first().is_some_and(|p| *p == "Vec3") {
         3
     } else {
         2

@@ -8,7 +8,7 @@ pub use provider::{BrowserWorkerProvider, descriptor};
 pub use worker_envelope::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
 };
-pub use worker_handle::{BrowserWorkerHandle, OutputWait, PreviewPixelFrame};
+pub use worker_handle::{BrowserWorkerHandle, OutputWait, PosterPixelFrame, PreviewPixelFrame};
 
 #[cfg(test)]
 mod tests;

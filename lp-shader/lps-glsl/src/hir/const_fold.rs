@@ -3,6 +3,7 @@ use lps_shared::LpsType;
 use crate::Span;
 use crate::body::{BinaryOp, UnaryOp};
 
+use super::arena::{ExprId, HirArena};
 use super::types::{BuiltinKind, HirExpr, HirExprKind};
 
 pub(super) fn fold_unary(span: Span, op: UnaryOp, expr: &HirExpr) -> Option<HirExpr> {
@@ -26,67 +27,78 @@ pub(super) fn fold_binary(
         .or_else(|| fold_bool_binary(span, op, lhs, rhs))
 }
 
+/// Folds a builtin call whose arguments are already in `arena`.
+///
+/// Reads the argument nodes through the arena instead of taking owned
+/// [`HirExpr`] copies: every builtin call reaches this, and all but the
+/// literal-only shapes bail immediately, so materializing the arguments
+/// would be pure churn.
 pub(super) fn fold_builtin_call(
     span: Span,
     kind: BuiltinKind,
-    args: &[HirExpr],
+    arena: &HirArena,
+    args: &[ExprId],
     result_ty: &LpsType,
 ) -> Option<HirExpr> {
     if *result_ty != LpsType::Float {
         return None;
     }
     let value = match kind {
-        BuiltinKind::Abs => abs_f32(float_arg(args, 0)?),
-        BuiltinKind::Ceil => ceil_f32(float_arg(args, 0)?),
+        BuiltinKind::Abs => abs_f32(float_arg(arena, args, 0)?),
+        BuiltinKind::Ceil => ceil_f32(float_arg(arena, args, 0)?),
         BuiltinKind::Clamp => {
-            let value = float_arg(args, 0)?;
-            let lo = float_arg(args, 1)?;
-            let hi = float_arg(args, 2)?;
+            let value = float_arg(arena, args, 0)?;
+            let lo = float_arg(arena, args, 1)?;
+            let hi = float_arg(arena, args, 2)?;
             min_f32(max_f32(value, lo), hi)
         }
-        BuiltinKind::Degrees => float_arg(args, 0)? * (180.0 / core::f32::consts::PI),
-        BuiltinKind::Floor => floor_f32(float_arg(args, 0)?),
+        BuiltinKind::Degrees => float_arg(arena, args, 0)? * (180.0 / core::f32::consts::PI),
+        BuiltinKind::Floor => floor_f32(float_arg(arena, args, 0)?),
         BuiltinKind::Fract => {
-            let value = float_arg(args, 0)?;
+            let value = float_arg(arena, args, 0)?;
             value - floor_f32(value)
         }
-        BuiltinKind::Max => max_f32(float_arg(args, 0)?, float_arg(args, 1)?),
-        BuiltinKind::Min => min_f32(float_arg(args, 0)?, float_arg(args, 1)?),
+        BuiltinKind::Max => max_f32(float_arg(arena, args, 0)?, float_arg(arena, args, 1)?),
+        BuiltinKind::Min => min_f32(float_arg(arena, args, 0)?, float_arg(arena, args, 1)?),
         BuiltinKind::Mix => {
-            let x = float_arg(args, 0)?;
-            let y = float_arg(args, 1)?;
-            let a = float_arg(args, 2)?;
+            let x = float_arg(arena, args, 0)?;
+            let y = float_arg(arena, args, 1)?;
+            let a = float_arg(arena, args, 2)?;
             x * (1.0 - a) + y * a
         }
         BuiltinKind::Mod => {
-            let rhs = float_arg(args, 1)?;
+            let rhs = float_arg(arena, args, 1)?;
             if rhs == 0.0 {
                 return None;
             }
-            let lhs = float_arg(args, 0)?;
+            let lhs = float_arg(arena, args, 0)?;
             lhs - rhs * floor_f32(lhs / rhs)
         }
-        BuiltinKind::Radians => float_arg(args, 0)? * (core::f32::consts::PI / 180.0),
-        BuiltinKind::Round => round_f32(float_arg(args, 0)?),
-        BuiltinKind::RoundEven => round_even_f32(float_arg(args, 0)?),
-        BuiltinKind::Sign => sign_f32(float_arg(args, 0)?),
-        BuiltinKind::Trunc => trunc_f32(float_arg(args, 0)?),
+        BuiltinKind::Radians => float_arg(arena, args, 0)? * (core::f32::consts::PI / 180.0),
+        BuiltinKind::Round => round_f32(float_arg(arena, args, 0)?),
+        BuiltinKind::RoundEven => round_even_f32(float_arg(arena, args, 0)?),
+        BuiltinKind::Sign => sign_f32(float_arg(arena, args, 0)?),
+        BuiltinKind::Trunc => trunc_f32(float_arg(arena, args, 0)?),
         _ => return None,
     };
     Some(float_literal(span, value))
 }
 
+/// Folds a GLSL-import call whose arguments are already in `arena`.
+///
+/// See [`fold_builtin_call`] for why the arguments arrive as ids.
 pub(super) fn fold_glsl_import_call(
     span: Span,
     name: &str,
-    args: &[HirExpr],
+    arena: &HirArena,
+    args: &[ExprId],
     result_ty: &LpsType,
 ) -> Option<HirExpr> {
     if *result_ty != LpsType::Float || name != "pow" {
         return None;
     }
-    let base = float_arg(args, 0)?;
-    let exponent = float_arg(args, 1)?;
+    let base = float_arg(arena, args, 0)?;
+    let exponent = float_arg(arena, args, 1)?;
     if base < 0.0 || (base == 0.0 && exponent <= 0.0) {
         return None;
     }
@@ -221,8 +233,8 @@ fn fold_bool_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> O
     Some(bool_literal(span, value))
 }
 
-fn float_arg(args: &[HirExpr], index: usize) -> Option<f32> {
-    let arg = args.get(index)?;
+fn float_arg(arena: &HirArena, args: &[ExprId], index: usize) -> Option<f32> {
+    let arg = arena.expr(*args.get(index)?);
     if let HirExprKind::FloatLiteral(value) = &arg.kind {
         Some(*value)
     } else {

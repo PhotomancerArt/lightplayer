@@ -1,6 +1,3 @@
-use alloc::string::String;
-use alloc::vec::Vec;
-
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::{LayoutRules, LpsType};
 
@@ -35,19 +32,70 @@ pub(crate) enum TypeShapeKind {
         len: u32,
         stride: usize,
     },
-    Struct {
-        fields: Vec<FieldShape>,
-    },
+    Struct,
     Texture2D,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FieldShape {
-    pub(super) name: String,
-    pub(super) ty: LpsType,
+/// One struct member's placement, borrowed from the type it came from.
+///
+/// The single-field answer that [`struct_field`] gives without building a
+/// whole [`TypeShape`].
+pub(super) struct FieldPlacement<'a> {
+    pub(super) ty: &'a LpsType,
     pub(super) lane_offset: usize,
     pub(super) lane_count: usize,
     pub(super) byte_offset: usize,
+}
+
+/// Resolves one struct member by name.
+///
+/// Member access asks this per swizzle, per field path segment and per place
+/// segment, so it walks the members directly and stops at the match instead
+/// of going through [`TypeShape`], which would clone the whole type first.
+/// Offsets use the same std430 stepping, so the answers are identical.
+pub(super) fn struct_field<'a>(ty: &'a LpsType, name: &str) -> Option<FieldPlacement<'a>> {
+    let LpsType::Struct { members, .. } = ty else {
+        return None;
+    };
+    let mut byte_offset = 0usize;
+    let mut lane_offset = 0usize;
+    for (index, member) in members.iter().enumerate() {
+        let align = type_alignment(&member.ty, RULES);
+        byte_offset = round_up(byte_offset, align);
+        let lane_count = scalar_lane_count(&member.ty);
+        if member_name_matches(member.name.as_deref(), index, name) {
+            return Some(FieldPlacement {
+                ty: &member.ty,
+                lane_offset,
+                lane_count,
+                byte_offset,
+            });
+        }
+        byte_offset += type_size(&member.ty, RULES);
+        lane_offset += lane_count;
+    }
+    None
+}
+
+/// Whether member `index` answers to `name`.
+///
+/// Unnamed members are addressed as `_{index}` — the same spelling
+/// [`TypeShape::new`] formats — matched here without allocating it.
+fn member_name_matches(member_name: Option<&str>, index: usize, name: &str) -> bool {
+    match member_name {
+        Some(member_name) => member_name == name,
+        None => {
+            let Some(digits) = name.strip_prefix('_') else {
+                return false;
+            };
+            // `format!("_{index}")` never emits a leading zero (except for
+            // `_0` itself), so neither does a match.
+            if digits.is_empty() || (digits.len() > 1 && digits.starts_with('0')) {
+                return false;
+            }
+            digits.parse::<usize>() == Ok(index)
+        }
+    }
 }
 
 impl TypeShape {
@@ -83,29 +131,9 @@ impl TypeShape {
                 len: *len,
                 stride: array_stride(element, RULES),
             },
-            LpsType::Struct { members, .. } => {
-                let mut byte_offset = 0usize;
-                let mut lane_offset = 0usize;
-                let mut fields = Vec::with_capacity(members.len());
-                for (index, member) in members.iter().enumerate() {
-                    let align = type_alignment(&member.ty, RULES);
-                    byte_offset = round_up(byte_offset, align);
-                    let lane_count = scalar_lane_count(&member.ty);
-                    fields.push(FieldShape {
-                        name: member
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| alloc::format!("_{index}")),
-                        ty: member.ty.clone(),
-                        lane_offset,
-                        lane_count,
-                        byte_offset,
-                    });
-                    byte_offset += type_size(&member.ty, RULES);
-                    lane_offset += lane_count;
-                }
-                TypeShapeKind::Struct { fields }
-            }
+            // Member placements are resolved on demand by [`struct_field`],
+            // so the shape itself carries no per-field table.
+            LpsType::Struct { .. } => TypeShapeKind::Struct,
             LpsType::Texture2D => TypeShapeKind::Texture2D,
         };
 
@@ -118,11 +146,13 @@ impl TypeShape {
         }
     }
 
-    pub(crate) fn field(&self, name: &str) -> Option<&FieldShape> {
-        let TypeShapeKind::Struct { fields } = &self.kind else {
-            return None;
-        };
-        fields.iter().find(|field| field.name == name)
+    /// Shape-level spelling of [`struct_field`].
+    #[allow(
+        dead_code,
+        reason = "shape-level field lookup; the hot paths call `struct_field` directly and skip building the shape"
+    )]
+    pub(super) fn field(&self, name: &str) -> Option<FieldPlacement<'_>> {
+        struct_field(&self.ty, name)
     }
 
     pub(crate) fn array_element(&self) -> Option<(&LpsType, u32, usize)> {

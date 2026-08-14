@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
 
 /// One example. Click → running simulator, zero choices; the copy becomes
@@ -21,6 +22,10 @@ pub(crate) fn ExampleCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let open_id = card.id.clone();
+    let source = PreviewSource::Example(card.id.clone());
+    // Hover-to-play: pointing at a card is what buys live rendering. Touch
+    // devices never send these, so a tap still just opens the example.
+    let (hover_enter, hover_leave) = card_hover_handlers(Some(&source));
 
     rsx! {
         article {
@@ -32,10 +37,16 @@ pub(crate) fn ExampleCard(
                     }));
                 }
             },
+            onmouseenter: hover_enter,
+            onmouseleave: hover_leave,
             CardThumb {
                 seed: card.id.clone(),
                 label: card.name.clone(),
-                source: Some(PreviewSource::Example(card.id.clone())),
+                source: Some(source),
+                // A shelf of examples is a shelf of pictures: each card
+                // renders just long enough to take one, then lets its slot
+                // go. Explore shows a dozen of these at once.
+                mode: ThumbMode::PosterFirst,
             }
             div { class: "tw:grid tw:gap-0.5 tw:p-3",
                 p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",

@@ -6,9 +6,9 @@
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureSprite, HelpFloat,
-    Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath, ZoomFloat,
-    display_inset_padding, doc_fit_bounds, tool_hint,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureSprite,
+    HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath,
+    ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -56,26 +56,40 @@ fn ComposedEditorStory(
     let view_opts = use_signal(move || initial_view.unwrap_or_default());
     let viewport = use_signal(|| None::<[f32; 2]>);
     let mut fit_pending = use_signal(|| true);
+    let mut fit_done = use_signal(FitReconcile::default);
     let drag = use_signal(|| None::<CanvasDrag>);
     let live_feed = use_signal(Vec::<[u8; 3]>::new);
     // Deterministic framing: fit once the canvas measures itself, with
-    // the same bounds + inset the display mode uses.
+    // the same bounds + inset the display mode uses — and re-fit if the
+    // measurement settles AFTER the fit while the camera is untouched
+    // (the story-baseline churner class:
+    // docs/debt/story-capture-pipeline.md).
     {
         let viewport_now = *viewport.read();
-        if *fit_pending.read()
-            && let Some([width, height]) = viewport_now
-            && let Some(bounds) = doc_fit_bounds(session.peek().doc())
+        if let Some([width, height]) = viewport_now
+            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
         {
-            let padding = display_inset_padding(bounds, width, height);
             let mut camera = camera;
-            camera.write().fit(bounds, width, height, padding);
-            fit_pending.set(false);
+            if let Some(bounds) = doc_fit_bounds(session.peek().doc()) {
+                let padding = display_inset_padding(bounds, width, height);
+                camera.write().fit(bounds, width, height, padding);
+                if *fit_pending.peek() {
+                    fit_pending.set(false);
+                }
+            }
+            let mut next = *fit_done.peek();
+            next.record([width, height], *camera.peek());
+            if *fit_done.peek() != next {
+                fit_done.set(next);
+            }
         }
     }
     let hint = tool_hint(&session.read());
     rsx! {
         EditorCanvasFrame {
-            div { class: "lpme-canvas-wrap",
+            div {
+                class: "lpme-canvas-wrap",
+                "data-fit-viewport": fit_done.read().guard_attr(),
                 EditorCanvas {
                     session,
                     camera,
@@ -333,7 +347,7 @@ pub(crate) fn editor_repeated_sector() -> Element {
 }
 
 #[story(
-    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the popover breadcrumbs the scope."
+    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the Props stack carries the scope as ancestor cards."
 )]
 pub(crate) fn editor_repeat_scoped() -> Element {
     rsx! {

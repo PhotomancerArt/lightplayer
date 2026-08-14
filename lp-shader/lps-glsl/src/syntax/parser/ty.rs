@@ -1,3 +1,4 @@
+use crate::index::StructDecl;
 use crate::{Diagnostic, Keyword, Token, TokenKind};
 
 use super::BodyParser;
@@ -43,13 +44,15 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 }
 
-pub(super) fn token_is_type_name(
-    tok: Token,
-    source: &str,
-    struct_names: &[alloc::string::String],
-) -> bool {
+pub(super) fn token_is_type_name(tok: Token, source: &str, struct_names: &[StructDecl]) -> bool {
     match tok.kind {
-        TokenKind::Identifier if struct_names.iter().any(|name| name == tok.lexeme(source)) => true,
+        TokenKind::Identifier
+            if struct_names
+                .iter()
+                .any(|decl| decl.name == tok.lexeme(source)) =>
+        {
+            true
+        }
         TokenKind::Keyword(
             Keyword::Bool
             | Keyword::Float
@@ -91,9 +94,9 @@ pub(super) fn token_is_type_name(
 
 pub(in crate::syntax::parser) fn token_text_is_type_name(
     text: &str,
-    struct_names: &[alloc::string::String],
+    struct_names: &[StructDecl],
 ) -> bool {
-    struct_names.iter().any(|name| name == text)
+    struct_names.iter().any(|decl| decl.name == text)
         || matches!(
             text,
             "bool"

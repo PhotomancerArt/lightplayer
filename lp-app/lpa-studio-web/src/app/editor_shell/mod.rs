@@ -88,8 +88,9 @@ pub fn EditorShellCenter(
     prefetch_editor_meta(&on_action, &surface);
     prefetch_selected_body(&on_action, &surface, &selection);
     let (bodies, asset_editors) = mapping_assets(&project_editor);
-    // Sticky auto-pack slots: refreshed only when the unarranged set
-    // changes, so arranging one fixture never moves another.
+    // Sticky auto-pack slots: grown only when a never-slotted fixture
+    // appears, and never re-packed — arranging one fixture must not move
+    // another, and an undone arrange returns to the retained slot.
     let mut pack_slots = use_signal(PackSlots::new);
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {
@@ -105,23 +106,8 @@ pub fn EditorShellCenter(
             ProjectEditorOp::EditorJournal { event, node, mode },
         ));
     };
-    let mut enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
-        if focused.peek().is_none() {
-            focus_journal(
-                on_action,
-                UiEditJournalEvent::ModeSwitch,
-                Some(node),
-                UiEditorMode::Mapping,
-            );
-        } else if *focused.peek() != Some(node) {
-            focus_journal(
-                on_action,
-                UiEditJournalEvent::NodeSwitch,
-                Some(node),
-                UiEditorMode::Mapping,
-            );
-        }
-        focused.set(Some(node));
+    let enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
+        enter_dive(on_action, focused, node)
     };
     let mut exit_focus = move |on_action: &EventHandler<UiAction>| {
         if focused.peek().is_some() {
@@ -749,10 +735,38 @@ fn dive_toolbar(
     ]
 }
 
+/// Enter the dive on `node`, stamping the edit journal exactly like the
+/// toolbar path — ONE truth for the transition, shared by the center's
+/// "edit mapping"/double-click and the Props placement card's action.
+pub(crate) fn enter_dive(
+    on_action: &EventHandler<UiAction>,
+    mut dive_focused: Signal<Option<NodeId>>,
+    node: NodeId,
+) {
+    let event = if dive_focused.peek().is_none() {
+        Some(UiEditJournalEvent::ModeSwitch)
+    } else if *dive_focused.peek() != Some(node) {
+        Some(UiEditJournalEvent::NodeSwitch)
+    } else {
+        None
+    };
+    if let Some(event) = event {
+        on_action.call(UiAction::from_op(
+            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal {
+                event,
+                node: Some(node),
+                mode: UiEditorMode::Mapping,
+            },
+        ));
+    }
+    dive_focused.set(Some(node));
+}
+
 /// Prebuild the arrange-op factory: `editor.json` artifact + the fixture
 /// facts every write refreshes footprints through. `None` op = the
 /// artifact is unknown (surface not settled), so verbs no-op honestly.
-fn arrange_dispatch(
+pub(crate) fn arrange_dispatch(
     surface: &UiPatchSurface,
 ) -> impl Fn(EditorMetaVerb) -> Option<EditorMetaOp> + Clone + 'static {
     let artifact = surface.editor_meta_artifact.clone();

@@ -39,7 +39,66 @@ pub fn link_jit<F>(
 where
     F: FnMut(&str) -> Option<u32>,
 {
-    link_jit_impl(module, isa, None, resolve_symbol)
+    let (code, entries, func_offsets) = concat_borrowed(&module.functions);
+    link_jit_patch(
+        &module.functions,
+        code,
+        entries,
+        func_offsets,
+        isa,
+        None,
+        resolve_symbol,
+    )
+}
+
+/// [`link_jit`] that **empties** the module as it goes: each function's code
+/// is moved into the image and its buffer freed immediately, instead of the
+/// whole module staying resident beside a full second copy of itself.
+///
+/// This is the shape every JIT caller wants — nothing reads `module` after a
+/// link — and it is the difference between a 1x and a 2x code peak at the
+/// worst moment of a device compile. Names, relocs and symbols survive; only
+/// `CompiledFunction::code` is taken (left empty).
+pub fn link_jit_taking<F>(
+    module: &mut CompiledModule,
+    isa: IsaTarget,
+    resolve_symbol: F,
+) -> Result<LinkedJitImage, NativeError>
+where
+    F: FnMut(&str) -> Option<u32>,
+{
+    let (code, entries, func_offsets) = concat_taking(&mut module.functions);
+    link_jit_patch(
+        &module.functions,
+        code,
+        entries,
+        func_offsets,
+        isa,
+        None,
+        resolve_symbol,
+    )
+}
+
+/// [`link_jit_at`] with [`link_jit_taking`]'s move-out-the-code behavior.
+pub fn link_jit_at_taking<F>(
+    module: &mut CompiledModule,
+    isa: IsaTarget,
+    exec_base: u32,
+    resolve_symbol: F,
+) -> Result<LinkedJitImage, NativeError>
+where
+    F: FnMut(&str) -> Option<u32>,
+{
+    let (code, entries, func_offsets) = concat_taking(&mut module.functions);
+    link_jit_patch(
+        &module.functions,
+        code,
+        entries,
+        func_offsets,
+        isa,
+        Some(exec_base),
+        resolve_symbol,
+    )
 }
 
 /// [`link_jit`] for an image that will be **copied elsewhere before
@@ -61,11 +120,87 @@ pub fn link_jit_at<F>(
 where
     F: FnMut(&str) -> Option<u32>,
 {
-    link_jit_impl(module, isa, Some(exec_base), resolve_symbol)
+    let (code, entries, func_offsets) = concat_borrowed(&module.functions);
+    link_jit_patch(
+        &module.functions,
+        code,
+        entries,
+        func_offsets,
+        isa,
+        Some(exec_base),
+        resolve_symbol,
+    )
 }
 
-fn link_jit_impl<F>(
-    module: &CompiledModule,
+/// Sizing rule shared by both concatenation halves: the total is known up
+/// front, and sizing exactly avoids grow-reallocs of the largest buffer in
+/// the pipeline AND is load-bearing for correctness — `image_base` is taken
+/// from the buffer's address in [`link_jit_patch`] and patched into the code,
+/// so the Vec must not reallocate (and thus move) after it is filled.
+fn image_capacity(functions: &[crate::compile::CompiledFunction]) -> usize {
+    functions.iter().map(|f| f.code.len()).sum()
+}
+
+/// Concatenate every function's code, copying (the module stays whole).
+fn concat_borrowed(
+    functions: &[crate::compile::CompiledFunction],
+) -> (Vec<u8>, VecMap<String, usize>, Vec<usize>) {
+    let total_code = image_capacity(functions);
+    let mut code = Vec::with_capacity(total_code);
+    let mut entries = VecMap::new();
+    let mut func_offsets = Vec::with_capacity(functions.len());
+    for func in functions {
+        let offset = code.len();
+        entries.insert(func.name.clone(), offset);
+        func_offsets.push(offset);
+        code.extend_from_slice(&func.code);
+    }
+    debug_assert_eq!(
+        code.len(),
+        total_code,
+        "image fully written before patching"
+    );
+    (code, entries, func_offsets)
+}
+
+/// Concatenate every function's code, **moving** it: each source buffer is
+/// dropped as soon as its bytes are in the image, so the peak is one image
+/// plus one function — not two whole copies of the module's code.
+fn concat_taking(
+    functions: &mut [crate::compile::CompiledFunction],
+) -> (Vec<u8>, VecMap<String, usize>, Vec<usize>) {
+    let total_code = image_capacity(functions);
+    let mut code = Vec::with_capacity(total_code);
+    let mut entries = VecMap::new();
+    let mut func_offsets = Vec::with_capacity(functions.len());
+    for func in functions {
+        let offset = code.len();
+        entries.insert(func.name.clone(), offset);
+        func_offsets.push(offset);
+        let owned = core::mem::take(&mut func.code);
+        code.extend_from_slice(&owned);
+        drop(owned);
+    }
+    debug_assert_eq!(
+        code.len(),
+        total_code,
+        "image fully written before patching"
+    );
+    (code, entries, func_offsets)
+}
+
+/// Patch relocations into an already-concatenated image. Reads only the
+/// functions' names, relocs and offsets — never their `code`, which may
+/// already have been moved into `code` by [`concat_taking`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the concatenation half's three outputs are threaded through explicitly"
+)]
+fn link_jit_patch<F>(
+    functions: &[crate::compile::CompiledFunction],
+    mut code: Vec<u8>,
+    entries: VecMap<String, usize>,
+    func_offsets: Vec<usize>,
     isa: IsaTarget,
     exec_base: Option<u32>,
     mut resolve_symbol: F,
@@ -73,32 +208,10 @@ fn link_jit_impl<F>(
 where
     F: FnMut(&str) -> Option<u32>,
 {
-    // Concatenate all function code. Total size is known up front — sizing
-    // exactly avoids grow-reallocs of the largest buffer in the pipeline AND
-    // is load-bearing for correctness: `image_base` is taken from the
-    // buffer's address below and patched into the code, so the Vec must not
-    // reallocate (and thus move) after this point.
-    let total_code: usize = module.functions.iter().map(|f| f.code.len()).sum();
-    let mut code = Vec::with_capacity(total_code);
-    let mut entries = VecMap::new();
-    let mut func_offsets = Vec::with_capacity(module.functions.len());
-
-    for func in &module.functions {
-        let offset = code.len();
-        entries.insert(func.name.clone(), offset);
-        func_offsets.push(offset);
-        code.extend_from_slice(&func.code);
-    }
-
     let image_base = code.as_ptr() as usize;
-    debug_assert_eq!(
-        code.len(),
-        total_code,
-        "image fully written before patching"
-    );
 
     // Resolve relocations
-    for (func_idx, func) in module.functions.iter().enumerate() {
+    for (func_idx, func) in functions.iter().enumerate() {
         let func_base = func_offsets[func_idx];
 
         for reloc in &func.relocs {

@@ -472,6 +472,47 @@ fn thumb_product_faces() -> Element {
     }
 }
 
+/// A deterministic 2×2 violet PNG data URL, hand-built (not a rendered
+/// capture) so the poster-state baselines are reproducible bytes rather
+/// than anything a live slot or worker produced — see the poster-first
+/// gallery previews ADR (`docs/adr/`).
+const POSTER_TEST_IMAGE: &str = "data:image/png;base64,\
+iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mOosXoLRAwQCgAsHgaNmEOi\
+1gAAAABJRU5ErkJggg==";
+
+#[story]
+fn poster_states() -> Element {
+    // The poster-first policy's at-rest state (poster-first-gallery-
+    // previews ADR): a captured frame shown with no live slot held. Story
+    // mode leases no slot and captures nothing, so the poster is injected
+    // statically via `static_poster` — a fixed inline PNG, never a
+    // rendered capture, keeping the baseline byte-stable. Motion states
+    // (hover-to-play, the live canvas reveal) are NOT posable this way:
+    // they need a running canvas, which stories must never mount — so
+    // only the poster and its badge composition are posed here.
+    rsx! {
+        section { class: "tw:grid tw:w-[480px] tw:grid-cols-2 tw:gap-3.5 tw:p-4",
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj3fkq8zr21btxyw0a".to_string(),
+                    label: "poster".to_string(),
+                    static_poster: Some(POSTER_TEST_IMAGE.to_string()),
+                }
+                p { class: thumb_state_caption_class(), "Poster (at rest)" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj9sm2xc44dqnv7bgw".to_string(),
+                    label: "poster-gpu".to_string(),
+                    static_poster: Some(POSTER_TEST_IMAGE.to_string()),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "Poster + GPU badge" }
+            }
+        }
+    }
+}
+
 /// The canned lamp field the control-first thumb story draws: a three-row
 /// sign of 72 lamps under a fixed rainbow sweep.
 ///
