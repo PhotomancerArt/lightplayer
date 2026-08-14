@@ -166,8 +166,8 @@ pub(crate) fn card_hover_handlers(
 pub(crate) struct ThumbPreview {
     /// The poster image (a PNG data URL) to show under the live layers:
     /// this session's captured frame for the thumb's source. `None` until
-    /// one exists — and forever, in [`ThumbMode::Live`] and on the
-    /// shader-only GPU quadrant, whose capture path lands in P3.
+    /// one exists — and forever in [`ThumbMode::Live`], which never
+    /// captures.
     pub poster: Option<String>,
     /// Stable per-mount element id for the thumb frame — the
     /// IntersectionObserver target.
