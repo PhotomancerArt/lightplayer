@@ -120,8 +120,11 @@ pub fn ObjectPropertiesPane(
     drop(session_read);
 
     rsx! {
+        // A stack fragment, not a padded pane: the shell composes this
+        // above its placement card inside one outer `lpme-stack`, so the
+        // nested grid keeps the same 7px rhythm and the host owns padding.
         div {
-            class: "lpme-props-pane lpme-stack",
+            class: "lpme-stack",
             // Keep canvas shortcuts out of field typing.
             onkeydown: move |evt| evt.stop_propagation(),
             if multi {

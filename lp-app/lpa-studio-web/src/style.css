@@ -1705,14 +1705,10 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 4 3;
 }
 
-.lpme-props-pane {
-    /* The Props stack (B′): a dock pane of level cards, deepest first —
-       the pane carries the padding, the stack grid carries the rhythm. */
-    padding: 8px 10px 12px;
-}
-
-/* The card stack: one card per level of the selected path (the shell's
-   placement card joins the same grid). */
+/* The Props stack (B′): one card per level of the selected path, deepest
+   first. The shell's placement card joins the same grid; a nested stack
+   (the document cards) keeps the same gap, so the rhythm stays uniform.
+   Padding is the host panel's job. */
 .lpme-stack {
     display: grid;
     gap: 7px;

@@ -22,9 +22,9 @@ use lpa_mapping_editor::{
     structural_child_count,
 };
 use lpa_studio_core::{
-    NodeId, ProjectController, ProjectEditorOp, UiAction, UiPatchCell, UiPatchInstance,
-    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput,
-    UiPatchTarget,
+    NodeId, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchCell,
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
+    UiPatchSurfaceOutput, UiPatchTarget,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
 
@@ -794,10 +794,14 @@ fn PortCell(
     }
 }
 
-/// The Props panel (R4, Figma prior art): while a dive is live, the
-/// selected OBJECT's fields — the floating popover re-housed, editing the
-/// shared session and committing through the session host's pipeline.
-/// At the arranged level it reads out the selected fixture's placement.
+/// The Props panel — the props STACK (B′ ruling, design record
+/// `spikes/props-stack/index.html`): while a dive is live, the document
+/// cards (deepest first, from the mapping editor) stack over the fixture's
+/// PLACEMENT card, with the module chain as a muted context strip at the
+/// bottom; at the arranged level the placement card stands alone for the
+/// selected fixture. The arrange data lives HERE, in the shell — the
+/// mapping-editor crate renders only authored document levels and stays
+/// project-unaware.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PropsPanel(
@@ -806,20 +810,53 @@ pub fn PropsPanel(
     dive_focused: Signal<Option<NodeId>>,
     dive_session: Signal<MapEditorSession>,
     mut dive_commits: Signal<u64>,
+    /// The Nodes view's route — the context strip's "Nodes ↗" link.
+    workspace_href: String,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
-    if dive_focused.read().is_some() {
+    // Dived: the full stack. A dive whose fixture vanished from the
+    // surface falls through to the arranged-level arms honestly.
+    if let Some(node) = *dive_focused.read()
+        && let Some(surface_now) = surface.as_ref()
+        && let Some(fixture) = surface_now
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == node)
+            .cloned()
+    {
+        let chain = fixture
+            .module
+            .map(|module| module_chain(&surface_now.modules, module))
+            .unwrap_or_default();
+        // With no document selection the placement card IS the top (only)
+        // card — the fixture level is what esc's clear-rung leaves
+        // selected. Never a "select an object" placeholder.
+        let fixture_is_top = dive_session.read().selection.is_empty();
         return rsx! {
-            ObjectPropertiesPane {
-                session: dive_session,
-                on_committed: move |()| {
-                    let next = *dive_commits.peek() + 1;
-                    dive_commits.set(next);
-                },
+            div { class: "lpme-stack",
+                ObjectPropertiesPane {
+                    session: dive_session,
+                    on_committed: move |()| {
+                        let next = *dive_commits.peek() + 1;
+                        dive_commits.set(next);
+                    },
+                }
+                PlacementCard {
+                    fixture,
+                    surface: surface_now.clone(),
+                    dived: true,
+                    selected: fixture_is_top,
+                    dive_focused,
+                    dive_session,
+                    on_action,
+                }
             }
+            ModuleContextStrip { chain, workspace_href }
         };
     }
-    // A selected MODULE row reads out its context facts — the level the
-    // Props stack will grow from.
+    // A selected MODULE row reads out its context facts — a context level
+    // (the stack's document/placement cards never grow module fields; the
+    // real module UX lives on the Nodes view).
     if let (Some(surface), Some(UiPatchTarget::Module { node })) = (&surface, &selection)
         && let Some(module) = surface.modules.iter().find(|module| module.node == *node)
     {
@@ -845,6 +882,7 @@ pub fn PropsPanel(
             count(fixtures, "fixture"),
             count(outputs, "output")
         );
+        let chain = module_chain(&surface.modules, module.node);
         return rsx! {
             div { class: "tw:grid tw:content-start tw:gap-1 tw:px-1.5 tw:text-sm",
                 p { class: "tw:m-0 tw:font-medium tw:text-foreground", "{module.label}" }
@@ -855,6 +893,7 @@ pub fn PropsPanel(
                     "Select a fixture beneath it for placement, or dive in for object properties."
                 }
             }
+            ModuleContextStrip { chain, workspace_href }
         };
     }
     let fixture = match (&surface, &selection) {
@@ -868,34 +907,241 @@ pub fn PropsPanel(
         ) => surface
             .fixtures
             .iter()
-            .find(|fixture| fixture.node == *node),
+            .find(|fixture| fixture.node == *node)
+            .cloned(),
         _ => None,
     };
-    let Some(fixture) = fixture else {
+    let (Some(fixture), Some(surface)) = (fixture, surface) else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
-                "Select a fixture on the canvas — its placement reads out here; dive in (double-click) for object properties."
+                "Select a fixture on the canvas — its placement edits here; dive in (double-click) for object properties."
             }
         };
     };
-    let arrange = fixture.arrange.clone().unwrap_or_default();
-    let transform = arrange.transform;
+    let chain = fixture
+        .module
+        .map(|module| module_chain(&surface.modules, module))
+        .unwrap_or_default();
     rsx! {
-        div { class: "tw:grid tw:content-start tw:gap-1 tw:px-1.5 tw:text-sm",
-            p { class: "tw:m-0 tw:font-medium tw:text-foreground", "{fixture.label}" }
-            p { class: "tw:m-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
-                "{fixture.patch.lamps} lamps · {fixture.instances.len()} instances"
-            }
-            p { class: "tw:m-0 tw:mt-1 tw:font-mono tw:text-[10.5px] tw:text-dim-foreground",
-                if arrange.arranged {
-                    "placed at {transform.t[0]:.1}, {transform.t[1]:.1} · {transform.r:.0}° · ×{transform.s:.2}"
-                } else {
-                    "unarranged — drag it on the canvas to place it"
-                }
-            }
-            p { class: "tw:m-0 tw:mt-2 tw:text-[11px] tw:text-dim-foreground",
-                "Double-click the fixture to dive into its mapping."
+        div { class: "lpme-stack",
+            PlacementCard {
+                fixture,
+                surface,
+                dived: false,
+                selected: true,
+                dive_focused,
+                dive_session,
+                on_action,
             }
         }
+        ModuleContextStrip { chain, workspace_href }
+    }
+}
+
+/// The fixture's PLACEMENT card: `editor.json` arrange data as editable
+/// fields (x/y/rotation/scale — each commit is ONE `EditorMetaVerb::Set`,
+/// one arrange undo step; no mid-typing preview, the controller path has
+/// no uncommitted lane) plus the "edit mapping" action. Wears the same
+/// `lpme-lvl` card language as the document cards above it (one pane, one
+/// family). While dived with a document selection it is a muted context
+/// card whose header click pops selection back to the fixture level —
+/// the same state esc's clear-rung produces.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PlacementCard(
+    fixture: UiPatchSurfaceFixture,
+    surface: UiPatchSurface,
+    /// Whether the pane is dived into this fixture.
+    dived: bool,
+    /// Whether this card is the stack's top/selected card.
+    selected: bool,
+    dive_focused: Signal<Option<NodeId>>,
+    mut dive_session: Signal<MapEditorSession>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let arrange = fixture.arrange.clone().unwrap_or_default();
+    let transform = arrange.transform;
+    let node = fixture.node;
+    let node_key = fixture.address.clone();
+    let can_edit_mapping = fixture.mapping_artifact.is_some();
+    let range_grain = fixture.instances.is_empty();
+    let meta = if range_grain {
+        format!("{} lamps · range", fixture.patch.lamps)
+    } else {
+        format!(
+            "{} lamps · {} instances",
+            fixture.patch.lamps,
+            fixture.instances.len()
+        )
+    };
+    let dispatch = crate::app::editor_shell::arrange_dispatch(&surface);
+    let commit = move |transform: UiArrangeTransform| {
+        let Some(node_key) = node_key.clone() else {
+            return;
+        };
+        if let Some(op) = dispatch(lpa_studio_core::EditorMetaVerb::Set {
+            node_key,
+            node: Some(node),
+            transform,
+        }) {
+            on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
+        }
+    };
+    // One field row: parse on change, replace one component of the
+    // CURRENT transform, commit. Values re-render from the surface DTO.
+    let field = |label: &'static str,
+                 shown: String,
+                 apply: fn(UiArrangeTransform, f64) -> UiArrangeTransform| {
+        let commit = commit.clone();
+        rsx! {
+            div { class: "lpme-field",
+                label { "{label}" }
+                input {
+                    r#type: "number",
+                    value: "{shown}",
+                    onchange: move |evt| {
+                        if let Ok(parsed) = evt.value().parse::<f64>()
+                            && parsed.is_finite()
+                        {
+                            commit(apply(transform, parsed));
+                        }
+                    },
+                }
+            }
+        }
+    };
+    let card_class = if selected {
+        "lpme-lvl lpme-lvl-sel"
+    } else {
+        "lpme-lvl"
+    };
+    rsx! {
+        div { class: "{card_class}",
+            div {
+                class: "lpme-lvl-head",
+                title: if dived { "select the fixture level" } else { "" },
+                onclick: move |_| {
+                    // Dived: pop the document selection — the fixture level
+                    // becomes the top card. Not dived, the fixture already
+                    // IS the selection.
+                    if dived {
+                        dive_session.write().selection.clear();
+                    }
+                },
+                span { class: "tw:w-3 tw:flex-none tw:text-center tw:text-[10px] tw:text-dim-foreground",
+                    "⬡"
+                }
+                span { class: "lpme-lvl-name", "{fixture.label}" }
+                span { class: "lpme-lvl-kind", "{meta}" }
+            }
+            div { class: "lpme-lvl-body",
+                if arrange.arranged {
+                    {field("x", format!("{:.1}", transform.t[0]), |mut t, v| { t.t[0] = v; t })}
+                    {field("y", format!("{:.1}", transform.t[1]), |mut t, v| { t.t[1] = v; t })}
+                    {field("rotation", format!("{:.0}", transform.r), |mut t, v| { t.r = v; t })}
+                    {field("scale", format!("{:.2}", transform.s), |mut t, v| {
+                        t.s = v.clamp(0.05, 20.0);
+                        t
+                    })}
+                } else {
+                    div { class: "lpme-pop-meta", "unarranged — drag it on the canvas to place it" }
+                }
+                if !dived {
+                    div { class: "lpme-pop-actions",
+                        button {
+                            class: "lpme-btn",
+                            title: "Edit this fixture's mapping (double-click on the canvas does too)",
+                            disabled: !can_edit_mapping,
+                            onclick: move |_| {
+                                crate::app::editor_shell::enter_dive(&on_action, dive_focused, node);
+                            },
+                            "edit mapping"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The module chain enclosing `leaf` (root-first): the surface's modules
+/// are a flattened preorder walk, so the chain is the nearest entry at
+/// each strictly smaller depth walking backward from the leaf.
+fn module_chain(modules: &[UiPatchSurfaceModule], leaf: NodeId) -> Vec<UiPatchSurfaceModule> {
+    let Some(mut index) = modules.iter().position(|module| module.node == leaf) else {
+        return Vec::new();
+    };
+    let mut chain = vec![modules[index].clone()];
+    let mut depth = modules[index].depth;
+    while depth > 0 && index > 0 {
+        index -= 1;
+        if modules[index].depth < depth {
+            depth = modules[index].depth;
+            chain.push(modules[index].clone());
+        }
+    }
+    chain.reverse();
+    chain
+}
+
+/// The module chain as a muted one-line CONTEXT strip under the stack —
+/// these levels are homed on the Nodes view (the "Nodes ↗" link), never
+/// edited here (scope ruling: a node level rendered as a card would have
+/// to be the real node card re-housed whole — a someday-unification).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModuleContextStrip(chain: Vec<UiPatchSurfaceModule>, workspace_href: String) -> Element {
+    if chain.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "tw:mt-2 tw:flex tw:items-center tw:gap-1 tw:overflow-hidden tw:whitespace-nowrap tw:px-1 tw:text-[10.5px] tw:text-dim-foreground",
+            span { class: "tw:flex-none", "▤" }
+            for (slot, module) in chain.into_iter().enumerate() {
+                if slot > 0 {
+                    span { class: "tw:flex-none tw:text-[9px]", "▸" }
+                }
+                span { class: "tw:truncate tw:text-subtle-foreground", "{module.label}" }
+            }
+            a {
+                class: "tw:ml-auto tw:flex-none tw:text-[10px] tw:text-selection-border tw:no-underline tw:opacity-75 tw:hover:opacity-100",
+                href: "{workspace_href}",
+                title: "modules are edited on the Nodes view",
+                "Nodes ↗"
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_chain_walks_ancestors_by_depth() {
+        // Preorder: root(0) > rig(1) > wing(2), then a SIBLING branch
+        // spare(1) — the chain from `wing` must skip `spare`.
+        let module = |id: u32, label: &str, depth: usize| UiPatchSurfaceModule {
+            node: NodeId::new(id),
+            label: label.to_string(),
+            address: None,
+            depth,
+        };
+        let modules = vec![
+            module(1, "root", 0),
+            module(2, "rig", 1),
+            module(3, "wing", 2),
+            module(4, "spare", 1),
+        ];
+        let names = |leaf: u32| {
+            module_chain(&modules, NodeId::new(leaf))
+                .into_iter()
+                .map(|module| module.label)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(3), ["root", "rig", "wing"]);
+        assert_eq!(names(4), ["root", "spare"]);
+        assert_eq!(names(1), ["root"]);
+        assert!(names(99).is_empty(), "unknown leaf yields no chain");
     }
 }
