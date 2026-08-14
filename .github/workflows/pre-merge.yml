@@ -1179,11 +1179,11 @@ jobs:
           "$CHROME_BIN" --version
 
       # Baseline lookup needs main's recent first-parent chain: the checkout
-      # is depth-1, and the comparison root is HEAD^1 — on a PR merge-ref
-      # checkout that is the main tip the merge was built against (so the
-      # comparison shows exactly what this PR changes relative to current
-      # main); on a main push it is the previous main commit. The depth must
-      # stay comfortably above the lookup's walk limit (50).
+      # is depth-1, and the comparison root is HEAD's first parent — on a PR
+      # merge-ref checkout that is the main tip the merge was built against
+      # (so the comparison shows exactly what this PR changes relative to
+      # current main); on a main push it is the previous main commit. The
+      # depth must stay comfortably above the lookup's walk limit (50).
       - name: Fetch main history (baseline lookup)
         run: cd lp2025 && git fetch origin main --depth=60
 
@@ -1196,7 +1196,12 @@ jobs:
         run: |
           set -euo pipefail
           cd lp2025
-          root="$(git rev-parse HEAD^1)"
+          # NOT `git rev-parse HEAD^1`: the depth-1 checkout grafts HEAD as
+          # parentless in .git/shallow, so ^1 is "unknown revision" even
+          # though the parent OBJECT arrived via the main fetch above. The
+          # raw commit header keeps its parent lines regardless of grafts.
+          root="$(git cat-file commit HEAD | awk '/^parent /{print $2; exit}')"
+          test -n "$root"
           node lp-app/lpa-studio-web/scripts/story-baseline-lookup.mjs \
             --root "$root" --fetch "$RUNNER_TEMP/story-baseline" \
             > "$RUNNER_TEMP/baseline.json"
