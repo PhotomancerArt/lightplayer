@@ -14,9 +14,9 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FixtureBody, FixtureEvent, FixtureSprite,
-    HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding, object_color,
-    tool_hint,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureEvent,
+    FixtureSprite, HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding,
+    object_color, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -163,6 +163,9 @@ pub(crate) fn ProjectCanvasHost(
     // float's fit re-frames on demand.
     let mut camera = use_signal(Camera::new);
     let viewport = use_signal(|| None::<[f32; 2]>);
+    // Which measurement the current fit consumed — so a viewport that
+    // settles AFTER the fit re-runs it (see the fit block below).
+    let mut fit_done = use_signal(FitReconcile::default);
     let local_fit = use_signal(|| true);
     let mut fit_pending = fit_pending.unwrap_or(local_fit);
     let local_view = use_signal(EditorViewOptions::default);
@@ -250,10 +253,17 @@ pub(crate) fn ProjectCanvasHost(
     // `0` key, waiting for a real viewport measurement and real bounds.
     // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
     // "snap viewport to fixture" affordance); otherwise it fits all.
+    // The fit ALSO re-runs when the measurement moves while the camera is
+    // still exactly the value the last fit produced: the first
+    // measurement races container layout settling (docks, the mobile
+    // fold), and freezing the camera on it baked a nondeterministic zoom
+    // into story baselines (the churner —
+    // docs/debt/story-capture-pipeline.md). Once the user pans or zooms,
+    // the camera is theirs and reconciliation stops.
     {
         let viewport_now = *viewport.read();
-        if *fit_pending.read()
-            && let Some([width, height]) = viewport_now
+        if let Some([width, height]) = viewport_now
+            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
         {
             let bounds = match &dive_focus {
                 Some((_, placement, own_bounds)) => {
@@ -277,7 +287,18 @@ pub(crate) fn ProjectCanvasHost(
                     None => 0.0,
                 };
                 camera.write().fit(bounds, width, height, padding);
-                fit_pending.set(false);
+                if *fit_pending.peek() {
+                    fit_pending.set(false);
+                }
+            }
+            // Reconcile even with nothing to frame — the default camera is
+            // deterministic too, and the capture guard must clear on an
+            // empty canvas. Change-guarded: a bare signal write at render
+            // would re-render forever.
+            let mut next = *fit_done.peek();
+            next.record([width, height], *camera.peek());
+            if *fit_done.peek() != next {
+                fit_done.set(next);
             }
         }
     }
@@ -355,7 +376,13 @@ pub(crate) fn ProjectCanvasHost(
         .then(|| tool_hint(&canvas_session.read()));
     let committed = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
     rsx! {
-        div { class: "lpme-canvas-wrap",
+        div {
+            class: "lpme-canvas-wrap",
+            // The geometry guard (clock-face precedent): the size the
+            // camera's fit was reconciled against. The story capture's
+            // ready gate refuses to photograph a visible canvas whose
+            // real box disagrees with this stamp.
+            "data-fit-viewport": fit_done.read().guard_attr(),
             EditorCanvas {
                 session: canvas_session,
                 camera,
