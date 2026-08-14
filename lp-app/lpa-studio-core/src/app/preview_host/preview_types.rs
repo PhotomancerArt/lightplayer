@@ -181,3 +181,14 @@ mod tests {
         assert_eq!(config.default_fps, 12.0);
     }
 }
+
+/// One captured poster frame handed back through
+/// [`crate::PreviewSlotHandle::poster_frame`]: sRGB RGBA8, row-major,
+/// `width × height × 4` bytes. The worker-side `capture_poster` answer for
+/// slots whose canvas cannot be read on the page (shader-only GPU tier).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewPosterFrame {
+    pub width: u32,
+    pub height: u32,
+    pub bytes: std::rc::Rc<[u8]>,
+}

@@ -31,6 +31,16 @@ use crate::preview_surface::PreviewSurface;
 use crate::server_transport::BrowserServerTransport;
 use crate::tier::{RuntimeTier, TierSelection};
 
+/// A poster capture in progress — see
+/// [`BrowserFirmwareRuntime::begin_poster_capture`].
+pub(crate) enum PosterCapture {
+    /// CPU tier: the bytes were host-resident; capture completed inline.
+    Ready(Vec<u8>),
+    /// GPU tier: the copy is submitted; await the map outside any registry
+    /// borrow. Resolves to sRGB RGBA8 bytes.
+    Pending(core::pin::Pin<Box<dyn core::future::Future<Output = Result<Vec<u8>, String>>>>),
+}
+
 /// GLSL frontend for the browser runtime's CPU tier.
 ///
 /// Naga: the browser CPU tier has compiled through naga since the GPU tier
@@ -349,6 +359,49 @@ impl BrowserFirmwareRuntime {
             project.read_output_frame(OutputFrameProbeRequest { display_layout });
         self.control_first = Some(control_first);
         (control_first, outputs)
+    }
+
+    /// Begin a one-shot poster capture: render the visual product on
+    /// `channel` at the requested size and hand back sRGB RGBA8 bytes —
+    /// immediately on the CPU tier, or via an async GPU readback the caller
+    /// awaits AFTER releasing its registry borrow (the returned future owns
+    /// refcounted wgpu handles only).
+    ///
+    /// This is the poster exit of the "GPU products stay GPU-resident"
+    /// doctrine: a single on-demand capture (a gallery poster), never a
+    /// per-frame transport — the per-frame paths remain `preview_frame`
+    /// (CPU bytes) and `present_frame` (GPU surface, zero readback).
+    pub(crate) fn begin_poster_capture(
+        &mut self,
+        channel: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<PosterCapture, String> {
+        let texture = self.render_bus_texture(channel, width, height)?;
+        if let Some(bytes) = texture.try_raw_bytes() {
+            return Ok(PosterCapture::Ready(
+                crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes),
+            ));
+        }
+        let gpu = self
+            .gpu
+            .as_ref()
+            .ok_or_else(|| "GPU-resident product on a runtime without GPU state".to_string())?;
+        let handle = texture.gpu_handle().ok_or_else(|| {
+            "render produced a texture with neither host bytes nor GPU handle".to_string()
+        })?;
+        let readback = gpu
+            .graphics
+            .read_back_texture_async(handle)
+            .map_err(|error| format!("begin poster readback: {error}"))?;
+        Ok(PosterCapture::Pending(Box::pin(async move {
+            let data = readback
+                .await
+                .map_err(|error| format!("poster readback: {error}"))?;
+            Ok(crate::texture_convert::rgba16_unorm_to_rgba8_srgb(
+                data.bytes(),
+            ))
+        })))
     }
 
     /// Attach a transferred `OffscreenCanvas` as this runtime's card surface.

@@ -14,7 +14,7 @@
 //! | | control-first (lamps) | shader-only (raster) |
 //! |---|---|---|
 //! | **CPU tier** | [`lamp_poster`] | [`canvas_poster`] |
-//! | **GPU tier** | [`lamp_poster`] | *no path yet* |
+//! | **GPU tier** | [`lamp_poster`] | [`pixel_poster`] |
 //!
 //! The lamp field is rasterized in Rust from the slot's own output frame
 //! ([`rasterize_lamp_field`]), so the capture never scrapes the DOM and its
@@ -22,8 +22,10 @@
 //! `putImageData` blit onto a plain canvas, which reads back fine. A
 //! GPU-tier raster slot's canvas was permanently handed to a worker by
 //! `transferControlToOffscreen`, so `toDataURL` on it is impossible by
-//! construction — that quadrant is captured **worker-side** and lands in
-//! P3; until then those cards keep their identity gradient.
+//! construction — that quadrant asks the WORKER to capture: the host posts
+//! `capture_poster`, the worker renders once and reads the texture back
+//! asynchronously, and the bytes come home as a transferable buffer
+//! ([`pixel_poster`] encodes them).
 //!
 //! # Cache
 //!
@@ -46,8 +48,8 @@ pub(crate) const POSTER_CACHE_LIMIT: usize = 64;
 
 /// Poster size in device pixels: the card thumb's 256×96 box at 2×, crisp
 /// on a retina panel and still tens of KB as a PNG.
-const POSTER_WIDTH: u32 = 512;
-const POSTER_HEIGHT: u32 = 192;
+pub(crate) const POSTER_WIDTH: u32 = 512;
+pub(crate) const POSTER_HEIGHT: u32 = 192;
 const POSTER_DPR: f64 = 2.0;
 
 /// The lamp layer's inset on a card (`card_thumb.rs`: `tw:inset-[6%]`, so
@@ -146,6 +148,35 @@ pub(crate) fn lamp_poster(preview: &UiControlProductPreview) -> Result<String, S
             .map_err(|error| format!("build ImageData: {error:?}"))?;
     context
         .put_image_data(&image, inset_x, inset_y)
+        .map_err(|error| format!("putImageData: {error:?}"))?;
+    encode_png(&canvas)
+}
+
+/// Encode a worker-captured poster frame (shader-only GPU tier) as a PNG
+/// data URL.
+///
+/// The bytes arrive already sized (the host requests [`POSTER_WIDTH`] ×
+/// [`POSTER_HEIGHT`]) and already sRGB RGBA8 — this is just
+/// bytes → scratch canvas → PNG.
+pub(crate) fn pixel_poster(frame: &lpa_studio_core::PreviewPosterFrame) -> Result<String, String> {
+    if frame.bytes.len() != (frame.width as usize) * (frame.height as usize) * 4 {
+        return Err(format!(
+            "poster frame byte count {} does not match {}x{}",
+            frame.bytes.len(),
+            frame.width,
+            frame.height
+        ));
+    }
+    let canvas = scratch_canvas(frame.width, frame.height)?;
+    let context = canvas_2d_context(&canvas)?;
+    let image = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        Clamped(&frame.bytes),
+        frame.width,
+        frame.height,
+    )
+    .map_err(|error| format!("build ImageData: {error:?}"))?;
+    context
+        .put_image_data(&image, 0.0, 0.0)
         .map_err(|error| format!("putImageData: {error:?}"))?;
     encode_png(&canvas)
 }

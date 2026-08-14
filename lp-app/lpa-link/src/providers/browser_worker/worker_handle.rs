@@ -34,10 +34,22 @@ pub struct PreviewPixelFrame {
     pub pixels: js_sys::ArrayBuffer,
 }
 
+/// One poster-capture answer (binary `poster_pixels` worker message):
+/// sRGB RGBA8, row-major, `width × height × 4` bytes, transferred — never
+/// JSON-shaped. The `capture_poster` counterpart of [`PreviewPixelFrame`].
+pub struct PosterPixelFrame {
+    pub runtime_id: u32,
+    pub frame_id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub pixels: js_sys::ArrayBuffer,
+}
+
 pub struct BrowserWorkerHandle {
     worker: Worker,
     outputs: Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
     preview_frames: Rc<RefCell<Vec<PreviewPixelFrame>>>,
+    poster_frames: Rc<RefCell<Vec<PosterPixelFrame>>>,
     /// Sticky instance-fatal message. Set (first message wins — it carries
     /// the primary panic) when the worker posts `status: "fatal"`: its wasm
     /// instance is condemned (escaped panic=abort trap) and will never
@@ -59,16 +71,37 @@ impl BrowserWorkerHandle {
             .map_err(|error| LinkError::other(format!("{error:?}")))?;
         let outputs = Rc::new(RefCell::new(Vec::new()));
         let preview_frames = Rc::new(RefCell::new(Vec::new()));
+        let poster_frames = Rc::new(RefCell::new(Vec::new()));
         let fatal = Rc::new(RefCell::new(None));
         let output_wakers: Rc<RefCell<Vec<Waker>>> = Rc::new(RefCell::new(Vec::new()));
         let output_ref = Rc::clone(&outputs);
         let preview_ref = Rc::clone(&preview_frames);
+        let poster_ref = Rc::clone(&poster_frames);
         let fatal_ref = Rc::clone(&fatal);
         let wakers_ref = Rc::clone(&output_wakers);
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let data = event.data();
             // The binary preview path is intercepted before serde: its pixel
             // ArrayBuffer must stay a JS object, not become JSON-shaped data.
+            if message_kind(&data).as_deref() == Some("poster_pixels") {
+                match parse_poster_pixels(&data) {
+                    Ok(frame) => {
+                        // Like preview frames: consumed by the PreviewHost
+                        // pump, no output-waker wake.
+                        poster_ref.borrow_mut().push(frame);
+                    }
+                    Err(error) => {
+                        output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
+                            runtime_id: 0,
+                            level: "error".to_string(),
+                            target: "lpa-link".to_string(),
+                            message: format!("failed to parse poster pixel frame: {error}"),
+                        });
+                        wake_output_waiters(&wakers_ref);
+                    }
+                }
+                return;
+            }
             if message_kind(&data).as_deref() == Some("preview_pixels") {
                 match parse_preview_pixels(&data) {
                     Ok(frame) => {
@@ -159,6 +192,7 @@ impl BrowserWorkerHandle {
             worker,
             outputs,
             preview_frames,
+            poster_frames,
             fatal,
             output_wakers,
         })
@@ -275,6 +309,11 @@ impl BrowserWorkerHandle {
         core::mem::take(&mut *self.preview_frames.borrow_mut())
     }
 
+    /// Take binary poster-capture answers received since the last call.
+    pub fn take_poster_frames(&mut self) -> Vec<PosterPixelFrame> {
+        core::mem::take(&mut *self.poster_frames.borrow_mut())
+    }
+
     /// The worker's sticky instance-fatal message, once it has reported
     /// one (`None` while the instance is healthy). Set permanently by the
     /// first `status: "fatal"` envelope; carries the primary panic.
@@ -358,6 +397,26 @@ fn parse_preview_pixels(data: &JsValue) -> Result<PreviewPixelFrame, String> {
         render_ms: number("render_ms")?,
         posted_epoch_ms: number("posted_epoch_ms")?,
         wasm_memory_bytes: number("wasm_memory_bytes")?,
+        pixels,
+    })
+}
+
+fn parse_poster_pixels(data: &JsValue) -> Result<PosterPixelFrame, String> {
+    let number = |key: &str| -> Result<f64, String> {
+        js_sys::Reflect::get(data, &JsValue::from_str(key))
+            .map_err(|error| format!("{error:?}"))?
+            .as_f64()
+            .ok_or_else(|| format!("poster pixel frame field {key:?} is not a number"))
+    };
+    let pixels = js_sys::Reflect::get(data, &JsValue::from_str("pixels"))
+        .map_err(|error| format!("{error:?}"))?
+        .dyn_into::<js_sys::ArrayBuffer>()
+        .map_err(|_| "poster pixel frame field \"pixels\" is not an ArrayBuffer".to_string())?;
+    Ok(PosterPixelFrame {
+        runtime_id: number("runtime_id")? as u32,
+        frame_id: number("frame_id")? as u32,
+        width: number("width")? as u32,
+        height: number("height")? as u32,
         pixels,
     })
 }
@@ -449,6 +508,9 @@ fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
         }
         BrowserOutputEnvelope::PreviewError { message, .. } => {
             format!("; last worker output was a preview error: {message}")
+        }
+        BrowserOutputEnvelope::PosterError { message, .. } => {
+            format!("; last worker output was a poster error: {message}")
         }
     }
 }

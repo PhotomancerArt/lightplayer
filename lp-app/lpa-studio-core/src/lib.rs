@@ -75,8 +75,8 @@ pub use app::node::{
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
 pub use app::preview_host::{
-    PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
-    PreviewTier, is_teardown_abort_reason,
+    PreviewHostConfig, PreviewPosterFrame, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus,
+    PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
