@@ -29,6 +29,31 @@ pub fn choose_eviction(candidates: &[EvictionCandidate]) -> Option<u64> {
     pick(false).or_else(|| pick(true)).map(|c| c.slot_id)
 }
 
+/// Where a slot lands when its runtime is torn out from under it (LRU
+/// eviction or a worker recycle) while it is neither released nor
+/// terminal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DetachedSlotNext {
+    /// Still visible: re-lease immediately. Parking a visible slot
+    /// `Suspended` would freeze it forever — `set_visible(true)` only
+    /// fires on a visibility EDGE, and a slot the consumer already
+    /// reports visible never gets another one.
+    Redeploy,
+    /// Not visible: park `Suspended` until the next visibility edge.
+    Park,
+}
+
+/// Decide a detached slot's future from its visibility. Both detach
+/// paths (eviction and recycle) must agree on this — they diverged
+/// once, and the evicted-while-visible half froze thumbs permanently.
+pub fn detached_slot_next(visible: bool) -> DetachedSlotNext {
+    if visible {
+        DetachedSlotNext::Redeploy
+    } else {
+        DetachedSlotNext::Park
+    }
+}
+
 /// Pick the least-loaded available worker. `loads[i]` is `Some(assigned
 /// slot count)` for a usable worker and `None` for one that is dead or
 /// still booting. Ties resolve to the lowest index.
@@ -77,6 +102,19 @@ mod tests {
     #[test]
     fn eviction_with_no_candidates_is_none() {
         assert_eq!(choose_eviction(&[]), None);
+    }
+
+    #[test]
+    fn detached_visible_slot_redeploys_instead_of_parking() {
+        // Regression: an LRU-evicted slot that was still visible used to
+        // park Suspended and freeze forever (no visibility edge left to
+        // resume it).
+        assert_eq!(detached_slot_next(true), DetachedSlotNext::Redeploy);
+    }
+
+    #[test]
+    fn detached_invisible_slot_parks_until_its_visibility_edge() {
+        assert_eq!(detached_slot_next(false), DetachedSlotNext::Park);
     }
 
     #[test]
