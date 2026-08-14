@@ -183,9 +183,11 @@
   context, homed in the Fixtures tree; a node level rendered here would have to be the
   REAL node card re-housed whole (the workbench's re-house-don't-redesign rule), which is a
   someday-unification, not this design. The module chain survives as a muted one-line
-  context strip. Concepts C and D still split the semantic question: is the stack <b>the
-  selection</b> (clicking an ancestor ascends it, canvas follows) or a <b>local accordion</b>
-  (edit an ancestor without moving the canvas selection)?
+  context strip. <b>RULED (round 3): B′ — full stack, deepest first.</b> The selection is always the top
+  card (inspection-panel convention: DevTools styles, debugger call stacks), ancestors
+  unwind beneath, module context at the bottom; editing the repeat while its inner item
+  stays selected is the workflow this exists for. The losing concepts are kept below as a
+  rejected-because strip.
 </p>
 
 <div class="xcontrols">
@@ -200,23 +202,22 @@
   </span>
 </div>
 
-<h2>1 · Four concepts, one selection</h2>
+<h2>1 · B′ — the ruled treatment</h2>
 <p class="thesis">
-  All four columns render the <b>same selected path</b> at dock width (322px). Change the
-  selection or dataset above — every column follows. Fields are live where the design
-  question is live: edit the repeat's <b>instances</b> count and watch the group's ×N label
-  update in every concept.
+  Dock width (322px), live: change selection/dataset above, edit the repeat's
+  <b>instances</b> count, toggle the module context line. Header click selects that level
+  (esc = pop, the same ladder).
 </p>
 
 <div class="concepts" id="concepts"></div>
 
 <p class="leannote" id="lean">
-  <b>Lean (round 2, document scope):</b> the scope ruling shortens the chain to 3 cards
-  (fixture · group · object; +1 per nested repeat), which materially strengthens <b>B</b> —
-  the whole dived fixture's story fits the dock without scrolling, and field edits never
-  move the selection. <b>C</b> still wins on selection clarity (the stack IS the selection,
-  esc walks it) and on nested repeats. Honest call: B and C are now close; judge by feel.
-  D's second disclosure state buys little once B can simply show everything.
+  <b>Design record:</b> ruled B′ 2026-08-14 (Yona: "seeing it is obvious"). Scope = what the
+  Mapping view edits (fixture placement card + authored document levels); node levels =
+  context line only, real node UX stays on the Nodes view. Production notes: document cards
+  live in lpa-mapping-editor's pane, the placement card is SHELL composition (the crate
+  stays project-unaware); multi-select = shared-ancestor cards + one "N objects" leaf;
+  empty-selection-while-dived = fixture card alone; esc = pop.
 </p>
 
 <script>
@@ -445,11 +446,13 @@ function firstObjIndex() {
 
 /* ---------- shell ---------- */
 const CONCEPTS = [
-  ['A', 'Breadcrumb (production)', 'One level at a time; ancestors are a crumb trail. Faithful baseline — the option "keep what we have".', conceptA],
-  ['B', 'Full stack — root first', 'Every level expanded, tree order: fixture on top, selection deepest. Matches the Fixtures tree.', conceptB],
-  ['B′', 'Full stack — deepest first', 'Same cards, inverted: the SELECTION is always the top card, ancestors unwind below (call-stack order).', conceptB2],
-  ['C', 'Selection stack', 'Every level as a header; ONE open body that mirrors the selection. The stack IS the selection.', conceptC],
-  ['D', 'Accordion stack', 'Headers always; open/close is local, selection stays put. Peek at an ancestor without ascending.', conceptD],
+  ['B′', 'Full stack — deepest first (RULED)', 'The selection is always the top card; ancestors unwind below; module context line at the bottom. Field edits never move selection; header click selects (esc = pop).', conceptB2],
+];
+const REJECTED = [
+  ['A', 'Breadcrumb (production)', 'one level at a time hid the chain; superseded — the stack replaces the breadcrumb (selection/tree ADR amendment owed).'],
+  ['B', 'Full stack, root first', 'same cards, wrong orientation: the edited card wanders down the pane as you descend. Root-first is a NAVIGATION convention (trees, breadcrumbs); this dock is INSPECTION.'],
+  ['C', 'Selection stack', 'one-open-body bought a stable locus B′ gets for free while hiding ancestor fields — the repeat-while-inner-selected edit was the whole point.'],
+  ['D', 'Accordion', 'a second, local disclosure state to keep in your head; buys nothing once everything can just be visible.'],
 ];
 
 function render(fullControls = true) {
@@ -458,7 +461,14 @@ function render(fullControls = true) {
       <div class="dock-tabrow"><span>Props</span></div>
       <div class="dock-head"><span class="tag">${tag}</span><b>${name}</b><p>${thesis}</p></div>
       <div class="dock-body">${fn()}</div>
-    </div>`).join('');
+    </div>`).join('') + `
+    <div style="max-width:420px">
+      <h2 style="margin-top:0">Rejected</h2>
+      ${REJECTED.map(([tag, name, why]) => `
+        <div class="leannote" style="margin:0 0 8px">
+          <span class="tag" style="display:inline-block;margin-right:7px;padding:0 6px;border-radius:4px;background:var(--raised);color:var(--dim);font:600 10.5px var(--mono)">${tag}</span>
+          <b>${name}</b> — ${why}</div>`).join('')}
+    </div>`;
   if (fullControls) renderControls();
 }
 
