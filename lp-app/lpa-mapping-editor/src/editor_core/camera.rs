@@ -3,8 +3,11 @@
 
 use lpc_mapping::Bounds2d;
 
-const MIN_SCALE: f32 = 0.1;
-const MAX_SCALE: f32 = 8.0;
+// The clamp bounds the EFFECTIVE doc zoom seen through a placement
+// (`camera.scale × placement.s`): wide enough that a 0.1-scaled fixture
+// still reaches lamp-editing zoom and a large arrangement still fits.
+const MIN_SCALE: f32 = 0.02;
+const MAX_SCALE: f32 = 64.0;
 
 /// View transform: `view = doc * scale + offset`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,10 +115,23 @@ mod tests {
     #[test]
     fn zoom_clamps_to_range() {
         let mut camera = Camera::new();
-        camera.zoom_at([0.0, 0.0], 100.0);
-        assert!((camera.scale - 8.0).abs() < 1e-6);
-        camera.zoom_at([0.0, 0.0], 0.0001);
-        assert!((camera.scale - 0.1).abs() < 1e-6);
+        camera.zoom_at([0.0, 0.0], 10000.0);
+        assert!((camera.scale - 64.0).abs() < 1e-6);
+        camera.zoom_at([0.0, 0.0], 0.000001);
+        assert!((camera.scale - 0.02).abs() < 1e-6);
+    }
+
+    /// Q7: the clamp reaches lamp-editing zoom on a shrunken placement —
+    /// a 0.1-scaled fixture at MAX_SCALE still gives effective doc zoom
+    /// 6.4×, and MIN_SCALE zooms out well past a large arrangement.
+    #[test]
+    fn zoom_range_covers_placement_scaled_fixtures() {
+        let mut camera = Camera::new();
+        camera.zoom_at([0.0, 0.0], f32::MAX);
+        let placement_scale = 0.1;
+        assert!(camera.scale * placement_scale > 6.0);
+        camera.zoom_at([0.0, 0.0], f32::MIN_POSITIVE);
+        assert!(camera.scale <= 0.02);
     }
 
     #[test]
