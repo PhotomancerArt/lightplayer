@@ -195,7 +195,8 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogDraft> {
             message,
             ..
         } => Some(worker_log_draft(&level, target, message)),
-        BrowserOutputEnvelope::PreviewError { message, .. } => {
+        BrowserOutputEnvelope::PreviewError { message, .. }
+        | BrowserOutputEnvelope::PosterError { message, .. } => {
             Some(worker_log_draft("error", "fw-browser".to_string(), message))
         }
         BrowserOutputEnvelope::ProtocolOut { .. }

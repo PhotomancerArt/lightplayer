@@ -124,6 +124,31 @@ pub fn drain_output_json(runtime_id: u32) -> Result<String, String> {
     runtime_registry::with_runtime_mut(runtime_id, |runtime| runtime.drain_output_json())
 }
 
+/// Capture one poster frame of the visual product on a bus channel as sRGB
+/// RGBA8 pixels — the ONE readback the GPU tier allows itself, and it is
+/// on-demand, never per-frame.
+///
+/// CPU tier resolves immediately (host bytes); GPU tier renders at the
+/// requested size and awaits an async buffer map on the worker's event loop
+/// (the registry borrow is released before the await, so ordinary messages
+/// keep dispatching while the map is in flight). Returns a fresh JS-owned
+/// buffer the worker can transfer to the page.
+#[wasm_bindgen]
+pub async fn capture_poster_rgba8(
+    runtime_id: u32,
+    channel: String,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let capture = runtime_registry::with_runtime_mut(runtime_id, |runtime| {
+        runtime.begin_poster_capture(&channel, width, height)
+    })?;
+    match capture {
+        crate::runtime::PosterCapture::Ready(bytes) => Ok(bytes),
+        crate::runtime::PosterCapture::Pending(readback) => readback.await,
+    }
+}
+
 /// Materialize the visual product on a bus channel as sRGB RGBA8 pixels.
 ///
 /// The returned `Uint8Array` (width × height × 4 bytes, row-major) is a fresh
