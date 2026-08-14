@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Props stack — the selected path as editable levels</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    /* editor object colours (OBJECT_COLORS in editor_canvas.rs) */
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+    --gap: #3a4149;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 940px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 42px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 940px; }
+  p.thesis b { color: var(--muted); }
+  code, kbd.k { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 940px; border: 1px solid var(--border); background: var(--surface-muted);
+              border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
+              margin: 14px 0 0; }
+  .leannote b { color: var(--muted); }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols button {
+    background: var(--surface-muted); color: var(--muted); font: inherit; font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .xcontrols button:hover { color: var(--strong); }
+  .xcontrols button.on { color: var(--good); border-color: rgba(63,214,142,.4);
+                         background: rgba(63,214,142,.1); }
+
+  /* ---- concept columns (dock width) ---- */
+  .concepts { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .dock {
+    width: 322px; flex: none; border: 1px solid var(--border);
+    border-radius: var(--r-md); background: var(--surface-subtle); overflow: hidden;
+  }
+  .dock-head {
+    padding: 8px 12px 7px; border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-muted);
+  }
+  .dock-head b { color: var(--strong); font-size: 12px; }
+  .dock-head .tag { display: inline-block; margin-right: 7px; padding: 0 6px;
+    border-radius: 4px; background: var(--raised); color: var(--accent);
+    font: 600 10.5px var(--mono); letter-spacing: .06em; }
+  .dock-head p { margin: 3px 0 0; font-size: 11px; color: var(--dim); }
+  .dock-body { padding: 10px; min-height: 340px; }
+  .dock-tabrow { display: flex; align-items: stretch; gap: 0; border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-muted); }
+  .dock-tabrow span { padding: 4px 10px; font-size: 10px; font-weight: 600; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--strong); background: var(--surface-subtle);
+    border-bottom: 1px solid var(--accent); }
+
+  /* ---- props idiom (lpme-props-pane, faithfully) ---- */
+  .field { display: grid; grid-template-columns: 86px 1fr; align-items: center;
+           gap: 8px; margin: 0 0 6px; }
+  .field label { font-size: 11px; color: var(--subtle); }
+  .field input[type=text], .field input[type=number] {
+    width: 100%; background: var(--terminal); color: var(--text);
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    font: 12px var(--mono); padding: 3px 7px;
+  }
+  .field input:focus { outline: none; border-color: var(--sel); }
+  .seg { display: inline-flex; border: 1px solid var(--border-subtle);
+         border-radius: var(--r-xs); overflow: hidden; }
+  .seg button { background: transparent; color: var(--subtle); border: 0;
+    font: 11px var(--sans); padding: 3px 9px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border-subtle); }
+  .seg button.on { background: var(--raised); color: var(--strong); }
+  .actions { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+  .btn { background: var(--surface-muted); color: var(--muted);
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    font: 11.5px var(--sans); padding: 3px 9px; cursor: pointer; }
+  .btn:hover { color: var(--strong); }
+  .btn.danger { color: #ff9d9d; border-color: rgba(135,75,75,.7); }
+  .meta { font: 10.5px var(--mono); color: var(--subtle); margin: 7px 0 0; }
+  .props-empty { color: var(--dim); font-size: 12px; text-align: center; padding: 26px 10px; }
+
+  /* crumbs (concept A, production) */
+  .crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 9px; }
+  .crumbs .sep { color: var(--dim); font-size: 10px; }
+  .crumb { background: transparent; border: 0; color: var(--sel); font: 12px var(--sans);
+           cursor: pointer; padding: 0; }
+  .crumb-here { color: var(--strong); font-weight: 600; font-size: 12px; }
+  .pop-name { font: 600 12.5px var(--sans); color: var(--strong); }
+  .pop-kind { margin-left: auto; font: 10.5px var(--mono); color: var(--subtle); }
+  .pop-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+  .descend { background: var(--surface-muted); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-xs); color: var(--sel); font: 11.5px var(--sans);
+    padding: 3px 9px; cursor: pointer; }
+
+  /* ---- stack idiom (concepts B/C/D) ---- */
+  .stack { display: grid; gap: 7px; }
+  .lvl {
+    border: 1px solid var(--border-muted); border-radius: var(--r-sm);
+    background: var(--surface); overflow: hidden;
+  }
+  .lvl.sel { border-color: var(--sel); box-shadow: 0 0 0 1px rgba(76,159,254,.25); }
+  .lvl-head {
+    display: flex; align-items: center; gap: 7px; padding: 5px 9px;
+    cursor: pointer; user-select: none;
+  }
+  .lvl-head:hover { background: var(--bg-wash); }
+  .lvl-head .glyph { flex: none; font-size: 10px; color: var(--dim); width: 12px; text-align: center; }
+  .lvl-head .sw { flex: none; width: 8px; height: 8px; border-radius: 3px; }
+  .lvl-head .sw.hollow { background: transparent !important; border: 1.5px solid; }
+  .lvl-head b { font-size: 12px; color: var(--text); font-weight: 600;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lvl-head .kind { margin-left: auto; flex: none; font: 10px var(--mono); color: var(--dim); }
+  .lvl-head .seldot { flex: none; width: 6px; height: 6px; border-radius: 50%;
+                      background: var(--sel); }
+  .lvl-body { padding: 8px 10px 10px; border-top: 1px solid var(--border-muted); }
+  .lvl.ctx > .lvl-head b { color: var(--muted); font-weight: 500; }
+  .stack .indent-rail { border-left: 2px solid var(--border-muted); margin-left: 8px;
+                        padding-left: 7px; display: grid; gap: 7px; }
+  .depthnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; }
+  .ctxline { display: flex; align-items: center; gap: 5px; margin: 0 1px 8px;
+    font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .ctxline .sep { font-size: 9px; }
+  .ctxline .name { color: var(--subtle); overflow: hidden; text-overflow: ellipsis; }
+  .ctxline .nodes { margin-left: auto; flex: none; color: var(--sel); opacity: .75;
+    cursor: pointer; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Props stack — the selected path as editable levels</h1>
+<p class="hint">
+  G1 follow-on to the one-project-canvas: the Props dock currently shows <b>one level at a
+  time</b> (the selected node's fields, a breadcrumb standing in for ancestors). Yona's stack
+  idea: <b>one card per level of the selected path</b>, each editable in place.
+  <b>Scope ruling (round 2):</b> the stack shows only the levels the Mapping view actually
+  EDITS — the fixture's <i>placement</i> (editor.json, an arrange concern, never node
+  config) plus the authored document levels (group &gt; object). Module/show levels are
+  context, homed in the Fixtures tree; a node level rendered here would have to be the
+  REAL node card re-housed whole (the workbench's re-house-don't-redesign rule), which is a
+  someday-unification, not this design. The module chain survives as a muted one-line
+  context strip. <b>RULED (round 3): B′ — full stack, deepest first.</b> The selection is always the top
+  card (inspection-panel convention: DevTools styles, debugger call stacks), ancestors
+  unwind beneath, module context at the bottom; editing the repeat while its inner item
+  stays selected is the workflow this exists for. The losing concepts are kept below as a
+  rejected-because strip.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>Selection</b><span id="selbtns"></span></span>
+  <span class="grp"><b>Context</b>
+    <button id="ctxbtn" class="on" onclick="state.ctx=!state.ctx;render()">module line</button>
+  </span>
+  <span class="grp"><b>Data</b>
+    <button data-ds="dome" class="on">mini-dome</button>
+    <button data-ds="deep">nested repeat</button>
+    <button data-ds="awkward">awkward names</button>
+  </span>
+</div>
+
+<h2>1 · B′ — the ruled treatment</h2>
+<p class="thesis">
+  Dock width (322px), live: change selection/dataset above, edit the repeat's
+  <b>instances</b> count, toggle the module context line. Header click selects that level
+  (esc = pop, the same ladder).
+</p>
+
+<div class="concepts" id="concepts"></div>
+
+<p class="leannote" id="lean">
+  <b>Design record:</b> ruled B′ 2026-08-14 (Yona: "seeing it is obvious"). Scope = what the
+  Mapping view edits (fixture placement card + authored document levels); node levels =
+  context line only, real node UX stays on the Nodes view. Production notes: document cards
+  live in lpa-mapping-editor's pane, the placement card is SHELL composition (the crate
+  stays project-unaware); multi-select = shared-ancestor cards + one "N objects" leaf;
+  empty-selection-while-dived = fixture card alone; esc = pop.
+</p>
+
+<script>
+/* ---------- data ---------- */
+const DATASETS = {
+  dome: {
+    label: 'mini-dome',
+    context: ['mini_dome', 'Dome'],
+    chain: [
+      { kind: 'fixture', label: 'dome',      meta: '150 lamps · 5 instances',
+        placement: { x: 12.0, y: 4.5, r: 0, s: 1.0 } },
+      { kind: 'group',   label: 'sector', shape: 'repeat', count: 5, cx: 60, cy: 60 },
+      { kind: 'object',  label: 'path',  shape: 'path', count: 30,
+        gaps: '3,7,11,15,19,23,27', dir: 'fwd' },
+    ],
+  },
+  deep: {
+    label: 'nested repeat',
+    context: ['radiance', 'Petals'],
+    chain: [
+      { kind: 'fixture', label: 'petal_ring', meta: '1440 lamps · 24 instances',
+        placement: { x: -8.2, y: 31.0, r: 15, s: 1.25 } },
+      { kind: 'group',   label: 'arm',   shape: 'repeat', count: 6, cx: 0, cy: 0 },
+      { kind: 'group',   label: 'petal', shape: 'repeat', count: 4, cx: 12, cy: 0 },
+      { kind: 'object',  label: 'polygon', shape: 'polygon', count: 60 },
+    ],
+  },
+  awkward: {
+    label: 'awkward names',
+    context: ['kinetic-canopy-tour-rig-2026 (loaner)', 'Untitled module'],
+    chain: [
+      { kind: 'fixture', label: 'left_wing_underside_strip_final_v3_ACTUAL', meta: '88 lamps · range grain',
+        placement: null },
+      { kind: 'group',   label: '', shape: 'repeat', count: 11, cx: 4, cy: 4 },
+      { kind: 'object',  label: 'path', shape: 'path', count: 8, gaps: '', dir: 'rev' },
+    ],
+  },
+};
+
+const KIND_GLYPH = { show: '▤', module: '▤', fixture: '⬡', group: '⟳', object: '·' };
+const state = { ds: 'dome', sel: 2, dOpen: null /* concept D's local open level */, ctx: true };
+
+function chain() { return DATASETS[state.ds].chain; }
+function kindLabel(lvl) {
+  if (lvl.kind === 'group') return 'repeat ×' + lvl.count;
+  if (lvl.kind === 'object') return lvl.shape;
+  return lvl.kind;
+}
+function objColor(i) {
+  return getComputedStyle(document.documentElement).getPropertyValue('--obj-' + (i % 6));
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function dispLabel(lvl) { return lvl.label === '' ? '(unnamed)' : lvl.label; }
+
+/* ---------- shared field renderers (edit → state → rerender) ---------- */
+function fieldNum(label, value, oninputName) {
+  return `<div class="field"><label>${label}</label>
+    <input type="number" value="${value}" oninput="${oninputName}(this.value)"></div>`;
+}
+function fieldText(label, value, oninputName) {
+  return `<div class="field"><label>${label}</label>
+    <input type="text" value="${esc(value)}" oninput="${oninputName}(this.value)"></div>`;
+}
+function seg(label, options, current, fnName) {
+  const btns = options.map(([v, t]) =>
+    `<button class="${v === current ? 'on' : ''}" onclick="${fnName}('${v}')">${t}</button>`).join('');
+  return `<div class="field"><label>${label}</label><span class="seg">${btns}</span></div>`;
+}
+
+/* level bodies — the same fields in every stack concept */
+function levelBody(lvl, i) {
+  if (lvl.kind === 'show') return `
+    ${fieldText('name', lvl.label, 'setLabel' + i)}
+    <p class="meta">${lvl.meta}</p>`;
+  if (lvl.kind === 'module') return `
+    ${fieldText('name', lvl.label, 'setLabel' + i)}
+    <p class="meta">${lvl.meta}</p>
+    <div class="actions"><button class="btn">open module</button></div>`;
+  if (lvl.kind === 'fixture') {
+    const p = lvl.placement;
+    return `
+    ${fieldText('name', lvl.label, 'setLabel' + i)}
+    ${p ? fieldNum('x', p.x, 'noop') + fieldNum('y', p.y, 'noop') +
+          fieldNum('rotation', p.r, 'noop') + fieldNum('scale', p.s, 'noop')
+        : '<p class="meta">unarranged — drag it on the canvas to place it</p>'}
+    <p class="meta">${lvl.meta}</p>
+    <div class="actions"><button class="btn">edit mapping</button></div>`;
+  }
+  if (lvl.kind === 'group') return `
+    ${fieldNum('instances', lvl.count, 'setCount' + i)}
+    ${fieldNum('center x', lvl.cx, 'noop')}
+    ${fieldNum('center y', lvl.cy, 'noop')}
+    <div class="actions"><button class="btn">expand</button><button class="btn">unwrap</button></div>`;
+  /* object */
+  return `
+    ${fieldNum('count', lvl.count, 'setCount' + i)}
+    ${lvl.dir !== undefined ? seg('direction', [['fwd','forward'],['rev','reversed']], lvl.dir, 'setDir' + i) : ''}
+    ${lvl.gaps !== undefined ? fieldText('gaps', lvl.gaps, 'noop') : ''}
+    <div class="actions"><button class="btn">repeat</button><button class="btn danger">delete</button></div>`;
+}
+
+/* per-level setters (declared for every index the longest chain needs) */
+function noop() {}
+for (let i = 0; i < 8; i++) {
+  window['setLabel' + i] = (v) => { chain()[i].label = v; render(false); };
+  window['setCount' + i] = (v) => { chain()[i].count = Math.max(1, +v || 1); render(false); };
+  window['setDir' + i]   = (v) => { chain()[i].dir = v; render(true); };
+}
+
+/* ---------- concept renderers ---------- */
+
+/* A — production baseline: one level, breadcrumb when descended */
+function conceptA() {
+  const c = chain(), sel = state.sel, lvl = c[sel];
+  if (lvl.kind === 'fixture') return `
+    <div class="pop-head"><span class="pop-name">${esc(dispLabel(lvl))}</span>
+      <span class="pop-kind">${lvl.meta}</span></div>
+    ${levelBody(lvl, sel)}`;
+  /* dived object levels: crumb trail from the object root down */
+  const objRoot = c.findIndex(l => l.kind === 'group' || l.kind === 'object');
+  let crumbs = '';
+  for (let i = objRoot; i <= sel; i++) {
+    if (i > objRoot) crumbs += `<span class="sep">▸</span>`;
+    crumbs += i < sel
+      ? `<button class="crumb" onclick="setSel(${i})">${esc(dispLabel(c[i]))}</button>`
+      : `<span class="crumb-here">${esc(kindLabel(c[i]))}</span>`;
+  }
+  const next = c[sel + 1];
+  return `
+    <div class="crumbs">${crumbs}</div>
+    ${levelBody(c[sel], sel)}
+    ${next ? `<div class="field"><label>repeats</label>
+        <button class="descend" onclick="setSel(${sel + 1})">${esc(kindLabel(next))} ▸</button></div>` : ''}
+    <p class="depthnote">Fixture placement: a different pane state (select the fixture) —
+    the stack concepts carry it as the top card instead.</p>`;
+}
+
+/* the module chain as CONTEXT, not cards: one muted line, links to the
+   Nodes view where those levels are actually edited */
+function ctxLine() {
+  if (!state.ctx) return '';
+  const parts = DATASETS[state.ds].context
+    .map(name => `<span class="name">${esc(name)}</span>`)
+    .join('<span class="sep">▸</span>');
+  return `<div class="ctxline"><span>▤</span>${parts}<span class="sep">▸</span>
+    <span class="nodes" title="modules are edited on the Nodes view">Nodes ↗</span></div>`;
+}
+
+/* one always-expanded level card (concepts B and B′) */
+function fullCard(lvl, i) {
+  return `
+    <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
+      <div class="lvl-head" onclick="setSel(${i})">
+        ${headBits(lvl, i)}
+      </div>
+      <div class="lvl-body">${levelBody(lvl, i)}</div>
+    </div>`;
+}
+
+/* B — full stack, root first: reads like the tree beside it */
+function conceptB() {
+  const c = chain();
+  return ctxLine() + `<div class="stack">` +
+    c.map((lvl, i) => fullCard(lvl, i)).join('') + `</div>`;
+}
+
+/* B′ — full stack, DEEPEST first: the selection is always the TOP card
+   (call-stack / devtools-styles order — stable locus of interaction),
+   ancestors unwind beneath, root context at the very bottom */
+function conceptB2() {
+  const c = chain();
+  return `<div class="stack">` +
+    c.map((lvl, i) => fullCard(lvl, i)).reverse().join('') + `</div>` +
+    `<div style="margin-top:8px">${ctxLine()}</div>` +
+    `<p class="depthnote">Selection always lands at the top — it never wanders
+    down the pane as you descend. Trade: vertical order CONTRADICTS the
+    Fixtures tree beside it.</p>`;
+}
+
+/* C — selection stack: headers always, ONE body — the selected level's.
+   Clicking a header ASCENDS/DESCENDS the one shared selection. */
+function conceptC() {
+  const c = chain();
+  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
+    <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
+      <div class="lvl-head" onclick="setSel(${i})" title="select this level (canvas follows)">
+        ${headBits(lvl, i)}
+      </div>
+      ${i === state.sel ? `<div class="lvl-body">${levelBody(lvl, i)}</div>` : ''}
+    </div>`).join('') + `</div>
+    <p class="depthnote">Header click = the one shared selection moves (watch every other
+    column follow). Esc walks up the same ladder.</p>`;
+}
+
+/* D — accordion: selection stays put; open/close is local UI state */
+function conceptD() {
+  const c = chain();
+  const open = state.dOpen ?? state.sel;
+  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
+    <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
+      <div class="lvl-head" onclick="dToggle(${i})" title="open this level's fields (selection stays)">
+        <span class="glyph">${i === open ? '▾' : '▸'}</span>
+        ${headBits(lvl, i, true)}
+        ${i === state.sel ? '<span class="seldot" title="the canvas selection"></span>' : ''}
+      </div>
+      ${i === open ? `<div class="lvl-body">${levelBody(lvl, i)}</div>` : ''}
+    </div>`).join('') + `</div>
+    <p class="depthnote">Blue dot = canvas selection; the open body is local — edit the
+    fixture's placement without leaving the object. Two states to keep in your head.</p>`;
+}
+
+function headBits(lvl, i, noGlyph) {
+  const objIdx = firstObjIndex();
+  const isObj = i >= objIdx;
+  const sw = isObj
+    ? `<span class="sw ${i > objIdx ? 'hollow' : ''}"
+         style="background:${objColor(0)};border-color:${objColor(0)}"></span>`
+    : `<span class="glyph">${KIND_GLYPH[lvl.kind]}</span>`;
+  return `${noGlyph ? sw : sw}
+    <b>${esc(dispLabel(lvl))}</b>
+    <span class="kind">${kindLabel(lvl)}</span>`;
+}
+function firstObjIndex() {
+  return chain().findIndex(l => l.kind === 'group' || l.kind === 'object');
+}
+
+/* ---------- shell ---------- */
+const CONCEPTS = [
+  ['B′', 'Full stack — deepest first (RULED)', 'The selection is always the top card; ancestors unwind below; module context line at the bottom. Field edits never move selection; header click selects (esc = pop).', conceptB2],
+];
+const REJECTED = [
+  ['A', 'Breadcrumb (production)', 'one level at a time hid the chain; superseded — the stack replaces the breadcrumb (selection/tree ADR amendment owed).'],
+  ['B', 'Full stack, root first', 'same cards, wrong orientation: the edited card wanders down the pane as you descend. Root-first is a NAVIGATION convention (trees, breadcrumbs); this dock is INSPECTION.'],
+  ['C', 'Selection stack', 'one-open-body bought a stable locus B′ gets for free while hiding ancestor fields — the repeat-while-inner-selected edit was the whole point.'],
+  ['D', 'Accordion', 'a second, local disclosure state to keep in your head; buys nothing once everything can just be visible.'],
+];
+
+function render(fullControls = true) {
+  document.getElementById('concepts').innerHTML = CONCEPTS.map(([tag, name, thesis, fn]) => `
+    <div class="dock">
+      <div class="dock-tabrow"><span>Props</span></div>
+      <div class="dock-head"><span class="tag">${tag}</span><b>${name}</b><p>${thesis}</p></div>
+      <div class="dock-body">${fn()}</div>
+    </div>`).join('') + `
+    <div style="max-width:420px">
+      <h2 style="margin-top:0">Rejected</h2>
+      ${REJECTED.map(([tag, name, why]) => `
+        <div class="leannote" style="margin:0 0 8px">
+          <span class="tag" style="display:inline-block;margin-right:7px;padding:0 6px;border-radius:4px;background:var(--raised);color:var(--dim);font:600 10.5px var(--mono)">${tag}</span>
+          <b>${name}</b> — ${why}</div>`).join('')}
+    </div>`;
+  if (fullControls) renderControls();
+}
+
+function renderControls() {
+  const c = chain();
+  document.getElementById('selbtns').innerHTML = c.map((lvl, i) =>
+    `<button class="${i === state.sel ? 'on' : ''}" onclick="setSel(${i})"
+      style="margin-right:5px">${esc(dispLabel(lvl)).slice(0, 14)}</button>`).join('');
+  document.querySelectorAll('[data-ds]').forEach(b =>
+    b.classList.toggle('on', b.dataset.ds === state.ds));
+  document.getElementById('ctxbtn').classList.toggle('on', state.ctx);
+}
+
+function setSel(i) { state.sel = i; state.dOpen = null; render(); }
+function dToggle(i) { state.dOpen = (state.dOpen ?? state.sel) === i ? -1 : i; render(false); }
+document.querySelectorAll('[data-ds]').forEach(b => b.onclick = () => {
+  state.ds = b.dataset.ds;
+  state.sel = DATASETS[state.ds].chain.length - 1;
+  state.dOpen = null;
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
