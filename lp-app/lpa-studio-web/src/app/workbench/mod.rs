@@ -6,12 +6,14 @@
 //! own only the center; the **user owns visibility** through the edge
 //! strips. Nothing rearranges itself:
 //!
-//! - Panels with FIXED homes — left: Nodes (the project pane) · Fixtures;
-//!   right: Device · Outputs · Props (Mapping view only — the selection's
-//!   properties, R4). The assignment lives in [`PanelId::side`] and
-//!   [`roster`], data tables by design, so experiments are a
-//!   constant edit — but there is deliberately no user arrangement in v1
-//!   ("things have one home", spike round-2 ruling).
+//! - Panels with FIXED homes — left: Tree (one panel, one ROLE — the
+//!   view supplies the content: the project's node tree on Nodes, the
+//!   fixture tree on Mapping, D10); right: Device · Outputs · Props
+//!   (Mapping view only — the selection's properties, R4). The
+//!   assignment lives in [`PanelId::side`] and [`roster`], data tables
+//!   by design, so experiments are a constant edit — but there is
+//!   deliberately no user arrangement in v1 ("things have one home",
+//!   spike round-2 ruling).
 //! - Panels toggle **radio-per-side**. An EXPANDED dock says so with a
 //!   TAB ROW at its top — both of the side's panels as tabs, the open one
 //!   active; clicking the other switches, clicking the active one
@@ -140,14 +142,14 @@ impl WorkbenchHrefs {
 }
 
 /// The dockable panels. `side` is the fixed-home table (ratified:
-/// content/structure left, hardware right).
+/// content/structure left, hardware right). A panel is a ROLE, not a
+/// content mount: the VIEW supplies the [`PanelBody`] content (D10 —
+/// the Tree shows the assembly on Nodes, the fixture tree on Mapping).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelId {
-    /// The project pane — the node tree, add-node, save/change UI.
-    /// Named "Nodes" in the UI: the whole workbench is the project.
-    Nodes,
-    /// fixture → object → instance with channel chips (P2).
-    Fixtures,
+    /// The structure tree (D10): the project's node tree on the Nodes
+    /// view, the fixture → object → instance tree on the Mapping view.
+    Tree,
     /// The lens session's device card (D43), docked.
     Device,
     /// box → port → wire-window cells (P2).
@@ -169,7 +171,7 @@ impl PanelId {
     /// The fixed-home table: which dock this panel opens into.
     pub fn side(self) -> DockSide {
         match self {
-            PanelId::Nodes | PanelId::Fixtures => DockSide::Left,
+            PanelId::Tree => DockSide::Left,
             PanelId::Device | PanelId::Outputs | PanelId::Props => DockSide::Right,
         }
     }
@@ -177,11 +179,20 @@ impl PanelId {
     /// The strip/panel-header label.
     pub fn title(self) -> &'static str {
         match self {
-            PanelId::Nodes => "Nodes",
-            PanelId::Fixtures => "Fixtures",
+            PanelId::Tree => "Tree",
             PanelId::Device => "Device",
             PanelId::Outputs => "Outputs",
             PanelId::Props => "Props",
+        }
+    }
+
+    /// The summon strip's glyph.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            PanelId::Tree => "⬡",
+            PanelId::Device => "⌁",
+            PanelId::Outputs => "▦",
+            PanelId::Props => "≡",
         }
     }
 }
@@ -191,7 +202,7 @@ impl PanelId {
 /// only where a canvas selection exists to describe (the Mapping view).
 pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
     match (side, view) {
-        (DockSide::Left, _) => &[PanelId::Nodes, PanelId::Fixtures],
+        (DockSide::Left, _) => &[PanelId::Tree],
         (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
         (DockSide::Right, WorkbenchView::Mapping) => {
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
@@ -200,17 +211,17 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
 }
 
 /// Each view's ratified dock defaults — what [`PanelMemory`] seeds a
-/// view with on first visit. Nodes opens the node tree + Device; the
-/// Mapping view opens Fixtures + Props (the fixture tree and the object
+/// view with on first visit. Nodes opens the Tree + Device; the Mapping
+/// view opens the Tree + Props (the fixture tree and the object
 /// properties: what actual mapping wants, R4 ruling).
 pub fn defaults(view: WorkbenchView) -> DockState {
     match view {
         WorkbenchView::Nodes => DockState {
-            left: Some(PanelId::Nodes),
+            left: Some(PanelId::Tree),
             right: Some(PanelId::Device),
         },
         WorkbenchView::Mapping => DockState {
-            left: Some(PanelId::Fixtures),
+            left: Some(PanelId::Tree),
             right: Some(PanelId::Props),
         },
     }
@@ -426,6 +437,7 @@ pub fn WorkbenchFrame(
                             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
                                 PanelBody {
                                     panel,
+                                    view,
                                     panes: panes.clone(),
                                     lens_card: lens_card.clone(),
                                     surface: surface.clone(),
@@ -438,6 +450,9 @@ pub fn WorkbenchFrame(
                                     now_secs,
                                     on_action,
                                 }
+                            }
+                            if let Some(summary) = panel_footer(panel, view, surface.as_ref()) {
+                                PanelFooter { summary }
                             }
                         }
                     }
@@ -476,8 +491,9 @@ pub fn WorkbenchFrame(
 }
 
 /// The fold's sticky strip: the desktop edge strips folded into one row —
-/// view switch centered, the four panel summon buttons flanking it in
-/// their home-side order. Hidden above the fold breakpoint.
+/// view switch centered, the view's rostered panel summon buttons
+/// flanking it in their home-side order. Hidden above the fold
+/// breakpoint.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SummonStrip(
@@ -486,7 +502,7 @@ fn SummonStrip(
     hrefs: WorkbenchHrefs,
     on_summon: EventHandler<PanelId>,
 ) -> Element {
-    let button = |panel: PanelId, glyph: &'static str| {
+    let button = |panel: PanelId| {
         let class = if summoned == Some(panel) {
             "tw:flex tw:h-[26px] tw:w-[30px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:text-xs tw:text-selection-border"
         } else {
@@ -497,7 +513,7 @@ fn SummonStrip(
                 class: "{class}",
                 title: "{panel.title()} panel",
                 onclick: move |_| on_summon.call(panel),
-                "{glyph}"
+                "{panel.glyph()}"
             }
         }
     };
@@ -513,8 +529,9 @@ fn SummonStrip(
     };
     rsx! {
         div { class: "tw:hidden tw:min-h-[38px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-strong tw:bg-card-muted tw:px-2 tw:max-[960px]:flex",
-            {button(PanelId::Nodes, "▤")}
-            {button(PanelId::Fixtures, "⬡")}
+            for panel in roster(view, DockSide::Left).iter().copied() {
+                {button(panel)}
+            }
             div { class: "tw:mx-1 tw:flex tw:flex-1 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-strong tw:p-0.5",
                 for spec in VIEWS.iter() {
                     if let Some(href) = hrefs.href(spec.view) {
@@ -522,8 +539,9 @@ fn SummonStrip(
                     }
                 }
             }
-            {button(PanelId::Outputs, "▦")}
-            {button(PanelId::Device, "⌁")}
+            for panel in roster(view, DockSide::Right).iter().copied() {
+                {button(panel)}
+            }
         }
     }
 }
@@ -673,9 +691,10 @@ fn PanelDock(
             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
                 PanelBody {
                     panel,
+                    view,
                     panes,
                     lens_card,
-                    surface,
+                    surface: surface.clone(),
                     patch_selection,
                     dive_focused,
                     dive_session,
@@ -686,6 +705,52 @@ fn PanelDock(
                     on_action,
                 }
             }
+            if let Some(summary) = panel_footer(panel, view, surface.as_ref()) {
+                PanelFooter { summary }
+            }
+        }
+    }
+}
+
+/// A panel's Finder-style summary footer (D12), pinned at the dock
+/// bottom under the scrolling body. Declared per (panel, view) so any
+/// panel can grow one; today only the Mapping view's Tree carries its
+/// fixture totals (the line that used to sit atop the Fixtures panel).
+fn panel_footer(
+    panel: PanelId,
+    view: WorkbenchView,
+    surface: Option<&UiPatchSurface>,
+) -> Option<String> {
+    match (panel, view) {
+        (PanelId::Tree, WorkbenchView::Mapping) => {
+            let surface = surface?;
+            let lamps: u32 = surface
+                .fixtures
+                .iter()
+                .map(|fixture| fixture.patch.lamps)
+                .sum();
+            let instances: usize = surface
+                .fixtures
+                .iter()
+                .map(|fixture| fixture.instances.len())
+                .sum();
+            Some(format!(
+                "{} fixtures · {lamps} lamps · {instances} instances",
+                surface.fixtures.len()
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// The footer row itself: muted, mono, non-scrolling — the dock
+/// composition owns it, panels only declare the line.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PanelFooter(summary: String) -> Element {
+    rsx! {
+        div { class: "tw:flex-none tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+            "{summary}"
         }
     }
 }
@@ -720,10 +785,14 @@ fn DockTab(panel: PanelId, active: bool, on_press: EventHandler<PanelId>) -> Ele
 
 /// One panel's BODY, dock- and summon-agnostic: the docks and the mobile
 /// summon overlay render the same content through this one component.
+/// Dispatch is `(view, panel)` — a panel is a role, and the VIEW picks
+/// what fills it (D10): the Tree shows the project's node tree on Nodes
+/// and the fixture tree on Mapping.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelBody(
     panel: PanelId,
+    view: WorkbenchView,
     panes: Vec<UiPaneView>,
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
@@ -737,15 +806,14 @@ fn PanelBody(
     now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    match panel {
-        PanelId::Nodes => rsx! {
+    match (panel, view) {
+        (PanelId::Tree, WorkbenchView::Nodes) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-3.5",
                 for (index, pane) in panes.into_iter().enumerate() {
                     // The project pane renders FLAT here (ruling 2): the dock
                     // tab already names it, so a card inside the panel was
-                    // box-in-box, and its header's [i] now lives on the root
-                    // node card in the center. Every other pane keeps the
-                    // shared `PaneView` path.
+                    // box-in-box. Every other pane keeps the shared
+                    // `PaneView` path.
                     if let UiViewContent::ProjectEditor(editor) = pane.body.clone() {
                         ProjectPane {
                             key: "{pane.node_id}",
@@ -767,7 +835,19 @@ fn PanelBody(
                 }
             }
         },
-        PanelId::Device => rsx! {
+        (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
+            // Today's fixture tree, re-housed whole: mixed grain
+            // (effective instances + the dive's authored objects) is
+            // DELIBERATE until the R5 patching plan splits the grains
+            // (grain-follows-activity ruling).
+            FixturesPanel {
+                surface,
+                selection: patch_selection,
+                dive: (*dive_focused.read()).map(|node| (node, dive_session)),
+                on_action,
+            }
+        },
+        (PanelId::Device, _) => rsx! {
             if let Some(card) = lens_card {
                 crate::app::home::device_card::DeviceCard {
                     sim: card.sim,
@@ -778,15 +858,7 @@ fn PanelBody(
                 }
             }
         },
-        PanelId::Fixtures => rsx! {
-            FixturesPanel {
-                surface,
-                selection: patch_selection,
-                dive: (*dive_focused.read()).map(|node| (node, dive_session)),
-                on_action,
-            }
-        },
-        PanelId::Props => rsx! {
+        (PanelId::Props, _) => rsx! {
             panels::PropsPanel {
                 surface,
                 selection: patch_selection,
@@ -797,7 +869,7 @@ fn PanelBody(
                 on_action,
             }
         },
-        PanelId::Outputs => rsx! {
+        (PanelId::Outputs, _) => rsx! {
             OutputsPanel {
                 surface,
                 selection: patch_selection,
@@ -824,11 +896,11 @@ mod tests {
         }
         assert_eq!(
             roster(WorkbenchView::Nodes, DockSide::Left),
-            &[PanelId::Nodes, PanelId::Fixtures]
+            &[PanelId::Tree]
         );
         assert_eq!(
             roster(WorkbenchView::Mapping, DockSide::Left),
-            &[PanelId::Nodes, PanelId::Fixtures]
+            &[PanelId::Tree]
         );
         assert_eq!(
             roster(WorkbenchView::Nodes, DockSide::Right),
@@ -857,14 +929,14 @@ mod tests {
         assert_eq!(
             defaults(WorkbenchView::Nodes),
             DockState {
-                left: Some(PanelId::Nodes),
+                left: Some(PanelId::Tree),
                 right: Some(PanelId::Device),
             }
         );
         assert_eq!(
             defaults(WorkbenchView::Mapping),
             DockState {
-                left: Some(PanelId::Fixtures),
+                left: Some(PanelId::Tree),
                 right: Some(PanelId::Props),
             }
         );
@@ -880,24 +952,27 @@ mod tests {
 
         // Pressing the open panel collapses its side; the other view's
         // memory is untouched (per-view memory).
-        memory.view_mut(WorkbenchView::Nodes).toggle(PanelId::Nodes);
+        memory.view_mut(WorkbenchView::Nodes).toggle(PanelId::Tree);
         assert_eq!(memory.view(WorkbenchView::Nodes).left, None);
         assert_eq!(
             memory.view(WorkbenchView::Mapping),
             defaults(WorkbenchView::Mapping)
         );
 
-        // Pressing another panel on the same side is a radio swap.
+        // Pressing a collapsed side's panel reopens it; pressing another
+        // panel on an open side is a radio swap.
+        memory.view_mut(WorkbenchView::Nodes).toggle(PanelId::Tree);
+        assert_eq!(memory.view(WorkbenchView::Nodes).left, Some(PanelId::Tree));
         memory
             .view_mut(WorkbenchView::Nodes)
-            .toggle(PanelId::Fixtures);
+            .toggle(PanelId::Outputs);
         assert_eq!(
-            memory.view(WorkbenchView::Nodes).left,
-            Some(PanelId::Fixtures)
+            memory.view(WorkbenchView::Nodes).right,
+            Some(PanelId::Outputs)
         );
         memory
             .view_mut(WorkbenchView::Nodes)
-            .toggle(PanelId::Device);
+            .toggle(PanelId::Outputs);
         assert_eq!(memory.view(WorkbenchView::Nodes).right, None);
     }
 
