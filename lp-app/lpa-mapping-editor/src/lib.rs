@@ -1,15 +1,25 @@
-//! The 2D mapping editor module: a standalone, project-agnostic editor for
-//! `lpc-mapping` documents.
+//! The 2D mapping editor: the ONE project canvas and the editing grammar
+//! over `lpc-mapping` documents.
 //!
-//! Boundary (parent plan D5): document in, edits out. This crate knows the
-//! mapping document schema and how to edit it — it has **no** knowledge of
-//! projects, assets, routes, or the Studio server. Hosts (the `#/mapping`
-//! page, later the fixture face) own persistence and mount the editor.
+//! Boundary (the one-project-canvas ADR): **data in, events out.** This
+//! crate owns the SURFACE — geometry, the project-space camera, the
+//! gesture grammar, tools, per-document session/undo, the fixture sprite
+//! layer, and the placement seam (a dived document renders through its
+//! `Placement` inside project space; the session never learns it is
+//! placed). It has **no** knowledge of projects, assets, routes, or the
+//! Studio server: fixtures enter as plain [`FixtureSprite`] props, intent
+//! leaves as [`FixtureEvent`]s, and the host owns every policy decision
+//! (persistence, ops, journal, prefetch, packing).
 //!
-//! `editor_core` is pure Rust — sessions, tools, selection, camera, and the
-//! shared lamp-view geometry are host-testable with no browser or Dioxus
-//! involvement. View components (Dioxus) arrive in later phases and stay
-//! thin over the core.
+//! There is no wrapper editor component: hosts compose [`EditorCanvas`]
+//! with the floats ([`ZoomFloat`], [`HelpFloat`]), the [`tool_hint`], and
+//! the keyboard grammar ([`handle_editor_key`]) — the canvas IS the
+//! editor.
+//!
+//! `editor_core` is pure Rust — sessions, tools, selection, camera,
+//! placement, and the shared lamp-view geometry are host-testable with no
+//! browser or Dioxus involvement. View components (Dioxus) stay thin over
+//! the core.
 
 pub mod editor_core;
 pub mod view;
