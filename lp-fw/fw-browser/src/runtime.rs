@@ -359,20 +359,29 @@ impl BrowserFirmwareRuntime {
         let Some(project) = self.server.project_manager_mut().get_project_mut(handle) else {
             return (false, Vec::new());
         };
-        let control_first = cached.unwrap_or_else(|| {
+        let resolved = cached.unwrap_or_else(|| {
             match project.resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL) {
                 Ok(_) => true,
                 Err(error) => {
-                    // The ordinary state of a shader-only project, but it is
-                    // also the only place a genuine resolve failure would
-                    // read as "no lamps" — so say why, once (this is cached).
-                    log::debug!("preview runtime: project is not control-first: {error}");
+                    // The ordinary state of a shader-only project — but ALSO
+                    // the state of a multi-module project whose sibling
+                    // modules tie on the bus (mini-dome, the peaches). The
+                    // published outputs below settle it either way; say why
+                    // once (this is cached).
+                    log::debug!("preview runtime: bus control product did not resolve: {error}");
                     false
                 }
             }
         });
         let OutputFrameProbeResult::Frame { outputs } =
             project.read_output_frame(OutputFrameProbeRequest { display_layout });
+        // Published outputs break the tie ONLY for a project whose visual
+        // side already took the control-only fallback (multi-module bus
+        // ties): there the outputs are the ground truth — fragments MERGE,
+        // so the project drives real lamps while bus resolution refuses.
+        // A project whose visual resolves keeps the resolve-based verdict,
+        // so raster-led cards stay raster-led.
+        let control_first = resolved || (self.bus_visual_control_only && !outputs.is_empty());
         self.control_first = Some(control_first);
         (control_first, outputs)
     }
@@ -547,18 +556,25 @@ impl BrowserFirmwareRuntime {
                     product
                 }
                 Err(resolve_error) => {
-                    let control_first = self.control_first.unwrap_or_else(|| {
-                        project
-                            .resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL)
-                            .is_ok()
-                    });
-                    if control_first {
-                        self.control_first = Some(true);
+                    // A project that publishes outputs (or resolves the
+                    // control bus) leads with lamps: its visual tie is a
+                    // state, not an error. Only a project with NEITHER —
+                    // genuinely shader-only — errors loudly here.
+                    let control_resolves = project
+                        .resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL)
+                        .is_ok();
+                    let OutputFrameProbeResult::Frame { outputs } =
+                        project.read_output_frame(OutputFrameProbeRequest {
+                            display_layout: ControlDisplayLayoutRead::None,
+                        });
+                    log::debug!(
+                        "preview runtime: visual fallback: control_resolves={} outputs={} \
+                         ({resolve_error})",
+                        control_resolves,
+                        outputs.len()
+                    );
+                    if control_resolves || !outputs.is_empty() {
                         self.bus_visual_control_only = true;
-                        log::debug!(
-                            "preview runtime: control-first project has no visual product \
-                             ({resolve_error}); lamps are the picture"
-                        );
                         return Ok(None);
                     }
                     return Err(format!("{resolve_error}"));
