@@ -26,6 +26,7 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::neutral_lamp_rgb;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
+    UiFixturePatch,
 };
 use wasm_bindgen::{Clamped, JsCast, closure::Closure};
 
@@ -128,30 +129,52 @@ pub(crate) fn LampView(
     }
 }
 
-/// Live lamp colors indexed by wiring index — the same sample decode the
-/// display renderer uses, packaged for the mapping editor's live view.
-#[allow(
-    dead_code,
-    reason = "the face embed's live feed died with it (R1); the unified canvas re-feeds live colors in R3"
-)]
-pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
+/// The dived fixture's live lamp colors, decoded out of its output's
+/// published WIRE frame through the patch cells — the mapping editor's
+/// live view (`live_feed`), rebuilt on the one-project canvas after the
+/// face embed's own-product feed died with it (R1).
+///
+/// Index = the lamp's position in the fixture's own resolved document —
+/// the same space the canvas's `data-lamp` attributes and
+/// [`UiPatchCell::source_start`] use. Lamps no cell claims stay
+/// [`UNLIT_RGB`]: they never light on hardware, and the neutral reads as
+/// geometry rather than as black lamps. No frame yet = empty (no feed —
+/// the host keeps the last good one).
+///
+/// A fixture feeding two outputs decodes every cell from the ONE frame
+/// [`UiFixturePatch::frame`] carries (the first output's), the same
+/// honest limit the patch bay's fixture face draws with.
+pub(crate) fn fixture_live_colors(patch: &UiFixturePatch) -> Vec<[u8; 3]> {
+    let Some(frame) = patch.frame.as_ref() else {
         return Vec::new();
     };
-    let len = layout
-        .lamps
-        .iter()
-        .map(|lamp| lamp.lamp_index as usize + 1)
-        .max()
-        .unwrap_or(0);
-    let mut colors = vec![[0_u8; 3]; len];
-    for lamp in &layout.lamps {
-        if let Some(rgb) = control_rgb_at_sample(preview, lamp.sample_start) {
-            colors[lamp.lamp_index as usize] = rgb;
+    let mut colors = vec![UNLIT_RGB; patch.lamps as usize];
+    for cell in &patch.cells {
+        for index in 0..cell.lamps {
+            let Some(slot) = colors.get_mut(cell.source_start.saturating_add(index) as usize)
+            else {
+                continue;
+            };
+            // The run lands on the wire end-first when reversed — the same
+            // mapping the patch bay's fixture-side strips draw with.
+            let wire_lamp = if cell.reversed {
+                cell.wire_start
+                    .saturating_add(cell.lamps.saturating_sub(1).saturating_sub(index))
+            } else {
+                cell.wire_start.saturating_add(index)
+            };
+            if let Some(rgb) = control_rgb_at_sample(frame, wire_lamp.saturating_mul(3)) {
+                *slot = rgb;
+            }
         }
     }
     colors
 }
+
+/// What a lamp with no frame sample behind it draws as — the same neutral
+/// the patch bay's cell strips use, so an unfed lamp reads as geometry
+/// rather than as a black lamp.
+pub(crate) const UNLIT_RGB: [u8; 3] = [58, 63, 70];
 
 /// Whether the product's sample layout carries anything this renderer can
 /// colour a lamp from.
@@ -414,6 +437,8 @@ impl Drop for LampResizeObserver {
 
 #[cfg(test)]
 mod tests {
+    use lpa_studio_core::{ControlExtent, ControlSampleLayout, ControlSampleSpan, UiPatchCell};
+
     use super::*;
 
     /// Endpoints exact; the linear midtone must brighten (linear 0.2 →
@@ -428,5 +453,101 @@ mod tests {
             (123..=125).contains(&mid),
             "linear 0.2 ≈ sRGB 124, got {mid}"
         );
+    }
+
+    /// A wire frame whose lamp `n` carries full-red at `n == 0`, full-green
+    /// at `n == 1`, … cycling — distinguishable colors per wire position.
+    fn wire_frame(lamps: u32) -> UiControlProductPreview {
+        let mut bytes = Vec::with_capacity(lamps as usize * 6);
+        for lamp in 0..lamps {
+            let mut rgb = [0_u16; 3];
+            rgb[(lamp % 3) as usize] = 65535;
+            for sample in rgb {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        UiControlProductPreview {
+            revision: 1,
+            extent: ControlExtent::new(1, lamps * 3),
+            sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: vec![ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: lamps * 3,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count: lamps,
+                        color_order: ColorOrder::Rgb,
+                    },
+                }],
+            },
+            display_layout: None,
+            bytes: bytes.into(),
+        }
+    }
+
+    fn run(source_start: u32, lamps: u32, wire_start: u32, reversed: bool) -> UiPatchCell {
+        UiPatchCell {
+            source_start,
+            lamps,
+            wire_start,
+            reversed,
+            ..UiPatchCell::default()
+        }
+    }
+
+    const RED: [u8; 3] = [255, 0, 0];
+    const GREEN: [u8; 3] = [0, 255, 0];
+    const BLUE: [u8; 3] = [0, 0, 255];
+
+    /// The feed contract end to end: doc index = `source_start + offset`,
+    /// wire index rebased per cell (reversed runs read the wire end-first),
+    /// unclaimed lamps stay the unlit neutral, no frame = no feed.
+    #[test]
+    fn fixture_live_colors_rebase_doc_lamps_onto_the_wire() {
+        let mut patch = UiFixturePatch {
+            lamps: 7,
+            cells: vec![
+                // Doc 0..3 land forward at wire 3..6: R G B from lamp 3 → B R G.
+                run(0, 3, 3, false),
+                // Doc 4..7 land REVERSED at wire 0..3: doc 4 reads wire 2.
+                run(4, 3, 0, true),
+            ],
+            frame: Some(wire_frame(6)),
+            single_output: true,
+        };
+        assert_eq!(
+            fixture_live_colors(&patch),
+            vec![
+                RED, GREEN, BLUE,      // wire 3,4,5 (cycle restarts at wire 3 = red)
+                UNLIT_RGB, // doc 3: no cell claims it
+                BLUE, GREEN, RED, // wire 2,1,0
+            ]
+        );
+        patch.frame = None;
+        assert_eq!(
+            fixture_live_colors(&patch),
+            Vec::<[u8; 3]>::new(),
+            "no frame = no feed (the host keeps its last good one)"
+        );
+    }
+
+    /// A cell reaching past the frame's samples keeps the unlit neutral
+    /// (never panics, never wraps), and a cell reaching past the fixture's
+    /// own width is clipped.
+    #[test]
+    fn fixture_live_colors_survive_out_of_range_cells() {
+        let patch = UiFixturePatch {
+            lamps: 2,
+            cells: vec![run(0, 2, 5, false), run(1, 9, 1, false)],
+            frame: Some(wire_frame(6)),
+            single_output: true,
+        };
+        let colors = fixture_live_colors(&patch);
+        assert_eq!(colors.len(), 2);
+        // Doc 0 = wire 5 (blue); doc 1: wire 6 is past the frame, so the
+        // second cell's wire 1 (green) wins the contested slot.
+        assert_eq!(colors[0], BLUE);
+        assert_eq!(colors[1], GREEN);
     }
 }
