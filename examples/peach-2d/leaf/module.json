@@ -1,0 +1,19 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "leaf_shimmer": {
+      "ref": "./leaf_shimmer.json"
+    },
+    "peach_leaf": {
+      "ref": "./peach_leaf.json"
+    }
+  },
+  "exports": {
+    "control.out": "bus:control.out"
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

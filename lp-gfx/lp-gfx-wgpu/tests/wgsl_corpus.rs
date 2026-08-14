@@ -4,7 +4,7 @@
 mod util;
 
 use lp_gfx_wgpu::wgsl_compile::compile_wgsl;
-use lp_shader::TextureBindingSpecs;
+use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
 use util::corpus::CORPUS;
 
 #[test]
@@ -12,8 +12,12 @@ fn whole_corpus_translates_to_wgsl() {
     for shader in CORPUS {
         // A `sampler2D` uniform needs its spec at translation time, so the
         // corpus supplies the palette specs its shaders declare.
-        let translated = compile_wgsl(shader.source, &util::palette::texture_specs(shader))
-            .unwrap_or_else(|e| panic!("{}: {e}", shader.name));
+        let translated = compile_wgsl(
+            shader.source,
+            &util::palette::texture_specs(shader),
+            ShaderEntrySpace::TwoD,
+        )
+        .unwrap_or_else(|e| panic!("{}: {e}", shader.name));
         assert!(
             translated.wgsl.contains("fn main"),
             "{}: WGSL contains the fragment entry point",
@@ -28,8 +32,12 @@ fn rocaille_tanh_is_bounded() {
         .iter()
         .find(|s| s.name == "rocaille")
         .expect("corpus shader");
-    let translated =
-        compile_wgsl(rocaille.source, &TextureBindingSpecs::new()).expect("rocaille translates");
+    let translated = compile_wgsl(
+        rocaille.source,
+        &TextureBindingSpecs::new(),
+        ShaderEntrySpace::TwoD,
+    )
+    .expect("rocaille translates");
     assert!(
         translated.wgsl.contains("clamp"),
         "bounded-tanh pass applied:\n{}",

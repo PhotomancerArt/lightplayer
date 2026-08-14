@@ -1,0 +1,43 @@
+{
+  "kind": "Shader",
+  "source": "dome_sky.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
+    },
+    "bands": {
+      "source": "bus:bands"
+    }
+  },
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 24.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Phase",
+      "description": "Master cycle; the rings and the sweep ride whole multiples of it"
+    },
+    "bands": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3.0,
+      "min": 1.0,
+      "max": 8.0,
+      "label": "Bands",
+      "description": "How many rings roll down the dome at once"
+    }
+  },
+  "space": {
+    "kind": "TwoD"
+  }
+}

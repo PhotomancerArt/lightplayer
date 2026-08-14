@@ -172,6 +172,21 @@ pub fn shape_for_shader_slot(
         ShaderSlotKind::Palette => Err(ComputeStateError::Unsupported(String::from(
             "a palette slot cannot be produced",
         ))),
+        ShaderSlotKind::Buffer => {
+            let elem = slot
+                .value_lp_type()
+                .as_ref()
+                .and_then(lpc_model::BufferElem::from_lp_type)
+                .ok_or_else(|| {
+                    ComputeStateError::Unsupported(String::from(
+                        "buffer slot element must be a builtin scalar/vector",
+                    ))
+                })?;
+            let len = slot.buffer_len().ok_or_else(|| {
+                ComputeStateError::Unsupported(String::from("buffer slot missing len"))
+            })?;
+            Ok(SlotShape::value(LpType::Buffer { elem, len }))
+        }
         ShaderSlotKind::Map => {
             let key = slot.key.data.as_ref().ok_or_else(|| {
                 ComputeStateError::Unsupported(String::from("map slot missing key"))
@@ -251,6 +266,16 @@ fn empty_data_for_slot(slot: &ShaderSlotDef, revision: Revision) -> SlotData {
         ShaderSlotKind::Map => SlotData::Map(lpc_model::SlotMapDyn::with_revision(
             revision,
             VecMap::new(),
+        )),
+        ShaderSlotKind::Buffer => SlotData::Value(WithRevision::new(
+            revision,
+            lpc_model::LpValue::Buffer(lpc_model::LpBuffer::zeroed(
+                slot.value_lp_type()
+                    .as_ref()
+                    .and_then(lpc_model::BufferElem::from_lp_type)
+                    .unwrap_or(lpc_model::BufferElem::F32),
+                slot.buffer_len().unwrap_or(0),
+            )),
         )),
     }
 }

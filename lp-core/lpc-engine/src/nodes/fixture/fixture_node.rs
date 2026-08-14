@@ -25,8 +25,8 @@ use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
-    MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
-    TickContext, err_ctx,
+    MemPressureCtx, NodeError, NodeRuntime, PatchedRun, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
@@ -34,9 +34,9 @@ use crate::products::control::{
     ControlSpan,
 };
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, TextureSampleBatch, TextureUvSamplePoint,
-    VisualProduct, VisualSample, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
-    texel_center_to_uv_q16,
+    CellProjection, ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, TextureSampleBatch,
+    TextureUvSamplePoint, VisualProduct, VisualSample, VisualSpace, normalized_f32_to_q16,
+    normalized_q16_to_pixel_q16, texel_center_to_uv_q16,
 };
 use lpc_model::NodeRuntimeStatus;
 use lpc_model::nodes::fixture::{FixturePower, preset_for};
@@ -52,6 +52,24 @@ pub struct FixtureMap2dSource {
     /// Render-texture extent the doc was resolved against (from the def).
     pub render_width: u32,
     pub render_height: u32,
+}
+
+/// The patch document a fixture's placement was resolved from, kept so the
+/// node can re-resolve when the asset body changes — the same live-edit path
+/// [`FixtureMap2dSource`] gives the mapping.
+#[derive(Clone, Debug)]
+pub struct FixturePatchSource {
+    pub location: lpc_model::AssetLocation,
+    /// Asset revision the current patch document was read at.
+    pub revision: Revision,
+    /// The document itself. Kept parsed because resolution is
+    /// fixture-relative: the lamp count comes from the MAPPING, so a mapping
+    /// edit re-resolves the same document against the new count.
+    ///
+    /// `None` when the reference resolves to a body this build cannot read (a
+    /// newer format, a typo mid-edit). The fixture still lights — auto-flowed
+    /// — and says why; the location stays so the next edit is picked up.
+    pub doc: Option<lpc_mapping::PatchDoc>,
 }
 
 /// A fixture's resolved mapping, in whichever representation it was built
@@ -106,6 +124,34 @@ pub struct FixtureNode {
     /// Keep-last-good: a failed map2d refresh keeps the old mapping
     /// rendering and surfaces the failure as the node's runtime status.
     mapping_error: Option<alloc::string::String>,
+    /// Present when the fixture authored a `.patch.json`.
+    patch_source: Option<FixturePatchSource>,
+    /// Bumped whenever the patch DOCUMENT changes, exactly as
+    /// `mapping_version` tracks the mapping. Paired with `mapping_version` as
+    /// the key `resolved_patch` was computed under — resolution is
+    /// fixture-relative, so a mapping edit invalidates it just as surely as a
+    /// patch edit does.
+    patch_version: Revision,
+    /// The patch resolved against the current lamp count, and the
+    /// `(patch_version, mapping_version, output_topology_revision)` it was
+    /// resolved under. The topology revision is in the key so a
+    /// late-registering output name clears a transient dangling report
+    /// without a patch edit.
+    ///
+    /// An unpatched fixture leaves this `None` forever and the output
+    /// auto-flows it. A patched one that fails to RESOLVE (a range past the
+    /// end of a fixture that shrank) also leaves it `None` — auto-flow is the
+    /// honest fallback, since the alternative is placing lamps the document
+    /// no longer describes — and says so in `patch_error`.
+    resolved_patch: Option<((Revision, Revision, Revision), alloc::vec::Vec<PatchedRun>)>,
+    /// Per-strand instance addresses from the resolved map2d document
+    /// ([`lpc_mapping::object_instance_spans`]) — what `/sector/2`-style
+    /// patch entries lower through. Empty for shape-less strips and
+    /// non-map2d mappings.
+    object_spans: alloc::vec::Vec<lpc_mapping::ObjectInstanceSpan>,
+    /// Keep-last-good, like `mapping_error`: a patch that stops parsing keeps
+    /// the last good placement lighting and surfaces the failure as status.
+    patch_error: Option<alloc::string::String>,
     /// The input didn't resolve (fresh fixture, nothing bound yet): lamps
     /// render unlit and the cause surfaces as runtime status.
     input_error: Option<alloc::string::String>,
@@ -131,6 +177,18 @@ pub struct FixtureNode {
     /// Render time of the last frame, for the release rate limit. Supplied by
     /// the render context — the core never reads a clock.
     power_last_time_seconds: Option<f32>,
+    /// Does this fixture's strip order mean something? (vision D3 — the
+    /// single authored space question.) True puts 1D in this fixture's
+    /// authored coordinate set. Synced from the def each tick; an absent
+    /// def leaves the loaded value standing.
+    strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests (lamp `k`
+    /// reads strip position `N-1-k`). Synced from the def each tick; only
+    /// the 1D request paths ever read it.
+    wire_reversed: bool,
+    /// The authored consumer policy for a 1D source landing on a 2D
+    /// request, translated from `FixtureDef::consume`.
+    consume_policy: ConsumerPolicy,
 }
 
 impl FixtureNode {
@@ -149,6 +207,11 @@ impl FixtureNode {
             mapping_version,
             map2d_source: None,
             mapping_error: None,
+            patch_source: None,
+            patch_version: mapping_version,
+            resolved_patch: None,
+            object_spans: alloc::vec::Vec::new(),
+            patch_error: None,
             input_error: None,
             def_view: None,
             last_visual_product: None,
@@ -162,7 +225,31 @@ impl FixtureNode {
             power_scale_q16: power_limit::UNITY_SCALE_Q16,
             power_estimate_ma: 0,
             power_last_time_seconds: None,
+            strip_order_meaningful: true,
+            wire_reversed: false,
+            consume_policy: ConsumerPolicy::AUTO,
         }
+    }
+
+    /// Seed the authored space declaration, for callers that build a
+    /// fixture runtime without a def to read (tests, and the same
+    /// load-time seeding [`Self::with_render_defaults`] does). The first
+    /// tick that CAN read the def refreshes it.
+    #[must_use]
+    pub fn with_space_declaration(
+        mut self,
+        strip_order_meaningful: bool,
+        consume_policy: ConsumerPolicy,
+    ) -> Self {
+        self.strip_order_meaningful = strip_order_meaningful;
+        self.consume_policy = consume_policy;
+        // Seeded settings carry a copy, so they must move with it — the
+        // builders are order-independent by construction, not by luck.
+        if let Some(settings) = self.last_settings.as_mut() {
+            settings.strip_order_meaningful = strip_order_meaningful;
+            settings.consume_policy = consume_policy;
+        }
+        self
     }
 
     /// Attach the map2d document source this mapping was resolved from,
@@ -171,6 +258,133 @@ impl FixtureNode {
     pub fn with_map2d_source(mut self, source: FixtureMap2dSource) -> Self {
         self.map2d_source = Some(source);
         self
+    }
+
+    /// Attach the patch document this fixture is placed by.
+    ///
+    /// The document is not resolved here: resolution needs the lamp count,
+    /// which the mapping owns and which can change under a live edit, so the
+    /// first `produce` (and every one after a mapping or patch change) does
+    /// it. A patch that cannot resolve degrades to auto-flow and reports.
+    #[must_use]
+    /// Seed the per-strand instance-address table computed at load
+    /// ([`lpc_mapping::object_instance_spans`]); asset refresh recomputes it.
+    pub fn with_object_spans(
+        mut self,
+        spans: alloc::vec::Vec<lpc_mapping::ObjectInstanceSpan>,
+    ) -> Self {
+        self.object_spans = spans;
+        self
+    }
+
+    pub fn with_patch_source(mut self, source: FixturePatchSource) -> Self {
+        self.patch_source = Some(source);
+        self
+    }
+
+    /// Seed the reason a patch document could not be read at load, so the
+    /// node reports it from its first status read rather than only after a
+    /// refresh.
+    #[must_use]
+    pub fn with_patch_error(mut self, error: alloc::string::String) -> Self {
+        self.patch_error = Some(error);
+        self
+    }
+
+    /// Resolve the patch document against the CURRENT lamp count, if that
+    /// pair has moved since the last resolve.
+    ///
+    /// Cheap and idempotent: an unpatched fixture returns immediately, and a
+    /// patched one re-resolves only when its document or its mapping changed.
+    fn ensure_patch_resolved(&mut self, ctx: &TickContext<'_>) {
+        let Some(source) = &self.patch_source else {
+            self.resolved_patch = None;
+            return;
+        };
+        // An empty document is a CLEARED patch, and a cleared patch means
+        // auto-flow — the same thing deleting the file means. Resolving it
+        // would instead anchor the whole fixture at channel 0, which is
+        // auto-flow only when this fixture is alone on the wire; an installer
+        // who cleared one strand of three would find the wire contested.
+        let Some(doc) = source.doc.as_ref().filter(|doc| !doc.entries.is_empty()) else {
+            self.resolved_patch = None;
+            return;
+        };
+        let (known_outputs, topology_revision) = ctx.known_output_names();
+        let key = (self.patch_version, self.mapping_version, topology_revision);
+        if let Some((resolved_key, _)) = &self.resolved_patch
+            && *resolved_key == key
+        {
+            return;
+        }
+        // The same count the control product is sized from, and the same one
+        // the patch document's ranges are written against.
+        let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
+        // No `allowed_outputs` and no `default_output`: a dangling name must
+        // degrade per RUN, not refuse the whole document (checked below),
+        // and which output is the default is the ENGINE's routing question —
+        // the kernel groups entries that name it explicitly as their own
+        // wire, which only matters for reflow docs mixing an explicit
+        // default-output anchor with unanchored lamps.
+        let resolve_ctx = lpc_mapping::PatchResolveContext {
+            fixture_lamp_count: lamp_count,
+            object_spans: &self.object_spans,
+            allowed_outputs: None,
+            default_output: None,
+        };
+        match lpc_mapping::resolve_patch(&resolve_ctx, doc) {
+            Ok(resolution) => {
+                // Degrade-and-report for dangling output names: the run is
+                // UNPLACED (no output would ever match it), the rest of the
+                // document stands, and the error names the fix. Skipped
+                // while no output has registered a name yet — the topology
+                // revision in the cache key re-runs this once one does.
+                let mut dangling: Option<alloc::string::String> = None;
+                let runs: alloc::vec::Vec<PatchedRun> = resolution
+                    .ranges
+                    .into_iter()
+                    .filter_map(|range| {
+                        if let Some(name) = &range.output
+                            && !known_outputs.is_empty()
+                            && !known_outputs.iter().any(|known| known == name)
+                        {
+                            dangling.get_or_insert_with(|| name.clone());
+                            return None;
+                        }
+                        Some(PatchedRun {
+                            start: range.start,
+                            count: range.count,
+                            lamp: range.lamp,
+                            reversed: range.reversed,
+                            offset: range.offset,
+                            output: range.output,
+                        })
+                    })
+                    .collect();
+                self.resolved_patch = Some((key, runs));
+                // The kernel's own per-entry degrades (duplicate paths)
+                // outrank a dangling name: both leave lamps auto-flowing,
+                // but the duplicate names the entry to delete.
+                self.patch_error = resolution
+                    .refusals
+                    .first()
+                    .map(|refusal| format!("resolve fixture patch: {refusal}"))
+                    .or(dangling.map(|name| {
+                        format!(
+                            "fixture patch places lamps on output {name:?}, but no output is \
+                             named {name:?}; those lamps are unplaced"
+                        )
+                    }));
+            }
+            Err(error) => {
+                // No last-good placement to keep here — the document IS
+                // readable, it just does not describe this fixture — so fall
+                // back to auto-flow rather than lighting lamps by a rule
+                // nobody authored.
+                self.resolved_patch = None;
+                self.patch_error = Some(format!("resolve fixture patch: {error}"));
+            }
+        }
     }
 
     /// Seed render settings from the def at load, so control probes work
@@ -193,6 +407,9 @@ impl FixtureNode {
             brightness: lpc_model::Brightness::DEFAULT.as_u8(),
             gamma_correction: true,
             power: FixturePower::default(),
+            strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
+            consume_policy: self.consume_policy,
         });
         self
     }
@@ -287,6 +504,46 @@ impl FixtureNode {
         Ok(())
     }
 
+    /// The patch half of [`NodeRuntime::refresh_asset`].
+    ///
+    /// `None` means "not my patch document" and the caller falls through to
+    /// the mapping. Bumping `patch_version` is what makes the next `produce`
+    /// re-resolve, and the tick after that re-places the wire — a patch edit
+    /// therefore reaches the lamps the same way a mapping edit does.
+    fn refresh_patch_asset(
+        &mut self,
+        location: &lpc_model::AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Option<AssetRefreshResult> {
+        let source = self.patch_source.as_ref()?;
+        if location != &source.location {
+            return None;
+        }
+        let text = match ctx.read_asset_text_if_changed(location, source.revision) {
+            Ok(Some(text)) => text,
+            Ok(None) => return Some(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                // Keep-last-good: no new document to parse.
+                self.patch_error = Some(format!("read fixture patch document: {err:?}"));
+                return Some(AssetRefreshResult::Refreshed);
+            }
+        };
+        match lpc_mapping::PatchDoc::from_json(&text.text) {
+            Ok(doc) => {
+                if let Some(source) = self.patch_source.as_mut() {
+                    source.doc = Some(doc);
+                    source.revision = text.revision;
+                }
+                self.patch_version = ctx.revision();
+                self.patch_error = None;
+            }
+            // Keep-last-good: the placement standing on the wire came from a
+            // document that parsed, and a half-typed edit should not go dark.
+            Err(error) => self.patch_error = Some(format!("parse fixture patch document: {error}")),
+        }
+        Some(AssetRefreshResult::Refreshed)
+    }
+
     fn control_display_layout_revision(
         &mut self,
         settings: FixtureRenderSettings,
@@ -322,6 +579,19 @@ struct FixtureSamplePoints {
     mapping_version: Revision,
     width: u32,
     height: u32,
+    /// The space these coordinates were generated for. A 1D batch is a
+    /// different *packing* as well as different numbers, so a space change
+    /// must rewrite the buffer.
+    space: VisualSpace,
+    /// The policy the request carried. It does not change these
+    /// coordinates today, but it is part of what the producer was asked —
+    /// keeping it in the key means a policy edit can never be served from
+    /// a buffer written under the old one.
+    policy: ConsumerPolicy,
+    /// The wire direction the 1D coordinates were generated for. Unlike
+    /// `policy` this DOES change the numbers (the strip reads back to
+    /// front), so a flip must rewrite the buffer.
+    wire_reversed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,7 +641,24 @@ impl NodeRuntime for FixtureNode {
         let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
+        // The two-sided space declaration (vision D3/D14). Absent reads —
+        // a runtime fixture with no def behind it — leave the loaded
+        // declaration standing rather than resetting it, the same rule the
+        // shader node's `space` read follows.
+        if let Some(strip_order_meaningful) = try_read_def_value(ctx, "strip_order_meaningful")? {
+            self.strip_order_meaningful = strip_order_meaningful;
+        }
+        if let Some(wire_reversed) = try_read_def_value(ctx, "wire_reversed")? {
+            self.wire_reversed = wire_reversed;
+        }
+        if let Some(policy) = try_read_consume_policy(ctx) {
+            self.consume_policy = policy;
+        }
         self.sync_mapping_from_def(ctx)?;
+        // After the mapping settles and before the control product is
+        // published: the output reads this placement in the same tick, right
+        // after the resolve that ran us.
+        self.ensure_patch_resolved(ctx);
         let width = render_size.width;
         let height = render_size.height;
 
@@ -434,6 +721,9 @@ impl NodeRuntime for FixtureNode {
             brightness,
             gamma_correction,
             power,
+            strip_order_meaningful: self.strip_order_meaningful,
+            wire_reversed: self.wire_reversed,
+            consume_policy: self.consume_policy,
         });
         self.state.output.set_with_version(
             ver,
@@ -501,6 +791,11 @@ impl NodeRuntime for FixtureNode {
         location: &lpc_model::AssetLocation,
         ctx: &mut AssetRefreshContext<'_>,
     ) -> Result<AssetRefreshResult, NodeError> {
+        // A fixture has TWO refreshable documents. Try the patch first (the
+        // cheaper one), then fall through to the mapping.
+        if let Some(result) = self.refresh_patch_asset(location, ctx) {
+            return Ok(result);
+        }
         let Some(source) = &self.map2d_source else {
             return Ok(AssetRefreshResult::Unused);
         };
@@ -521,11 +816,20 @@ impl NodeRuntime for FixtureNode {
         let resolved = lpc_mapping::Map2dDoc::from_json(&text.text)
             .map_err(|e| format!("parse fixture map2d document: {e}"))
             .and_then(|doc| {
-                mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
-                    .map_err(|e| format!("resolve fixture map2d document: {e}"))
+                let mapping =
+                    mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
+                        .map_err(|e| format!("resolve fixture map2d document: {e}"))?;
+                // The per-strand instance-address table `/sector/2`-style
+                // patch entries lower through, kept in lockstep with the
+                // mapping it derives from (same doc, same resolve).
+                let spans = lpc_mapping::resolve(&doc)
+                    .map(|resolved| lpc_mapping::object_instance_spans(&doc, &resolved))
+                    .unwrap_or_default();
+                Ok((mapping, spans))
             });
         match resolved {
-            Ok(mapping) => {
+            Ok((mapping, spans)) => {
+                self.object_spans = spans;
                 self.mapping = FixtureMapping::Compact(mapping);
                 self.mapping_version = ctx.revision();
                 if let Some(source) = &mut self.map2d_source {
@@ -544,8 +848,15 @@ impl NodeRuntime for FixtureNode {
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
         self.mapping_error
             .as_ref()
+            .or(self.patch_error.as_ref())
             .or(self.input_error.as_ref())
             .map(|error| NodeRuntimeStatus::Error(error.clone()))
+    }
+
+    fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
+        self.resolved_patch
+            .as_ref()
+            .map(|(_, runs)| runs.as_slice())
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -615,6 +926,70 @@ fn sync_mapping_config_from_def(
     }
 }
 
+/// The authored `consume` policy (`FixtureDef::consume`), translated into
+/// the runtime vocabulary. `None` when the declaration does not resolve at
+/// all (a runtime fixture with no def) — the loaded policy then stands.
+fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> {
+    match try_read_def_enum_variant(ctx, "consume")?.as_str() {
+        // `Auto` IS the defaults-only policy — the model says so in as many
+        // words, so there is no third state to carry into the engine.
+        "Auto" => Some(ConsumerPolicy::AUTO),
+        "Policy" => {
+            // The factored cell (v9): one `Project` record of
+            // shape × mirror × flip. Unresolvable payload fields read as
+            // their behavior-preserving defaults.
+            let from_1d = CellProjection {
+                shape: try_read_def_shape(ctx, "consume.Policy.from_1d.Project.shape"),
+                // The modifiers are two-variant mode enums; anything but
+                // the on-variant (including unresolvable) reads as off.
+                mirror: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.mirror")
+                    .as_deref()
+                    == Some("Mirrored"),
+                flip: try_read_def_enum_variant(ctx, "consume.Policy.from_1d.Project.flip")
+                    .as_deref()
+                    == Some("Flipped"),
+            };
+            let force = try_read_def_value::<bool>(ctx, "consume.Policy.force")
+                .ok()
+                .flatten()
+                .unwrap_or(false);
+            Some(ConsumerPolicy {
+                default_1d_to_2d: from_1d,
+                force,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The authored shape payload of a `Project` cell. Unresolvable reads as
+/// the default `ExtrudeX` (the behavior-preserving anchor).
+fn try_read_def_shape(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> crate::products::visual::ProjectionShape {
+    use crate::products::visual::ProjectionShape;
+    match try_read_def_enum_variant(ctx, path).as_deref() {
+        Some("ExtrudeY") => ProjectionShape::ExtrudeY,
+        Some("Radial") => ProjectionShape::Radial,
+        Some("Angular") => ProjectionShape::Angular,
+        _ => ProjectionShape::ExtrudeX,
+    }
+}
+
+/// The active variant name of an authored enum slot, read through the same
+/// overlay-aware view as the value syncs.
+fn try_read_def_enum_variant(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
+) -> Option<alloc::string::String> {
+    let production = ctx.resolve_static_consumed(path).ok()?;
+    let lpc_model::SlotData::Enum(declaration) = production.data() else {
+        return None;
+    };
+    Some(alloc::string::String::from(declaration.variant.as_str()))
+}
+
 fn try_read_def_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
     path: &'static str,
@@ -673,6 +1048,12 @@ struct FixtureRenderSettings {
     /// Lamp type and the budget in force, after an unstated one has fallen
     /// back to the default. A zero budget means limiting was opted out of.
     power: FixturePower,
+    /// Whether 1D is in this fixture's authored coordinate set.
+    strip_order_meaningful: bool,
+    /// Reverse the wire order on along-the-wire 1D requests.
+    wire_reversed: bool,
+    /// This fixture's projection policy for a 1D source on a 2D request.
+    consume_policy: ConsumerPolicy,
 }
 
 impl ControlNode for FixtureNode {
@@ -794,6 +1175,17 @@ impl FixtureNode {
                 power,
             );
         };
+        // Ask the product what space it lives in, then pick which of our own
+        // coordinate sets to send (vision D1 leg c). Selecting is the whole
+        // of the consumer's job — the producer executes any projection.
+        let product_space = ctx.visual_product_space(visual_product)?;
+        let area_rows =
+            (self.sampling == FixtureSamplingConfig::TextureArea).then_some(settings.height);
+        let request_space = select_request_space(
+            product_space.primary,
+            settings.strip_order_meaningful,
+            fixture_carries_2d_coords(self.mapping.as_mapping_ref(), area_rows),
+        );
         if self.sampling == FixtureSamplingConfig::Direct {
             let (channels_version, channels) = self
                 .direct_channels
@@ -810,7 +1202,55 @@ impl FixtureNode {
                 request,
                 target,
                 settings,
+                request_space,
                 ctx,
+                power,
+            );
+        }
+        if request_space == VisualSpace::OneD {
+            // 1D-native texture path: the target is the strip itself,
+            // `(N, 1)`, one texel per lamp in wire order. The 2D area
+            // accumulator below has no meaning here — there is no area.
+            self.ensure_direct_channels(self.mapping_version);
+            let channels = self
+                .direct_channels
+                .as_ref()
+                .map(|(_, channels)| channels.as_slice())
+                .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
+            let texture_request = RenderTextureRequest {
+                width: channels.len() as u32,
+                height: 1,
+                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                time_seconds: ctx.time_seconds(),
+                space: VisualSpace::OneD,
+                policy: settings.consume_policy,
+            };
+            let texture =
+                ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
+            ctx.render_texture_into(visual_product, &texture_request, texture)?;
+            let texture_data = ctx
+                .graphics()
+                .ok_or_else(|| NodeError::msg("fixture strip accumulation requires graphics"))?
+                .read_back(texture)
+                .map_err(err_ctx("fixture strip render target read back"))?;
+            let channels = self
+                .direct_channels
+                .as_ref()
+                .map(|(_, channels)| channels.as_slice())
+                .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
+            let accumulators = accumulate_fixture_channels_from_strip(
+                &texture_data,
+                channels,
+                settings.wire_reversed,
+            )?;
+            return render_fixture_control_target(
+                request,
+                target,
+                &accumulators,
+                self.mapping.as_mapping_ref(),
+                settings.color_order,
+                settings.brightness,
+                settings.gamma_correction,
                 power,
             );
         }
@@ -825,6 +1265,8 @@ impl FixtureNode {
             height: settings.height,
             format: lps_shared::TextureStorageFormat::Rgba16Unorm,
             time_seconds: ctx.time_seconds(),
+            space: VisualSpace::TwoD,
+            policy: settings.consume_policy,
         };
         let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
         ctx.render_texture_into(visual_product, &texture_request, texture)?;
@@ -967,6 +1409,9 @@ fn ensure_fixture_sample_points<'a>(
     count: u32,
     output_width: u32,
     output_height: u32,
+    space: VisualSpace,
+    policy: ConsumerPolicy,
+    wire_reversed: bool,
     ctx: &ControlRenderContext<'_>,
 ) -> Result<&'a mut SamplePointsHandle, NodeError> {
     let current_matches = current.as_ref().is_some_and(|sp| {
@@ -974,6 +1419,9 @@ fn ensure_fixture_sample_points<'a>(
             && sp.mapping_version == mapping_version
             && sp.width == output_width
             && sp.height == output_height
+            && sp.space == space
+            && sp.policy == policy
+            && sp.wire_reversed == wire_reversed
     });
     if current_matches {
         return Ok(&mut current.as_mut().expect("checked above").handle);
@@ -1001,16 +1449,29 @@ fn ensure_fixture_sample_points<'a>(
             "fixture sample points out of sync with channels: mapping generated {generated_count} points for {count} channels"
         )));
     }
-    let coords = fixture_sample_point_coords(mapping, output_width, output_height);
-    graphics
-        .write_sample_points(&mut handle, &coords)
-        .map_err(err_ctx("fixture sample point write"))?;
+    match space {
+        VisualSpace::TwoD => {
+            let coords = fixture_sample_point_coords(mapping, output_width, output_height);
+            graphics
+                .write_sample_points(&mut handle, &coords)
+                .map_err(err_ctx("fixture sample point write"))?;
+        }
+        VisualSpace::OneD => {
+            let coords = fixture_strip_point_coords(count, wire_reversed);
+            graphics
+                .write_sample_points_1d(&mut handle, &coords)
+                .map_err(err_ctx("fixture strip point write"))?;
+        }
+    }
 
     *current = Some(FixtureSamplePoints {
         handle,
         mapping_version,
         width: output_width,
         height: output_height,
+        space,
+        policy,
+        wire_reversed,
     });
     Ok(&mut current.as_mut().expect("just stored").handle)
 }
@@ -1042,6 +1503,131 @@ fn fixture_sample_point_coords(
     coords
 }
 
+/// The 1-lane pixel-space Q16 coordinates of a strip request: lamp `k`
+/// sits at the centre of texel `k` of an `(N, 1)` target.
+///
+/// **This ignores the mapping, by design.** Strip position is the wire
+/// order — the same visit order `fixture_sample_point_coords` walks and
+/// the same order the channel list was built in — and a fixture only ever
+/// receives a 1D request when it declared that its strip order means
+/// something (vision D1: fire2012 on a ring-mapped scarf runs along the
+/// scarf, not around the ring). Pixel centres (`k + 0.5`) rather than
+/// `k`, so sampling the strip and rendering an `(N, 1)` texture of it
+/// land on the same points.
+fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
+    (0..count)
+        .map(|index| {
+            let index = if wire_reversed {
+                count - 1 - index
+            } else {
+                index
+            } as i32;
+            (index << 16) + (crate::products::visual::coordinates::Q16_ONE / 2)
+        })
+        .collect()
+}
+
+/// One texel per lamp, straight off an `(N, 1)` strip render — the 1D
+/// answer to `accumulate_fixture_channels_from_texture_data`. There is no
+/// area to integrate here, so there is no sampler and no u8 round trip:
+/// the RGBA16 texel IS the lamp value.
+fn accumulate_fixture_channels_from_strip(
+    texture: &TextureData,
+    channels: &[u32],
+    wire_reversed: bool,
+) -> Result<ChannelAccumulators, NodeError> {
+    if texture.format() != lps_shared::TextureStorageFormat::Rgba16Unorm {
+        return Err(NodeError::msg(format!(
+            "fixture strip accumulation needs an Rgba16Unorm target, got {:?}",
+            texture.format()
+        )));
+    }
+    if texture.width() as usize != channels.len() || texture.height() != 1 {
+        return Err(NodeError::msg(format!(
+            "fixture strip target is {}x{}, expected {}x1",
+            texture.width(),
+            texture.height(),
+            channels.len()
+        )));
+    }
+    let max_channel = channels.iter().copied().max().unwrap_or(0);
+    let len = max_channel as usize + 1;
+    let mut accumulators = ChannelAccumulators {
+        r: alloc::vec![Q32::ZERO; len],
+        g: alloc::vec![Q32::ZERO; len],
+        b: alloc::vec![Q32::ZERO; len],
+        max_channel,
+    };
+    let bytes = texture.bytes();
+    for (index, channel) in channels.iter().enumerate() {
+        // The reversed wire reads the strip back to front: lamp `k` takes
+        // texel `N-1-k` (the along-the-wire direction option).
+        let texel_index = if wire_reversed {
+            channels.len() - 1 - index
+        } else {
+            index
+        };
+        let base = texel_index * 8;
+        let Some(texel) = bytes.get(base..base + 8) else {
+            break;
+        };
+        let read = |offset: usize| -> Q32 {
+            let raw = u16::from_le_bytes([texel[offset], texel[offset + 1]]);
+            unorm16_to_q32(raw)
+        };
+        let channel = *channel as usize;
+        if channel < accumulators.r.len() {
+            accumulators.r[channel] = read(0);
+            accumulators.g[channel] = read(2);
+            accumulators.b[channel] = read(4);
+        }
+    }
+    Ok(accumulators)
+}
+
+/// Unorm16 `[0, 65535]` as Q32 `[0, 1]`.
+fn unorm16_to_q32(value: u16) -> Q32 {
+    Q32(((value as i64) * 65536 / 65535) as i32)
+}
+
+/// Which of this fixture's coordinate sets to send, given what the product
+/// declared (vision D1 leg c: intersection, preferring the effect's intent).
+///
+/// Non-empty intersection → the product's own space, which is what makes a
+/// 1D effect on a ring-mapped scarf sample strip positions. Empty → this
+/// fixture's only space, and the producer projects into it (a 1D source on
+/// a matrix, a 2D source on a bare strip).
+fn select_request_space(
+    product_primary: VisualSpace,
+    strip_order_meaningful: bool,
+    carries_2d_coords: bool,
+) -> VisualSpace {
+    let in_set = match product_primary {
+        VisualSpace::OneD => strip_order_meaningful,
+        VisualSpace::TwoD => carries_2d_coords,
+    };
+    if in_set {
+        return product_primary;
+    }
+    if carries_2d_coords {
+        VisualSpace::TwoD
+    } else {
+        VisualSpace::OneD
+    }
+}
+
+/// Does this fixture carry 2D coordinates at all?
+///
+/// 2D membership comes from **authored intent**: a map (vision §1: nobody
+/// builds a ring map by accident), or a TextureArea render area taller
+/// than one row — `render_size` height > 1 is the author saying "render my
+/// area in 2D" (the pre-map idiom every area fixture uses). Never derived
+/// from lamp positions.
+fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) -> bool {
+    !matches!(mapping, MappingRef::Slots(MappingConfig::Unset))
+        || area_rows.is_some_and(|rows| rows > 1)
+}
+
 fn render_direct_fixture_control(
     sample_points: &mut Option<FixtureSamplePoints>,
     sample_target: &mut Option<SampleOutHandle>,
@@ -1052,6 +1638,7 @@ fn render_direct_fixture_control(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
+    space: VisualSpace,
     ctx: &mut ControlRenderContext<'_>,
     power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
@@ -1074,13 +1661,22 @@ fn render_direct_fixture_control(
         ));
     }
 
+    // A 1D request's target is the strip itself: `outputSize` is
+    // `(lamp count, 1)`, so `pos / outputSize.x` reads as strip position.
+    let (output_width, output_height) = match space {
+        VisualSpace::OneD => (channels.len() as u32, 1),
+        VisualSpace::TwoD => (settings.width, settings.height),
+    };
     let point_buf = ensure_fixture_sample_points(
         sample_points,
         mapping,
         mapping_version,
         channels.len() as u32,
-        settings.width,
-        settings.height,
+        output_width,
+        output_height,
+        space,
+        settings.consume_policy,
+        settings.wire_reversed,
         ctx,
     )?;
     let sample_buf = ensure_fixture_sample_target(sample_target, channels.len() as u32, ctx)?;
@@ -1088,9 +1684,11 @@ fn render_direct_fixture_control(
         visual_product,
         crate::products::visual::VisualSampleBufferRequest {
             points: point_buf,
-            output_width: settings.width,
-            output_height: settings.height,
+            output_width,
+            output_height,
             time_seconds: ctx.time_seconds(),
+            space,
+            policy: settings.consume_policy,
         },
         crate::products::visual::VisualSampleTarget {
             samples: sample_buf,
@@ -1694,7 +2292,7 @@ fn fixture_path_spans(config: MappingRef<'_>) -> Vec<FixturePathSpan> {
         // empty strands skipped, so `palette_index` stays a running index
         // over the spans that actually have lamps. A repeated document
         // therefore yields one honest span per instance. Studio's wiring
-        // arrows and universe coloring read these.
+        // arrows read these.
         MappingRef::Compact(compact) => {
             let mut spans = Vec::new();
             for span in &compact.spans {
@@ -2032,6 +2630,9 @@ mod tests {
             2,
             4,
             4,
+            VisualSpace::TwoD,
+            ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("first ensure");
@@ -2054,6 +2655,9 @@ mod tests {
             2,
             4,
             4,
+            VisualSpace::TwoD,
+            ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("same-key ensure");
@@ -2071,6 +2675,9 @@ mod tests {
             2,
             4,
             8,
+            VisualSpace::TwoD,
+            ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("resized ensure");
@@ -2091,6 +2698,9 @@ mod tests {
             2,
             4,
             8,
+            VisualSpace::TwoD,
+            ConsumerPolicy::default(),
+            false,
             &ctx,
         )
         .expect("remapped ensure");
@@ -3115,15 +3725,17 @@ mod tests {
         assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
     }
 
-    /// A dome-scale fixture's display layout cannot ride one project-read
-    /// frame (1500 lamps serialize far past the 16 KiB budget), and the
+    /// A fixture past the packed encoding's frame ceiling (~2650 lamps at
+    /// ~5.4 B/lamp against the 16 KiB budget; dome-scale 1500 now FITS)
+    /// still gets its display layout refused as `Unsupported` — the
     /// transport's over-budget rejection is terminal for the whole read
-    /// stream. The engine must refuse the layout as `Unsupported` — a
-    /// graceful per-probe fallback — instead of handing the transport an
-    /// event that wedges the entire project view.
+    /// stream, so the engine must degrade the one probe rather than hand
+    /// the transport an event that wedges the entire project view. Above
+    /// the declared 2048-lamp embedded ceiling this refusal is product
+    /// posture, not a defect.
     #[test]
     #[cfg(feature = "node-shader")]
-    fn fixture_project_read_refuses_over_budget_display_layout() {
+    fn fixture_project_read_refuses_display_layout_past_the_packed_budget() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
@@ -3161,9 +3773,10 @@ mod tests {
             )
             .unwrap();
 
-        // Dome scale: 1500 lamps on one path, the Zook dome regime.
-        let points: Vec<[f32; 2]> = (0..1500)
-            .map(|i| [(i % 100) as f32 / 100.0, (i / 100) as f32 / 15.0])
+        // Past the packed ceiling: 4000 lamps on one path — beyond what a
+        // single 16 KiB frame can carry even at ~5.4 packed bytes a lamp.
+        let points: Vec<[f32; 2]> = (0..4000)
+            .map(|i| [(i % 100) as f32 / 100.0, (i / 100) as f32 / 40.0])
             .collect();
         let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, points)], 2.0);
 
@@ -3231,7 +3844,7 @@ mod tests {
         engine.add_demand_root(fix_id);
         engine.tick(&registry, 10).unwrap();
 
-        let extent = ControlExtent::new(1, 4500);
+        let extent = ControlExtent::new(1, 12000);
         let product = ControlProduct::new(fix_id, 0, extent);
         let results = read_probe_results(
             &mut engine,
@@ -3259,8 +3872,8 @@ mod tests {
             panic!("expected preview with refused display layout, got {results:?}");
         };
         assert!(
-            reason.contains("wire budget"),
-            "reason names the wire budget: {reason}"
+            reason.contains("byte budget") && reason.contains("bytes serialized"),
+            "reason names the link budget and the measured size: {reason}"
         );
     }
 
@@ -3910,6 +4523,1031 @@ mod tests {
     }
 }
 
+/// The two-sided space negotiation, end to end through a real compiled
+/// shader (dimensionality plan P4).
+///
+/// These are the founding cases promised at the vision gate: the scarf
+/// (a 1D effect on a ring-mapped fixture runs along the strip and ignores
+/// the map), the precedence ladder for a 1D effect that lands on a
+/// 2D-only fixture, and the cache key that must notice a space change.
+/// The producer is a `ShaderNode` compiling ramp GLSL through the normal
+/// pipeline, so what is asserted is the values that actually come out of
+/// a program, not a fake's opinion of them.
+#[cfg(all(test, feature = "node-shader"))]
+mod space_negotiation {
+    use super::*;
+    use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
+    use crate::nodes::ShaderNode;
+    use crate::products::visual::{
+        ProductSpaceInfo, ProjectionShape, VisualSampleBufferRequest, VisualSampleTarget,
+    };
+
+    /// An authored factored answer cell: `Project { shape, mirror, flip }`.
+    fn authored_project(
+        shape: lpc_model::ProjectionShape,
+        mirror: bool,
+        flip: bool,
+    ) -> SpaceAnswer2 {
+        SpaceAnswer2::Project {
+            shape: EnumSlot::new(shape),
+            mirror: EnumSlot::new(if mirror {
+                lpc_model::MirrorMode::Mirrored
+            } else {
+                lpc_model::MirrorMode::Normal
+            }),
+            flip: EnumSlot::new(if flip {
+                lpc_model::FlipMode::Flipped
+            } else {
+                lpc_model::FlipMode::Normal
+            }),
+        }
+    }
+
+    /// A runtime factored cell.
+    fn cellp(shape: ProjectionShape, mirror: bool, flip: bool) -> CellProjection {
+        CellProjection {
+            shape,
+            mirror,
+            flip,
+        }
+    }
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::sync::Arc;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use lpc_model::{
+        ArtifactLocation, AssetContentType, AssetLocation, EnumSlot, NodeId, ShaderDef,
+        ShaderSpace, SpaceAnswer2, VisualConsumerSpace,
+    };
+    use lpc_registry::AssetText;
+
+    /// `render_1d(p)` = a ramp along the strip: every channel is the
+    /// normalized strip position. Deterministic, and every projection the
+    /// producer might apply is directly readable off the output.
+    const RAMP_1D: &str = "layout(binding = 0) uniform vec2 outputSize; \
+vec4 render_1d(float pos) { float t = pos / outputSize.x; return vec4(t, t, t, 1.0); }";
+
+    /// `render_2d(pos)` = x in red, y in green. Reading a lamp tells you
+    /// exactly which UV it was sampled at.
+    const RAMP_2D: &str = "layout(binding = 0) uniform vec2 outputSize; \
+vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }";
+
+    /// Q32 shader math plus the unorm16 round trip: a few hundred counts
+    /// out of 65535 is agreement, and every case below has expectations
+    /// that differ by far more than that.
+    const TOLERANCE: u16 = 400;
+
+    fn assert_near(actual: u16, expected: f32, what: &str) {
+        let expected_u16 = (expected.clamp(0.0, 1.0) * 65535.0) as u16;
+        let delta = actual.abs_diff(expected_u16);
+        assert!(
+            delta <= TOLERANCE,
+            "{what}: got {actual}, expected ~{expected_u16} (delta {delta})"
+        );
+    }
+
+    fn graphics() -> Arc<dyn lp_gfx::LpGraphics> {
+        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))
+    }
+
+    fn shader_def(space: ShaderSpace) -> ShaderDef {
+        ShaderDef {
+            space: EnumSlot::new(space),
+            ..ShaderDef::default()
+        }
+    }
+
+    fn asset(source: &str) -> AssetText {
+        AssetText {
+            location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+            content_type: AssetContentType::ShaderSource,
+            revision: Revision::new(1),
+            text: String::from(source),
+            diagnostic_name: String::from("/shader.glsl"),
+        }
+    }
+
+    /// A `ControlRenderServices` whose visual product is one real shader
+    /// node — the sampling boundary with nothing faked on either side.
+    struct ShaderProducer {
+        node: ShaderNode,
+        node_id: NodeId,
+        graphics: Arc<dyn lp_gfx::LpGraphics>,
+    }
+
+    impl ShaderProducer {
+        fn new(space: ShaderSpace, source: &str) -> Self {
+            let node_id = NodeId::new(1);
+            let mut node = ShaderNode::new(node_id, shader_def(space), asset(source));
+            // The engine opens compile windows during tick; a node-level
+            // harness stands in for it.
+            node.open_compile_window(Revision::new(1));
+            Self {
+                node,
+                node_id,
+                graphics: graphics(),
+            }
+        }
+
+        fn product(&self) -> VisualProduct {
+            VisualProduct::new(self.node_id, 0)
+        }
+
+        fn ctx(&self) -> RenderContext<'static> {
+            RenderContext::new(
+                self.node_id,
+                Revision::new(1),
+                Some(self.graphics.clone()),
+                None,
+                0.0,
+            )
+        }
+    }
+
+    impl TimebaseRead for ShaderProducer {}
+
+    impl crate::node::ControlRenderServices for ShaderProducer {
+        fn visual_product_space(
+            &mut self,
+            product: VisualProduct,
+        ) -> Result<ProductSpaceInfo, NodeError> {
+            let mut ctx = self.ctx();
+            self.node.visual_space(product, &mut ctx)
+        }
+
+        fn render_texture(
+            &mut self,
+            product: VisualProduct,
+            request: &RenderTextureRequest,
+        ) -> Result<TextureRenderProduct, NodeError> {
+            let mut ctx = self.ctx();
+            self.node.render_texture(product, request, &mut ctx)
+        }
+
+        fn render_texture_into(
+            &mut self,
+            product: VisualProduct,
+            request: &RenderTextureRequest,
+            target: &mut lp_gfx::TextureHandle,
+        ) -> Result<(), NodeError> {
+            let mut ctx = self.ctx();
+            self.node
+                .render_texture_into(product, request, target, &mut ctx)
+        }
+
+        fn sample_visual_into(
+            &mut self,
+            product: VisualProduct,
+            request: VisualSampleBufferRequest<'_>,
+            target: VisualSampleTarget<'_>,
+        ) -> Result<(), NodeError> {
+            let mut ctx = self.ctx();
+            self.node
+                .sample_visual_into(product, request, target, &mut ctx)
+        }
+    }
+
+    /// Lamp positions around a ring — the scarf's authored map. Nothing
+    /// about the ring is monotone in x, so a value that tracks strip
+    /// position cannot have come from the map.
+    fn ring_points(count: usize) -> Vec<[f32; 2]> {
+        (0..count)
+            .map(|index| {
+                let turns = index as f32 / count as f32;
+                let angle = core::f32::consts::TAU * turns;
+                [0.5 + 0.4 * libm::cosf(angle), 0.5 + 0.4 * libm::sinf(angle)]
+            })
+            .collect()
+    }
+
+    /// Build a ticked-enough fixture: the state a `produce()` would have
+    /// left behind, seeded directly so the test needs no engine.
+    fn ring_fixture(
+        count: usize,
+        strip_order_meaningful: bool,
+        policy: ConsumerPolicy,
+        product: VisualProduct,
+    ) -> FixtureNode {
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, ring_points(count))], 1.0);
+        let version = Revision::new(1);
+        let mut fixture = FixtureNode::new(
+            NodeId::new(2),
+            mapping,
+            FixtureSamplingConfig::Direct,
+            version,
+        )
+        .with_render_defaults(16, 16, ColorOrder::Rgb)
+        .with_space_declaration(strip_order_meaningful, policy);
+        // Gamma off / full brightness: the assertions below are about the
+        // coordinates the shader saw, not the output encode.
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.gamma_correction = false;
+            settings.brightness = u8::MAX;
+            settings.power = FixturePower {
+                budget_ma: 0,
+                ..FixturePower::default()
+            };
+        }
+        fixture.ensure_direct_channels(version);
+        fixture.last_visual_product = Some(product);
+        fixture
+    }
+
+    /// Render every lamp's RGB through the fixture, against a producer.
+    fn render_lamps(
+        fixture: &mut FixtureNode,
+        producer: &mut ShaderProducer,
+        count: usize,
+    ) -> Vec<[u16; 3]> {
+        let extent = ControlExtent::new(1, count as u32 * 3);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        // One backend for both ends: handles are backend-owned, and the
+        // fixture allocates the very buffers the shader writes into.
+        let graphics = producer.graphics.clone();
+        {
+            let target =
+                ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+            let mut ctx = ControlRenderContext::new(
+                NodeId::new(2),
+                Revision::new(1),
+                Some(graphics),
+                0.0,
+                None,
+                producer,
+            );
+            fixture
+                .render_control(
+                    ControlProduct::new(NodeId::new(2), 0, extent),
+                    &request,
+                    target,
+                    &mut ctx,
+                )
+                .expect("fixture control render");
+        }
+        samples
+            .chunks_exact(3)
+            .map(|rgb| [rgb[0], rgb[1], rgb[2]])
+            .collect()
+    }
+
+    /// **The scarf.** A ring-mapped fixture whose strip order means
+    /// something, running a 1D-declared effect, samples STRIP POSITION —
+    /// the ring map is not consulted at all (vision D1).
+    #[test]
+    fn a_native_1d_effect_on_a_ring_mapped_scarf_ignores_the_map() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, true, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        let ring = ring_points(COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let strip_position = (index as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], strip_position, "strip ramp");
+            // The map's x at this lamp is a different number for most
+            // lamps — if the fixture had sent ring UVs, red would track it.
+            let ring_x = ring[index][0];
+            if (ring_x - strip_position).abs() > 0.1 {
+                assert!(
+                    lamp[0].abs_diff((ring_x * 65535.0) as u16) > TOLERANCE,
+                    "lamp {index} tracked the ring map instead of the strip"
+                );
+            }
+        }
+    }
+
+    /// **The scarf, worn the other way.** `wire_reversed` (the
+    /// along-the-wire direction option) flips the wire-order 1D request:
+    /// lamp `k` samples strip position `1 − u` — the strip read back to
+    /// front. Nothing else changes; only the wire-order path reads the
+    /// bit.
+    #[test]
+    fn a_reversed_wire_request_samples_the_strip_back_to_front() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, true, ConsumerPolicy::AUTO, product);
+        fixture.wire_reversed = true;
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.wire_reversed = true;
+        }
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], reversed_position, "reversed strip ramp");
+        }
+    }
+
+    /// The reversed wire's strip coordinates are the forward ones read
+    /// back to front — texel centres either way, so forward and reversed
+    /// sample the same points in opposite orders.
+    #[test]
+    fn reversed_strip_point_coords_read_back_to_front() {
+        let forward = fixture_strip_point_coords(4, false);
+        let mut reversed = fixture_strip_point_coords(4, true);
+        reversed.reverse();
+        assert_eq!(forward, reversed);
+        assert_eq!(
+            fixture_strip_point_coords(4, true)[0] >> 16,
+            3,
+            "the reversed wire's first lamp sits on the last texel"
+        );
+    }
+
+    /// **The map2d peach.** A tiny two-object `.map2d.json` document — a
+    /// ring (non-monotonic in x, so a value tracking strip position could
+    /// not have come from the map) plus a short path — resolved into the
+    /// SAME `FixtureMapping::Compact` carrier a real map2d-backed fixture
+    /// runs on (`P2 — 1D-along-the-wire verification`, rd 23). This is the
+    /// combination no gallery example exercises: a map2d presentation doc
+    /// consuming a 1D product with along-the-wire (`strip_order_meaningful`)
+    /// selected. It is expected to behave exactly like the hand-authored
+    /// `ring_fixture` scarf above, because `select_request_space` /
+    /// `fixture_strip_point_coords` never look at the mapping representation
+    /// — this test is what actually proves that for the compact carrier
+    /// instead of assuming the differential test implies it.
+    fn map2d_scarf_doc() -> lpc_mapping::Map2dDoc {
+        use lpc_mapping::{Map2dObject, Map2dShape, PathShape, RingDir, RingOrder, RingShape};
+        lpc_mapping::Map2dDoc {
+            format: lpc_mapping::MAP2D_FORMAT,
+            sample_diameter: 1.0,
+            canvas: None,
+            objects: alloc::vec![
+                Map2dObject {
+                    name: String::new(),
+                    id: None,
+                    stride: None,
+                    shape: Map2dShape::Ring(RingShape {
+                        center: [0.5, 0.5],
+                        radius: 0.4,
+                        outer_count: 6,
+                        rings: 1,
+                        counts: Vec::new(),
+                        order: RingOrder::OuterFirst,
+                        start_angle_deg: -90.0,
+                        dir: RingDir::Cw,
+                    }),
+                },
+                Map2dObject {
+                    name: String::new(),
+                    id: None,
+                    stride: None,
+                    shape: Map2dShape::Path(PathShape {
+                        points: alloc::vec![[0.0, 1.0], [1.0, 1.0]],
+                        count: 2,
+                        reversed: false,
+                        gaps: Vec::new(),
+                    }),
+                },
+            ],
+        }
+    }
+
+    /// Build a ticked-enough fixture whose mapping is a resolved map2d
+    /// document (`FixtureMapping::Compact`) rather than hand-authored
+    /// `PathPoints` slots — the `ring_fixture` builder above, but for the
+    /// document-sourced carrier.
+    fn map2d_fixture(
+        mapping: ResolvedMappingCompact,
+        strip_order_meaningful: bool,
+        policy: ConsumerPolicy,
+        product: VisualProduct,
+    ) -> FixtureNode {
+        let version = Revision::new(1);
+        let mut fixture = FixtureNode::new(
+            NodeId::new(2),
+            mapping,
+            FixtureSamplingConfig::Direct,
+            version,
+        )
+        .with_render_defaults(16, 16, ColorOrder::Rgb)
+        .with_space_declaration(strip_order_meaningful, policy);
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.gamma_correction = false;
+            settings.brightness = u8::MAX;
+            settings.power = FixturePower {
+                budget_ma: 0,
+                ..FixturePower::default()
+            };
+        }
+        fixture.ensure_direct_channels(version);
+        fixture.last_visual_product = Some(product);
+        fixture
+    }
+
+    #[test]
+    fn a_map2d_sourced_fixture_running_a_1d_effect_samples_wire_order() {
+        const COUNT: usize = 8;
+        let doc = map2d_scarf_doc();
+        let compact = mapping_from_map2d_doc(&doc, 16, 16).expect("resolve map2d doc");
+        assert_eq!(
+            compact.points.len(),
+            COUNT,
+            "doc must produce exactly COUNT lamps"
+        );
+
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = map2d_fixture(compact, true, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, lamp) in lamps.iter().enumerate() {
+            let strip_position = (index as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], strip_position, "map2d wire ramp");
+        }
+    }
+
+    /// Same map2d-sourced fixture, `wire_reversed = true`: the wire-order
+    /// path composes with the direction bit exactly like the hand-authored
+    /// scarf does (`a_reversed_wire_request_samples_the_strip_back_to_front`).
+    #[test]
+    fn a_map2d_sourced_fixture_with_wire_reversed_samples_back_to_front() {
+        const COUNT: usize = 8;
+        let doc = map2d_scarf_doc();
+        let compact = mapping_from_map2d_doc(&doc, 16, 16).expect("resolve map2d doc");
+        assert_eq!(compact.points.len(), COUNT);
+
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = map2d_fixture(compact, true, ConsumerPolicy::AUTO, product);
+        fixture.wire_reversed = true;
+        if let Some(settings) = fixture.last_settings.as_mut() {
+            settings.wire_reversed = true;
+        }
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        for (index, lamp) in lamps.iter().enumerate() {
+            let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], reversed_position, "map2d reversed wire ramp");
+        }
+    }
+
+    /// The same scarf running a 2D effect samples the RING UVs — the map
+    /// is exactly what a 2D effect is for.
+    #[test]
+    fn a_2d_effect_on_the_same_scarf_samples_the_ring_uvs() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::TwoD {
+                in_1d: EnumSlot::default(),
+            },
+            RAMP_2D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, true, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            assert_near(lamp[0], point[0], &alloc::format!("lamp {index} u"));
+            assert_near(lamp[1], point[1], &alloc::format!("lamp {index} v"));
+        }
+    }
+
+    /// A serpentine matrix (`strip_order_meaningful: false`) is `{2D}`, so
+    /// a 1D effect lands on an empty intersection and the PRODUCER
+    /// projects — here through its own authored `Radial` opinion.
+    #[test]
+    fn a_1d_effect_on_a_2d_only_fixture_uses_the_authored_opinion() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, false, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::radial(point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} radial"));
+        }
+    }
+
+    /// Post-v9 the producer ALWAYS declares — a fresh (default) record is
+    /// plain extrude-x, and a non-forcing consumer policy no longer fills
+    /// any silence: the declaration wins.
+    #[test]
+    fn a_default_declaration_beats_a_non_forcing_consumer_policy() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, true, true),
+            force: false,
+        };
+        let mut fixture = ring_fixture(COUNT, false, policy, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::extrude(point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude"));
+        }
+    }
+
+    /// A flipped authored opinion (the factorization's spelling of the
+    /// old `Extrude { Left }`): `ExtrudeX + flip` runs the strip
+    /// right→left — every lamp reads `1 − x` where the plain extrude
+    /// would read `x`.
+    #[test]
+    fn an_extrude_left_opinion_reverses_the_strip() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::ExtrudeX,
+                    false,
+                    true,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = ring_fixture(COUNT, false, ConsumerPolicy::AUTO, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::extrude(1.0 - point[0], point[1]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} extrude ←"));
+        }
+    }
+
+    /// A FORCED factored consumer policy: the old outward-y fold spelled
+    /// `ExtrudeY + mirror + flip` runs the strip from the centre ROW
+    /// toward top and bottom — the same `|2s−1|` core over `y`.
+    #[test]
+    fn a_mirror_outward_y_policy_folds_along_the_rows() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeY, true, true),
+            force: true,
+        };
+        let mut fixture = ring_fixture(COUNT, false, policy, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let expected = crate::products::visual::mirror(point[1], point[0]);
+            assert_near(lamp[0], expected, &alloc::format!("lamp {index} mirror ↑↓"));
+        }
+    }
+
+    /// `force: true` is the consumer taking the wheel: the fixture's
+    /// default wins even over an authored `Radial`.
+    #[test]
+    fn a_forcing_consumer_beats_the_authored_opinion() {
+        const COUNT: usize = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let policy = ConsumerPolicy {
+            default_1d_to_2d: cellp(ProjectionShape::ExtrudeX, false, false),
+            force: true,
+        };
+        let mut fixture = ring_fixture(COUNT, false, policy, product);
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+
+        for (index, (lamp, point)) in lamps.iter().zip(ring_points(COUNT)).enumerate() {
+            let extruded = crate::products::visual::extrude(point[0], point[1]);
+            assert_near(lamp[0], extruded, &alloc::format!("lamp {index} extrude"));
+            let radial = crate::products::visual::radial(point[0], point[1]);
+            if (radial - extruded).abs() > 0.1 {
+                assert!(
+                    lamp[0].abs_diff((radial * 65535.0) as u16) > TOLERANCE,
+                    "lamp {index} used the producer's opinion despite force"
+                );
+            }
+        }
+    }
+
+    /// The consumer's whole job, isolated: which space gets asked for.
+    #[test]
+    fn selection_is_intersection_preferring_the_effects_intent() {
+        // Scarf: both sets, so the effect's intent decides.
+        assert_eq!(
+            select_request_space(VisualSpace::OneD, true, true),
+            VisualSpace::OneD
+        );
+        assert_eq!(
+            select_request_space(VisualSpace::TwoD, true, true),
+            VisualSpace::TwoD
+        );
+        // Serpentine matrix: {2D} only — a 1D effect is projected into it.
+        assert_eq!(
+            select_request_space(VisualSpace::OneD, false, true),
+            VisualSpace::TwoD
+        );
+        // Bare strip (no authored map): {1D} only — a 2D effect is
+        // scanlined onto it.
+        assert_eq!(
+            select_request_space(VisualSpace::TwoD, true, false),
+            VisualSpace::OneD
+        );
+    }
+
+    /// 2D membership comes from authored intent — a map or a TextureArea
+    /// render area taller than one row — never from the lamp positions
+    /// (vision §1). The area rule is what keeps every pre-map 2D fixture
+    /// (a mapless 16×16 TextureArea) rendering its area instead of being
+    /// scanlined: the regression the studio e2e suite caught.
+    #[test]
+    fn authored_map_or_2d_area_puts_2d_in_the_fixtures_set() {
+        let unset = MappingConfig::Unset;
+        // Mapless + no area (Direct sampling): 1D only.
+        assert!(!fixture_carries_2d_coords(MappingRef::Slots(&unset), None));
+        // Mapless single-row area: still 1D only.
+        assert!(!fixture_carries_2d_coords(
+            MappingRef::Slots(&unset),
+            Some(1)
+        ));
+        // Mapless 2D TextureArea: the render area IS the 2D authorship.
+        assert!(fixture_carries_2d_coords(
+            MappingRef::Slots(&unset),
+            Some(16)
+        ));
+        let mapped =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 1.0);
+        assert!(fixture_carries_2d_coords(MappingRef::Slots(&mapped), None));
+    }
+
+    /// The sample-point cache is keyed on the request space and policy as
+    /// well as the geometry: a 1D batch is a different packing AND
+    /// different numbers, and serving it from a 2D-era buffer is the
+    /// silent-staleness failure this subsystem keeps re-learning.
+    #[test]
+    fn the_sample_point_cache_key_notices_a_space_or_policy_change() {
+        struct NoServices;
+        impl TimebaseRead for NoServices {}
+        impl crate::node::ControlRenderServices for NoServices {
+            fn render_texture(
+                &mut self,
+                _product: VisualProduct,
+                _request: &RenderTextureRequest,
+            ) -> Result<TextureRenderProduct, NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+            fn render_texture_into(
+                &mut self,
+                _product: VisualProduct,
+                _request: &RenderTextureRequest,
+                _target: &mut lp_gfx::TextureHandle,
+            ) -> Result<(), NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+            fn sample_visual_into(
+                &mut self,
+                _product: VisualProduct,
+                _request: VisualSampleBufferRequest<'_>,
+                _target: VisualSampleTarget<'_>,
+            ) -> Result<(), NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+        }
+
+        let graphics = graphics();
+        let mut services = NoServices;
+        let ctx = ControlRenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            0.0,
+            None,
+            &mut services,
+        );
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
+            2.0,
+        );
+        let version = Revision::new(7);
+        let mut current = None;
+
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            version,
+            2,
+            4,
+            4,
+            VisualSpace::TwoD,
+            ConsumerPolicy::AUTO,
+            false,
+            &ctx,
+        )
+        .expect("2D ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+            "2D coordinates are mapping pixel positions"
+        );
+
+        // Same geometry, 1D request: a different packing entirely.
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            version,
+            2,
+            2,
+            1,
+            VisualSpace::OneD,
+            ConsumerPolicy::AUTO,
+            false,
+            &ctx,
+        )
+        .expect("1D ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![32768, 98304, 0, 0],
+            "1D coordinates are strip texel centres, tail zeroed"
+        );
+
+        // A policy change with everything else equal must still rewrite.
+        graphics
+            .write_sample_points(handle, &[111, 222, 333, 444])
+            .expect("poke");
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            version,
+            2,
+            2,
+            1,
+            VisualSpace::OneD,
+            ConsumerPolicy {
+                default_1d_to_2d: cellp(ProjectionShape::Radial, false, false),
+                force: true,
+            },
+            false,
+            &ctx,
+        )
+        .expect("policy ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![32768, 98304, 0, 0],
+            "a policy change must not be served from the old buffer"
+        );
+    }
+
+    /// A 1D consumer on a 2D producer gets the CENTRE SCANLINE (vision
+    /// D8): `t` runs along x, `v` is pinned to 0.5.
+    ///
+    /// Asserted at the producer, because the 1D-only fixture that would
+    /// send this request needs an authored "bare strip, no map" shape that
+    /// only Plan B's authoring surface can express today. The request
+    /// itself is exactly what `select_request_space` picks for that
+    /// fixture (see `selection_is_intersection_preferring_the_effects_intent`).
+    #[test]
+    fn a_2d_source_answers_a_1d_request_on_the_centre_scanline() {
+        const COUNT: u32 = 8;
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::TwoD {
+                in_1d: EnumSlot::default(),
+            },
+            RAMP_2D,
+        );
+        let product = producer.product();
+        let graphics = producer.graphics.clone();
+
+        let mut points = graphics.create_sample_points(COUNT).expect("points");
+        let coords = fixture_strip_point_coords(COUNT, false);
+        graphics
+            .write_sample_points_1d(&mut points, &coords)
+            .expect("write strip points");
+        let mut samples = graphics.create_sample_out(COUNT).expect("samples");
+
+        {
+            let mut ctx = producer.ctx();
+            producer
+                .node
+                .sample_visual_into(
+                    product,
+                    VisualSampleBufferRequest {
+                        points: &mut points,
+                        output_width: COUNT,
+                        output_height: 1,
+                        time_seconds: 0.0,
+                        space: VisualSpace::OneD,
+                        policy: ConsumerPolicy::AUTO,
+                    },
+                    VisualSampleTarget {
+                        samples: &mut samples,
+                    },
+                    &mut ctx,
+                )
+                .expect("scanline sample");
+        }
+
+        let channels = graphics.read_sample_out(&samples).expect("read samples");
+        for (index, rgba) in channels.chunks_exact(4).enumerate() {
+            let t = (index as f32 + 0.5) / COUNT as f32;
+            assert_near(rgba[0], t, "scanline u");
+            assert_near(rgba[1], 0.5, "scanline v is the centre row");
+        }
+    }
+
+    /// The texture path's 1D→2D fill: a 2D-only consumer that
+    /// materializes a frame gets the projection applied per pixel, from
+    /// the same map library the direct path uses.
+    #[test]
+    fn a_1d_source_fills_a_2d_texture_through_the_projection() {
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Radial,
+                    false,
+                    false,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let graphics = producer.graphics.clone();
+        let request = RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::AUTO,
+        };
+        let mut texture = graphics.create_render_target(4, 4).expect("target");
+        {
+            let mut ctx = producer.ctx();
+            producer
+                .node
+                .render_texture_into(product, &request, &mut texture, &mut ctx)
+                .expect("projected texture fill");
+        }
+        let data = graphics.read_back(&texture).expect("read back");
+        let bytes = data.bytes();
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let base = ((y * 4 + x) * 8) as usize;
+                let red = u16::from_le_bytes([bytes[base], bytes[base + 1]]);
+                let u = (x as f32 + 0.5) / 4.0;
+                let v = (y as f32 + 0.5) / 4.0;
+                assert_near(
+                    red,
+                    crate::products::visual::radial(u, v),
+                    &alloc::format!("texel {x},{y}"),
+                );
+            }
+        }
+    }
+
+    /// The texture path's 2D→1D fill: a 1D-only consumer that materializes
+    /// a frame gets the centre scanline (vision D8), the same map the
+    /// direct path's `a_2d_source_answers_a_1d_request_on_the_centre_scanline`
+    /// exercises — this is the texture-request counterpart, and the arm
+    /// this test targets errored before P2 (`shader_node.rs`
+    /// `render_projected_texture`).
+    #[test]
+    fn a_2d_source_fills_a_1d_texture_through_the_centre_scanline() {
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::TwoD {
+                in_1d: EnumSlot::default(),
+            },
+            RAMP_2D,
+        );
+        let product = producer.product();
+        let graphics = producer.graphics.clone();
+        const WIDTH: u32 = 8;
+        let request = RenderTextureRequest {
+            width: WIDTH,
+            height: 1,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+            space: VisualSpace::OneD,
+            policy: ConsumerPolicy::AUTO,
+        };
+        let mut texture = graphics.create_render_target(WIDTH, 1).expect("target");
+        {
+            let mut ctx = producer.ctx();
+            producer
+                .node
+                .render_texture_into(product, &request, &mut texture, &mut ctx)
+                .expect("scanline texture fill");
+        }
+        let data = graphics.read_back(&texture).expect("read back");
+        let bytes = data.bytes();
+        for x in 0..WIDTH {
+            let base = (x * 8) as usize;
+            let red = u16::from_le_bytes([bytes[base], bytes[base + 1]]);
+            let green = u16::from_le_bytes([bytes[base + 2], bytes[base + 3]]);
+            let t = (x as f32 + 0.5) / WIDTH as f32;
+            assert_near(red, t, &alloc::format!("texel {x} u"));
+            assert_near(green, 0.5, &alloc::format!("texel {x} v is the centre row"));
+        }
+    }
+
+    /// The forwarding rule: a shader that never declared anything answers
+    /// the query with 2D-and-no-opinion, which is what keeps every
+    /// pre-plan project meaning-identical.
+    #[test]
+    fn an_undeclared_shader_answers_two_d() {
+        let mut producer = ShaderProducer::new(ShaderSpace::default(), RAMP_2D);
+        let product = producer.product();
+        let mut ctx = producer.ctx();
+        assert_eq!(
+            producer
+                .node
+                .visual_space(product, &mut ctx)
+                .expect("space"),
+            ProductSpaceInfo::two_d()
+        );
+    }
+
+    /// Unused in the assertions above but kept honest: the boxed-node
+    /// route the engine uses must expose the same answer.
+    #[test]
+    fn the_render_node_route_answers_the_same_space() {
+        let producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::new(authored_project(
+                    lpc_model::ProjectionShape::Angular,
+                    false,
+                    false,
+                )),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut boxed: Box<dyn crate::node::NodeRuntime> = {
+            let node = ShaderNode::new(
+                NodeId::new(1),
+                shader_def(ShaderSpace::OneD {
+                    in_2d: EnumSlot::new(authored_project(
+                        lpc_model::ProjectionShape::Angular,
+                        false,
+                        false,
+                    )),
+                }),
+                asset(RAMP_1D),
+            );
+            Box::new(node)
+        };
+        let mut ctx = producer.ctx();
+        let via_trait = boxed
+            .render_node()
+            .expect("shader is a render node")
+            .visual_space(product, &mut ctx)
+            .expect("space");
+        assert_eq!(
+            via_trait,
+            ProductSpaceInfo::one_d(Some(cellp(ProjectionShape::Angular, false, false)))
+        );
+        let _ = VisualConsumerSpace::default();
+    }
+}
+
 /// The mapping-representation differential: a document-sourced fixture
 /// carried as [`FixtureMapping::Compact`] must be indistinguishable from the
 /// same document expanded into the slot form, at every seam that leaves the
@@ -3969,6 +5607,8 @@ mod mapping_representation_differential {
     fn object(shape: Map2dShape) -> Map2dObject {
         Map2dObject {
             name: alloc::string::String::new(),
+            id: None,
+            stride: None,
             shape,
         }
     }
@@ -4116,7 +5756,7 @@ mod mapping_representation_differential {
                 "{at}: sample coords"
             );
 
-            // 3. Path spans — studio wiring arrows and universe coloring.
+            // 3. Path spans — studio wiring arrows.
             assert_eq!(path_spans(slots), path_spans(compact), "{at}: path spans");
 
             // 4. The published 2D display layout.

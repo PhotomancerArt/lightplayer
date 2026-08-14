@@ -49,7 +49,7 @@ pub fn ProjectShareSection(
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
             ShareRow {
-                label: "Export zip",
+                label: "Download zip",
                 hint: "Download this project as a zip archive.",
                 icon: StudioIconName::Download,
                 disabled: dirty,

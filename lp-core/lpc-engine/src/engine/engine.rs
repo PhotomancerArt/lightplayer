@@ -8,10 +8,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lp_collection::VecSet;
 use lpc_model::{
-    ChannelName, ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision,
-    SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment,
-    SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision,
-    advance_revision, lookup_slot_data_and_shape,
+    ChannelName, ControlDisplayLayout, ControlProduct, NodeDef, NodeDefLocation, NodeDefState,
+    NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath,
+    SlotPathSegment, SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath,
+    WithRevision, advance_revision, lookup_slot_data_and_shape,
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
@@ -32,8 +32,8 @@ use crate::node::{
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
-    VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSampleBufferRequest, VisualSampleTarget,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -79,6 +79,29 @@ pub struct Engine {
     /// not be editable by the thing that broke it. Composed into every
     /// fixture's power scale via `min` in the fixture render.
     safe_output_clamp_q16: Option<u32>,
+    /// The authored NAMES of live output nodes (D39/D40), self-registered by
+    /// each output at the top of its `consume` — the engine cannot read
+    /// another node's def slots outside its tick, so identity flows the
+    /// same direction as everything else: from the node that owns it.
+    ///
+    /// A side store like `panel_writers` (must outlive
+    /// `apply_project_changes`), and the substrate for the two scatter
+    /// questions: which output does a run naming "Box 2" reach, and which
+    /// names exist at all (the fixture's dangling-entry report). Entries for
+    /// dead nodes are pruned on registration.
+    output_identities: alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
+    /// Bumped whenever [`Self::output_identities`] CHANGES, so a fixture's
+    /// cached patch resolution (keyed on it) re-runs when the topology
+    /// settles — a name registered one tick after the fixture resolved must
+    /// clear a transient dangling report without a patch edit.
+    output_identity_revision: Revision,
+    /// The most bytes a serialized display layout may occupy in one
+    /// project-read answer, declared by the EMBEDDER for its transport
+    /// (`Engine::set_display_layout_budget`). `None` = unbounded. Defaults
+    /// to the serial frame budget — the conservative, fail-safe value: an
+    /// un-plumbed host refuses big layouts rather than wedging a serial
+    /// link. Device/link state, never project data.
+    display_layout_budget: Option<usize>,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -109,6 +132,12 @@ impl Engine {
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
             timebases: crate::dataflow::timebase::TimebaseStore::new(),
             safe_output_clamp_q16: None,
+            output_identities: alloc::collections::BTreeMap::new(),
+            output_identity_revision: revision,
+            display_layout_budget: Some(
+                lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+                    - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
+            ),
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -374,6 +403,24 @@ impl Engine {
         self.safe_output_clamp_q16 = level.map(|level| (u32::from(level) << 16) / 255);
     }
 
+    /// Declare the transport's display-layout byte budget.
+    ///
+    /// `Some(n)`: a serialized layout larger than `n` bytes is refused as
+    /// `Unsupported` instead of being handed to a transport whose frame it
+    /// would wedge. `None`: the link has no meaningful frame limit
+    /// (in-proc, websocket) and any layout is answered. The default is the
+    /// embedded serial value; embedders with bigger pipes opt OUT, so a
+    /// host that never calls this stays safe on the smallest link.
+    pub fn set_display_layout_budget(&mut self, budget: Option<usize>) {
+        self.display_layout_budget = budget;
+    }
+
+    /// The declared transport display-layout budget (see
+    /// [`Self::set_display_layout_budget`]).
+    pub(crate) fn display_layout_budget(&self) -> Option<usize> {
+        self.display_layout_budget
+    }
+
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
         self.graphics.as_ref()
     }
@@ -480,7 +527,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 6\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -632,6 +679,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -641,6 +690,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
 
@@ -716,6 +766,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -725,9 +777,52 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_texture(product, request)
+    }
+
+    /// Ask a visual product's producer what space it renders in (plan D17),
+    /// without materializing a frame.
+    ///
+    /// This is the same node-to-node query the fixture negotiation path
+    /// issues every render (`ControlRenderServices::visual_product_space`);
+    /// public here so preview surfaces can introspect a producer's
+    /// primary space and 2D answer — e.g. to recompute
+    /// [`crate::products::visual::resolve_1d_to_2d_with_origin`] for a
+    /// caption — without threading that origin through the render call
+    /// itself.
+    pub fn visual_product_space(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, SessionResolveError> {
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
+            frame_revision: self.revision,
+        };
+        host.visual_node_space(product)
     }
 
     /// Resolve a bus channel to the visual product handle it currently carries.
@@ -804,6 +899,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -813,6 +910,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         let result = session.resolve(&mut host, &key);
@@ -860,6 +958,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -869,6 +969,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_control(product, request, target)
@@ -901,6 +1002,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -910,6 +1013,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
@@ -942,6 +1046,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -951,6 +1057,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.render_node_control_probe(product, request, target, display_layout)
@@ -980,6 +1087,8 @@ impl Engine {
             registry,
             panel_writers: &self.panel_writers,
             timebases: &mut self.timebases,
+            output_identities: &mut self.output_identities,
+            output_identity_revision: &mut self.output_identity_revision,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -989,6 +1098,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
         host.node_control_display_layout(product, display_layout)
@@ -1029,6 +1139,10 @@ struct EngineResolveHost<'a> {
     registry: &'a ProjectRegistry,
     panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
     timebases: &'a mut crate::dataflow::timebase::TimebaseStore,
+    /// The engine's output-name registry (D39/D40 scatter routing) and the
+    /// revision it last changed at — see the fields on [`Engine`].
+    output_identities: &'a mut alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
+    output_identity_revision: &'a mut Revision,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -1038,6 +1152,7 @@ struct EngineResolveHost<'a> {
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
     safe_output_clamp_q16: Option<u32>,
+    display_layout_budget: Option<usize>,
     /// The engine's current frame revision — the same value the tick stamps
     /// on compile windows ([`NodeRuntime::open_compile_window`]).
     ///
@@ -1053,6 +1168,50 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
+    /// Is `consumer` the DEFAULT output for its bus channel — the target of
+    /// every unaddressed patch run and of auto-flow (D40)?
+    ///
+    /// The default is the first fragments-consuming output in attach order
+    /// (lowest [`NodeId`] — the loader attaches in module `nodes` key
+    /// order, the same determinism the provider walk leans on). **Fails
+    /// safe to `true`**: a consumer whose peer set cannot be determined
+    /// (no bus binding, an unscoped or single-consumer topology) behaves
+    /// exactly as every output did before scatter existed — that identity
+    /// is what keeps single-output projects byte-stable (A1).
+    fn is_default_fragments_consumer(&self, consumer: NodeId) -> bool {
+        use crate::dataflow::resolver::ResolveHost as _;
+        let bindings = self
+            .tree
+            .bindings_for_consumed_slot(consumer, &crate::nodes::output_input_path());
+        let Some(channel) = bindings.iter().find_map(|(_, entry)| match &entry.source {
+            crate::dataflow::binding::BindingSource::BusChannel(channel) => Some(channel.clone()),
+            _ => None,
+        }) else {
+            return true;
+        };
+        let peers = match self.tree.bus_read_scope(consumer) {
+            Some(scope) => self.tree.consumers_for_bus_in_scope(scope, &channel),
+            None => self.tree.consumers_for_bus(&channel),
+        };
+        let candidates: Vec<(NodeId, lpc_model::SlotPath)> = peers
+            .iter()
+            .filter_map(|(_, entry)| match &entry.target {
+                crate::dataflow::binding::BindingTarget::ConsumedSlot { node, slot } => {
+                    Some((*node, slot.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let first = candidates
+            .into_iter()
+            .filter(|(node, slot)| {
+                self.merge_policy_for_consumed_slot(*node, slot) == SlotMerge::Fragments
+            })
+            .map(|(node, _)| node)
+            .min();
+        first.is_none_or(|first| first == consumer)
+    }
+
     #[inline(never)]
     fn produce_produced_slot(
         &mut self,
@@ -1402,6 +1561,109 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.render_node_control(product, request, target)
     }
 
+    /// Read the producing node's resolved patch, AS `consumer` should see it
+    /// (D40, the scatter rule).
+    ///
+    /// The producer's runs carry output names; each consuming output
+    /// receives only the runs addressed to it — by name match, or, for
+    /// unaddressed runs, by being the DEFAULT output (the first
+    /// fragments-consuming output on the bus in attach order).
+    ///
+    /// The `Some(vec![])` / `None` distinction is load-bearing:
+    ///
+    /// - `None` = "auto-flow me" — the producer is unpatched (or its patch
+    ///   is empty), and `consumer` is the default output. The planner emits
+    ///   an auto-flow fragment.
+    /// - `Some(vec![])` = "patched, but nothing lands HERE" — either every
+    ///   run is addressed elsewhere, or the producer is unpatched and
+    ///   `consumer` is not the default. Zero runs is NOT a gap: the planner
+    ///   emits no fragment and no warning.
+    ///
+    /// Deliberately silent when the node is missing or mid-execution: this
+    /// answers "how is this producer patched", and "we could not ask right
+    /// now" means auto-flow, not a dead frame. A node whose patch failed to
+    /// parse keeps its last good placement and reports the failure as its own
+    /// runtime status.
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+        consumer: NodeId,
+    ) -> Option<Vec<crate::node::PatchedRun>> {
+        let entry = self.tree.get(product.node())?;
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            return None;
+        };
+        let runs = node
+            .control_patch_placement()
+            .filter(|runs| !runs.is_empty());
+        let is_default = self.is_default_fragments_consumer(consumer);
+        let Some(runs) = runs else {
+            // Unpatched producer: auto-flow on the default output only.
+            return if is_default { None } else { Some(Vec::new()) };
+        };
+        let consumer_name = self.output_identities.get(&consumer).cloned().flatten();
+        let filtered: Vec<crate::node::PatchedRun> = runs
+            .iter()
+            .filter(|run| match &run.output {
+                None => is_default,
+                Some(name) => consumer_name.as_deref() == Some(name.as_str()),
+            })
+            .cloned()
+            .collect();
+        Some(filtered)
+    }
+
+    /// Register (or refresh) an output's authored name — called by the
+    /// output itself at the top of `consume`, the one place its def is
+    /// readable. Returns the name of a LIVE sibling already claiming the
+    /// same name, so the caller can surface the collision as its runtime
+    /// status (duplicate names make `at.output` ambiguous; routing stays
+    /// exact-match and reports rather than guessing).
+    fn register_output_identity(
+        &mut self,
+        node: NodeId,
+        name: Option<alloc::string::String>,
+        revision: Revision,
+    ) -> Option<alloc::string::String> {
+        // Prune the dead so a deleted output releases its name.
+        let dead: Vec<NodeId> = self
+            .output_identities
+            .keys()
+            .copied()
+            .filter(|id| {
+                self.tree
+                    .get(*id)
+                    .is_none_or(|entry| !matches!(entry.state.value(), NodeEntryState::Alive(_)))
+            })
+            .collect();
+        let mut changed = false;
+        for id in dead {
+            self.output_identities.remove(&id);
+            changed = true;
+        }
+        if self.output_identities.get(&node) != Some(&name) {
+            self.output_identities.insert(node, name.clone());
+            changed = true;
+        }
+        if changed {
+            *self.output_identity_revision = revision;
+        }
+        let name = name?;
+        self.output_identities
+            .iter()
+            .find(|(other, other_name)| **other != node && other_name.as_deref() == Some(&name))
+            .map(|_| name)
+    }
+
+    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
+        let names = self
+            .output_identities
+            .values()
+            .filter_map(|name| name.clone())
+            .collect();
+        (names, *self.output_identity_revision)
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: crate::resource::RuntimeBufferId,
@@ -1538,6 +1800,9 @@ impl EngineResolveHost<'_> {
             .shader_consumed_slot_def(node, slot)?
             .map(|slot| match slot.kind.value() {
                 lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
+                // A buffer is ONE value that rewrites wholesale every tick;
+                // by-key merging has nothing to key on.
+                lpc_model::ShaderSlotKind::Buffer => SlotMerge::Latest,
                 // A timebase or palette uniform's binding, when it has one,
                 // names a single config channel — never an aggregate.
                 lpc_model::ShaderSlotKind::Value
@@ -1599,6 +1864,23 @@ impl EngineResolveHost<'_> {
                         lp_collection::VecMap::new(),
                     ))
                 }
+                // The zeroed buffer of the declared shape — the same value
+                // `materialize_shader_input` runs on for absent data, so an
+                // unbound buffer input never warns. A malformed def (no
+                // builtin element / no len) zeroes out honest-empty; the
+                // materializer is where that def error gets its diagnostic.
+                lpc_model::ShaderSlotKind::Buffer => {
+                    let elem = slot
+                        .value_lp_type()
+                        .as_ref()
+                        .and_then(lpc_model::BufferElem::from_lp_type)
+                        .unwrap_or(lpc_model::BufferElem::F32);
+                    let len = slot.buffer_len().unwrap_or(0);
+                    SlotData::Value(WithRevision::new(
+                        self.frame_revision,
+                        lpc_model::LpValue::Buffer(lpc_model::LpBuffer::zeroed(elem, len)),
+                    ))
+                }
             }))
     }
 
@@ -1644,6 +1926,81 @@ impl EngineResolveHost<'_> {
             SessionResolveError::other(format!("node {node:?} has no project definition location"))
         })?;
         loaded_registry_def(self.registry, location)
+    }
+
+    /// Answer the product-space query (plan D17) by routing it to the
+    /// producing node, exactly like a render call.
+    ///
+    /// The node is taken out of the tree for the duration for the same
+    /// reason the render paths take it: a forwarding producer (playlist,
+    /// module) answers by asking the engine about *its* upstream product,
+    /// which re-enters this host.
+    fn visual_node_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, SessionResolveError> {
+        let node_id = product.node();
+        let revision = self.frame_revision;
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                other => {
+                    let already_executing = matches!(&other, NodeEntryState::Executing { .. })
+                        .then(|| match &other {
+                            NodeEntryState::Executing { call } => call.call.label(),
+                            _ => unreachable!("checked by the matches! above"),
+                        });
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(match already_executing {
+                        Some(label) => format!(
+                            "node {node_id:?} is already executing {label}; re-entry through EngineSession is unsupported"
+                        ),
+                        None => format!("visual space: node {node_id:?} not alive"),
+                    }));
+                }
+            }
+        };
+
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
+        let result = {
+            match node_runtime.render_node() {
+                Some(render_node) => {
+                    let mut ctx = RenderContext::with_services(
+                        node_id,
+                        revision,
+                        self.graphics.clone(),
+                        self.time_provider.clone(),
+                        self.frame_time_seconds,
+                        self,
+                    );
+                    catch_node_panic_framed(
+                        lp_recovery::FrameKind::NodeRender,
+                        &recovery_name,
+                        || render_node.visual_space(product, &mut ctx),
+                    )
+                }
+                // Not a render node at all: nothing to project, and the
+                // caller's real error comes from the render call itself.
+                None => Ok(ProductSpaceInfo::two_d()),
+            }
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+        result.map_err(|e| SessionResolveError::other(format!("visual space: {e}")))
     }
 
     fn render_node_texture(
@@ -2071,6 +2428,7 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
+            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2082,8 +2440,13 @@ impl EngineResolveHost<'_> {
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 let sample_layout =
                     control_node.render_control(product, request, target, &mut ctx)?;
-                let display_layout =
-                    control_display_layout_result(control_node, product, display_layout, &mut ctx)?;
+                let display_layout = control_display_layout_result(
+                    control_node,
+                    product,
+                    display_layout,
+                    budget,
+                    &mut ctx,
+                )?;
                 Ok((sample_layout, display_layout))
             })
         };
@@ -2171,6 +2534,7 @@ impl EngineResolveHost<'_> {
                     ),
                 });
             };
+            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2180,7 +2544,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                control_display_layout_result(control_node, product, request, &mut ctx)
+                control_display_layout_result(control_node, product, request, budget, &mut ctx)
             })
         };
 
@@ -2196,24 +2560,11 @@ impl EngineResolveHost<'_> {
     }
 }
 
-/// The most bytes a serialized display layout may occupy and still ride one
-/// project-read frame alongside its probe header and frame envelope.
-///
-/// The transport rejects any single event larger than
-/// [`lpc_wire::PROJECT_READ_FRAME_MAX_BYTES`], and that rejection is terminal
-/// for the whole read stream — an over-budget layout wedges the entire
-/// project view, not just one probe. Until layouts stream in bounded chunks
-/// (the "semantic layout split" escalation noted in
-/// `lpc-wire`'s probe tests), an oversized layout is refused here as
-/// `Unsupported`, which clients already render as a graceful fallback. The
-/// 2 KiB margin covers the probe header (extent, sample layout, product) and
-/// the frame envelope around the event.
-const DISPLAY_LAYOUT_WIRE_BUDGET: usize = lpc_wire::PROJECT_READ_FRAME_MAX_BYTES - 2048;
-
 fn control_display_layout_result(
     control_node: &mut dyn crate::node::ControlNode,
     product: ControlProduct,
     request: ControlDisplayLayoutRead,
+    budget: Option<usize>,
     ctx: &mut ControlRenderContext<'_>,
 ) -> Result<ControlDisplayLayoutProbeResult, NodeError> {
     match request {
@@ -2226,27 +2577,51 @@ fn control_display_layout_result(
                     ),
                 });
             };
-            let revision = layout.revision();
-            match request {
-                ControlDisplayLayoutRead::IfChanged {
-                    known_revision: Some(known),
-                } if known == revision => {
-                    Ok(ControlDisplayLayoutProbeResult::Unchanged { revision })
-                }
-                _ => {
-                    let layout_len = lpc_wire::ser_write_json_len(&layout);
-                    if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
-                        return Ok(ControlDisplayLayoutProbeResult::Unsupported {
-                            reason: alloc::format!(
-                                "display layout is {layout_len} bytes serialized, over the \
-                                 {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
-                                 large need chunked streaming (not yet implemented)"
-                            ),
-                        });
-                    }
-                    Ok(ControlDisplayLayoutProbeResult::Layout(layout))
+            Ok(gate_display_layout(layout, request, budget))
+        }
+    }
+}
+
+/// Apply the read's revision gate and the transport's byte budget to a
+/// layout that is already in hand.
+///
+/// Split out of [`control_display_layout_result`] because the published-frame
+/// read builds its layout rather than asking one node for it — an output's
+/// geometry is N producers' layouts rebased through the fragments that placed
+/// them — and the gate must be the same gate either way.
+///
+/// `budget` is the embedder-declared transport limit
+/// ([`Engine::set_display_layout_budget`]): the transport rejects any single
+/// event larger than its frame, and that rejection is terminal for the whole
+/// read stream — an over-budget layout wedges the entire project view, not
+/// just one probe. So an oversized layout is refused here as `Unsupported`,
+/// which clients render as an honest "no layout". `None` = the link has no
+/// meaningful frame limit and every layout is answered.
+pub(crate) fn gate_display_layout(
+    layout: ControlDisplayLayout,
+    request: ControlDisplayLayoutRead,
+    budget: Option<usize>,
+) -> ControlDisplayLayoutProbeResult {
+    let revision = layout.revision();
+    match request {
+        ControlDisplayLayoutRead::None => ControlDisplayLayoutProbeResult::Omitted,
+        ControlDisplayLayoutRead::IfChanged {
+            known_revision: Some(known),
+        } if known == revision => ControlDisplayLayoutProbeResult::Unchanged { revision },
+        _ => {
+            if let Some(budget) = budget {
+                let layout_len = lpc_wire::ser_write_json_len(&layout);
+                if layout_len > budget {
+                    return ControlDisplayLayoutProbeResult::Unsupported {
+                        reason: alloc::format!(
+                            "display layout is {layout_len} bytes serialized, over this \
+                             link's {budget}-byte budget; a layout this large cannot ride \
+                             one project-read frame"
+                        ),
+                    };
                 }
             }
+            ControlDisplayLayoutProbeResult::Layout(layout)
         }
     }
 }
@@ -2358,6 +2733,14 @@ fn resolve_shape_projection<'a>(
 }
 
 impl ControlRenderServices for EngineResolveHost<'_> {
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.visual_node_space(product)
+            .map_err(|e| NodeError::msg(format!("visual space: {e}")))
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -2389,6 +2772,14 @@ impl ControlRenderServices for EngineResolveHost<'_> {
 }
 
 impl VisualRenderServices for EngineResolveHost<'_> {
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.visual_node_space(product)
+            .map_err(|e| NodeError::msg(format!("visual space: {e}")))
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -2624,6 +3015,8 @@ pub(crate) fn resolve_with_engine_host(
         registry,
         panel_writers: &eng.panel_writers,
         timebases: &mut eng.timebases,
+        output_identities: &mut eng.output_identities,
+        output_identity_revision: &mut eng.output_identity_revision,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2633,6 +3026,7 @@ pub(crate) fn resolve_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
     };
     let result = session
@@ -2666,6 +3060,8 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         registry,
         panel_writers: &eng.panel_writers,
         timebases: &mut eng.timebases,
+        output_identities: &mut eng.output_identities,
+        output_identity_revision: &mut eng.output_identity_revision,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2675,6 +3071,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {

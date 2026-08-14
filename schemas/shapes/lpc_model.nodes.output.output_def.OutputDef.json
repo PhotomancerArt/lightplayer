@@ -5,7 +5,8 @@
         "default_bind": "bus:control.out",
         "name": "input",
         "semantics": {
-          "direction": "consumed"
+          "direction": "consumed",
+          "merge": "fragments"
         },
         "shape": {
           "value": {
@@ -21,14 +22,32 @@
         }
       },
       {
-        "name": "channels",
+        "name": "name",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3219703103,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "ports",
         "shape": {
           "map": {
             "key": "u32",
             "meta": {},
             "value": {
               "ref": {
-                "id": 3125801182
+                "id": 441814542
               }
             }
           }
@@ -71,6 +90,20 @@
               "id": 1196386242,
               "meta": {},
               "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "highlight",
+        "role": "debug",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
             }
           }
         }

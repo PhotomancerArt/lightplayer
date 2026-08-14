@@ -246,7 +246,7 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
     use lp_cloud_domain::{HeadRef, MemberRole};
-    use lpc_cloud_api::Visibility;
+    use lpc_cloud_api::Access;
     use lpc_history::{EventKind, UidPrefix};
 
     /// The pending-membership hook (Q4) at store level: an invitation by
@@ -261,7 +261,7 @@ mod tests {
             project,
             email: "later@example.com".to_string(),
             user: None,
-            role: MemberRole::Member,
+            role: MemberRole::Editor,
             added_at: 1.0,
         });
 
@@ -306,7 +306,7 @@ mod tests {
                 project,
                 email: email.to_string(),
                 user: None,
-                role: MemberRole::Member,
+                role: MemberRole::Editor,
                 added_at: 1.0,
             });
         }
@@ -481,7 +481,8 @@ mod tests {
         CloudProject {
             uid,
             owner,
-            visibility: Visibility::Private,
+            access: Access::None,
+            archived_at: None,
             slug: "sample".to_string(),
             created_at: 1.0,
         }

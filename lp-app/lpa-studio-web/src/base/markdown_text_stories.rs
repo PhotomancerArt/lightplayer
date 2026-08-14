@@ -13,7 +13,7 @@ pub(crate) fn markdown_subset() -> Element {
 # Big heading (demoted)\n\
 ### Small heading (same style)\n\n\
 Inline **bold**, *italic*, ~~struck~~, and `code`.\n\n\
-```glsl\nvec4 render(vec2 pos) {\n    return vec4(pos, 0.0, 1.0);\n}\n```\n\n\
+```glsl\nvec4 render_2d(vec2 pos) {\n    return vec4(pos, 0.0, 1.0);\n}\n```\n\n\
 1. First step\n\
 2. Second step\n\n\
 - Unordered too\n\

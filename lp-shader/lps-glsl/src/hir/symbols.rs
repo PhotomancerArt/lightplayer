@@ -193,12 +193,12 @@ layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float time;
 float phase = 0.25;
 vec3 tonemap(vec3 color, float exposure) { return color * exposure; }
-vec4 render(vec2 pos) { return vec4(tonemap(vec3(pos, 0.0), 1.0), 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(tonemap(vec3(pos, 0.0), 1.0), 1.0); }
 ";
         let symbols = analyze_symbols(source).expect("complete shader analyzes");
 
         let fn_names: Vec<&str> = symbols.functions.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(fn_names, ["tonemap", "render"]);
+        assert_eq!(fn_names, ["tonemap", "render_2d"]);
         let tonemap = &symbols.functions[0];
         assert_eq!(tonemap.return_type, "vec3");
         assert_eq!(tonemap.params.len(), 2);
@@ -255,9 +255,9 @@ vec4 render(vec2 pos) { return vec4(tonemap(vec3(pos, 0.0), 1.0), 1.0); }
 
     #[test]
     fn defined_render_appears_as_function_symbol() {
-        let symbols = analyze_symbols("vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }")
+        let symbols = analyze_symbols("vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }")
             .expect("render-only shader analyzes");
-        assert!(symbols.functions.iter().any(|f| f.name == "render"));
+        assert!(symbols.functions.iter().any(|f| f.name == "render_2d"));
     }
 
     #[test]

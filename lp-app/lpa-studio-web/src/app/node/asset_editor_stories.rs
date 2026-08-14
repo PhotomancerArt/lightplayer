@@ -27,7 +27,7 @@ use crate::base::Platform;
 const STORY_GLSL: &str = "\
 uniform float time;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     float ring = sin(length(pos - 0.5) * 40.0 - time);
     vec3 base = vec3(0.9, 0.3, 0.1);
     return vec4(base * ring, 1.0);

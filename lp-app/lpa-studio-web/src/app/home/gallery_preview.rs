@@ -17,6 +17,30 @@
 //! carries the lamp answer home); only its canvas stays hidden. Everything
 //! else is exactly the raster thumb it has always been.
 //!
+//! # How long a thumb renders: [`ThumbMode`]
+//!
+//! Gallery cards are [`ThumbMode::PosterFirst`]: a card wants *a picture*,
+//! not a canvas that runs forever. A session-cached poster paints with no
+//! lease at all; a miss leases a slot with a small
+//! `PreviewProfile::frame_budget`, waits for the budget to be spent,
+//! captures the poster ([`super::thumb_poster`]), and then stands the whole
+//! thumb down — handle dropped, observer disconnected, poll loop ended.
+//! Cards at rest hold nothing.
+//!
+//! The docs hero is [`ThumbMode::Live`]: one large canvas the reader is
+//! actually watching, leased for as long as it is mounted. That is the
+//! behavior every lease had before posters existed.
+//!
+//! # Motion on hover
+//!
+//! A poster-first card plays while the cursor is on it: the page's
+//! [`HoveredCard`] signal names at most one card, that card takes a
+//! continuous lease (no frame budget), and the motion fades in OVER the
+//! poster it already had — so neither taking the lease nor dropping it can
+//! blank the card. Hover is a courtesy: it writes no badge, spends none of
+//! the at-rest recovery budget, and returns to the poster in silence when
+//! anything goes wrong.
+//!
 //! # Host construction and lifetime
 //!
 //! One [`PreviewHost`] per page, constructed **lazily** the first time a
@@ -74,10 +98,77 @@ pub(crate) enum ThumbPreviewBadge {
     },
 }
 
+/// How long a thumb is willing to render (see the module docs).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ThumbMode {
+    /// Hold the slot for as long as the consumer is mounted and visible —
+    /// the docs hero, and every lease before posters existed.
+    Live,
+    /// Show a session-cached poster with no lease at all; on a miss, lease
+    /// briefly, capture one, and release. Gallery cards.
+    PosterFirst,
+}
+
+/// The gallery card the cursor is on, page-wide: `Some(`[`hover_card_key`]`)`.
+///
+/// A `Signal` in a context rather than per-card state, following the
+/// `HoveredPatchCell` precedent (`app/node/face/patch_bay.rs`): one signal
+/// holds one key, so **at most one card is hovered — and therefore at most
+/// one hover lease exists — by construction**. Provided by the pages that
+/// host card grids (Explore, Projects); a thumb mounted without one (a
+/// story, the docs hero, a device card) simply never plays on hover.
+#[derive(Clone, Copy)]
+pub(crate) struct HoveredCard(pub(crate) Signal<Option<String>>);
+
+/// The hover key for a card's preview source: the same namespaced source
+/// string the poster cache is keyed by, so "which card" means exactly the
+/// same thing in both places.
+pub(crate) fn hover_card_key(source: &PreviewSource) -> String {
+    crate::app::home::thumb_poster::poster_cache_key(source)
+}
+
+/// The hover wiring one card needs: `(onmouseenter, onmouseleave)` for the
+/// page's [`HoveredCard`] signal. A card with no preview source, or one on a
+/// page that provides no signal, gets inert handlers — including every
+/// story, so static capture keeps no hover state at all.
+///
+/// The leave handler is **guarded** (`peek` against the current owner — the
+/// `patch_surface.rs` precedent): sweeping the cursor across a grid delivers
+/// the next card's enter before this card's leave, and an unguarded clear
+/// would cancel the hover that had just started.
+pub(crate) fn card_hover_handlers(
+    source: Option<&PreviewSource>,
+) -> (
+    impl FnMut(MouseEvent) + 'static,
+    impl FnMut(MouseEvent) + 'static,
+) {
+    let hover = try_consume_context::<HoveredCard>();
+    let key = source.map(hover_card_key);
+    let enter_key = key.clone();
+    let enter = move |_: MouseEvent| {
+        if let (Some(HoveredCard(mut hovered)), Some(key)) = (hover, enter_key.as_ref()) {
+            hovered.set(Some(key.clone()));
+        }
+    };
+    let leave = move |_: MouseEvent| {
+        if let (Some(HoveredCard(mut hovered)), Some(key)) = (hover, key.as_ref()) {
+            if hovered.peek().as_deref() == Some(key.as_str()) {
+                hovered.set(None);
+            }
+        }
+    };
+    (enter, leave)
+}
+
 /// Per-render snapshot of one card thumb's live-preview state, produced by
 /// [`use_thumb_preview`].
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ThumbPreview {
+    /// The poster image (a PNG data URL) to show under the live layers:
+    /// this session's captured frame for the thumb's source. `None` until
+    /// one exists — and forever in [`ThumbMode::Live`], which never
+    /// captures.
+    pub poster: Option<String>,
     /// Stable per-mount element id for the thumb frame — the
     /// IntersectionObserver target.
     pub frame_id: String,
@@ -120,25 +211,38 @@ pub(crate) struct StaticThumbPreviews;
 /// Drive one card thumb's live preview and snapshot it for rendering.
 ///
 /// `source: None` (stories, non-wasm builds, cards without previews) is
-/// fully inert: no host, no canvas, no observer. With a source, the thumb
-/// leases a `PreviewHost` slot when it first scrolls into view, follows
-/// visibility edges with `set_visible`, reveals the canvas after the first
-/// presented frame, and recovers from errors by remounting a fresh canvas
-/// generation and leasing again (bounded; then parks on an error badge).
-pub(crate) fn use_thumb_preview(source: Option<PreviewSource>) -> ThumbPreview {
-    use_preview_lease(source, None)
+/// fully inert: no host, no canvas, no observer, no poster. With a source,
+/// the thumb leases a `PreviewHost` slot when it first scrolls into view,
+/// follows visibility edges with `set_visible`, reveals the canvas after
+/// the first presented frame, and recovers from errors by remounting a
+/// fresh canvas generation and leasing again (bounded; then parks on an
+/// error badge). In [`ThumbMode::PosterFirst`] the lease is a poster
+/// producer that stands down once it has one.
+pub(crate) fn use_thumb_preview(source: Option<PreviewSource>, mode: ThumbMode) -> ThumbPreview {
+    use_preview_slot(source, None, mode)
 }
 
-/// The general lease hook behind [`use_thumb_preview`]: same host, same
-/// visibility/recovery discipline, with the slot's present cadence left to
-/// the caller. Gallery thumbs pass `None` (the host default); a docs
+/// The always-live lease hook: same host, same visibility/recovery
+/// discipline, with the slot's present cadence left to the caller. A docs
 /// article's hero preview is a single large canvas the reader is actually
-/// looking at, so it asks for a smoother rate.
+/// looking at, so it asks for a smoother rate — and never posters, because
+/// motion is the point.
 pub(crate) fn use_preview_lease(source: Option<PreviewSource>, fps: Option<f32>) -> ThumbPreview {
+    use_preview_slot(source, fps, ThumbMode::Live)
+}
+
+/// The one hook behind [`use_thumb_preview`] and [`use_preview_lease`].
+fn use_preview_slot(
+    source: Option<PreviewSource>,
+    fps: Option<f32>,
+    mode: ThumbMode,
+) -> ThumbPreview {
     let frame_id = use_hook(|| {
         let id = NEXT_THUMB_ID.fetch_add(1, Ordering::Relaxed);
         format!("gallery-thumb-{id}")
     });
+    // Story capture: no source means no host, no lease, no capture and no
+    // poster — the static stack is the whole face, deterministically.
     let source = if try_consume_context::<StaticThumbPreviews>().is_some() {
         None
     } else {
@@ -146,14 +250,19 @@ pub(crate) fn use_preview_lease(source: Option<PreviewSource>, fps: Option<f32>)
     };
     #[cfg(target_arch = "wasm32")]
     {
-        wasm::use_live_thumb(frame_id, source, fps)
+        // Hover-to-play: the page's hovered-card signal paired with this
+        // card's key in it. A story (source cleared above) and a page that
+        // provides no signal are both inert — the hook never looks at hover.
+        let hover = try_consume_context::<HoveredCard>().zip(source.as_ref().map(hover_card_key));
+        wasm::use_live_thumb(frame_id, source, fps, mode, hover)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         // Host builds of this crate run unit tests only and never mount a
         // live preview; the static stack still renders.
-        let _ = (source, fps);
+        let _ = (source, fps, mode);
         ThumbPreview {
+            poster: None,
             frame_id,
             canvas: None,
             lamps: None,
@@ -176,12 +285,29 @@ mod wasm {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::Closure;
 
-    use super::{ThumbCanvas, ThumbPreview, ThumbPreviewBadge};
+    use super::{HoveredCard, ThumbCanvas, ThumbMode, ThumbPreview, ThumbPreviewBadge};
+    use crate::app::home::thumb_poster::{
+        POSTER_HEIGHT, POSTER_WIDTH, cached_poster, canvas_poster, lamp_poster, pixel_poster,
+        store_poster,
+    };
     use crate::app::node::lamp_view::control_sample_layout_has_rgb;
 
     /// Status/visibility poll cadence per thumb. Change detection rides
     /// `status_revision()`, so each tick is a couple of cheap reads.
     const THUMB_POLL_MS: u32 = 200;
+    /// Presents a poster lease is worth.
+    ///
+    /// Must be ≥ 2: on the GPU tier the lamp samples read back one frame
+    /// behind the render (`docs/adr/2026-08-05-browser-sample-readback-is-
+    /// async.md`) and a program's first frame is usually still black, so
+    /// capturing frame 1 would poster a dark box. Three presents at the
+    /// thumb cadence is a quarter of a second of rendering per card.
+    const POSTER_FRAME_BUDGET: u32 = 3;
+    /// Presenting poll ticks a poster lease gets to produce its picture
+    /// before it gives up and releases (the card keeps its gradient).
+    /// Counts only ticks where the slot is actually `Live`, so a queued
+    /// deploy or a scrolled-away card never burns the budget.
+    const POSTER_LIVE_TICK_LIMIT: u32 = 50;
     /// Substantive lease failures (deploy errors, worker loss, …) allowed
     /// before a thumb parks on an error badge instead of leasing again.
     const THUMB_ERROR_LIMIT: u8 = 2;
@@ -192,6 +318,18 @@ mod wasm {
     /// How long the host constructor waits for the app's local-store probe
     /// before starting without the library seam, in 100 ms polls.
     const LIBRARY_WAIT_POLLS: u32 = 50;
+    /// Cursor dwell before a hover takes its lease: long enough that
+    /// sweeping the pointer across a grid deploys nothing, short enough that
+    /// landing on a card still feels like a direct response.
+    const HOVER_DEBOUNCE_MS: u32 = 120;
+    /// Poll ticks a hover waits for the at-rest poster flow to finish before
+    /// giving up on this card (see [`hold_hover_lease`]).
+    const HOVER_WAIT_TICKS: u32 = 50;
+    /// Canvas-generation remounts one hover may spend. A poster lease on the
+    /// GPU tier consumed the card's canvas (`transferControlToOffscreen` is
+    /// permanent), so the first hover lease on such a card is EXPECTED to
+    /// fail once and remount; anything past that gives up quietly.
+    const HOVER_REMOUNT_LIMIT: u8 = 2;
 
     /// The page-wide preview host (see the module docs for the lifetime
     /// decision).
@@ -282,13 +420,32 @@ mod wasm {
         /// Canvas-generation remounts so far (parks at
         /// [`THUMB_REMOUNT_LIMIT`]).
         remounts: u8,
+        /// Poll ticks this poster lease has spent with the slot actually
+        /// presenting (parks at [`POSTER_LIVE_TICK_LIMIT`]).
+        poster_live_ticks: u32,
+        /// The at-rest flow is finished — poster captured, given up, or
+        /// parked — so hover-to-play may take the card from here. Hover
+        /// never races the poster flow: one card holds one slot.
+        at_rest: bool,
+        /// Monotonic hover intent. Every hover edge bumps it, so the task a
+        /// superseded edge spawned notices and exits.
+        hover_epoch: u64,
+        /// A hover lease is held: only then does the release path put the
+        /// card back the way hover found it.
+        hover_lease: bool,
+        /// Canvas remounts the current hover has spent
+        /// ([`HOVER_REMOUNT_LIMIT`]) — hover's own budget, never the
+        /// at-rest one.
+        hover_remounts: u8,
     }
 
-    /// The wasm arm of [`super::use_preview_lease`].
+    /// The wasm arm of [`super::use_preview_slot`].
     pub(super) fn use_live_thumb(
         frame_id: String,
         source: Option<PreviewSource>,
         fps: Option<f32>,
+        mode: ThumbMode,
+        hover: Option<(HoveredCard, String)>,
     ) -> ThumbPreview {
         // Canvas element generation: bumped on every recovery so a fresh
         // element mounts (a GPU-tier canvas is consumed by its transfer).
@@ -296,6 +453,14 @@ mod wasm {
         let badge = use_signal(|| None::<ThumbPreviewBadge>);
         let revealed = use_signal(|| false);
         let lamps = use_signal(|| None::<UiControlProductPreview>);
+        // Resolved at mount, ahead of any host boot: a returning visitor's
+        // card paints from the session cache on its very first render and
+        // never leases anything (the "navigate back to /explore" case).
+        let cached_source = source.clone();
+        let poster = use_signal(move || match mode {
+            ThumbMode::PosterFirst => cached_source.as_ref().and_then(cached_poster),
+            ThumbMode::Live => None,
+        });
         let state = use_hook(|| Rc::new(RefCell::new(LiveThumbState::default())));
 
         let tick_state = Rc::clone(&state);
@@ -309,31 +474,78 @@ mod wasm {
                 let Some(source) = source else {
                     return; // static thumb: nothing to drive
                 };
+                if poster.peek().is_some() {
+                    // Cache hit: no host, no lease, no observer — and the
+                    // thumb is already at rest, so a hover may lease at once.
+                    state.borrow_mut().at_rest = true;
+                    return;
+                }
                 let signals = ThumbSignals {
                     generation,
                     badge,
                     revealed,
                     lamps,
+                    poster,
                 };
-                loop {
-                    drive_thumb(&state, &frame_id, &source, fps, signals);
+                while drive_thumb(&state, &frame_id, &source, fps, mode.into(), signals)
+                    == ThumbTick::Poll
+                {
                     TimeoutFuture::new(THUMB_POLL_MS).await;
                 }
+                // Captured, gave up, or parked: whatever this card shows is
+                // what it shows from now on — hover-to-play may take it.
+                state.borrow_mut().at_rest = true;
             }
+        });
+
+        // Hover-to-play. The memo is the whole gate: a card with no page
+        // signal, no source, or [`ThumbMode::Live`] is never "the hovered
+        // card", so the effect below only ever runs its inert arm.
+        let hovered = use_memo(move || match (&hover, mode) {
+            (Some((HoveredCard(hovered), key)), ThumbMode::PosterFirst) => {
+                hovered.read().as_deref() == Some(key.as_str())
+            }
+            _ => false,
+        });
+        let hover_state = Rc::clone(&state);
+        let hover_frame = frame_id.clone();
+        let hover_source = source.clone();
+        use_effect(move || {
+            let hovering = hovered();
+            let Some(source) = hover_source.clone() else {
+                return;
+            };
+            let state = Rc::clone(&hover_state);
+            // Every hover edge supersedes the task the previous one spawned,
+            // so a cursor sweeping the grid leaves nothing running behind it.
+            let epoch = {
+                let mut state = state.borrow_mut();
+                state.hover_epoch = state.hover_epoch.wrapping_add(1);
+                state.hover_epoch
+            };
+            if !hovering {
+                release_hover(&mut state.borrow_mut(), poster, revealed);
+                return;
+            }
+            let frame_id = hover_frame.clone();
+            let signals = ThumbSignals {
+                generation,
+                badge,
+                revealed,
+                lamps,
+                poster,
+            };
+            spawn(hold_hover_lease(state, epoch, frame_id, source, signals));
         });
 
         let drop_state = Rc::clone(&state);
         use_drop(move || {
             let mut state = drop_state.borrow_mut();
-            if let Some(observer) = state.observer.take() {
-                observer.disconnect();
-            }
-            state.observer_closure = None;
-            // Dropping the handle releases the slot (DestroyRuntime).
-            state.handle = None;
+            stand_down(&mut state);
         });
 
         ThumbPreview {
+            poster: poster(),
             canvas: source.as_ref().map(|_| ThumbCanvas {
                 id: thumb_canvas_id(&frame_id, generation()),
                 revealed: revealed(),
@@ -355,23 +567,158 @@ mod wasm {
         /// The lamp field, once a control-first slot has published a
         /// drawable one.
         lamps: Signal<Option<UiControlProductPreview>>,
+        /// The captured poster, once this thumb has one.
+        poster: Signal<Option<String>>,
+    }
+
+    /// Why a slot is leased — the three shapes [`drive_thumb`] serves. The
+    /// first two are [`ThumbMode`] under another name; the third is the
+    /// hover lease, which a poster-first card takes *after* its at-rest flow
+    /// is done and holds only while the cursor stays on it.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum LeaseKind {
+        /// [`ThumbMode::Live`]: hold the slot while mounted and visible.
+        Live,
+        /// [`ThumbMode::PosterFirst`] at rest: spend a frame budget, capture
+        /// the poster, stand down.
+        Poster,
+        /// Motion while hovered: a continuous lease over the poster. Writes
+        /// no badge and spends no at-rest recovery budget — hover is a
+        /// courtesy, and its failures return to the poster in silence.
+        Hover,
+    }
+
+    impl From<ThumbMode> for LeaseKind {
+        fn from(mode: ThumbMode) -> Self {
+            match mode {
+                ThumbMode::Live => Self::Live,
+                ThumbMode::PosterFirst => Self::Poster,
+            }
+        }
+    }
+
+    /// What the poll loop does after one [`drive_thumb`] tick.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum ThumbTick {
+        /// Come back in [`THUMB_POLL_MS`].
+        Poll,
+        /// This thumb is finished: it holds no slot, watches nothing, and
+        /// nothing that can happen next would change what it shows. The
+        /// loop ends here, so a gallery at rest costs zero timers.
+        Rest,
+    }
+
+    /// Release everything the thumb holds: the slot lease (dropping the
+    /// handle sends DestroyRuntime), the IntersectionObserver, and its JS
+    /// callback.
+    fn stand_down(state: &mut LiveThumbState) {
+        if let Some(observer) = state.observer.take() {
+            observer.disconnect();
+        }
+        state.observer_closure = None;
+        state.handle = None;
+    }
+
+    /// Hold a continuous live lease for as long as this card stays hovered,
+    /// then put it back on its poster.
+    ///
+    /// **Hover during the initial poster capture waits** for that flow to
+    /// rest rather than racing it: one card never holds two slots, and what
+    /// the motion fades in over is the very poster the flow was busy
+    /// producing. (The alternative — promoting the poster lease in place —
+    /// would have to unwind its frame budget, its capture and its stand-down
+    /// mid-flight for a difference of about a second.)
+    async fn hold_hover_lease(
+        state: Rc<RefCell<LiveThumbState>>,
+        epoch: u64,
+        frame_id: String,
+        source: PreviewSource,
+        signals: ThumbSignals,
+    ) {
+        // Debounce first: a cursor crossing the grid must not deploy a
+        // project per card it passes over.
+        TimeoutFuture::new(HOVER_DEBOUNCE_MS).await;
+        let mut waits = 0_u32;
+        while hover_current(&state, epoch) && !state.borrow().at_rest {
+            if waits >= HOVER_WAIT_TICKS {
+                return; // the at-rest flow is taking far too long; leave it be
+            }
+            waits += 1;
+            TimeoutFuture::new(THUMB_POLL_MS).await;
+        }
+        if !hover_current(&state, epoch) {
+            return; // the cursor moved on during the wait
+        }
+        {
+            let mut state = state.borrow_mut();
+            state.hover_lease = true;
+            state.hover_remounts = 0;
+        }
+        // `fps: None` — a hovered card is watched, so it renders at the
+        // host's default cadence with no frame budget at all.
+        while hover_current(&state, epoch)
+            && drive_thumb(&state, &frame_id, &source, None, LeaseKind::Hover, signals)
+                == ThumbTick::Poll
+        {
+            TimeoutFuture::new(THUMB_POLL_MS).await;
+        }
+    }
+
+    /// Whether the hover task holding `epoch` is still the current intent.
+    fn hover_current(state: &Rc<RefCell<LiveThumbState>>, epoch: u64) -> bool {
+        state.borrow().hover_epoch == epoch
+    }
+
+    /// Drop the hover lease and put the card back the way hover found it.
+    ///
+    /// The poster has been under the canvas the whole time, so hiding a
+    /// canvas whose slot just went away cannot blank the card; a control-
+    /// first card's lamp field simply stops moving on its last frame, which
+    /// is also a picture and also not a blank. A card with NO poster keeps
+    /// its last hovered frame instead — never take away the only picture a
+    /// card has.
+    fn release_hover(
+        state: &mut LiveThumbState,
+        poster: Signal<Option<String>>,
+        mut revealed: Signal<bool>,
+    ) {
+        if !state.hover_lease {
+            return;
+        }
+        state.hover_lease = false;
+        state.handle = None;
+        state.last_revision = None;
+        state.last_output_revision = None;
+        if poster.peek().is_some() && *revealed.peek() {
+            revealed.set(false);
+        }
     }
 
     /// One poll tick: attach the observer once the frame exists, lease
-    /// when first visible, and fold slot status into the render signals.
+    /// when first visible, fold slot status into the render signals, and —
+    /// in [`LeaseKind::Poster`] — capture the poster and stand the thumb
+    /// down once the slot has spent its frame budget.
+    ///
+    /// [`LeaseKind::Hover`] runs the same tick with the poster half, the
+    /// badge writes and the at-rest budgets left out: what a hovered card
+    /// asks for is motion over the picture it already has.
     fn drive_thumb(
         state_rc: &Rc<RefCell<LiveThumbState>>,
         frame_id: &str,
         source: &PreviewSource,
         fps: Option<f32>,
+        kind: LeaseKind,
         signals: ThumbSignals,
-    ) {
+    ) -> ThumbTick {
         let ThumbSignals {
             mut generation,
             mut badge,
             mut revealed,
             mut lamps,
+            poster,
         } = signals;
+        let poster_first = kind == LeaseKind::Poster;
+        let hovering = kind == LeaseKind::Hover;
         let mut state = state_rc.borrow_mut();
 
         if state.observer.is_none() && !state.observer_broken {
@@ -382,20 +729,36 @@ mod wasm {
         // budget remains. The canvas for the current generation is already
         // mounted — the host's lease pipeline finds it by id.
         let assumed_visible = state.visible == Some(true) || state.observer_broken;
-        if state.handle.is_none()
-            && assumed_visible
-            && state.errors < THUMB_ERROR_LIMIT
-            && state.remounts < THUMB_REMOUNT_LIMIT
-        {
+        let recovery_left =
+            state.errors < THUMB_ERROR_LIMIT && state.remounts < THUMB_REMOUNT_LIMIT;
+        if !recovery_left && poster_first {
+            // Parked on an error badge over the gradient: nothing else is
+            // going to happen to this card — until the cursor lands on it,
+            // which leases through the hover arm below.
+            stand_down(&mut state);
+            return ThumbTick::Rest;
+        }
+        // A hovered card is on screen by definition, so hover neither waits
+        // for the observer's first edge (the at-rest flow disconnected it at
+        // stand-down) nor asks the at-rest recovery budgets for permission.
+        // Its own bound is [`HOVER_REMOUNT_LIMIT`], spent in the error arm.
+        let may_lease = hovering || (assumed_visible && recovery_left);
+        if state.handle.is_none() && may_lease {
             if let Some(host) = preview_host() {
                 let handle = host.lease(PreviewSlotRequest {
                     source: source.clone(),
                     canvas_id: thumb_canvas_id(frame_id, *generation.peek()),
                     fps,
-                    profile: PreviewProfile::default(),
+                    // A poster lease buys a picture, not a preview: the
+                    // host stops ticking the slot after this many presents
+                    // while the runtime and the last frame stay readable.
+                    profile: PreviewProfile {
+                        frame_budget: poster_first.then_some(POSTER_FRAME_BUDGET),
+                    },
                 });
                 state.last_revision = None;
                 state.last_output_revision = None;
+                state.poster_live_ticks = 0;
                 state.handle = Some(handle);
             }
         }
@@ -403,9 +766,9 @@ mod wasm {
         // Snapshot the handle's observables before mutating the state. The
         // output frame is read only when its revision moved — cloning a frame
         // is an Rc bump, but a repaint of the lamp field is not.
-        let (presented, revision, status, control_first, output_frame) = {
+        let (presented_frames, revision, status, control_first, output_frame) = {
             let Some(handle) = &state.handle else {
-                return;
+                return ThumbTick::Poll;
             };
             let control_first = handle.control_first();
             let output_revision = handle.output_frame_revision();
@@ -413,13 +776,24 @@ mod wasm {
                 && state.last_output_revision != Some(output_revision))
             .then(|| (output_revision, handle.output_frame()));
             (
-                handle.presented_frames() > 0,
+                handle.presented_frames(),
                 handle.status_revision(),
                 handle.status(),
                 control_first,
                 output_frame,
             )
         };
+        let presented = presented_frames > 0;
+        // A lease that actually presented proves the project renders: the
+        // recovery budgets meter consecutive attempts WITHOUT progress, so
+        // they reset here. Without this, an innocent card sharing a worker
+        // with a permanently-failing project burns its whole remount budget
+        // on that neighbour's recycles and parks even though every one of
+        // its own leases was healthy.
+        if presented && (state.errors != 0 || state.remounts != 0) {
+            state.errors = 0;
+            state.remounts = 0;
+        }
 
         // The lamp half: a control-first project draws its published output.
         if let Some((output_revision, frame)) = output_frame {
@@ -445,68 +819,236 @@ mod wasm {
         if *revealed.peek() != raster_revealed {
             revealed.set(raster_revealed);
         }
-        if state.last_revision == Some(revision) {
-            return;
-        }
-        state.last_revision = Some(revision);
-        match status {
-            // Deploying keeps whatever the thumb showed; Suspended freezes
-            // the canvas on its last frame (scroll-away) — both are
-            // non-events for the overlay.
-            PreviewSlotStatus::Deploying | PreviewSlotStatus::Suspended => {}
-            PreviewSlotStatus::Live { tier, tier_reason } => {
-                let next = match tier {
-                    PreviewTier::Gpu => ThumbPreviewBadge::Gpu,
-                    PreviewTier::Cpu => ThumbPreviewBadge::Cpu {
-                        reason: tier_reason,
-                    },
-                };
-                if badge.peek().as_ref() != Some(&next) {
-                    badge.set(Some(next));
+        // The tier the poster capture has to work with, kept before the
+        // status is consumed below.
+        let live_tier = match &status {
+            PreviewSlotStatus::Live { tier, .. } => Some(*tier),
+            _ => None,
+        };
+        if state.last_revision != Some(revision) {
+            state.last_revision = Some(revision);
+            match status {
+                // Deploying keeps whatever the thumb showed; Suspended freezes
+                // the canvas on its last frame (scroll-away) — both are
+                // non-events for the overlay.
+                PreviewSlotStatus::Deploying | PreviewSlotStatus::Suspended => {}
+                PreviewSlotStatus::Live { tier, tier_reason } => {
+                    // Hover writes no badge: a chip appearing on hover-in
+                    // and changing on hover-out would be exactly the churn
+                    // posters removed. The card keeps whatever its at-rest
+                    // lease already said about it.
+                    if !hovering {
+                        let next = match tier {
+                            PreviewTier::Gpu => ThumbPreviewBadge::Gpu,
+                            PreviewTier::Cpu => ThumbPreviewBadge::Cpu {
+                                reason: tier_reason,
+                            },
+                        };
+                        if badge.peek().as_ref() != Some(&next) {
+                            badge.set(Some(next));
+                        }
+                    }
                 }
-            }
-            PreviewSlotStatus::Error { reason } => {
-                // Release first: never reuse a canvas that a GPU-tier slot
-                // transferred. The host parks errored slots; recovery is
-                // ours (remount a fresh generation, lease again).
-                state.handle = None;
-                state.last_revision = None;
-                state.last_output_revision = None;
-                revealed.set(false);
-                // The lamps go with the canvas: the next lease redeploys the
-                // project and republishes them.
-                if lamps.peek().is_some() {
-                    lamps.set(None);
-                }
-                // The transferred-canvas error is the EXPECTED recovery
-                // path after LRU eviction or a worker recycle (the host
-                // words it "already transferred — remount"), so it spends
-                // the remount budget, not the error budget. Matching on
-                // the message is a P5 candidate for a typed status flag.
-                let expected_remount = reason.contains("already transferred");
-                if expected_remount {
-                    state.remounts = state.remounts.saturating_add(1);
-                } else {
-                    state.errors = state.errors.saturating_add(1);
-                }
-                if state.errors >= THUMB_ERROR_LIMIT || state.remounts >= THUMB_REMOUNT_LIMIT {
-                    // Workers killed by an aborted wasm fetch mean the page
-                    // is tearing down (refresh/navigation/HMR): the badge
-                    // still parks, but the console stays quiet.
-                    if lpa_studio_core::is_teardown_abort_reason(&reason) {
-                        log::debug!("gallery preview #{frame_id} gave up: {reason}");
+                PreviewSlotStatus::Error { reason } => {
+                    // Release first: never reuse a canvas that a GPU-tier slot
+                    // transferred. The host parks errored slots; recovery is
+                    // ours (remount a fresh generation, lease again).
+                    state.handle = None;
+                    state.last_revision = None;
+                    state.last_output_revision = None;
+                    revealed.set(false);
+                    // The lamps go with the canvas: the next lease redeploys the
+                    // project and republishes them.
+                    if lamps.peek().is_some() {
+                        lamps.set(None);
+                    }
+                    // The transferred-canvas error is the EXPECTED recovery
+                    // path after LRU eviction or a worker recycle (the host
+                    // words it "already transferred — remount"), so it spends
+                    // the remount budget, not the error budget. Matching on
+                    // the message is a P5 candidate for a typed status flag.
+                    let expected_remount = reason.contains("already transferred");
+                    if hovering {
+                        // Hover failures are quiet by construction: no badge
+                        // (the at-rest machinery owns that) and none of the
+                        // at-rest budgets, which a hover must never spend
+                        // into parking a card the user only pointed at. The
+                        // one retry worth making is the expected one — the
+                        // poster lease's GPU canvas was consumed, so remount
+                        // a fresh generation and lease again.
+                        if expected_remount && state.hover_remounts < HOVER_REMOUNT_LIMIT {
+                            state.hover_remounts = state.hover_remounts.saturating_add(1);
+                            generation += 1;
+                            return ThumbTick::Poll;
+                        }
+                        log::debug!("gallery hover preview #{frame_id} stood down: {reason}");
+                        return ThumbTick::Rest;
+                    }
+                    if expected_remount {
+                        state.remounts = state.remounts.saturating_add(1);
                     } else {
-                        log::warn!("gallery preview #{frame_id} gave up: {reason}");
+                        state.errors = state.errors.saturating_add(1);
                     }
-                    badge.set(Some(ThumbPreviewBadge::Error { reason }));
-                } else {
-                    generation += 1; // fresh canvas element; re-lease next tick
-                    if badge.peek().is_some() {
-                        badge.set(None);
+                    if state.errors >= THUMB_ERROR_LIMIT || state.remounts >= THUMB_REMOUNT_LIMIT {
+                        // Workers killed by an aborted wasm fetch mean the page
+                        // is tearing down (refresh/navigation/HMR): the badge
+                        // still parks, but the console stays quiet.
+                        if lpa_studio_core::is_teardown_abort_reason(&reason) {
+                            log::debug!("gallery preview #{frame_id} gave up: {reason}");
+                        } else {
+                            log::warn!("gallery preview #{frame_id} gave up: {reason}");
+                        }
+                        badge.set(Some(ThumbPreviewBadge::Error { reason }));
+                    } else {
+                        generation += 1; // fresh canvas element; re-lease next tick
+                        if badge.peek().is_some() {
+                            badge.set(None);
+                        }
                     }
+                    // The next tick re-leases (or stands the thumb down on
+                    // an exhausted budget); there is nothing to capture from
+                    // a slot that just died.
+                    return ThumbTick::Poll;
                 }
             }
         }
+
+        if !poster_first {
+            return ThumbTick::Poll;
+        }
+        capture_poster(
+            &mut state,
+            PosterCapture {
+                frame_id,
+                source,
+                generation: *generation.peek(),
+                presented_frames,
+                live_tier,
+                raster_revealed,
+            },
+            lamps,
+            poster,
+        )
+    }
+
+    /// Everything one poster-capture attempt reads about its slot.
+    struct PosterCapture<'a> {
+        frame_id: &'a str,
+        source: &'a PreviewSource,
+        /// Canvas generation currently mounted (the CPU-tier read target).
+        generation: u32,
+        presented_frames: u64,
+        /// Granted tier, `Some` only while the slot is `Live`.
+        live_tier: Option<PreviewTier>,
+        /// The raster canvas is the picture this thumb shows (not a hidden
+        /// engine-ticking present under a lamp field).
+        raster_revealed: bool,
+    }
+
+    /// The poster half of a tick: once the slot has spent its frame budget,
+    /// capture the picture its quadrant offers, cache it, and report that
+    /// the thumb is finished.
+    ///
+    /// Waiting for the FULL budget (rather than the first present) is what
+    /// makes the poster worth looking at: a program's first frame is
+    /// usually black, and on the GPU tier the lamp samples read back a
+    /// frame behind the render.
+    fn capture_poster(
+        state: &mut LiveThumbState,
+        slot: PosterCapture<'_>,
+        lamps: Signal<Option<UiControlProductPreview>>,
+        mut poster: Signal<Option<String>>,
+    ) -> ThumbTick {
+        let Some(tier) = slot.live_tier else {
+            // Deploying (possibly still queued behind the pool) or
+            // suspended off-screen: the clock does not run.
+            return ThumbTick::Poll;
+        };
+        state.poster_live_ticks = state.poster_live_ticks.saturating_add(1);
+        if slot.presented_frames < u64::from(POSTER_FRAME_BUDGET) {
+            if state.poster_live_ticks < POSTER_LIVE_TICK_LIMIT {
+                return ThumbTick::Poll;
+            }
+            log::debug!(
+                "gallery poster #{}: slot presented {} of {POSTER_FRAME_BUDGET} frames; \
+                 releasing with the placeholder",
+                slot.frame_id,
+                slot.presented_frames
+            );
+            stand_down(state);
+            return ThumbTick::Rest;
+        }
+
+        // Which quadrant this slot is in decides where the picture is read
+        // from (see `thumb_poster`'s module docs). The lamp field is the
+        // one this thumb is already drawing, so poster and live layer can
+        // never be different pictures.
+        let lamp_frame = lamps.peek();
+        let captured = match (lamp_frame.as_ref(), slot.raster_revealed, tier) {
+            // Control-first, either tier: the lamps ARE the card's picture,
+            // rasterized from the slot's own output frame.
+            (Some(frame), _, _) => lamp_poster(frame),
+            // Shader-only on the CPU tier: the host blits those frames onto
+            // the card's canvas with `putImageData`, so it reads back.
+            (None, true, PreviewTier::Cpu) => {
+                canvas_poster(&thumb_canvas_id(slot.frame_id, slot.generation))
+            }
+            // Shader-only on the GPU tier: the canvas was permanently
+            // handed to the worker by `transferControlToOffscreen`, so
+            // there is nothing readable on this thread. The WORKER captures
+            // instead: one `capture_poster` round-trip (render at poster
+            // size + async texture readback), answered through the handle.
+            (None, true, PreviewTier::Gpu) => {
+                let frame = state
+                    .handle
+                    .as_ref()
+                    .and_then(|handle| handle.poster_frame());
+                match frame {
+                    Some(frame) => pixel_poster(&frame),
+                    None => {
+                        // Idempotent while pending; survives worker
+                        // recycles until answered.
+                        if let Some(handle) = &state.handle {
+                            handle.request_poster_capture(POSTER_WIDTH, POSTER_HEIGHT);
+                        }
+                        if state.poster_live_ticks < POSTER_LIVE_TICK_LIMIT {
+                            return ThumbTick::Poll;
+                        }
+                        log::debug!(
+                            "gallery poster #{}: worker poster capture did not answer; \
+                             releasing with the placeholder",
+                            slot.frame_id
+                        );
+                        stand_down(state);
+                        return ThumbTick::Rest;
+                    }
+                }
+            }
+            // A control-first slot that spent its budget without ever
+            // publishing a drawable output frame: its raster is presenting
+            // HIDDEN (it only exists to tick the engine), so capturing it
+            // would poster a picture this card never shows. Nothing to
+            // take — release and keep the gradient.
+            (None, false, _) => {
+                log::debug!(
+                    "gallery poster #{}: control-first slot published no drawable output",
+                    slot.frame_id
+                );
+                stand_down(state);
+                return ThumbTick::Rest;
+            }
+        };
+        match captured {
+            Ok(data_url) => {
+                store_poster(slot.source, data_url.clone());
+                poster.set(Some(data_url));
+            }
+            // A failed capture is not worth a badge: the card keeps
+            // whatever it is already showing, and costs nothing further.
+            Err(error) => log::debug!("gallery poster #{}: {error}", slot.frame_id),
+        }
+        stand_down(state);
+        ThumbTick::Rest
     }
 
     /// Whether an output frame is a picture this thumb can actually draw.

@@ -693,6 +693,37 @@ fn last_seen_sort_key(card: &UiDeviceCard) -> f64 {
     }
 }
 
+/// The display label a pattern project's kind reads as
+/// ([`crate::app::library::package_manifest::kind_label`]).
+const PATTERN_KIND_LABEL: &str = "Pattern";
+
+/// Every pattern export the library offers, for the add-node picker's
+/// import source (module authoring unit, P5).
+///
+/// Derived from the ALREADY-hydrated gallery cards rather than from a
+/// second library read: the snapshot has been walked once at settle, and
+/// the picker's needs are exactly two fields that walk already produced.
+/// Blocked packages are skipped — a project this build cannot open is not
+/// a project it can vendor bytes out of.
+pub fn importable_patterns(inputs: &HomeInputs) -> Vec<crate::UiImportablePattern> {
+    inputs
+        .projects
+        .iter()
+        .filter(|card| card.project_kind == PATTERN_KIND_LABEL && card.health.is_openable())
+        .flat_map(|card| {
+            let family = card.exports.len() > 1;
+            card.exports
+                .iter()
+                .map(move |export| crate::UiImportablePattern {
+                    package_uid: card.uid.clone(),
+                    package_label: card.slug.clone(),
+                    export: export.clone(),
+                    family,
+                })
+        })
+        .collect()
+}
+
 fn package_card(
     store: &LibraryStore,
     registered: &[RegisteredDevice],
@@ -700,11 +731,16 @@ fn package_card(
 ) -> Result<UiPackageCard, crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
-    // Advisory board target (vision D3): straight passthrough from the
-    // container manifest, same seam `provenance`/`on_device` use — no
-    // catalog lookup here, that's the web renderer's job.
-    let target =
-        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?.target;
+    // Advisory board target (vision D3) + authored project kind (module
+    // authoring unit, P1): straight passthrough from the container
+    // manifest, same seam `provenance`/`on_device` use — no catalog lookup
+    // here, that's the web renderer's job.
+    let manifest_fields =
+        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?;
+    let target = manifest_fields.target;
+    let project_kind =
+        crate::app::library::package_manifest::kind_label(&manifest_fields.kind).to_string();
+    let exports = manifest_fields.exports;
 
     let last_saved_at = handle
         .history
@@ -729,6 +765,8 @@ fn package_card(
     Ok(UiPackageCard {
         uid,
         kind: summary.kind,
+        project_kind,
+        exports,
         slug: summary.slug,
         last_saved_at,
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
@@ -748,6 +786,15 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
     UiPackageCard {
         uid: summary.uid.to_string(),
         kind: summary.kind,
+        // A degraded package's manifest may be unreadable; fall back to
+        // the default kind rather than claim one we could not read.
+        project_kind: crate::app::library::package_manifest::kind_label(
+            &lpc_model::ProjectKind::General,
+        )
+        .to_string(),
+        // Same reason as the kind above: nothing was readable, so nothing
+        // is claimed.
+        exports: Vec::new(),
         slug: summary.slug,
         last_saved_at: None,
         provenance: None,
@@ -776,6 +823,9 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
         PackageProvenance::PulledFromDevice { device_name, .. } => {
             Some(format!("Pulled from {device_name}"))
         }
+        // Project-name-centric on purpose: the service exposes no owner
+        // profile, and guessing would be worse than saying what it is.
+        PackageProvenance::OpenedFromLink => Some("Shared with you".to_string()),
         PackageProvenance::ForkedFrom { parent_project, .. } => {
             let parent = parent_project
                 .parse()
@@ -1178,7 +1228,7 @@ mod tests {
                 "Basic",
                 &[(
                     "project.json".to_string(),
-                    br#"{"format":6,"name":"Basic"}"#.to_vec(),
+                    br#"{"format":10,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
                     source: "examples/fyeah-sign".to_string(),

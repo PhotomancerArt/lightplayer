@@ -68,7 +68,7 @@ holds the full context.
 | Layout-header semantic chunking (per-lamp-range events) | `2026-07-04-envelope-streaming` | Display-layout fixtures grow ~4×+ past the 16 KiB frame budget |
 | Sub-root slot progressive patching | `2026-07-04-envelope-streaming`; `2026-06-27-project-read-event-frames` | `SlotMirrorView` can apply partial root snapshots safely |
 | Real-hardware Studio smoke of the gated multi-frame serial read | `2026-07-04-envelope-streaming` | Post-merge hardware validation pass |
-| Binary/compressed payload encoding for project-read frames | `2026-06-27-project-read-event-frames`; `2026-06-27-ser-write-json-raw-value` | JSON/base64 overhead becomes material after the bounded-transport contract settles |
+| Binary/compressed payload encoding for project-read frames | `2026-06-27-project-read-event-frames`; `2026-06-27-ser-write-json-raw-value`; partially executed by `2026-08-10-packed-display-layouts-transport-budget` (display layouts packed; compression measured and declined) | Remaining scope: other frame payloads, only if frames become byte-bound in practice |
 | Membership-only `ids_revision` bump (strictly on id add/remove) | `2026-07-03-revision-gated-project-reads` | A correctness-neutral chattiness lean-out is worth doing |
 | Flatten the now single-variant `AssetSlotValue` enum; directory-per-node layout | `2026-07-04-json-only-artifacts` | Studio editing work touches asset/node layout |
 | ELF-symbol `Content` guardrail check in CI | `2026-07-04-json-only-artifacts` | CI ground-truth guardrail is prioritized |
@@ -166,6 +166,16 @@ holds the full context.
 | Local password method for self-host (the `local` connection's password method, sibling to the dev picker) | `2026-08-07-provider-based-auth` | A self-host deployment target is prioritized |
 | Identities link table `(connection, subject) → user` for multi-provider accounts on one user | `2026-08-07-provider-based-auth` | A second connection type ships and accounts need to merge across them |
 | Old-format (`prj_…` base-62) uids on the live cloud dev store — wipe or re-mint | `2026-08-07-uid-format-single-token-base32` | Next lightplayer.app deploy |
+| The Xtensa native default flips to f32 (the flip condition, written as a threshold: the synth-loop software-pipelining spike, or frame-floor headroom work) | `2026-08-08-float-semantics-per-target-representation` | Either lever measurably closes the ~19–20% dome-scale gap |
+| Build-time mode sets per image (a runtime-matched `FloatMode` keeps LTO from dropping the arm a board never enters — +63 KB on classic and S3 today) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-as-a-compiler-parameter` | Flash headroom tightens, or the first single-mode image is built |
+| Single-mode f32 image + whether it carries Q32 at all (lean: no) | `2026-08-08-float-semantics-per-target-representation` | ESP32-S31 silicon and toolchain arrive |
+| f32-native points-in frame ABI (~1 ms/1500 LEDs per `float.md` §4; deletes the Float arm of `Q16CoordDecoder`; output side stays integer in every design) | `2026-08-08-float-semantics-per-target-representation` | The first f32-native image lands — not worth a classic/S3 ABI churn on its own |
+| What a pinned `Fixed` means on an f32-native image (it aliases native on every shipping backend today) | `2026-08-08-float-semantics-per-target-representation` | An image exists where native is not Q32 |
+| Per-device preview representation selection in a multi-device Studio | `2026-08-08-float-semantics-per-target-representation` | Two attached devices disagree on native representation |
+| Gate the `float_mode` pin on the firmware manifest so it is not offered where one representation exists (the compile-error backstop stays regardless) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-reaches-the-device` | The manifest can report a board's representation set |
+| `declare_space` agent tool: the shader agent can stage a `render_1d` body but cannot write `ShaderDef::space`, and its prompt asserts the 2D entry unconditionally | `2026-08-09-dimensionality-authoring-surface` | Next shader-agent work; must reuse the dimensionality section's write path |
+| Fixture paste-guidedness is a heuristic (no mapping and height ≠ 1) for want of a model-level "declared" marker | `2026-08-09-dimensionality-authoring-surface` | The mapping/patching work's D15 declared fixture space lands |
+| `wire_reversed` is an interim fixture-level bit; the patching work's per-range `reversed` supersedes it, and D15 may absorb `strip_order_meaningful` entirely | `2026-08-09-dimensionality-authoring-surface` | Mapping/patching slice 1 |
 
 ## Relationship To Shared Planning
 

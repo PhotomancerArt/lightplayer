@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
     Brightness, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, MappingConfig,
+    PatchConfig, VisualConsumerSpace,
 };
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
@@ -30,6 +31,36 @@ pub struct FixtureDef {
     pub diagnostic_mode: ValueSlot<FixtureDiagnosticMode>,
     /// Fixture mapping definition.
     pub mapping: EnumSlot<MappingConfig>,
+    /// Where this fixture's lamps land on its output's wire.
+    ///
+    /// A separate slot from `mapping` on purpose (mapping & patching vision
+    /// D4/D6): a fixture is mapped once and re-patched on every install, so
+    /// clearing the patch back to `Unset` — pure auto-flow — must never
+    /// disturb a lamp position. Absent/`Unset` is the ordinary state; a
+    /// patch is opt-in and even then usually sparse.
+    pub patch: EnumSlot<PatchConfig>,
+    /// Whether this fixture's strip/lamp order carries meaning ("does strip
+    /// order mean something?", dimensionality-first-class vision D3).
+    /// Defaults true (a bare strip is `{1D}`); a serpentine matrix author
+    /// sets it false. Enforced by consumers, not the model — this slot only
+    /// carries the authored bit. Model layer only: not yet read by the
+    /// engine.
+    pub strip_order_meaningful: ValueSlot<bool>,
+    /// Reverse the wire order on the along-the-wire (1D) sampling path:
+    /// lamp `k` reads strip position `N-1-k` instead of `k`. Only read
+    /// when a wire-order 1D request actually happens (strip order
+    /// meaningful and a 1D-primary source); the mapped 2D path never
+    /// looks at it — map2d's per-object `reversed` is map geometry, a
+    /// different thing. INTERIM by design (strip-order unification
+    /// addendum, 2026-08-09): the mapping-patching work's per-range
+    /// `reversed` (slice 1) absorbs this whole-fixture bit later.
+    pub wire_reversed: ValueSlot<bool>,
+    /// This fixture's consumer-side space policy (vision D14): the answer
+    /// side of the two-sided space declaration, mirroring
+    /// [`crate::ShaderSpace`] on the producer side. Defaults to `Auto`
+    /// (defaults-only policy, never force). Model layer only: not yet read
+    /// by the engine.
+    pub consume: EnumSlot<VisualConsumerSpace>,
     /// Color order for RGB channels.
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
@@ -60,6 +91,10 @@ impl Default for FixtureDef {
             sampling: ValueSlot::new(FixtureSamplingConfig::default()),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::default()),
             mapping: EnumSlot::default(),
+            patch: EnumSlot::default(),
+            strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
+            consume: EnumSlot::default(),
             color_order: ValueSlot::default(),
             transform: Affine2dSlot::default(),
             brightness: default_brightness(),
@@ -351,6 +386,10 @@ mod tests {
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
+            patch: EnumSlot::default(),
+            strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
+            consume: EnumSlot::default(),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),
@@ -423,5 +462,17 @@ mod tests {
             view.gamma_correction().path(),
             &SlotPath::parse("gamma_correction").unwrap()
         );
+        assert_eq!(
+            view.strip_order_meaningful().path(),
+            &SlotPath::parse("strip_order_meaningful").unwrap()
+        );
+        assert_eq!(view.consume().path(), &SlotPath::parse("consume").unwrap());
+    }
+
+    #[test]
+    fn fixture_def_defaults_strip_order_meaningful_true_and_consume_auto() {
+        let def = FixtureDef::default();
+        assert!(*def.strip_order_meaningful.value());
+        assert_eq!(*def.consume.value(), VisualConsumerSpace::Auto);
     }
 }

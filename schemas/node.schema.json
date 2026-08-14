@@ -126,20 +126,6 @@
       },
       "type": "object"
     },
-    "lpc_model::nodes::output::output_channel_def::OutputChannelDef": {
-      "additionalProperties": false,
-      "properties": {
-        "count": {
-          "maximum": 4294967295,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "endpoint": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -159,6 +145,20 @@
           "maxItems": 3,
           "minItems": 3,
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::output::output_port_def::OutputPortDef": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -331,6 +331,11 @@
         },
         "label": {
           "type": "string"
+        },
+        "len": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
         },
         "mapping": {
           "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef"
@@ -576,6 +581,8 @@
           "type": "object"
         },
         "float_mode": {
+          "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+          "title": "Float mode",
           "type": "string"
         },
         "kind": {
@@ -624,6 +631,174 @@
             }
           ],
           "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+        },
+        "space": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "in_1d": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "const": "Default"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "kind": {
+                  "const": "TwoD"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "in_2d": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "flip": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Normal"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Flipped"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "const": "Project"
+                        },
+                        "mirror": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Normal"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Mirrored"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "shape": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "ExtrudeX"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "ExtrudeY"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Radial"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Angular"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "kind": {
+                  "const": "OneD"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "required": [
@@ -647,6 +822,8 @@
           "type": "object"
         },
         "float_mode": {
+          "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+          "title": "Float mode",
           "type": "string"
         },
         "kind": {
@@ -930,15 +1107,6 @@
           },
           "type": "object"
         },
-        "channels": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lpc_model::nodes::output::output_channel_def::OutputChannelDef"
-          },
-          "propertyNames": {
-            "pattern": "^\\+?[0-9]+$"
-          },
-          "type": "object"
-        },
         "input": {
           "additionalProperties": false,
           "properties": {
@@ -977,8 +1145,20 @@
         "kind": {
           "const": "Output"
         },
+        "name": {
+          "type": "string"
+        },
         "options": {
           "$ref": "#/$defs/lpc_model::nodes::output::output_def::OutputDriverOptionsConfig"
+        },
+        "ports": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::output::output_port_def::OutputPortDef"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
         }
       },
       "required": [
@@ -1002,6 +1182,161 @@
         },
         "color_order": {
           "type": "string"
+        },
+        "consume": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Auto"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "force": {
+                  "type": "boolean"
+                },
+                "from_1d": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "flip": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Normal"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Flipped"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "const": "Project"
+                        },
+                        "mirror": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Normal"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Mirrored"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "shape": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "ExtrudeX"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "ExtrudeY"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Radial"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "Angular"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "kind": {
+                  "const": "Policy"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "diagnostic_mode": {
           "type": "string"
@@ -1165,6 +1500,66 @@
             }
           ]
         },
+        "patch": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Unset"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "File"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "$path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "$path"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "power": {
           "additionalProperties": false,
           "description": "Lamp type and supply budget used to limit output current.",
@@ -1209,6 +1604,9 @@
         "sampling": {
           "type": "string"
         },
+        "strip_order_meaningful": {
+          "type": "boolean"
+        },
         "transform": {
           "description": "2D affine transform as a row-major 3x3 matrix; the bottom row must be (approximately) [0, 0, 1] — perspective matrices are rejected on read.",
           "items": {
@@ -1222,6 +1620,9 @@
           "maxItems": 3,
           "minItems": 3,
           "type": "array"
+        },
+        "wire_reversed": {
+          "type": "boolean"
         }
       },
       "required": [

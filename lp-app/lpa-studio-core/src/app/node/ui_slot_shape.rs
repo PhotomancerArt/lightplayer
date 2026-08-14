@@ -68,6 +68,8 @@ pub enum UiSlotShape {
     Mat4x4,
     /// Homogeneous or wire-provided array/list payload.
     Array,
+    /// Packed typed buffer (summary-only in panels).
+    Buffer,
     /// Atomic enum payload.
     Enum,
     /// Store-backed resource reference.
@@ -108,6 +110,7 @@ impl UiSlotShape {
             UiSlotValueKind::Mat3x3(_) => Self::Mat3x3,
             UiSlotValueKind::Mat4x4(_) => Self::Mat4x4,
             UiSlotValueKind::Array(_) => Self::Array,
+            UiSlotValueKind::Buffer(_) => Self::Buffer,
             UiSlotValueKind::Struct { fields, .. } => Self::Record(
                 fields
                     .iter()
@@ -147,6 +150,7 @@ impl UiSlotShape {
             Self::Mat3x3 => "Mat3x3".to_string(),
             Self::Mat4x4 => "Mat4x4".to_string(),
             Self::Array => "Array".to_string(),
+            Self::Buffer => "Buffer".to_string(),
             Self::Enum => "Enum".to_string(),
             Self::Resource => "Resource".to_string(),
             Self::Record(_) => "Record".to_string(),

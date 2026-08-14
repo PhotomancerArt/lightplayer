@@ -41,6 +41,13 @@ pub fn model_type_to_lps_type(ty: &LpType) -> LpsType {
             len: u32::try_from(*len)
                 .expect("lpc-model array length must fit LpsType::Array len (u32)"),
         },
+        // The ABI has no separate buffer TYPE: a buffer is the packed VALUE
+        // form of a bounded array, so the type lowers to the array the
+        // shader already declares.
+        LpType::Buffer { elem, len } => LpsType::Array {
+            element: Box::new(model_type_to_lps_type(&elem.as_lp_type())),
+            len: *len,
+        },
         LpType::List(_) => {
             unimplemented!("LpType::List does not have a shader ABI projection yet")
         }

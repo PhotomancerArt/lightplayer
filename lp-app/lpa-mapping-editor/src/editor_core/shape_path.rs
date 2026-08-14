@@ -108,7 +108,10 @@ impl ShapePath {
 pub fn structural_child_count(shape: &Map2dShape) -> usize {
     match shape {
         Map2dShape::Repeat(_) => 1,
-        Map2dShape::Grid(_) | Map2dShape::Ring(_) | Map2dShape::Path(_) => 0,
+        Map2dShape::Grid(_)
+        | Map2dShape::Ring(_)
+        | Map2dShape::Path(_)
+        | Map2dShape::Polygon(_) => 0,
     }
 }
 

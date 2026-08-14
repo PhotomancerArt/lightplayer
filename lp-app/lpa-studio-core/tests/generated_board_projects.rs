@@ -68,6 +68,11 @@ fn every_catalog_board_generates_a_valid_targeted_project() {
                 continue;
             }
             let text = std::str::from_utf8(bytes).expect("authored artifacts are utf8");
+            if path.ends_with(".patch.json") {
+                lpc_mapping::PatchDoc::from_json(text)
+                    .unwrap_or_else(|error| panic!("{board_id}/{path}: {error}"));
+                continue;
+            }
             if path.ends_with(".map2d.json") {
                 let doc = lpc_mapping::Map2dDoc::from_json(text)
                     .unwrap_or_else(|error| panic!("{board_id}/{path}: {error}"));
@@ -198,7 +203,7 @@ fn authored_endpoints(text: &str) -> Vec<String> {
     else {
         panic!("the generated output.json is an Output node");
     };
-    let mut channels: Vec<_> = output.channels.entries.iter().collect();
+    let mut channels: Vec<_> = output.ports.entries.iter().collect();
     channels.sort_by_key(|(key, _)| **key);
     channels
         .into_iter()

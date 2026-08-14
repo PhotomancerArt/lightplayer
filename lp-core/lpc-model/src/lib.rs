@@ -99,7 +99,10 @@ pub use project::inventory::{
     ReferencedAsset,
 };
 pub use value::WithRevision;
-pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
+pub use value::{
+    BufferElem, BufferScalar, LpBuffer, LpBufferError, LpType, LpValue, ModelEnumVariant,
+    ModelStructMember,
+};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
@@ -121,20 +124,24 @@ pub use nodes::{
     ButtonStateView, CLOCK_PLAY_STATE_DEFAULT_BIND, CLOCK_PLAY_STATE_SHAPE_NAME,
     CLOCK_RATE_DEFAULT_BIND, CLOCK_SCRUB_DEFAULT_BIND, CLOCK_TRANSPORT_SHAPE_NAME, ChannelMetaDef,
     ChannelMetaDefView, ClockDef, ClockDefView, ClockState, ClockTransport, ColorOrder,
-    ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
+    ComputeShaderDef, ComputeShaderDefView, ConsumerCell2, ControlRadioDef, ControlRadioDefView,
     ControlRadioState, ControlRadioStateView, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
-    FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, FloatMode, FluidDef,
-    FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType, MappingConfig, ModuleDef,
-    ModuleDefView, NodeDefParseError, NodeStarter, OutputChannelDef, OutputChannelDefView,
-    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec,
-    PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
-    PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint,
-    ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
-    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
-    glsl_type_for_lp_type, node_def_asset_ref, resolve_artifact_specifier, set_node_def_asset_ref,
-    shader_panel_step, starter_def_for_kind, starter_for_kind, starter_project_files,
+    FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, FlipMode, FloatMode,
+    FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType, MappingConfig,
+    MirrorMode, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OUTPUT_NAME_MAX_LEN,
+    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, OutputName,
+    OutputNameError, OutputPortDef, OutputPortDefView, PATTERN_EXPORT_FOLDER, PatchConfig,
+    PathSpec, PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
+    PlaylistState, PlaylistStateView, ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL,
+    STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderBudget, ShaderBudgetError,
+    ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
+    ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
+    ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2,
+    TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
+    generate_compute_shader_header, glsl_type_for_lp_type, next_output_name, node_def_asset_refs,
+    pattern_project_files_1d, pattern_project_files_2d, resolve_artifact_specifier,
+    rewrite_node_def_asset_refs, shader_panel_step, slot_bytes_estimate, starter_def_for_kind,
+    starter_for_kind, starter_project_files, validate_shader_slot_budget,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
@@ -150,10 +157,11 @@ pub use project::overlay_mutation::{
     StoredSlotEdit,
 };
 pub use project::{
-    ChangeSummary, CommitResult, LocationSeg, ManifestParseError, MutationBatchResults,
-    MutationResult, NodeAttachSite, NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary,
-    ProjectConfig, ProjectInventory, ProjectManifest, ProjectNode, ProjectNodeOrigin,
-    ProjectNodePlacement, ProjectTree, Revision,
+    ChangeSummary, CommitResult, ExportFileSet, ExportFinding, ExportLintReport, ExportSeverity,
+    LocationSeg, ManifestParseError, MutationBatchResults, MutationResult, NodeAttachSite,
+    NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary, ProjectConfig, ProjectInventory,
+    ProjectKind, ProjectManifest, ProjectNode, ProjectNodeOrigin, ProjectNodePlacement,
+    ProjectTree, Revision, check_export, check_exports,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};

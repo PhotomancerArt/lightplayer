@@ -28,7 +28,6 @@ pub(crate) mod h_fader_field_stories;
 pub(crate) mod knob_field_stories;
 pub(crate) mod lamp_view;
 pub(crate) mod map_view;
-pub(crate) mod mapping_asset_editor;
 mod node_children;
 mod node_detail_popover;
 mod node_pane;
@@ -43,6 +42,8 @@ pub(crate) mod palette_chooser_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod palette_swatch_stories;
 mod panel;
+#[cfg(feature = "stories")]
+pub(crate) mod patch_bay_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod playlist_face_stories;
 #[cfg(feature = "stories")]
@@ -96,8 +97,8 @@ pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub(crate) use face::node_ui_action;
 pub use face::{
-    ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace,
-    PlaylistFace, ShaderFace, TapeTransport,
+    ClockFace, FixtureFace, HoveredPatchCell, NodeCardDrawers, NodeCardSection, NodeFaceBody,
+    OutputFace, PlaylistFace, ShaderFace, TapeTransport,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};

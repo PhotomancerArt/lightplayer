@@ -26,30 +26,42 @@
 //! the shared view state feeds whichever renderer is showing, including
 //! live output colors. What the
 //! bar *offers* is not stable, and should not be: the wiring instruments
-//! (numbers, arrows, universe colors) are authoring tools, so they appear
+//! (numbers, arrows) are authoring tools, so they appear
 //! only in edit mode, and view mode's bar carries the live toggle alone.
 //! Edit mode also adds the texture-frame toggle and a full-page expand
 //! (fixed-position in place; the section never leaves the DOM). Toggle +
 //! edit-mode state are view-local for now, same as the drawer open-state (a
 //! CardUiState re-home is an existing follow-up).
 //!
+//! Between the output and the settings sits the `space` section — the
+//! CONSUMER half of the two-sided space model (D13): this fixture's
+//! `consume` policy and its "does strip order mean something?" bit,
+//! rendered by the same component the shader card renders its declaration
+//! with, so the two cannot drift apart.
+//!
+//! Under the hero, when this fixture's lamps have reached an output's
+//! wire, sits the patch bay's FIXTURE side (D34a): its own runs laid along
+//! its own channel space, each labelled with where on the wire it landed.
+//! The same cells the output card shows, the other ordering — a fixture
+//! split across two stretches of strand reads unbroken here, and that
+//! difference IS the patch. Read-only; the document is edited as text.
+//!
 //! The `controls` section holds one dominant horizontal fader bound to
 //! `FixtureDef.brightness.some`.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Maximize2, Minimize2, Pencil, Scan};
+use dioxus_icons::lucide::Pencil;
 use lpa_studio_core::{
     NodeCardDrawer, NodeUiOp, UiAction, UiFixtureFace as UiFixtureFaceData, UiProductKind,
-    UiProductPreview,
 };
 
-use crate::app::node::face::node_ui_action;
-use crate::app::node::lamp_view::control_live_lamp_colors;
+use crate::app::node::face::{FixturePatchRow, FixtureShapeMoment, node_ui_action};
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
-use crate::app::node::mapping_asset_editor::MappingAssetEditor;
 use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
+
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -66,44 +78,36 @@ pub fn FixtureFace(
     /// Initial map view options (stories render deterministic states).
     #[props(default)]
     initial_map_view: Option<MapViewOptions>,
-    /// Mount with the mapping editor open (stories).
-    #[props(default = false)]
-    edit_initially_open: bool,
     /// The node's address path, keying the power readout's open-the-drawer
     /// tap. Absent (stories) leaves the readout inert.
     #[props(default = None)]
     node: Option<String>,
+    /// Open the dimensionality drawer on first render (stories — the
+    /// drawer defaults collapsed, P4b).
+    #[props(default = false)]
+    space_initially_open: bool,
+    /// Render the dimensionality drawer as the guided Shape moment
+    /// (`NodeCardUiState::shape_guided` — a freshly created fixture).
+    #[props(default = false)]
+    shape_guided: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The dimensionality drawer's open state (P4b: default collapsed,
+    // below settings).
+    let mut space_open = use_signal(move || space_initially_open);
     let preview = face.preview.clone();
     // One view state for both faces of the section: the same toggle bar
     // (and its state) survives the view ⇄ edit flip, and the toggles drive
     // the editor canvas exactly like the display renderer.
     let mut view = use_signal(move || initial_map_view.unwrap_or_default().into_editor());
-    let mut editing = use_signal(|| edit_initially_open);
-    let mut expanded = use_signal(|| false);
-    // Bumped on expand/collapse: the editor re-fits to the new box size.
-    let mut refit = use_signal(|| 0_u64);
     let show_toggles = preview.kind == UiProductKind::Control;
+    // The mapping edits in the workbench's Mapping view now (the R1
+    // ruling deleted the in-place embed); the pencil is a doorway.
     let editable = face.mapping_editor.is_some();
-    let edit_open = editable && editing();
-    let full = edit_open && expanded();
-    // Live lamp colors for the editor's live view, decoded from the same
-    // control preview the display mode renders. Only fed while the live
-    // toggle is on: an empty vec keeps the editor's props stable so it
-    // skips the per-frame re-render entirely when live is off.
-    let live_colors = if edit_open && view().live {
-        match &preview.preview {
-            UiProductPreview::ControlNative(control) => control_live_lamp_colors(control),
-            _ => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
 
     rsx! {
         NodeCardSection { label: "output", first: true,
-            div { class: if full { "ux-map-home ux-map-home-full" } else { "ux-map-home" },
+            div { class: "ux-map-home",
                 div { class: "ux-map-toggle-bar",
                     // The product's own chrome, at the head of the bar the
                     // hero already had: name, publish chip, and (at the far
@@ -114,42 +118,10 @@ pub fn FixtureFace(
                     div { class: "lpme-spacer" }
                     if editable {
                         button {
-                            class: if edit_open { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
-                            title: if edit_open { "close the mapping editor" } else { "edit the mapping here" },
-                            onclick: move |_| {
-                                let now = *editing.peek();
-                                editing.set(!now);
-                                if now {
-                                    expanded.set(false);
-                                }
-                            },
-                            Pencil { size: 13 }
-                        }
-                    }
-                    if edit_open {
-                        button {
-                            class: if view().fit_preview { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
-                            title: "texture-frame preview — how the doc fits shader space (F)",
-                            onclick: move |_| {
-                                let now = view.peek().fit_preview;
-                                view.write().fit_preview = !now;
-                            },
-                            Scan { size: 13 }
-                        }
-                        button {
                             class: "ux-map-toggle",
-                            title: if full { "back to the card" } else { "expand the editor to the full page" },
-                            onclick: move |_| {
-                                let now = *expanded.peek();
-                                expanded.set(!now);
-                                let bump = *refit.peek() + 1;
-                                refit.set(bump);
-                            },
-                            if full {
-                                Minimize2 { size: 13 }
-                            } else {
-                                Maximize2 { size: 13 }
-                            }
+                            title: "edit the mapping (opens the Mapping view)",
+                            onclick: move |_| open_mapping_view(),
+                            Pencil { size: 13 }
                         }
                     }
                     if show_toggles {
@@ -159,10 +131,10 @@ pub fn FixtureFace(
                                 next.apply_to_editor(&mut view.write());
                             },
                             bare: true,
-                            // The wiring instruments are authoring tools:
-                            // view mode shows the product, edit mode
-                            // inspects the wiring.
-                            wiring: edit_open,
+                            // The wiring instruments moved to the Mapping
+                            // view with the editor; the face shows the
+                            // product.
+                            wiring: false,
                         }
                     }
                     SlotDetailButton {
@@ -173,27 +145,24 @@ pub fn FixtureFace(
                         authoring: preview.authoring.clone(),
                     }
                 }
-                if edit_open {
-                    if let Some(editor) = face.mapping_editor.clone() {
-                        MappingAssetEditor {
-                            editor,
-                            shared_view: view,
-                            live_colors,
-                            refit_epoch: refit(),
-                            on_action,
-                        }
-                    }
-                } else {
-                    ProductPreview {
-                        kind: preview.kind,
-                        preview: preview.preview.clone(),
-                        tracking: preview.tracking,
-                        frame: preview.frame,
-                        focus_action: None,
-                        on_action,
-                        live: view().live,
-                    }
+                ProductPreview {
+                    kind: preview.kind,
+                    preview: preview.preview.clone(),
+                    tracking: preview.tracking,
+                    frame: preview.frame,
+                    focus_action: None,
+                    on_action,
+                    live: view().live,
                 }
+            }
+            // The patch bay's FIXTURE side, in the section this fixture
+            // already has rather than a new one: the hero says what this
+            // fixture is showing, and the row under it says where those
+            // lamps landed on the wire — the same cells the driven
+            // output's card lays along the strand (D34a). Absent until
+            // something this fixture produces reaches an output.
+            if let Some(patch) = face.patch.clone() {
+                FixturePatchRow { patch }
             }
         }
         NodeCardSection { label: "settings",
@@ -204,8 +173,40 @@ pub fn FixtureFace(
                     on_action,
                 }
                 if let Some(power) = face.power {
-                    PowerReadout { power, node, on_action }
+                    PowerReadout { power, node: node.clone(), on_action }
                 }
+            }
+        }
+        // The consumer half of the mirror, in the same slot the shader
+        // card gives the producer half — below settings, as a
+        // default-collapsed drawer whose summary states the policy (G1
+        // rework, P4b). Same DTO, same component, opposite side. A
+        // guided card (P5's Shape moment) renders the preset tiles in
+        // its place, forced open: the moment IS this section in guided
+        // clothing, and a moment folded away is no moment.
+        if shape_guided && face.shape_presets.is_some() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                open: Some(true),
+                on_toggle: move |()| {},
+                FixtureShapeMoment {
+                    presets: face.shape_presets.clone().expect("checked above"),
+                    node: node.clone(),
+                    on_open_mapping: editable
+                        .then_some(EventHandler::new(move |()| open_mapping_view())),
+                    on_action,
+                }
+            }
+        } else if let Some(space) = face.space.clone() {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                summary: Some(space_section_summary(&space)),
+                open: Some(space_open()),
+                on_toggle: move |()| {
+                    let open = space_open();
+                    space_open.set(!open);
+                },
+                SpaceSection { section: space, on_action }
             }
         }
     }
@@ -275,4 +276,11 @@ fn PowerReadout(
             }
         }
     }
+}
+
+/// The pencil's doorway since the in-place embed was deleted (R1): jump
+/// to the current project's Mapping view, where the one editor lives.
+fn open_mapping_view() {
+    let route = crate::router::current_route().with_view(crate::router::ProjectView::Mapping);
+    crate::router::navigate_push(&route);
 }

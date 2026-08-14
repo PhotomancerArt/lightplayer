@@ -396,7 +396,9 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
 
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
-        HomeOp::CreateProject,
+        HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+        },
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
@@ -466,6 +468,138 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
     );
 }
 
+/// The P4 gesture: `New → 1D pattern project` creates-and-opens a
+/// *library* project — the rig cards plus the `effect/` module card are on
+/// the canvas, and the manifest that reached the runtime already
+/// designates the export (which is what makes P3's exports rail appear
+/// with no further gesture).
+#[test]
+fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::{HOME_NODE_ID, HomeOp, ProjectTemplate};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [6u8; 16]),
+        Rc::new(|| "2026-08-07-0900".to_string()),
+    );
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 2.0),
+    )));
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CreateProject {
+            template: ProjectTemplate::Pattern1d,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
+
+    assert!(snapshot.home.is_none(), "the created project opened");
+    let editor = project_editor(&snapshot);
+    let root = &editor.nodes[0];
+    let children: Vec<&str> = root
+        .children
+        .iter()
+        .map(|child| child.label.as_str())
+        .collect();
+    // card labels are the humanized node names
+    for expected in [
+        "Clock",
+        "Effect",
+        "Strip 300",
+        "Strip 300 out",
+        "Matrix 32x16",
+        "Matrix 32x16 out",
+    ] {
+        assert!(
+            children.contains(&expected),
+            "the template's {expected} card is on the canvas, got {children:?}"
+        );
+    }
+
+    // R-A: the manifest's designation groups the CHILD COLUMN — the effect
+    // card sits under the EXPORTS header, the rig cards under the other one
+    // (P3's on-face rail is gone).
+    let exports = root
+        .exports
+        .clone()
+        .expect("the designated template opens with its child column grouped");
+    let exported: Vec<&str> = root
+        .children
+        .iter()
+        .filter(|child| exports.keys.contains(&child.detail))
+        .map(|child| child.label.as_str())
+        .collect();
+    assert_eq!(
+        exported,
+        vec!["Effect"],
+        "exactly the export folder's card is grouped as an export"
+    );
+
+    // R-E: no bordered group with nothing in it. The template's effect
+    // invocation publishes no channel of its own, and an empty "EFFECT" box
+    // on the root panel is a label pointing at nothing.
+    let Some(crate::UiNodeFace::Module(root_face)) = root.face.clone() else {
+        panic!("the root card wears a module face");
+    };
+    assert!(
+        root_face.panel.groups.iter().all(|group| !group.is_empty()),
+        "an empty panel group reached the root card: {:?}",
+        root_face
+            .panel
+            .groups
+            .iter()
+            .map(|group| (group.label.clone(), group.controls.len()))
+            .collect::<Vec<_>>()
+    );
+
+    // the library slug came from the TEMPLATE's label, not "Project"
+    let summary = store
+        .list()
+        .expect("library lists")
+        .pop()
+        .expect("the create landed exactly one package");
+    assert_eq!(summary.slug, "2026-08-07-0900-1d-pattern");
+
+    // the manifest that reached the RUNTIME already designates the export
+    let pushed_manifest = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/project.json".as_path())
+            .expect("pushed manifest exists in the runtime");
+        String::from_utf8(bytes).expect("utf8 manifest")
+    };
+    let manifest = lpc_model::ProjectManifest::read_json(&pushed_manifest)
+        .expect("the pushed manifest parses");
+    assert_eq!(
+        manifest.project_kind(),
+        lpc_model::ProjectKind::Pattern {
+            exports: vec!["effect".to_string()]
+        },
+        "the template's designation reached the runtime: {pushed_manifest}"
+    );
+    assert!(
+        manifest.uid.is_some(),
+        "the library minted an identity over the template's manifest: {pushed_manifest}"
+    );
+}
+
 #[test]
 fn device_connect_pulls_classifies_and_adopts() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost};
@@ -484,7 +618,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":6,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":10,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -613,7 +747,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":6,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
+            br#"{"format":10,"uid":"prjdev1cedev1cedev1","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2314,8 +2448,8 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
             section,
             UiNodeSection::DebugSlots(_)
         )),
-        vec!["Test pattern"],
-        "the output's one Debug field renders in the Debug section"
+        vec!["Test pattern", "Highlight"],
+        "the output's Debug fields render in the Debug section"
     );
     assert!(
         !section_slot_labels(&sections, |section| matches!(
@@ -2334,7 +2468,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
+    let endpoint = find_slot(&snapshot, "ports[0].endpoint");
     assert!(
         !endpoint.state.debug,
         "a channel endpoint is authored config, not debug"
@@ -2372,7 +2506,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     // lazily on render, so tick before and after.
     server.borrow_mut().advance_frame(16).expect("tick");
     handle.tx.send(StudioCommand::Action(tab.apply_action(
-        "vec4 render(vec2 pos) { return vec4(first_bad, 0.0, 0.0, 1.0); }",
+        "vec4 render_2d(vec2 pos) { return vec4(first_bad, 0.0, 0.0, 1.0); }",
     )));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv();
@@ -2396,7 +2530,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     handle
         .tx
         .send(StudioCommand::Action(snapshot_tab.apply_action(
-            "vec4 render(vec2 pos) { return vec4(second_bad, 0.0, 0.0, 1.0); }",
+            "vec4 render_2d(vec2 pos) { return vec4(second_bad, 0.0, 0.0, 1.0); }",
         )));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv();
@@ -2432,10 +2566,9 @@ fn successive_shader_applies_each_reach_the_engine() {
     );
 }
 
-pub(crate) const ASSET_SHADER_V1: &str =
-    "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
-const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
-const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
+pub(crate) const ASSET_SHADER_V1: &str = "uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
+const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
+const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
 
 /// Find the shader node's inline asset editor anywhere in the editor DTO
 /// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
@@ -2537,7 +2670,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2546,7 +2679,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2593,7 +2726,7 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 /// Connect-time pulls discover the device's LOADED project, so device
 /// tests must not run the edit-e2e project — an idle device falls back to
 /// the default storage slot, an empty one classifies Empty.
-fn device_e2e_server() -> LpServer {
+pub(crate) fn device_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -2625,7 +2758,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 6\n}\n"),
+        ("project.json", "{\n  \"format\": 10\n}\n"),
         (
             "module.json",
             r#"{

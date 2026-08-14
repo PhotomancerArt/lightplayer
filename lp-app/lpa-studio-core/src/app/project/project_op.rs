@@ -24,6 +24,14 @@ pub enum ProjectOp {
         example_id: String,
     },
     RefreshProject,
+    /// Re-push the active library project's on-disk content to the running
+    /// runtime (P6 visitor pull loop): the platform edge fast-forwarded the
+    /// library copy through the open project's own mounted stores, and the
+    /// running session must now show that content. Dispatched only by the
+    /// edge's pull loop — never a user-visible action — and only when the
+    /// session overlay is clean (D18: an inbound update is never applied
+    /// over a dirty session).
+    ReloadActiveProject,
     DisconnectProject,
     /// Detach the editor lens (runtime-pool P3): the mirror drops, every
     /// runtime session KEEPS running — worker alive, wire client attached,
@@ -102,6 +110,11 @@ impl ControllerOp for ProjectOp {
                 "Refresh Studio's synced project view.",
                 ActionPriority::Secondary,
             ),
+            Self::ReloadActiveProject => ActionMeta::new(
+                "Reload project",
+                "Reload the open project from its library copy.",
+                ActionPriority::Secondary,
+            ),
             Self::DisconnectProject => ActionMeta::new(
                 "Disconnect project",
                 "Detach Studio from the current project without stopping it on the device.",
@@ -165,6 +178,11 @@ impl ControllerOp for ProjectOp {
             // The route-driven arm may run a full granted-port connect +
             // attach before the mirror opens — the load budget fits.
             Self::OpenDeviceProject { .. } => ActionClass::Foreground {
+                deadline: PROJECT_LOAD_DEADLINE,
+            },
+            // A reload re-pushes the whole package, the same wire work as
+            // a load — it gets the same budget.
+            Self::ReloadActiveProject => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,
             },
             // The docs bootstrap may run a full worker connect + deploy,

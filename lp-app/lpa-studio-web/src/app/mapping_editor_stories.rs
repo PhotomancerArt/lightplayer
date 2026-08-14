@@ -1,9 +1,15 @@
-//! Stories for the standalone mapping editor (`/mapping`,
-//! `lpa-mapping-editor`). Mount states are pinned via the editor's
-//! deterministic story props — no animation, no measured viewport.
+//! Stories for the mapping-editor crate — the canvas/tool visuals the
+//! unified editor composes (there is no wrapper editor component: the
+//! canvas + floats + hint ARE the editor). Mount states are pinned via
+//! deterministic session seeding; framing comes from the same doc-fit
+//! math the shell uses.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{EditorViewOptions, MapEditor, ReferenceImage};
+use lpa_mapping_editor::{
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureSprite,
+    HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath,
+    ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
+};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::fyeah_presentable_doc;
@@ -18,14 +24,259 @@ fn EditorCanvasFrame(children: Element) -> Element {
     }
 }
 
+/// The composed editor, as the unified center mounts it: canvas + hint +
+/// zoom/help floats over one deterministically seeded session, framed by
+/// the shared doc-fit math once the canvas measures itself.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ComposedEditorStory(
+    doc: Map2dDoc,
+    #[props(default)] initial_selection: Vec<usize>,
+    #[props(default = false)] initial_descend: bool,
+    #[props(default)] initial_draft: Vec<[f32; 2]>,
+    #[props(default)] initial_view: Option<EditorViewOptions>,
+    #[props(default)] reference: Option<ReferenceImage>,
+) -> Element {
+    let session = use_signal(|| {
+        let mut session = MapEditorSession::new(doc.clone());
+        for index in &initial_selection {
+            session.selection.insert_path(ShapePath::root(*index));
+        }
+        if initial_descend {
+            session.descend();
+        }
+        if !initial_draft.is_empty() {
+            session.tool = MapTool::Path {
+                draft: initial_draft.clone(),
+            };
+        }
+        session
+    });
+    let camera = use_signal(Camera::new);
+    let view_opts = use_signal(move || initial_view.unwrap_or_default());
+    let viewport = use_signal(|| None::<[f32; 2]>);
+    let mut fit_pending = use_signal(|| true);
+    let mut fit_done = use_signal(FitReconcile::default);
+    let drag = use_signal(|| None::<CanvasDrag>);
+    let live_feed = use_signal(Vec::<[u8; 3]>::new);
+    // Deterministic framing: fit once the canvas measures itself, with
+    // the same bounds + inset the display mode uses — and re-fit if the
+    // measurement settles AFTER the fit while the camera is untouched
+    // (the story-baseline churner class:
+    // docs/debt/story-capture-pipeline.md).
+    {
+        let viewport_now = *viewport.read();
+        if let Some([width, height]) = viewport_now
+            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
+        {
+            let mut camera = camera;
+            if let Some(bounds) = doc_fit_bounds(session.peek().doc()) {
+                let padding = display_inset_padding(bounds, width, height);
+                camera.write().fit(bounds, width, height, padding);
+                if *fit_pending.peek() {
+                    fit_pending.set(false);
+                }
+            }
+            let mut next = *fit_done.peek();
+            next.record([width, height], *camera.peek());
+            if *fit_done.peek() != next {
+                fit_done.set(next);
+            }
+        }
+    }
+    let hint = tool_hint(&session.read());
+    rsx! {
+        EditorCanvasFrame {
+            div {
+                class: "lpme-canvas-wrap",
+                "data-fit-viewport": fit_done.read().guard_attr(),
+                EditorCanvas {
+                    session,
+                    camera,
+                    view_opts,
+                    viewport,
+                    drag,
+                    live_feed,
+                    on_committed: move |()| {},
+                    reference,
+                }
+                div { class: "lpme-hint", "{hint}" }
+                ZoomFloat { camera, viewport, fit_pending }
+                HelpFloat {}
+            }
+        }
+    }
+}
+
+/// Synthetic sprites for the fixture-layer stories: a loaded panel
+/// (rotated + scaled, selected, instance-ringed), a scaled halo, a dashed
+/// unarranged placeholder, and a range strip — the three honest bodies
+/// plus every placement quirk the seam must survive.
+fn fixture_story_sprites() -> Vec<FixtureSprite> {
+    let resolved =
+        lpc_mapping::resolve(&lpc_mapping::corpus::panel_16x16()).expect("corpus resolves");
+    let panel_points = resolved.positions();
+    let panel_total = panel_points.len() as u32;
+    let panel_bounds = lpc_mapping::bounds_of_points(&panel_points)
+        .map(|b| {
+            [
+                f64::from(b.min_x),
+                f64::from(b.min_y),
+                f64::from(b.width),
+                f64::from(b.height),
+            ]
+        })
+        .expect("panel has lamps");
+    let halo_points: Vec<[f32; 2]> = (0..24)
+        .map(|slot| {
+            let angle = (slot as f32) / 24.0 * std::f32::consts::TAU;
+            [angle.cos() * 40.0, angle.sin() * 40.0]
+        })
+        .collect();
+    vec![
+        FixtureSprite {
+            key: "panel".to_string(),
+            label: "dome panel".to_string(),
+            color: "#5aa9e6".to_string(),
+            placement: Placement {
+                t: [60.0, 50.0],
+                r: 25.0,
+                s: 0.5,
+            },
+            bounds: panel_bounds,
+            body: FixtureBody::Lamps {
+                points: panel_points,
+                total: panel_total,
+            },
+            arranged: true,
+            selected: true,
+            selected_range: Some((32, 16)),
+        },
+        FixtureSprite {
+            key: "halo".to_string(),
+            label: "halo".to_string(),
+            color: "#3fd68e".to_string(),
+            placement: Placement {
+                t: [360.0, 90.0],
+                r: -10.0,
+                s: 1.4,
+            },
+            bounds: [-40.0, -40.0, 80.0, 80.0],
+            body: FixtureBody::Lamps {
+                points: halo_points,
+                total: 24,
+            },
+            arranged: true,
+            selected: false,
+            selected_range: None,
+        },
+        FixtureSprite {
+            key: "block".to_string(),
+            label: "matrix (pending)".to_string(),
+            color: "#e4c065".to_string(),
+            placement: Placement {
+                t: [70.0, 320.0],
+                r: 0.0,
+                s: 1.0,
+            },
+            bounds: [0.0, 0.0, 120.0, 74.0],
+            body: FixtureBody::Placeholder { lamps: 256 },
+            arranged: false,
+            selected: false,
+            selected_range: None,
+        },
+        FixtureSprite {
+            key: "strip".to_string(),
+            label: "shelf strip".to_string(),
+            color: "#c792ea".to_string(),
+            placement: Placement {
+                t: [250.0, 330.0],
+                r: 0.0,
+                s: 1.0,
+            },
+            bounds: [0.0, 0.0, 180.0, 10.0],
+            body: FixtureBody::Strip { lamps: 60 },
+            arranged: true,
+            selected: false,
+            selected_range: None,
+        },
+    ]
+}
+
+/// Mount the one canvas directly with deterministic signals (fixed camera,
+/// no fit effect) — the fixture-layer stories' harness.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FixtureCanvasStory(focused: Option<String>, dived: bool) -> Element {
+    let sprites = fixture_story_sprites();
+    let placement = if dived {
+        sprites
+            .iter()
+            .find(|sprite| Some(sprite.key.as_str()) == focused.as_deref())
+            .map(|sprite| sprite.placement)
+            .unwrap_or_default()
+    } else {
+        Placement::default()
+    };
+    let session = use_signal(|| {
+        MapEditorSession::new(if dived {
+            lpc_mapping::corpus::panel_16x16()
+        } else {
+            lpc_mapping::Map2dDoc::new()
+        })
+    });
+    let camera = use_signal(|| Camera {
+        x: 30.0,
+        y: 40.0,
+        scale: 1.1,
+    });
+    let view_opts = use_signal(EditorViewOptions::default);
+    let viewport = use_signal(|| None::<[f32; 2]>);
+    let drag = use_signal(|| None::<CanvasDrag>);
+    let live_feed = use_signal(Vec::<[u8; 3]>::new);
+    rsx! {
+        EditorCanvasFrame {
+            EditorCanvas {
+                session,
+                camera,
+                view_opts,
+                viewport,
+                drag,
+                live_feed,
+                on_committed: move |()| {},
+                placement,
+                fixtures: sprites,
+                focused,
+                on_fixture: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The fixture view on the one canvas: arranged sprites rendered from data in project space — a rotated+scaled panel (selected, instance ring), a scaled halo, a dashed unarranged placeholder, and a range strip."
+)]
+pub(crate) fn fixture_view_arrangement() -> Element {
+    rsx! {
+        FixtureCanvasStory { focused: None, dived: false }
+    }
+}
+
+#[story(
+    description = "Dived in place: the focused panel's live document renders through its rotated+scaled placement on the same canvas — same camera — while neighbour sprites dim to context."
+)]
+pub(crate) fn fixture_dive_neighbours() -> Element {
+    rsx! {
+        FixtureCanvasStory { focused: Some("panel".to_string()), dived: true }
+    }
+}
+
 #[story(
     description = "The 16×16 snake panel in the editor: wiring numbers + arrows at fit zoom — the editor's default view."
 )]
 pub(crate) fn editor_panel_wiring() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor { doc_epoch: 0, doc: lpc_mapping::corpus::panel_16x16() }
-        }
+        ComposedEditorStory { doc: lpc_mapping::corpus::panel_16x16() }
     }
 }
 
@@ -34,12 +285,9 @@ pub(crate) fn editor_panel_wiring() -> Element {
 )]
 pub(crate) fn editor_selection_popover() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::cat_ears(),
-                initial_selection: vec![2],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::cat_ears(),
+            initial_selection: vec![2],
         }
     }
 }
@@ -49,12 +297,9 @@ pub(crate) fn editor_selection_popover() -> Element {
 )]
 pub(crate) fn editor_group_selected() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: fyeah_presentable_doc(),
-                initial_selection: vec![0, 1, 2, 3, 4, 5, 6],
-            }
+        ComposedEditorStory {
+            doc: fyeah_presentable_doc(),
+            initial_selection: vec![0, 1, 2, 3, 4, 5, 6],
         }
     }
 }
@@ -64,12 +309,9 @@ pub(crate) fn editor_group_selected() -> Element {
 )]
 pub(crate) fn editor_path_draft() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::cat_ears(),
-                initial_draft: vec![[460.0, 320.0], [520.0, 240.0], [580.0, 320.0]],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::cat_ears(),
+            initial_draft: vec![[460.0, 320.0], [520.0, 240.0], [580.0, 320.0]],
         }
     }
 }
@@ -79,19 +321,15 @@ pub(crate) fn editor_path_draft() -> Element {
 )]
 pub(crate) fn editor_fit_preview() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: fyeah_presentable_doc(),
-                initial_view: Some(EditorViewOptions {
-                    numbers: false,
-                    arrows: true,
-                    universes: false,
-                    live: false,
-                    fit_preview: true,
-                    reference: true,
-                }),
-            }
+        ComposedEditorStory {
+            doc: fyeah_presentable_doc(),
+            initial_view: Some(EditorViewOptions {
+                numbers: false,
+                arrows: true,
+                live: false,
+                fit_preview: true,
+                reference: true,
+            }),
         }
     }
 }
@@ -101,28 +339,22 @@ pub(crate) fn editor_fit_preview() -> Element {
 )]
 pub(crate) fn editor_repeated_sector() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                initial_selection: vec![0],
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            initial_selection: vec![0],
         }
     }
 }
 
 #[story(
-    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the popover breadcrumbs the scope."
+    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the Props stack carries the scope as ancestor cards."
 )]
 pub(crate) fn editor_repeat_scoped() -> Element {
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                initial_selection: vec![0],
-                initial_descend: true,
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            initial_selection: vec![0],
+            initial_descend: true,
         }
     }
 }
@@ -145,34 +377,9 @@ pub(crate) fn editor_reference_trace() -> Element {
         size: [400.0, 400.0],
     };
     rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::repeated_sector(),
-                reference: Some(reference),
-            }
-        }
-    }
-}
-
-#[story(
-    description = "Universe coloring in the editor: 256 panel lamps flowing across the 170-lamp boundary, ranges annotated per universe in the rail."
-)]
-pub(crate) fn editor_universes() -> Element {
-    rsx! {
-        EditorCanvasFrame {
-            MapEditor {
-                doc_epoch: 0,
-                doc: lpc_mapping::corpus::panel_16x16(),
-                initial_view: Some(EditorViewOptions {
-                    numbers: false,
-                    arrows: false,
-                    universes: true,
-                    live: false,
-                    fit_preview: false,
-                    reference: true,
-                }),
-            }
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::repeated_sector(),
+            reference: Some(reference),
         }
     }
 }

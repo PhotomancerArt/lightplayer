@@ -161,11 +161,9 @@ pub fn SignInMenu(
         PopoverButton {
             class: SIGN_IN_TRIGGER_CLASS.to_string(),
             open_class: SIGN_IN_TRIGGER_OPEN_CLASS.to_string(),
-            // The word carries its own type: the trigger is a `button`, and
-            // `style.css` resets `button { font: inherit }` unlayered —
-            // which beats the (layered) font utilities in the tab class, so
-            // the chooser's trigger would otherwise not match the plain
-            // link's "Sign in".
+            // The word carries its own type on the span; the button's
+            // `font: inherit` reset (style.css, base layer) picks it up, so
+            // the chooser's trigger matches the plain link's "Sign in".
             trigger: rsx! {
                 span { class: "tw:text-xs tw:font-medium", "Sign in" }
             },
@@ -409,9 +407,8 @@ pub fn AccountMenu(
                     }
                 },
                 LogOut { size: 14 }
-                // The row's type lives on the span: `style.css` resets
-                // `button { font: inherit }` UNLAYERED, which beats every
-                // (layered) Tailwind font utility on the button itself.
+                // The row's type lives on the span; the button's `font:
+                // inherit` reset (style.css, base layer) picks it up.
                 span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-semibold", "Sign out" }
             }
         }
@@ -878,8 +875,8 @@ mod tests {
     #[test]
     fn hrefs_encode_only_the_values() {
         assert_eq!(
-            sign_in_href("/auth/dev", "/sim/my project", Some("a+b@x.com")),
-            "/auth/dev?email=a%2Bb%40x.com&next=%2Fsim%2Fmy%20project"
+            sign_in_href("/auth/dev", "/p/my project", Some("a+b@x.com")),
+            "/auth/dev?email=a%2Bb%40x.com&next=%2Fp%2Fmy%20project"
         );
         assert_eq!(
             sign_in_href("/auth/google", "/", None),

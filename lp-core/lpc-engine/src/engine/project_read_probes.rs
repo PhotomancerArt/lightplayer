@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, Kind, NodeId};
+use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
@@ -14,14 +14,17 @@ use lpc_wire::{
     OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
     RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireChannelSampleFormat, WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow,
+    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
+    WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin, WireProjectionShape, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use crate::engine::engine::gate_display_layout;
 use crate::node::NodeEntryState;
+use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -29,6 +32,14 @@ use crate::products::visual::RenderTextureRequest;
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
+use crate::products::visual::{
+    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
+    VisualSpace, resolve_1d_to_2d_with_origin,
+};
+
+/// Samples per RGB lamp — the same unit the output node plans fragments in
+/// (`lpc_engine`'s `output_node`: "a lamp is three samples").
+const SAMPLES_PER_LAMP: u32 = 3;
 
 /// One output node found by the published-frame tree walk, snapshotted so the
 /// layout pass can take `&mut Engine` without holding a tree borrow.
@@ -36,7 +47,10 @@ struct PublishedOutputCandidate {
     node: NodeId,
     buffer_id: RuntimeBufferId,
     sample_layout: Option<ControlLayout>,
-    source_product: Option<ControlProduct>,
+    /// The placement set behind the published frame — the only thing that
+    /// knows where each producer's lamps ended up on this wire.
+    fragments: Vec<OutputFragment>,
+    placement_revision: Revision,
 }
 
 impl Engine {
@@ -45,14 +59,28 @@ impl Engine {
         registry: &ProjectRegistry,
         request: RenderProductProbeRequest,
     ) -> RenderProductProbeResult {
+        let space = request.space.map_or(VisualSpace::TwoD, engine_visual_space);
+        let policy = request
+            .policy
+            .map_or(ConsumerPolicy::AUTO, engine_consumer_policy);
         let texture_request = RenderTextureRequest {
             width: request.width,
             height: request.height,
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: self.frame_time().total_ms as f32 / 1000.0,
+            space,
+            policy,
         };
         let revision = self.revision();
         let product = request.product;
+        // Best-effort: a producer that cannot answer the space query still
+        // renders (or fails) through the normal path below; `two_d()` is
+        // the same "no opinion" fallback an undeclared shader answers with.
+        let space_info = self
+            .visual_product_space(registry, product)
+            .unwrap_or_else(|_| ProductSpaceInfo::two_d());
+        let (projection, origin) = projection_and_origin(space_info, space, policy);
+        let primary = wire_visual_space(space_info.primary);
         match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
                 let Some(bytes) = texture.try_raw_bytes() else {
@@ -65,6 +93,10 @@ impl Engine {
                         revision,
                         width: texture.width(),
                         height: texture.height(),
+                        space: wire_visual_space(space),
+                        projection,
+                        origin,
+                        primary,
                     };
                 };
                 let bytes = match request.format {
@@ -78,6 +110,10 @@ impl Engine {
                     height: texture.height(),
                     format: request.format,
                     bytes,
+                    space: wire_visual_space(space),
+                    projection,
+                    origin,
+                    primary,
                 }
             }
             Err(error) => RenderProductProbeResult::Error {
@@ -399,11 +435,20 @@ impl Engine {
                     node: entry.id,
                     buffer_id,
                     sample_layout: node.runtime_output_sample_layout().cloned(),
-                    source_product: node.runtime_output_source_product(),
+                    fragments: node.runtime_output_fragments().to_vec(),
+                    placement_revision: node.runtime_output_placement_revision(),
                 })
             })
             .collect();
 
+        // The frame-probe HEADER is one unchunked event carrying EVERY
+        // entry's display layout, so the budget that matters here is the
+        // header TOTAL: three layouts that each pass the per-layout gate
+        // can still jointly blow the frame and wedge the read stream. Track
+        // the running layout bytes and degrade later entries to
+        // `Unsupported` once the total is spent — their frames still flow,
+        // only the geometry of the excess outputs is refused.
+        let mut layout_bytes_spent = 0usize;
         let mut outputs = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             let Some(buffer) = self.runtime_buffers().get(candidate.buffer_id) else {
@@ -424,16 +469,27 @@ impl Engine {
 
             let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
                 ControlDisplayLayoutProbeResult::Omitted
-            } else if let Some(product) = candidate.source_product {
-                self.control_display_layout_probe(registry, product, request.display_layout)
-                    .unwrap_or_else(|error| ControlDisplayLayoutProbeResult::Unsupported {
-                        reason: format!("{error}"),
-                    })
             } else {
-                ControlDisplayLayoutProbeResult::Unsupported {
-                    reason: String::from(
-                        "output has not published a frame yet, so its source product is unknown",
-                    ),
+                let answer =
+                    self.output_frame_display_layout(registry, &candidate, request.display_layout);
+                match (self.display_layout_budget(), answer) {
+                    (Some(budget), ControlDisplayLayoutProbeResult::Layout(layout)) => {
+                        let layout_len = lpc_wire::ser_write_json_len(&layout);
+                        if layout_bytes_spent + layout_len > budget {
+                            ControlDisplayLayoutProbeResult::Unsupported {
+                                reason: format!(
+                                    "the frame header already carries {layout_bytes_spent} \
+                                     bytes of display layouts; this one ({layout_len} bytes) \
+                                     would push the single header event past the link's \
+                                     {budget}-byte budget"
+                                ),
+                            }
+                        } else {
+                            layout_bytes_spent += layout_len;
+                            ControlDisplayLayoutProbeResult::Layout(layout)
+                        }
+                    }
+                    (_, answer) => answer,
                 }
             };
 
@@ -447,11 +503,114 @@ impl Engine {
                 },
                 sample_layout: candidate.sample_layout.unwrap_or_default(),
                 display_layout,
+                placements: candidate
+                    .fragments
+                    .iter()
+                    .map(wire_output_placement)
+                    .collect(),
                 bytes,
             });
         }
 
         OutputFrameProbeResult::Frame { outputs }
+    }
+
+    /// Where to draw the lamps of one published frame.
+    ///
+    /// The output's geometry is not any one producer's geometry. Each producer
+    /// states its lamps in its OWN numbering (`sample_start = channel * 3`),
+    /// and the fragment that placed it is the only thing that knows where
+    /// those samples ended up on the wire — after an authored offset, after a
+    /// reversal, after however many other strands share the run. So: ask each
+    /// producer once, rebase every fragment's share through the placement, and
+    /// merge. A client can then index the frame's bytes by each lamp's
+    /// `sample_start` and get that lamp's own color, which is the contract
+    /// `OutputFrameEntry` already claims.
+    ///
+    /// A producer whose layout the engine declines (over the wire budget at
+    /// dome scale, or a kind with no geometry at all) simply contributes no
+    /// lamps; the rest of the wire still draws. Only when NOTHING answers does
+    /// the whole read report `Unsupported`, carrying the first refusal's reason
+    /// so the client can say why.
+    ///
+    /// `Unsupported` is a PERMANENT answer, and every client treats it as one:
+    /// both feeds stop asking for geometry on the spot and stand a local
+    /// synthesis up in its place (see `card_feed.rs` and
+    /// `preview_output_feed.rs`), because re-asking would make a dome-scale
+    /// board rebuild and measure a layout it cannot send, every pull. So an
+    /// output that has simply not planned its placements yet must NOT answer
+    /// with it: "nothing to say this tick" is `Omitted`, and the client keeps
+    /// asking until there is.
+    fn output_frame_display_layout(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+        read: ControlDisplayLayoutRead,
+    ) -> ControlDisplayLayoutProbeResult {
+        if candidate.fragments.is_empty() {
+            return ControlDisplayLayoutProbeResult::Omitted;
+        }
+
+        // One probe per PRODUCT, not per fragment: a patched producer is cut
+        // into several runs and every one of them wants the same geometry.
+        let mut probed: Vec<(ControlProduct, Option<ControlLayout2d>)> = Vec::new();
+        let mut refusal: Option<String> = None;
+        for fragment in &candidate.fragments {
+            if probed
+                .iter()
+                .any(|(product, _)| *product == fragment.product)
+            {
+                continue;
+            }
+            // ALWAYS, never the caller's gate: the gate belongs to the merged
+            // answer, and an `Unchanged` on one part would silently drop that
+            // producer's lamps out of the composite.
+            let answer = match self.control_display_layout_probe(
+                registry,
+                fragment.product,
+                ControlDisplayLayoutRead::Always,
+            ) {
+                Ok(ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
+                    layout,
+                ))) => Some(layout),
+                Ok(ControlDisplayLayoutProbeResult::Unsupported { reason }) => {
+                    refusal.get_or_insert(reason);
+                    None
+                }
+                Ok(_) => None,
+                Err(error) => {
+                    refusal.get_or_insert_with(|| format!("{error}"));
+                    None
+                }
+            };
+            probed.push((fragment.product, answer));
+        }
+
+        let mut revision = candidate.placement_revision;
+        let mut placed = Vec::with_capacity(candidate.fragments.len());
+        for fragment in &candidate.fragments {
+            let Some((_, Some(layout))) = probed
+                .iter()
+                .find(|(product, _)| *product == fragment.product)
+            else {
+                continue;
+            };
+            revision = revision.max(layout.revision);
+            placed.push((*fragment, layout.clone()));
+        }
+        if placed.is_empty() {
+            return ControlDisplayLayoutProbeResult::Unsupported {
+                reason: refusal.unwrap_or_else(|| {
+                    String::from("no producer on this output exposes a display layout")
+                }),
+            };
+        }
+
+        gate_display_layout(
+            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision)),
+            read,
+            self.display_layout_budget(),
+        )
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).
@@ -524,6 +683,25 @@ fn wire_phasor_origin(key: &crate::dataflow::timebase::PhasorKey) -> WirePhasorO
     }
 }
 
+/// One planned fragment as the wire states it: **lamps**, not samples.
+///
+/// The engine plans in samples because that is what it renders into; every
+/// surface downstream of the probe — the patch document, the output's channel
+/// counts, the bay's cells — counts lamps, and converting once here keeps the
+/// division from being repeated (and mis-rounded) by each of them. A run is
+/// always a whole number of lamps: fragments are cut from lamp ranges.
+fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlacement {
+    lpc_wire::WireOutputPlacement {
+        node: fragment.product.node(),
+        output: fragment.product.output(),
+        source_lamp: fragment.source_offset_samples / SAMPLES_PER_LAMP,
+        source_lamps: fragment.product.preferred_extent().sample_count() / SAMPLES_PER_LAMP,
+        wire_lamp: fragment.offset_samples / SAMPLES_PER_LAMP,
+        lamps: fragment.len_samples / SAMPLES_PER_LAMP,
+        reversed: fragment.reversed,
+    }
+}
+
 fn control_samples_u16_to_bytes(samples: &[u16]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(samples.len() * 2);
     for sample in samples {
@@ -549,6 +727,89 @@ fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
 /// exhaustive test below).
 fn linear_unorm16_to_srgb8(value: u16) -> u8 {
     super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
+}
+
+/// The render-product probe's `(projection, origin)` pair: `Some` exactly
+/// when the request actually crossed a 1D→2D projection — a 2D request
+/// against a 1D-primary producer. Every other combination (native space, or
+/// the fixed 2D→1D centre scanline, which carries no [`CellProjection`]
+/// choice) answers `(None, None)`.
+fn projection_and_origin(
+    space_info: ProductSpaceInfo,
+    space: VisualSpace,
+    policy: ConsumerPolicy,
+) -> (Option<WireCellProjection>, Option<WireProjectionOrigin>) {
+    if space_info.primary == VisualSpace::OneD && space == VisualSpace::TwoD {
+        let (cell, origin) = resolve_1d_to_2d_with_origin(space_info, policy);
+        (
+            Some(wire_cell_projection(cell)),
+            Some(wire_projection_origin(origin)),
+        )
+    } else {
+        (None, None)
+    }
+}
+
+fn wire_visual_space(space: VisualSpace) -> WireVisualSpace {
+    match space {
+        VisualSpace::OneD => WireVisualSpace::OneD,
+        VisualSpace::TwoD => WireVisualSpace::TwoD,
+    }
+}
+
+fn engine_visual_space(space: WireVisualSpace) -> VisualSpace {
+    match space {
+        WireVisualSpace::OneD => VisualSpace::OneD,
+        WireVisualSpace::TwoD => VisualSpace::TwoD,
+    }
+}
+
+fn wire_cell_projection(cell: CellProjection) -> WireCellProjection {
+    WireCellProjection {
+        shape: wire_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
+    }
+}
+
+fn engine_cell_projection(cell: WireCellProjection) -> CellProjection {
+    CellProjection {
+        shape: engine_projection_shape(cell.shape),
+        mirror: cell.mirror,
+        flip: cell.flip,
+    }
+}
+
+fn wire_projection_shape(shape: ProjectionShape) -> WireProjectionShape {
+    match shape {
+        ProjectionShape::ExtrudeX => WireProjectionShape::ExtrudeX,
+        ProjectionShape::ExtrudeY => WireProjectionShape::ExtrudeY,
+        ProjectionShape::Radial => WireProjectionShape::Radial,
+        ProjectionShape::Angular => WireProjectionShape::Angular,
+    }
+}
+
+fn engine_projection_shape(shape: WireProjectionShape) -> ProjectionShape {
+    match shape {
+        WireProjectionShape::ExtrudeX => ProjectionShape::ExtrudeX,
+        WireProjectionShape::ExtrudeY => ProjectionShape::ExtrudeY,
+        WireProjectionShape::Radial => ProjectionShape::Radial,
+        WireProjectionShape::Angular => ProjectionShape::Angular,
+    }
+}
+
+fn wire_projection_origin(origin: ProjectionOrigin) -> WireProjectionOrigin {
+    match origin {
+        ProjectionOrigin::Declared => WireProjectionOrigin::Declared,
+        ProjectionOrigin::Forced => WireProjectionOrigin::Forced,
+    }
+}
+
+fn engine_consumer_policy(policy: WireConsumerPolicy) -> ConsumerPolicy {
+    ConsumerPolicy {
+        default_1d_to_2d: engine_cell_projection(policy.default_1d_to_2d),
+        force: policy.force,
+    }
 }
 
 /// Project one runtime binding entry onto the wire.

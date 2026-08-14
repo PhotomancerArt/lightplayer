@@ -151,6 +151,25 @@ pub enum BrowserInputEnvelope {
         #[serde(skip_serializing_if = "Option::is_none")]
         output_frame: Option<ControlDisplayLayoutRead>,
     },
+    /// Capture ONE poster frame of the bus visual product at the requested
+    /// size — the on-demand readback for cards whose canvas cannot be read
+    /// on the page (shader-only GPU tier).
+    ///
+    /// The worker replies with a binary `poster_pixels` message
+    /// (transferable `ArrayBuffer`, surfaced as [`super::PosterPixelFrame`])
+    /// on success or a `poster_error` JSON message
+    /// ([`BrowserOutputEnvelope::PosterError`]) on failure. Renders at the
+    /// requested size, independent of any attached surface, without ticking
+    /// the clock.
+    CapturePoster {
+        runtime_id: u32,
+        /// Bus channel carrying the visual product (conventionally `visual.out`).
+        channel: String,
+        width: u32,
+        height: u32,
+        /// Caller correlation id echoed back on the answer.
+        frame_id: u32,
+    },
     Start,
     Stop,
     Drain,
@@ -237,6 +256,14 @@ pub enum BrowserOutputEnvelope {
     /// A `preview_frame` / `present_frame` / `attach_surface` request failed;
     /// carries the caller's `frame_id` (0 for surface attachment).
     PreviewError {
+        runtime_id: u32,
+        frame_id: u32,
+        message: String,
+    },
+    /// A `capture_poster` request failed; the successful answer is the
+    /// binary `poster_pixels` message ([`super::PosterPixelFrame`]), which
+    /// never rides the JSON envelope path.
+    PosterError {
         runtime_id: u32,
         frame_id: u32,
         message: String,

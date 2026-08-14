@@ -23,7 +23,8 @@ mod shape_read;
 
 pub use crate::budget::{
     PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
-    PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES,
+    PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
+    PROJECT_READ_RUNTIME_CHUNK_BYTES,
 };
 pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
@@ -34,8 +35,9 @@ pub use probe::{
     ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader, RenderProductProbeRequest,
     RenderProductProbeResult, RenderProductProbeResultHeader, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin,
-    WirePhasorReading, WirePhasorRow, WireScopeRef,
+    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
+    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
+    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

@@ -23,12 +23,19 @@
 
 pub(crate) mod agent_support;
 pub mod asset;
-pub(crate) mod control_display_layout_fallback;
 pub mod demo_project;
 pub mod dirty_summary;
+pub(crate) mod edit_journal;
+pub(crate) mod editor_meta_op;
+pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
+pub(crate) mod output_frame_cache;
+pub(crate) mod patch_bay_derivation;
+pub mod patch_pulse;
+pub(crate) mod patch_verb_op;
+pub(crate) mod patch_verbs;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
@@ -48,6 +55,7 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 pub mod ui_affordance;
+pub(crate) mod ui_patch_surface;
 pub mod ui_pending_edit;
 
 pub use agent_support::AgentEngineStatus;
@@ -56,14 +64,27 @@ pub use asset::{
     UiAssetContentBody, UiShaderError,
 };
 pub use dirty_summary::DirtySummary;
+pub use edit_journal::{EDIT_JOURNAL_CAP, UiEditJournalEntry, UiEditJournalEvent, UiEditorMode};
+pub use editor_meta_op::{
+    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaVerb,
+    editor_meta_artifact,
+};
+pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
+    ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp,
+    NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp,
+    PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
+    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
+    UiImportablePattern, UiNodeRemovePreflight,
 };
-pub use node_card_ui_state::{ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp};
+pub use node_card_ui_state::{
+    ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
+};
+pub use patch_pulse::{PatchPulseOp, PatchPulseSubject};
+pub use patch_verb_op::{
+    PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
+};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
@@ -79,7 +100,7 @@ pub use project_op::ProjectOp;
 pub use project_runtime_summary::ProjectRuntimeSummary;
 pub use project_snapshot::ProjectSnapshot;
 pub use project_state::ProjectState;
-pub use project_sync::{ProjectSync, UiTimebaseRead};
+pub use project_sync::{ProjectSync, UiProductSpaceRequest, UiTimebaseRead, visual_probe_request};
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
@@ -93,4 +114,8 @@ pub use slot::{
     SlotKind,
 };
 pub use ui_affordance::UiAffordance;
+pub use ui_patch_surface::{
+    UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchInstance, UiPatchSurface,
+    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
+};
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

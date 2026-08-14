@@ -2,8 +2,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
-use crate::app::{DevicesPage, ProjectNodeWorkspace, ProjectOpeningFrame, ProjectsPage};
+use crate::app::workbench::{WorkbenchFrame, WorkbenchView};
+use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
 use crate::core::PaneView;
+use crate::router::ProjectView;
 
 /// Which gallery page the shell renders when the view has no open
 /// editor (P09 split): the route picks it — `#/` = Devices,
@@ -39,6 +41,18 @@ pub fn StudioShell(
     /// surface.
     #[props(default = false)]
     play: bool,
+    /// Which project view the route addresses (the `/patch` and
+    /// `/mapping` suffixes; `Workspace` is the suffix-less Nodes view).
+    /// Play arrives through the separate `play` flag because a DEVICE
+    /// lens has a play zoom too but no project-view suffixes.
+    #[props(default)]
+    project_view: ProjectView,
+    /// The workbench view tabs' hrefs: (Nodes tab, Mapping tab). The
+    /// Mapping href is `None` on a device lens — it has no mapping
+    /// address yet — which hides the tab. Stories default to inert
+    /// fragments.
+    #[props(default)]
+    workbench_hrefs: Option<(String, Option<String>)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let UiStudioView {
@@ -51,7 +65,7 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
-        open_project_slug: _,
+        open_project_name: _,
         // the lens card renders the sync facts (D43)
         device_sync: _,
         lens_card,
@@ -93,6 +107,20 @@ pub fn StudioShell(
     // card — so it deliberately short-circuits the whole editor layout
     // below. `PlayModeSurface` wraps its own controls, which is what makes
     // the same mount usable on a phone.
+    // Patch mode (D36): the project-scoped patching surface, full width —
+    // no pane column, no workspace. Same-session like play. Interim: the
+    // unified-editor plan re-houses it as the Mapping view's patching
+    // mode and deletes this page.
+    if project_view == ProjectView::Patch
+        && let Some(editor) = project_editor.clone()
+    {
+        return rsx! {
+            div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
+                crate::app::patch::PatchSurfacePage { view: editor, on_action }
+            }
+        };
+    }
+
     if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
         return rsx! {
             div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
@@ -107,31 +135,42 @@ pub fn StudioShell(
         };
     }
 
-    let layout_class = if project_editor.is_some() {
-        "tw:grid tw:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(300px,360px)] tw:gap-3.5 tw:max-[960px]:grid-cols-1"
-    } else if main.is_empty() {
+    // The workbench (PanelDock chrome): every project-editor render in a
+    // workbench view. Play and patch returned above; the states below
+    // (no editor yet, bare panes) keep the legacy grid.
+    if let Some(project_editor) = project_editor {
+        let view = if project_view == ProjectView::Mapping {
+            WorkbenchView::Mapping
+        } else {
+            WorkbenchView::Nodes
+        };
+        // Stories mount without a route; inert fragment hrefs keep the
+        // tabs drawable without navigation.
+        let (workspace_href, mapping_href) =
+            workbench_hrefs.unwrap_or_else(|| ("#".to_string(), None));
+        return rsx! {
+            WorkbenchFrame {
+                view,
+                panes: main,
+                project_editor,
+                lens_card: lens_card.map(|card| *card),
+                running,
+                now_secs,
+                workspace_href,
+                mapping_href,
+                on_action,
+            }
+        };
+    }
+
+    let layout_class = if main.is_empty() {
         "tw:grid tw:grid-cols-1 tw:gap-3.5"
     } else {
         "tw:grid tw:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] tw:gap-3.5 tw:max-[880px]:grid-cols-1"
     };
     rsx! {
         section { class: "{layout_class}",
-            if let Some(project_editor) = project_editor {
-                div { class: "tw:order-1 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5 tw:max-[960px]:order-2",
-                    for (index, pane) in main.into_iter().enumerate() {
-                        PaneView {
-                            key: "{pane.node_id}",
-                            view: pane,
-                            primary: index == 0,
-                            running,
-                            on_action,
-                        }
-                    }
-                }
-                div { class: "tw:order-2 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5 tw:max-[960px]:order-1",
-                    ProjectNodeWorkspace { view: project_editor, on_action }
-                }
-            } else if !main.is_empty() {
+            if !main.is_empty() {
                 div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
                     for (index, pane) in main.into_iter().enumerate() {
                         PaneView {

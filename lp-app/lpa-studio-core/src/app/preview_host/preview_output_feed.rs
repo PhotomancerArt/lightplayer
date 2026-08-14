@@ -53,10 +53,10 @@ pub struct PreviewOutputFeed {
     layout: Option<Rc<ControlDisplayLayout>>,
     /// The engine-side revision of `layout`, for `IfChanged` gating.
     layout_revision: Option<Revision>,
-    /// The engine refused the layout (dome-scale geometry is over the
-    /// serialized-size budget). The feed stops asking — building and
-    /// measuring a refused layout is real work at exactly the scale that can
-    /// least afford it — and the consumer synthesizes one instead.
+    /// The engine refused the layout — a PERMANENT answer (genuinely over
+    /// the link's budget). The feed stops asking — building and measuring
+    /// a refused layout is real work at exactly the scale that can least
+    /// afford it — and the slot draws without geometry.
     layout_refused: bool,
     /// The newest frame, as the renderer consumes it.
     frame: Option<UiControlProductPreview>,
@@ -78,12 +78,6 @@ impl PreviewOutputFeed {
     /// Bumped on every genuinely new frame — poll this to re-read cheaply.
     pub fn frame_revision(&self) -> u64 {
         self.frame_revision
-    }
-
-    /// Whether the feed still has no geometry to draw with (the engine
-    /// refused it, or no frame has carried one yet).
-    pub fn wants_display_layout(&self) -> bool {
-        self.layout.is_none()
     }
 
     /// What the next preview frame should ask for: `None` once the engine
@@ -140,18 +134,6 @@ impl PreviewOutputFeed {
             bytes: Rc::from(entry.bytes.as_slice()),
         });
         self.frame_revision += 1;
-    }
-
-    /// Install a consumer-synthesized display layout (the dome-scale
-    /// fallback, for when the engine refused its own). It becomes the stable
-    /// `Rc` later frames clone, and the frame already in hand adopts it so
-    /// the slot draws without waiting for the next tick.
-    pub fn set_synthesized_layout(&mut self, layout: Rc<ControlDisplayLayout>) {
-        if let Some(frame) = self.frame.as_mut() {
-            frame.display_layout = Some(Rc::clone(&layout));
-        }
-        self.layout = Some(layout);
-        self.layout_revision = None;
     }
 
     /// Drop everything that was a claim about the slot's RUNTIME — the
@@ -296,6 +278,9 @@ mod tests {
         );
     }
 
+    /// A refusal is permanent for the connection: the geometry asking
+    /// stops (the engine would rebuild and re-measure only to refuse
+    /// again) while the frames keep flowing without a layout.
     #[test]
     fn a_refused_layout_stops_the_geometry_asking_but_not_the_frames() {
         let mut feed = PreviewOutputFeed::default();
@@ -306,22 +291,11 @@ mod tests {
 
         feed.apply(true, &[refused]);
 
-        assert!(feed.wants_display_layout());
         assert_eq!(feed.next_read(), Some(ControlDisplayLayoutRead::None));
 
-        let synthesized = Rc::new(ControlDisplayLayout::Layout2d(layout_2d(11)));
-        feed.set_synthesized_layout(Rc::clone(&synthesized));
-
         feed.apply(true, &[entry(4, 2, vec![9, 0, 8, 0, 7, 0])]);
-        assert!(Rc::ptr_eq(
-            &synthesized,
-            feed.frame()
-                .expect("frame")
-                .display_layout
-                .as_ref()
-                .expect("layout")
-        ));
-        assert!(!feed.wants_display_layout());
+        let frame = feed.frame().expect("frames keep flowing");
+        assert!(frame.display_layout.is_none());
     }
 
     #[test]
@@ -401,6 +375,9 @@ mod tests {
                 }],
             },
             display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            // These feeds render lamps, not the bay: one auto-flowed
+            // producer over the whole wire is the shape they see.
+            placements: Vec::new(),
             bytes,
         }
     }

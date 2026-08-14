@@ -9,7 +9,7 @@ vec3 neon(float t) {
     return clamp(a + b * cos(6.2831853 * (c * t + d)), 0.0, 1.0);
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec2 p = uv - 0.5;
     float aspect = outputSize.x / outputSize.y;

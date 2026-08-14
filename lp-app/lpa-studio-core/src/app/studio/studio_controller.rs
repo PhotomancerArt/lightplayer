@@ -25,13 +25,14 @@ use crate::core::log::{
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
-    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
-    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, ModuleExportOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp,
+    NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp,
+    PanelWriteOp, PatchPulseOp, PlaylistActivateOp, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
+    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
+    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate,
+    UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -138,18 +139,6 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
-    /// Client-synthesized display layouts for the device card feed, keyed
-    /// by "project uid @ observed content hash" — the geometry a board's
-    /// project has, which changes only when that project changes. A `None`
-    /// value records an attempt that could not synthesize (not a map2d
-    /// fixture, unreadable document), so a card feed cannot re-read the
-    /// whole library package on every 150 ms pull.
-    ///
-    /// Deliberately NOT keyed by frame revision: that advances on every
-    /// publish, which would make every lookup a miss and every frame a
-    /// fresh `Rc` — the one thing the renderer's repaint key must not see.
-    card_layout_cache:
-        std::collections::HashMap<String, Option<Rc<lpc_model::ControlDisplayLayout>>>,
     /// The CARD-OWNED op flows in flight (state-flow model §2), one per
     /// managed SESSION: set at management dispatch, fed by the manage
     /// event sink, and — the point (I1) — NOT cleared when the session
@@ -293,7 +282,6 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
-            card_layout_cache: std::collections::HashMap::new(),
             device_card_ops: std::collections::BTreeMap::new(),
             device_backup: None,
             device_backup_seq: 0,
@@ -1107,7 +1095,6 @@ impl StudioController {
         };
         self.record_session_logs(id, request_logs);
         let now = (self.now_secs)();
-        let mut wants_layout = false;
         let mut new_frame = false;
         if let Some(session) = self.pool.session_mut(id) {
             session.card_feed_mut().mark_pull_complete(now);
@@ -1117,7 +1104,6 @@ impl StudioController {
                     let feed = session.card_feed_mut();
                     if let Some(entry) = feed.pick_entry(&outputs).cloned() {
                         let applied = feed.apply_entry(&entry, now);
-                        wants_layout = applied.wants_layout;
                         new_frame = applied.new_frame;
                     }
                 }
@@ -1130,9 +1116,6 @@ impl StudioController {
         }
         if new_frame {
             self.mark_dirty();
-        }
-        if wants_layout {
-            self.synthesize_card_feed_layout(id).await;
         }
     }
 
@@ -1169,109 +1152,6 @@ impl StudioController {
             .card_feed_mut()
             .set_handle_id(handle);
         Some(handle)
-    }
-
-    /// Fill in a display layout the device refused (a dome-scale fixture is
-    /// over the wire budget) by synthesizing it from the library's copy of
-    /// the project the board is running — the same bytes connect-as-pull
-    /// banked (D8), through the same shared generator the engine uses.
-    ///
-    /// Cached per (project uid, observed content hash) — NOT per frame
-    /// revision, which advances on every publish and would make the cache a
-    /// miss every time. A failed attempt is cached too: without that, a
-    /// project the fallback cannot handle would re-read the whole library
-    /// package every 150 ms.
-    async fn synthesize_card_feed_layout(&mut self, id: crate::RuntimeId) {
-        let Some((project_uid, observed, revision)) = self.card_feed_layout_key(id) else {
-            return;
-        };
-        let cache_key = format!("{project_uid}@{observed}");
-        if let Some(cached) = self.card_layout_cache.get(&cache_key) {
-            if let Some(layout) = cached.clone() {
-                self.install_card_feed_layout(id, layout);
-            }
-            return;
-        }
-        let layout = self
-            .package_display_layout(&project_uid, revision)
-            .await
-            .map(|layout| Rc::new(lpc_model::ControlDisplayLayout::Layout2d(layout)));
-        self.card_layout_cache.insert(cache_key, layout.clone());
-        match layout {
-            Some(layout) => self.install_card_feed_layout(id, layout),
-            None => log::debug!(
-                "device card feed: no client-side display layout for project {project_uid}"
-            ),
-        }
-    }
-
-    /// (project uid, observed content hash, current frame revision) for the
-    /// session's feed — the synthesis inputs. `None` unless the board is
-    /// running a project the library knows.
-    fn card_feed_layout_key(
-        &self,
-        id: crate::RuntimeId,
-    ) -> Option<(String, String, lpc_model::Revision)> {
-        let session = self.pool.session(id)?;
-        let revision = lpc_model::Revision::new(session.card_feed().frame()?.revision);
-        if session.is_sim() {
-            // The sim runs the library's own copy, so the uid alone finds
-            // the bytes. "sim" as the observed half means a fixture-layout
-            // edit mid-session could serve a stale cached synthesis until
-            // the next studio reload — an accepted edge: sim-scale
-            // projects normally get their layout over the in-proc wire
-            // and never reach the synthesis fallback.
-            let project_uid = session.sim_loaded_project()?.uid.clone();
-            return Some((project_uid, "sim".to_string(), revision));
-        }
-        let (project_uid, observed) = match &session.device_sync()?.content {
-            DeviceContent::Known {
-                project_uid,
-                observed,
-                ..
-            }
-            | DeviceContent::Adopted {
-                project_uid,
-                observed,
-                ..
-            } => (project_uid.clone(), observed.to_string()),
-            _ => return None,
-        };
-        Some((project_uid, observed, revision))
-    }
-
-    /// The layout a library package's own files synthesize to.
-    async fn package_display_layout(
-        &mut self,
-        project_uid: &str,
-        revision: lpc_model::Revision,
-    ) -> Option<lpc_model::ControlLayout2d> {
-        let host = self.library_host().ok()?;
-        let fs = host.catalog_snapshot().await.ok()?;
-        let store = crate::app::library::LibraryStore::read_only(fs);
-        let uid = store.resolve_key(project_uid).ok()?;
-        let handle = store.open(uid).ok()?;
-        let files = handle.read_all_files().ok()?;
-        crate::app::project::control_display_layout_fallback::synthesized_layout_from_package_files(
-            &files, revision,
-        )
-    }
-
-    fn install_card_feed_layout(
-        &mut self,
-        id: crate::RuntimeId,
-        layout: Rc<lpc_model::ControlDisplayLayout>,
-    ) {
-        let installed = match self.pool.session_mut(id) {
-            Some(session) => {
-                session.card_feed_mut().set_synthesized_layout(layout);
-                true
-            }
-            None => false,
-        };
-        if installed {
-            self.mark_dirty();
-        }
     }
 
     pub fn actions(&self) -> UiActions {
@@ -1324,7 +1204,7 @@ impl StudioController {
             .with_lens(self.lens_runtime())
             .with_open_project(
                 self.project.active_library_uid(),
-                self.project.active_library_slug(),
+                self.project.active_library_display_name(),
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
@@ -1482,9 +1362,9 @@ impl StudioController {
                 // binding) is the key: it survives detach, so re-attach
                 // flows address the same document
                 crate::UiLensRuntime::Sim {
-                    project_key: session
+                    project_uid: session
                         .sim_loaded_project()
-                        .map(|project| project.name.clone()),
+                        .map(|project| project.uid.clone()),
                 }
             } else {
                 let uid = session.device_uid().or_else(|| {
@@ -2006,8 +1886,13 @@ impl StudioController {
         let open_elsewhere = host.open_elsewhere_uids().await;
         match host.catalog_snapshot().await {
             Ok(fs) => {
-                self.home_inputs =
-                    Some(home_view_builder::hydrate_home_inputs(fs, &open_elsewhere));
+                let inputs = home_view_builder::hydrate_home_inputs(fs, &open_elsewhere);
+                // The add-node picker's import source is derived from the
+                // same walk (P5) — one snapshot read feeds both the
+                // gallery and the picker.
+                self.project
+                    .set_import_patterns(home_view_builder::importable_patterns(&inputs));
+                self.home_inputs = Some(inputs);
             }
             Err(error) => {
                 log::warn!("library snapshot failed: {error}");
@@ -2782,6 +2667,27 @@ impl StudioController {
         })
     }
 
+    /// Every file of one library package, read through a fresh read-only
+    /// snapshot. No lock: the source of a vendoring is somebody else's
+    /// project, possibly open in another tab, and reading it must never
+    /// contend with them ([`Self::resolve_deploy_target`]'s precedent).
+    async fn read_library_package_files(
+        &mut self,
+        key: &str,
+    ) -> Result<Vec<(String, Vec<u8>)>, UiError> {
+        let host = self.library_host()?;
+        let fs = host.catalog_snapshot().await.map_err(UiError::from)?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store
+            .resolve_key(key)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+        store
+            .open(uid)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?
+            .read_all_files()
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))
+    }
+
     async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
         // Every deploy verb acts on ONE board: the card the gesture came
         // from (M4). Push rows, drift sheets and the Danger tab all live
@@ -3483,6 +3389,18 @@ impl StudioController {
                 let op = action.into_op::<AssetContentFetchOp>()?;
                 return self.execute_asset_content_fetch(op).await;
             }
+            if action.op_as::<crate::PatchVerbOp>().is_some() {
+                let op = action.into_op::<crate::PatchVerbOp>()?;
+                return self.execute_patch_verb_op(op).await;
+            }
+            if action.op_as::<crate::EditorMetaOp>().is_some() {
+                let op = action.into_op::<crate::EditorMetaOp>()?;
+                return self.execute_editor_meta_op(op).await;
+            }
+            if action.op_as::<crate::EditorMetaFetchOp>().is_some() {
+                let op = action.into_op::<crate::EditorMetaFetchOp>()?;
+                return self.execute_editor_meta_fetch(op).await;
+            }
             if action.op_as::<NodeRevertOp>().is_some() {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
@@ -3490,6 +3408,10 @@ impl StudioController {
             if action.op_as::<NodeClearDebugOp>().is_some() {
                 let op = action.into_op::<NodeClearDebugOp>()?;
                 return self.execute_node_clear_debug_op(op).await;
+            }
+            if action.op_as::<PatchPulseOp>().is_some() {
+                let op = action.into_op::<PatchPulseOp>()?;
+                return self.execute_patch_pulse_op(op).await;
             }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
@@ -3519,9 +3441,17 @@ impl StudioController {
                 let op = action.into_op::<NodeCopyOp>()?;
                 return self.execute_node_copy_op(op).await;
             }
+            if action.op_as::<ModuleExportOp>().is_some() {
+                let op = action.into_op::<ModuleExportOp>()?;
+                return self.execute_module_export_op(op).await;
+            }
             if action.op_as::<NodePasteOp>().is_some() {
                 let op = action.into_op::<NodePasteOp>()?;
                 return self.execute_node_paste_op(op).await;
+            }
+            if action.op_as::<NodeImportOp>().is_some() {
+                let op = action.into_op::<NodeImportOp>()?;
+                return self.execute_node_import_op(op).await;
             }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
@@ -4017,15 +3947,45 @@ impl StudioController {
             HomeOp::OpenExample { id } => {
                 return self.open_from_home(PendingOpen::Example(id), updates).await;
             }
-            HomeOp::CreateProject => {
-                // Create-and-open (the D17 deviation, 2026-07-27): a pure
-                // blank one-file package lands in the library — "Project",
-                // slugged/dated/deduped by the store; rename lives on the
+            HomeOp::CreateProject { template } => {
+                // Create-and-open (the D17 deviation, 2026-07-27): the
+                // package lands in the library — slugged/dated/deduped by
+                // the store from the template's label; rename lives on the
                 // card kebab — then opens like any card, so the user lands
-                // in the empty editor with the add-node picker.
+                // in the editor with something to do next. `Blank` sends no
+                // files at all, so the historical path is untouched.
+                let files = crate::app::home::template_project_files(template)?;
                 let outcome = self
                     .run_catalog_op(CatalogOp::Create {
-                        name: "Project".to_string(),
+                        name: template.default_project_name().to_string(),
+                        files,
+                    })
+                    .await?;
+                let created = outcome.summary.ok_or_else(|| {
+                    UiError::MissingSession("create produced no package".to_string())
+                })?;
+                return self
+                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .await;
+            }
+            HomeOp::CreateFromPattern { uid, export, name } => {
+                // Read the SOURCE through a read-only snapshot (no lock —
+                // it may be open in another tab), compose the workbench
+                // around its export, then create-and-open like any other
+                // template. One catalog transaction, at the end.
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a project name cannot be empty".to_string(),
+                    ));
+                }
+                let source_files = self.read_library_package_files(&uid).await?;
+                let files =
+                    crate::app::home::project_files_from_export(&source_files, &export, &name)?;
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Create {
+                        name,
+                        files: Some(files),
                     })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
@@ -5081,8 +5041,8 @@ impl StudioController {
         if let Some(sim) = self.pool.sim_session() {
             let sim_id = sim.id();
             let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
-            // D37/M5 (`#/sim/<key>` — and the project-card click that now
-            // rides it): when the sim ALREADY runs the requested project,
+            // D37/M5 (`/p/<slug>-<uid>` — and the project-card click that
+            // now rides it): when the sim ALREADY runs the requested project,
             // re-attach the lens instead of pushing the head again — the
             // running session with its server-side overlay IS the document
             // (SDI); a fresh push would discard applied-but-unsaved edits.
@@ -5209,6 +5169,7 @@ impl StudioController {
                 self.open_docs_example(&example_id, updates).await
             }
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
+            ProjectOp::ReloadActiveProject => self.reload_active_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
             ProjectOp::OpenDeviceProject { uid } => self.open_device_project(uid, updates).await,
@@ -5262,6 +5223,38 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
+    /// One patch-surface verb (D42): kernel-validated document transforms
+    /// through the normal ApplyBody path, with the session-local undo
+    /// stack. Routed like asset edits — the verb writes assets.
+    async fn execute_patch_verb_op(&mut self, op: crate::PatchVerbOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.apply_patch_verb(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// One Arrange gesture over `editor.json` (unified-editor P2): routed
+    /// like the patch verbs — the op writes an asset.
+    async fn execute_editor_meta_op(&mut self, op: crate::EditorMetaOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.apply_editor_meta(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Settle the `editor.json` loaded-flag: presence via a root listing,
+    /// then the normal content fetch — absence is a state, not an error.
+    async fn execute_editor_meta_fetch(&mut self, op: crate::EditorMetaFetchOp) -> UiResult {
+        let logs = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.fetch_editor_meta(server, &op.artifact).await?
+        };
+        self.record_logs(logs);
+        Ok(UiNotices::new())
+    }
+
     /// Resolve (and cache) an asset's effective editor content so the next
     /// emitted view embeds it. Quiet on success — the refreshed view is the
     /// outcome; server log lines join the ring like any edit run's.
@@ -5302,6 +5295,11 @@ impl StudioController {
                 seq,
                 upsert,
             } => self.agent_upsert_param(artifact, seq, upsert).await,
+            crate::AgentOp::DeclareSpace {
+                artifact,
+                seq,
+                declaration,
+            } => self.agent_declare_space(artifact, seq, declaration).await,
         }
     }
 
@@ -5366,12 +5364,47 @@ impl StudioController {
         match outcome {
             Ok((run, rejection)) => {
                 self.record_logs(run.logs);
-                self.agent.record_upsert_ack(&artifact, seq, rejection);
+                self.agent.record_write_ack(&artifact, seq, rejection);
                 Ok(run.notices)
             }
             Err(error) => {
                 self.agent
-                    .record_upsert_ack(&artifact, seq, Some(error.to_string()));
+                    .record_write_ack(&artifact, seq, Some(error.to_string()));
+                Err(error)
+            }
+        }
+    }
+
+    /// Execute one agent `declare_space` dispatch — the same batch, ack
+    /// and failure-reporting path as [`Self::agent_upsert_param`], over
+    /// the space-declaration edit list.
+    async fn agent_declare_space(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        seq: u64,
+        declaration: lpa_agent::SpaceDeclaration,
+    ) -> UiResult {
+        let outcome = match self
+            .pool
+            .lens_session_mut()
+            .and_then(|session| session.client_mut())
+        {
+            Ok(server) => {
+                self.project
+                    .declare_shader_space(server, &artifact, &declaration)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok((run, rejection)) => {
+                self.record_logs(run.logs);
+                self.agent.record_write_ack(&artifact, seq, rejection);
+                Ok(run.notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_write_ack(&artifact, seq, Some(error.to_string()));
                 Err(error)
             }
         }
@@ -5422,6 +5455,7 @@ impl StudioController {
             node_name: target.node_label,
             fixture,
             bindings,
+            space: target.space,
         };
         let key = crate::AgentSessionKey::new(runtime, target.node_address);
         self.agent
@@ -5508,6 +5542,16 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
+    /// Patch-subject pulse (Q27): the selection's lamps blink on the live
+    /// sim/hardware via each involved output's `highlight` Debug slot.
+    async fn execute_patch_pulse_op(&mut self, op: PatchPulseOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.apply_patch_pulse(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
     /// Playlist entry-strip click: dispatch the activate-entry runtime
     /// command (the non-overlay command channel). Quiet on acceptance —
     /// the ACTIVE placard follows via the tightened refresh ticks; a
@@ -5590,6 +5634,36 @@ impl StudioController {
             }
         }
         self.record_project_edit_run(Ok(run))
+    }
+
+    /// Export designation (module authoring unit, P3): the manifest patch
+    /// runs against the OPEN project's own package handle, so nothing here
+    /// touches the catalog lock.
+    async fn execute_module_export_op(&mut self, op: ModuleExportOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .set_module_export(server, &op.folder, op.export)
+                .await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Vendor a library pattern export into the open project (module
+    /// authoring unit, P5). The source bytes come from the library, the
+    /// write goes over the wire as an ordinary `CreateNode`.
+    async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .import_pattern(server, &op.package_uid, &op.export)
+                .await
+        };
+        // The vendored files landed in the library through the create's
+        // save-pull, so the gallery — and the picker's own import list —
+        // are stale until the next settle.
+        self.request_library_refresh();
+        self.record_project_edit_run(run)
     }
 
     async fn execute_node_paste_op(&mut self, op: NodePasteOp) -> UiResult {
@@ -6444,6 +6518,41 @@ impl StudioController {
             "Project refreshed",
             "Project refresh needs attention",
         )))
+    }
+
+    /// The P6 pull loop's apply step: re-push the active library project's
+    /// on-disk content (already fast-forwarded by the platform edge) to the
+    /// running runtime, so the open editor shows what the library now
+    /// holds. Quiet on success — the edge raises its own "Updated to the
+    /// latest version" toast; a second notice here would double-speak.
+    async fn reload_active_project(&mut self, updates: UxUpdateSink) -> UiResult {
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Updating project",
+            "Updating",
+            "Reloading the project from its library copy",
+        );
+        let result = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.reload_active_from_library(server).await
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                self.note_sim_loaded_project();
+                updates.emit(UxUpdate::View(self.view()));
+                Ok(UiNotices::new())
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    format!("project reload failed: {error}"),
+                ));
+                Err(error)
+            }
+        }
     }
 
     async fn sync_project_after_attach(
@@ -8557,8 +8666,10 @@ mod tests {
         // the dispatch errs — the successful create-and-open round-trip is
         // the edit-e2e test's. The packages stick either way.
         for _ in 0..2 {
-            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject)))
-                .expect_err("host test builds have no sim runtime to open into");
+            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+                template: crate::ProjectTemplate::Blank,
+            })))
+            .expect_err("host test builds have no sim runtime to open into");
         }
         studio.request_library_refresh();
         block_on_ready(studio.settle_library());

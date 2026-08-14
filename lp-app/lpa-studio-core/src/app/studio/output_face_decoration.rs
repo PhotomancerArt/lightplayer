@@ -57,7 +57,7 @@ pub(crate) fn decorate_output_faces(
     // used total, so it is summed across all faces first).
     let used: u32 = fold_faces(&mut editor.nodes, 0, &mut |used, face| {
         used + face
-            .channels
+            .ports
             .iter()
             .map(|row| row.resolved_count.or(row.count).unwrap_or(0))
             .sum::<u32>()
@@ -125,7 +125,7 @@ fn apply_live_facts(
         let Some(status) = wire_status else {
             return;
         };
-        for row in &mut face.channels {
+        for row in &mut face.ports {
             let Some(gpio) = row.gpio else {
                 continue;
             };
@@ -204,7 +204,7 @@ fn decorate_face(
 ) {
     if let Some(board) = board {
         let mut board = board.clone();
-        for channel in &mut face.channels {
+        for channel in &mut face.ports {
             channel.gpio = board
                 .pins
                 .iter()
@@ -216,7 +216,7 @@ fn decorate_face(
         // function of the map, not of iteration luck.
         for pin in &mut board.pins {
             pin.assigned_to = face
-                .channels
+                .ports
                 .iter()
                 .find(|channel| channel.pin_label == pin.label)
                 .map(|channel| channel.key);
@@ -352,8 +352,8 @@ fn board_facts(board_id: &str) -> Option<UiOutputBoardFacts> {
 mod tests {
     use super::*;
     use crate::{
-        UiBindingEndpoint, UiNodeHeader, UiNodeTab, UiNodeView, UiOutputChannelRow,
-        UiProducedBinding, UiProducedBindings, UiProductKind,
+        UiBindingEndpoint, UiNodeHeader, UiNodeTab, UiNodeView, UiOutputPortRow, UiProducedBinding,
+        UiProducedBindings, UiProductKind,
     };
 
     #[test]
@@ -367,11 +367,11 @@ mod tests {
         let board = face.board.as_ref().expect("the desk board is known");
         assert_eq!(board.board_id, "domraem/dom-z-102");
         assert_eq!(
-            face.channels[0].gpio,
+            face.ports[0].gpio,
             Some(18),
             "IO18 translates to gpio 18 through the display manifest"
         );
-        assert_eq!(face.channels[1].gpio, Some(2));
+        assert_eq!(face.ports[1].gpio, Some(2));
         // The DOM-Z-102's LED wires are screw terminals on the rails; every
         // io-role one is offered, and only the two in use are assigned.
         let labels: Vec<&str> = board.pins.iter().map(|pin| pin.label.as_str()).collect();
@@ -408,7 +408,7 @@ mod tests {
             "terminal pins join the eligible set: {:?}",
             board.pins
         );
-        assert_eq!(face.channels[0].gpio, Some(3), "LED2 is gpio 3");
+        assert_eq!(face.ports[0].gpio, Some(3), "LED2 is gpio 3");
     }
 
     #[test]
@@ -419,9 +419,9 @@ mod tests {
 
         let face = output_face_of(&editor);
         assert_eq!(face.board, None, "no board known is a first-class state");
-        assert_eq!(face.channels[0].gpio, None);
+        assert_eq!(face.ports[0].gpio, None);
         assert_eq!(
-            face.channels[0].endpoint_display, "ws281x:local:IO18",
+            face.ports[0].endpoint_display, "ws281x:local:IO18",
             "the wire is still fully addressable without a board"
         );
     }
@@ -443,8 +443,8 @@ mod tests {
 
         let face = output_face_of(&editor);
         assert!(face.board.is_some(), "the board is still known");
-        assert_eq!(face.channels[0].gpio, None, "IO27 is not on this board");
-        assert_eq!(face.channels[0].pin_label, "IO27", "and it is still shown");
+        assert_eq!(face.ports[0].gpio, None, "IO27 is not on this board");
+        assert_eq!(face.ports[0].pin_label, "IO27", "and it is still shown");
     }
 
     #[test]
@@ -457,9 +457,9 @@ mod tests {
 
         let face = output_face_of(&editor);
         assert_eq!(face.total_lamps, Some(16));
-        assert_eq!(face.channels[0].resolved_count, Some(6));
+        assert_eq!(face.ports[0].resolved_count, Some(6));
         assert_eq!(
-            face.channels[1].resolved_count,
+            face.ports[1].resolved_count,
             Some(10),
             "the count-less channel takes what is left"
         );
@@ -479,7 +479,7 @@ mod tests {
         decorate_output_faces(&mut editor, None, None, None);
 
         let face = output_face_of(&editor);
-        assert_eq!(face.channels[1].resolved_count, Some(0));
+        assert_eq!(face.ports[1].resolved_count, Some(0));
     }
 
     #[test]
@@ -493,7 +493,7 @@ mod tests {
 
         let face = output_face_of(&editor);
         assert_eq!(face.total_lamps, None, "no upstream publishes this bus");
-        assert_eq!(face.channels[0].resolved_count, None);
+        assert_eq!(face.ports[0].resolved_count, None);
     }
 
     // -- fixtures ------------------------------------------------------------
@@ -510,19 +510,19 @@ mod tests {
                     Some(count) => start = start.map(|start| start + count),
                     None => start = None,
                 }
-                UiOutputChannelRow {
+                UiOutputPortRow {
                     key: *key,
                     endpoint_display: format!("ws281x:local:{pin}"),
                     pin_label: (*pin).to_string(),
                     count: *count,
                     resolved_count: *count,
                     slice_start,
-                    ..UiOutputChannelRow::default()
+                    ..UiOutputPortRow::default()
                 }
             })
             .collect();
         UiOutputFace {
-            channels,
+            ports: channels,
             input_binding: Some("bus:control.out".to_string()),
             ..UiOutputFace::default()
         }

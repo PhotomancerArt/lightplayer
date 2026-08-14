@@ -32,6 +32,8 @@ pub fn svg_to_doc(svg: &str, sample_diameter: f32) -> Result<Map2dDoc, SvgImport
         let SvgPathGeometry::Polyline(points) = group.geometry;
         objects.push(Map2dObject {
             name: format!("p{}", group.path_index),
+            id: None,
+            stride: None,
             shape: Map2dShape::Path(PathShape {
                 points,
                 count: group.count,

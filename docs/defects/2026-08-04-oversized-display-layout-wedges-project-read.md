@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-08-04      # how: first Studio open of examples/zook-dome (1500 lamps)
-fixed: pending         # commit updated at land time
+fixed: 2026-08-10      # PR #408 — packed layouts + transport-declared budget
 area: lpc-engine control-product probe + lpc-shared project-read transport
 class: unbounded-payload-on-bounded-transport
 related:
@@ -48,10 +48,15 @@ engine, so a device serving Studio over USB is protected identically.
 Regression: `fixture_project_read_refuses_over_budget_display_layout`
 (fixture_node.rs).
 
-**Follow-up** — the real capability, streaming large layouts in bounded
-chunks (the "semantic layout split"), is now motivated by a concrete
-product surface: dome-scale fixtures deserve lamp dots in the fixture
-face too. It needs its own plan: chunked layout events in `lpc-wire`,
-producer-side splitting, client reassembly, and device memory bounds.
-Until then the standalone mapping editor (`#/mapping`) is the full-size
-mapping view — it loads the document locally and never rides the probe.
+**Resolution (2026-08-10, PR #408)** — the defect class is closed by
+`docs/adr/2026-08-10-packed-display-layouts-transport-budget.md`, by a
+different route than the follow-up imagined: the layout crosses the wire
+PACKED (~5.4 B/lamp vs ~75), which fits the dome — and the declared
+2048-lamp embedded ceiling — in one frame; the budget the engine checks
+is the LINK's declared frame budget (unbounded links always answer); and
+the output-frame probe header is budgeted as a TOTAL, closing the
+adjacent multi-output wedge the per-layout guard never covered. The
+interim client-side synthesis this defect spawned drifted (it predated
+fragment-aware layouts) and is deleted; refusal is now rare (>2048 lamps
+on serial) and rendered honestly. The chunked "semantic layout split"
+remains the recorded escalation past that ceiling.

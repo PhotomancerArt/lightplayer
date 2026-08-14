@@ -90,7 +90,7 @@ pub(crate) fn emit_module(
         next_type += 1;
     }
 
-    // Detect `vec4 render(vec2, vec2, float)` → 5 params, 4 results in Q32.
+    // Detect `vec4 render_2d(vec2, vec2, float)` → 5 params, 4 results in Q32.
     let render_entry = find_render_entry(ir, options.float_mode);
     let render_frame_type_idx = if render_entry.is_some() {
         types
@@ -236,10 +236,10 @@ pub(crate) fn emit_module(
 // render_frame: pixel loop emitted as raw WASM
 // ---------------------------------------------------------------------------
 
-/// Match `vec4 render(vec2, vec2, float)` — WASM `(vmctx, 5×i32) -> 4×i32` in Q32.
+/// Match `vec4 render_2d(vec2, vec2, float)` — WASM `(vmctx, 5×i32) -> 4×i32` in Q32.
 fn find_render_entry(ir: &LpirModule, mode: FloatMode) -> Option<(usize, u32)> {
     for (i, f) in ir.functions.values().enumerate() {
-        if f.name != "render" {
+        if f.name != "render_2d" {
             continue;
         }
         let (params, results) = func::wasm_function_signature(f, mode);
@@ -251,18 +251,18 @@ fn find_render_entry(ir: &LpirModule, mode: FloatMode) -> Option<(usize, u32)> {
 }
 
 /// Emit `render_frame(width, height, time, out_ptr)` — loops over every pixel,
-/// calls `render`, converts Q16.16 vec4 → RGBA8, stores to linear memory.
+/// calls `render_2d`, converts Q16.16 vec4 → RGBA8, stores to linear memory.
 ///
 /// One WASM call per frame instead of W×H JS→WASM transitions.
 ///
 /// Fuel: this hand-written wrapper is the raw-export path (web-demo calls it
 /// directly via `instance.exports`, bypassing any `prepare_call` arming), so
 /// with `fuel` on it arms the vmctx header itself — trap slot cleared at
-/// frame start, per-pixel fuel/invocation re-arm before every `call render`
+/// frame start, per-pixel fuel/invocation re-arm before every `call render_2d`
 /// (mirroring the synth render wrappers in
 /// `lp-shader/src/synth/render_texture.rs`). The wrapper's own x/y loop
 /// back-edges stay unmetered (bounded by the width/height params); an
-/// infinite loop in the user `render` fn is caught by render's emitted
+/// infinite loop in the user `render_2d` fn is caught by render_2d's emitted
 /// entry/back-edge checks against the per-pixel tank and unwinds out of the
 /// whole frame call.
 fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>, fuel: bool) -> Function {

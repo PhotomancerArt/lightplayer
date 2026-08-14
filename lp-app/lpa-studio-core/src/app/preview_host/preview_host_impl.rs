@@ -43,10 +43,14 @@ use super::preview_content::{catalog_deploy_files, example_deploy_files};
 use super::preview_output_feed::PreviewOutputFeed;
 use super::preview_sleep::PreviewSleeper;
 use super::preview_types::{
-    PreviewHostConfig, PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier,
+    PreviewHostConfig, PreviewPosterFrame, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
+    PreviewTier,
 };
 use super::preview_worker::PreviewWorker;
-use super::slot_policy::{EvictionCandidate, choose_eviction, choose_worker};
+use super::slot_policy::{
+    DetachedSlotNext, EvictionCandidate, choose_eviction, choose_starts, choose_worker,
+    detached_slot_next,
+};
 
 /// Scheduler/polling loop period while any slot or sub-task is active.
 const LOOP_SLEEP_MS: u32 = 4;
@@ -145,6 +149,17 @@ struct Slot {
     presented_frames: u64,
     status: PreviewSlotStatus,
     status_revision: u64,
+    /// Consumer-requested one-shot poster capture size; `Some` until the
+    /// request is posted to the worker (shader-only GPU tier — the one
+    /// quadrant whose picture the page cannot read itself).
+    poster_request: Option<(u32, u32)>,
+    /// A `capture_poster` is in flight. Self-heals on runtime loss: the
+    /// send gate clears it whenever the slot has no runtime.
+    poster_inflight: bool,
+    /// The captured poster, once the worker answers.
+    poster_frame: Option<PreviewPosterFrame>,
+    /// Bumped when `poster_frame` lands — poll to re-read cheaply.
+    poster_revision: u64,
     /// CPU-tier render size (the mounted canvas's pixel size).
     cpu_size: (u32, u32),
     /// CPU-tier blit context cache (re-resolved if the canvas remounts).
@@ -227,10 +242,14 @@ impl PreviewHost {
             tier_reason: None,
             presentable: false,
             attach_error: None,
-            schedule: FrameSchedule::new(fps),
+            schedule: FrameSchedule::new(fps).with_frame_budget(request.profile.frame_budget),
             output: PreviewOutputFeed::default(),
             last_active_ms: now_ms(),
             presented_frames: 0,
+            poster_request: None,
+            poster_inflight: false,
+            poster_frame: None,
+            poster_revision: 0,
             status: if shut_down {
                 PreviewSlotStatus::Error {
                     reason: "preview host is shut down".to_string(),
@@ -283,6 +302,7 @@ impl PreviewHost {
             self.start_pending_leases(&mut tasks);
             let mut recycles = Vec::new();
             self.schedule_due_frames(&mut recycles);
+            self.send_poster_requests(&mut recycles);
             self.collect_worker_outputs(&mut recycles);
             self.apply_recycles(recycles, &mut tasks);
             poll_tasks(&mut tasks);
@@ -405,16 +425,44 @@ impl PreviewHost {
         }
     }
 
-    /// Start lease pipelines for pending slots: pick the least-loaded
-    /// ready worker, enforce the live-slot cap (LRU eviction), and spawn
-    /// the pipeline sub-task.
+    /// Start lease pipelines for pending slots: bound how many deploys run
+    /// at once ([`choose_starts`]), then per chosen slot pick the
+    /// least-loaded ready worker, enforce the live-slot cap (LRU
+    /// eviction), and spawn the pipeline sub-task.
+    ///
+    /// Slots left unchosen simply stay `pending` — no state changes, no
+    /// deadline — and are reconsidered every tick until they start; a long
+    /// wait is a queue, not a failure, and consumers already read `pending`
+    /// and `Deploying` as "not yet", never as an error.
     fn start_pending_leases(&self, tasks: &mut Vec<LocalTask>) {
         let slots = self.shared.borrow().slots.clone();
+        let mut candidates: Vec<(u64, bool)> = Vec::new();
+        let mut deploying_now = 0usize;
+        for slot_rc in &slots {
+            let slot = slot_rc.borrow();
+            if slot.deploying {
+                deploying_now += 1;
+                continue;
+            }
+            if slot.pending && !slot.released && !slot.terminal {
+                candidates.push((slot.id, slot.visible));
+            }
+        }
+        // One in-flight deploy per worker: past that the pipelines only
+        // contend for the same pool and time each other out.
+        let cap = self.shared.borrow().config.pool_size.max(1);
+        let starting = choose_starts(candidates, deploying_now, cap);
+        if starting.is_empty() {
+            return;
+        }
         for slot_rc in &slots {
             {
                 let slot = slot_rc.borrow();
                 if !slot.pending || slot.deploying || slot.released || slot.terminal {
                     continue;
+                }
+                if !starting.contains(&slot.id) {
+                    continue; // waits its turn; still pending next tick
                 }
             }
             let Some((worker_index, worker, generation)) = self.pick_worker(slot_rc) else {
@@ -559,10 +607,12 @@ impl PreviewHost {
         true
     }
 
-    /// Destroy an LRU-evicted slot's runtime and park it `Suspended` (the
-    /// canvas keeps its last frame). It re-leases on the next visibility
-    /// edge — GPU slots then need a consumer-remounted canvas, since the
-    /// old one was consumed by its transfer.
+    /// Destroy an LRU-evicted slot's runtime and detach it, per
+    /// [`detached_slot_next`]: a still-visible slot re-leases (status
+    /// `Deploying`, like the recycle path), an invisible one parks
+    /// `Suspended` (the canvas keeps its last frame) until its next
+    /// visibility edge. GPU slots then need a consumer-remounted canvas,
+    /// since the old one was consumed by its transfer.
     fn evict_slot(&self, slot_rc: &Rc<RefCell<Slot>>) {
         let (runtime, worker_index, generation) = {
             let slot = slot_rc.borrow();
@@ -577,8 +627,14 @@ impl PreviewHost {
         slot.schedule.pause();
         slot.schedule.frame_failed();
         slot.output.invalidate_runtime();
-        if !slot.terminal {
-            slot.set_status(PreviewSlotStatus::Suspended);
+        if !slot.terminal && !slot.released {
+            match detached_slot_next(slot.visible) {
+                DetachedSlotNext::Redeploy => {
+                    slot.resume_requested = true;
+                    slot.set_status(PreviewSlotStatus::Deploying);
+                }
+                DetachedSlotNext::Park => slot.set_status(PreviewSlotStatus::Suspended),
+            }
         }
         log::info!("preview host: evicted slot {} (live-slot cap)", slot.id);
     }
@@ -668,6 +724,66 @@ impl PreviewHost {
         }
     }
 
+    /// Post pending `capture_poster` requests for slots whose consumer
+    /// asked for one (see [`PreviewSlotHandle::request_poster_capture`]).
+    /// One in flight per slot; a slot that lost its runtime mid-flight
+    /// self-heals (the request stays queued for the next live runtime).
+    fn send_poster_requests(&self, recycles: &mut Vec<RecycleRequest>) {
+        let slots = self.shared.borrow().slots.clone();
+        for slot_rc in &slots {
+            let (envelope, worker_index, generation) = {
+                let mut slot = slot_rc.borrow_mut();
+                let Some(runtime_id) = slot.runtime_id else {
+                    // Runtime lost (recycle/evict) — any in-flight capture
+                    // died with it; re-arm so the request is re-sent if the
+                    // slot comes back live.
+                    slot.poster_inflight = false;
+                    continue;
+                };
+                if slot.poster_inflight || !slot.presentable {
+                    continue;
+                }
+                let Some((width, height)) = slot.poster_request else {
+                    continue;
+                };
+                slot.poster_inflight = true;
+                (
+                    BrowserInputEnvelope::CapturePoster {
+                        runtime_id,
+                        channel: PREVIEW_CHANNEL.to_string(),
+                        width,
+                        height,
+                        frame_id: 1,
+                    },
+                    slot.worker_index.expect("live slot has a worker"),
+                    slot.worker_generation,
+                )
+            };
+            let worker = {
+                let shared = self.shared.borrow();
+                match shared.workers.get(worker_index) {
+                    Some(entry) if entry.generation == generation => match &entry.state {
+                        WorkerState::Ready(worker) => Some(Rc::clone(worker)),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            };
+            match worker {
+                Some(worker) => {
+                    if let Err(error) = worker.borrow().post(&envelope) {
+                        recycles.push(RecycleRequest {
+                            worker_index,
+                            cause_runtime: None,
+                            reason: format!("post poster capture: {error}"),
+                        });
+                    }
+                }
+                None => slot_rc.borrow_mut().poster_inflight = false,
+            }
+        }
+    }
+
     /// Drain every ready worker: complete presents, blit CPU pixel
     /// frames, route attach errors to their pipelines, and collect
     /// worker-poisoning failures as recycle requests.
@@ -697,6 +813,35 @@ impl PreviewHost {
                     worker.take_worker_errors(),
                 )
             };
+            let (poster_frames, poster_errors) = {
+                let mut worker = worker.borrow_mut();
+                (worker.take_poster_frames(), worker.take_poster_errors())
+            };
+            for frame in poster_frames {
+                if let Some(slot) = self.slot_by_runtime(worker_index, frame.runtime_id) {
+                    let mut slot = slot.borrow_mut();
+                    let bytes: Vec<u8> = js_sys::Uint8Array::new(&frame.pixels).to_vec();
+                    slot.poster_frame = Some(PreviewPosterFrame {
+                        width: frame.width,
+                        height: frame.height,
+                        bytes: Rc::from(bytes.as_slice()),
+                    });
+                    slot.poster_revision += 1;
+                    slot.poster_request = None;
+                    slot.poster_inflight = false;
+                }
+            }
+            for error in poster_errors {
+                // Poster failures never condemn the slot or the worker: the
+                // card keeps its placeholder (and its live rendering, if
+                // any). One debug line, capture abandoned.
+                if let Some(slot) = self.slot_by_runtime(worker_index, error.runtime_id) {
+                    let mut slot = slot.borrow_mut();
+                    slot.poster_request = None;
+                    slot.poster_inflight = false;
+                }
+                log::debug!("poster capture failed: {}", error.message);
+            }
             for reason in worker_errors {
                 recycles.push(RecycleRequest {
                     worker_index,
@@ -735,6 +880,11 @@ impl PreviewHost {
                 if let Some(slot) = self.slot_by_runtime(worker_index, done.runtime_id) {
                     let mut slot = slot.borrow_mut();
                     slot.schedule.frame_completed();
+                    // Spends the slot's frame budget, if it has one: the
+                    // schedule stops at its last frame while the slot keeps
+                    // its runtime, its status, and its picture (the poster
+                    // case — see `PreviewProfile::frame_budget`).
+                    slot.schedule.note_present();
                     slot.presented_frames += 1;
                     slot.last_active_ms = now;
                 }
@@ -747,7 +897,11 @@ impl PreviewHost {
                 slot.schedule.frame_completed();
                 slot.last_active_ms = now;
                 match blit_pixel_frame(&mut slot, &frame) {
-                    Ok(()) => slot.presented_frames += 1,
+                    // Only a frame that reached the canvas spends budget.
+                    Ok(()) => {
+                        slot.schedule.note_present();
+                        slot.presented_frames += 1;
+                    }
                     Err(reason) => {
                         slot.schedule.pause();
                         slot.terminal = true;
@@ -854,16 +1008,19 @@ impl PreviewHost {
                 slot.set_status(PreviewSlotStatus::Error {
                     reason: format!("preview failed repeatedly: {reason}"),
                 });
-            } else if slot.visible {
-                // Re-lease once the pipeline (if any) unwinds. A GPU
-                // slot's canvas was consumed by its transfer, so the
-                // re-lease surfaces a clear canvas error unless the
-                // consumer remounted; that is the consumer's remount
-                // discipline (P4).
-                slot.resume_requested = true;
-                slot.set_status(PreviewSlotStatus::Deploying);
             } else {
-                slot.set_status(PreviewSlotStatus::Suspended);
+                match detached_slot_next(slot.visible) {
+                    DetachedSlotNext::Redeploy => {
+                        // Re-lease once the pipeline (if any) unwinds. A GPU
+                        // slot's canvas was consumed by its transfer, so the
+                        // re-lease surfaces a clear canvas error unless the
+                        // consumer remounted; that is the consumer's remount
+                        // discipline (P4).
+                        slot.resume_requested = true;
+                        slot.set_status(PreviewSlotStatus::Deploying);
+                    }
+                    DetachedSlotNext::Park => slot.set_status(PreviewSlotStatus::Suspended),
+                }
             }
         }
     }
@@ -911,20 +1068,28 @@ impl PreviewSlotHandle {
         self.slot.borrow().output.frame_revision()
     }
 
-    /// Whether the slot has output frames but no geometry to draw them with,
-    /// because the engine refused the layout (dome-scale) or none has
-    /// arrived yet. The consumer synthesizes one and installs it with
-    /// [`Self::set_synthesized_display_layout`].
-    pub fn wants_display_layout(&self) -> bool {
-        self.slot.borrow().output.wants_display_layout()
+    /// Ask the worker to capture ONE poster frame of this slot's visual
+    /// product at `width`×`height` — the readback path for the quadrant
+    /// whose canvas the page cannot read (shader-only GPU tier). The
+    /// answer lands in [`Self::poster_frame`]; the request survives worker
+    /// recycles until it is answered or the handle is dropped. Idempotent
+    /// while a capture is pending.
+    pub fn request_poster_capture(&self, width: u32, height: u32) {
+        let mut slot = self.slot.borrow_mut();
+        if slot.poster_frame.is_none() && slot.poster_request.is_none() {
+            slot.poster_request = Some((width, height));
+        }
     }
 
-    /// Install a consumer-synthesized display layout for the slot's lamps.
-    pub fn set_synthesized_display_layout(
-        &self,
-        layout: std::rc::Rc<lpc_model::ControlDisplayLayout>,
-    ) {
-        self.slot.borrow_mut().output.set_synthesized_layout(layout);
+    /// The captured poster frame, once the worker has answered
+    /// [`Self::request_poster_capture`].
+    pub fn poster_frame(&self) -> Option<PreviewPosterFrame> {
+        self.slot.borrow().poster_frame.clone()
+    }
+
+    /// Bumped when a poster frame lands — poll to re-read cheaply.
+    pub fn poster_revision(&self) -> u64 {
+        self.slot.borrow().poster_revision
     }
 
     /// Suspend (`false`) or resume (`true`) presenting. Hiding pauses the

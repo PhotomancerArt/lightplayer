@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, PhasorConfig, Revision, SlotMerge, SlotPath, TimeProduct};
 
 use crate::dataflow::binding::{BindingEntry, BindingRef};
-use crate::node::ScopeRef;
+use crate::node::{PatchedRun, ScopeRef};
 
 /// Engine or test fake that can satisfy demand for uncached queries.
 pub trait ResolveHost {
@@ -106,6 +106,40 @@ pub trait ResolveHost {
         Err(SessionResolveError::other(
             "resolve host has no render control access",
         ))
+    }
+
+    /// Where a control product's producer says its lamps land on
+    /// `consumer`'s wire (its resolved patch runs, filtered to that
+    /// output), or `None` for auto-flow — `Some(vec![])` = patched,
+    /// nothing here (D40).
+    ///
+    /// A READ of the producing node, not a call into it: it answers from what
+    /// its own tick already resolved, so the output can ask while it is
+    /// planning fragments without re-entering the graph.
+    fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+        consumer: NodeId,
+    ) -> Option<Vec<PatchedRun>> {
+        let _ = (product, consumer);
+        None
+    }
+
+    /// Record `node`'s authored output name for patch routing; answers a
+    /// live sibling's colliding claim (see the engine implementation).
+    fn register_output_identity(
+        &mut self,
+        node: NodeId,
+        name: Option<alloc::string::String>,
+        revision: Revision,
+    ) -> Option<alloc::string::String> {
+        let _ = (node, name, revision);
+        None
+    }
+
+    /// The registered output-name set and the revision it last changed at.
+    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
+        (Vec::new(), Revision::default())
     }
 
     fn runtime_buffer_mut(

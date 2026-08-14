@@ -37,6 +37,8 @@ fn packages() -> Vec<UiPackageCard> {
         UiPackageCard {
             uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
             kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
             slug: "2026-07-02-0930-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
             provenance: None,
@@ -50,6 +52,8 @@ fn packages() -> Vec<UiPackageCard> {
         UiPackageCard {
             uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
             slug: "2026-07-04-1102-basic".to_string(),
             last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
             provenance: Some("Remixed from Basic".to_string()),
@@ -63,6 +67,8 @@ fn packages() -> Vec<UiPackageCard> {
         UiPackageCard {
             uid: "prj1aBc3De56fGhIj8KlMnOpq".to_string(),
             kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
             slug: "2026-05-28-1740-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
@@ -188,7 +194,7 @@ fn gallery_chooser_buttons() -> Element {
 }
 
 #[story(
-    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Export zip on the card, delete in the menu."
+    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Download zip on the card, delete in the menu."
 )]
 fn project_format_states() -> Element {
     let mut projects = packages();
@@ -209,6 +215,8 @@ fn project_format_states() -> Element {
     projects.push(UiPackageCard {
         uid: "prj5tYu7Vw90xZaBc4DeFgHi".to_string(),
         kind: "Module".to_string(),
+        project_kind: "General".to_string(),
+        exports: Vec::new(),
         slug: "2026-06-11-0815-half-written".to_string(),
         last_saved_at: None,
         provenance: None,
@@ -459,6 +467,47 @@ fn thumb_product_faces() -> Element {
                     static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
                 p { class: thumb_state_caption_class(), "Shader-only — raster" }
+            }
+        }
+    }
+}
+
+/// A deterministic 2×2 violet PNG data URL, hand-built (not a rendered
+/// capture) so the poster-state baselines are reproducible bytes rather
+/// than anything a live slot or worker produced — see the poster-first
+/// gallery previews ADR (`docs/adr/`).
+const POSTER_TEST_IMAGE: &str = "data:image/png;base64,\
+iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mOosXoLRAwQCgAsHgaNmEOi\
+1gAAAABJRU5ErkJggg==";
+
+#[story]
+fn poster_states() -> Element {
+    // The poster-first policy's at-rest state (poster-first-gallery-
+    // previews ADR): a captured frame shown with no live slot held. Story
+    // mode leases no slot and captures nothing, so the poster is injected
+    // statically via `static_poster` — a fixed inline PNG, never a
+    // rendered capture, keeping the baseline byte-stable. Motion states
+    // (hover-to-play, the live canvas reveal) are NOT posable this way:
+    // they need a running canvas, which stories must never mount — so
+    // only the poster and its badge composition are posed here.
+    rsx! {
+        section { class: "tw:grid tw:w-[480px] tw:grid-cols-2 tw:gap-3.5 tw:p-4",
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj3fkq8zr21btxyw0a".to_string(),
+                    label: "poster".to_string(),
+                    static_poster: Some(POSTER_TEST_IMAGE.to_string()),
+                }
+                p { class: thumb_state_caption_class(), "Poster (at rest)" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj9sm2xc44dqnv7bgw".to_string(),
+                    label: "poster-gpu".to_string(),
+                    static_poster: Some(POSTER_TEST_IMAGE.to_string()),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "Poster + GPU badge" }
             }
         }
     }

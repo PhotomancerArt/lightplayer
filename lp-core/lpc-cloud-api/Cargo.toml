@@ -15,6 +15,11 @@ std = []
 lpc-history = { path = "../lpc-history" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# NFKD normalization for `share_link::slugify` (D11: strip accents before
+# folding). `lpc-cloud-api` is reached only by lp-cloud-* crates,
+# lpa-cloud-client, and lpa-studio-web (verified via `cargo tree -i
+# lpc-cloud-api`) — no fw-*/embedded crate links this dependency.
+unicode-normalization = { workspace = true }
 
 [lints]
 workspace = true

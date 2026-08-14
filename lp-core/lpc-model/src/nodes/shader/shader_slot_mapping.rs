@@ -37,7 +37,12 @@ impl Default for ShaderSlotMappingDef {
     }
 }
 
-/// Supported M1 shader slot mapping strategies.
+/// Supported shader slot mapping strategies.
+///
+/// Exactly one kind: a fixed array of struct values interpreted as a map,
+/// each element carrying its own key in a named field, elements whose key
+/// equals `empty_key` absent. Per-cell state over builtin elements is NOT a
+/// mapping — that is [`crate::ShaderSlotKind::Buffer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderSlotMappingKind {
     Sentinel,

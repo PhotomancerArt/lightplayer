@@ -20,6 +20,19 @@ pub fn materialize_shader_input(
     data: Option<&SlotData>,
     registry: &SlotShapeRegistry,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
+    // Defense in depth at the allocation site: the compile seams validate
+    // whole defs, but this function resizes a `Vec` straight off the
+    // authored `len`, and hosts that never compile (unit fakes, partial
+    // wiring) still reach it.
+    let bytes = lpc_model::slot_bytes_estimate(slot, registry);
+    let budget = lpc_model::ShaderBudget::default();
+    if bytes > u64::from(budget.max_slot_bytes) {
+        return Err(ShaderInputMaterializeError::OverBudget {
+            slot: String::from(slot_name),
+            bytes,
+            budget: budget.max_slot_bytes,
+        });
+    }
     match slot.kind.value() {
         // Timebase kinds never arrive here from the shader nodes (their
         // evaluator answers first); the f32 path is the honest fallback for
@@ -28,6 +41,7 @@ pub fn materialize_shader_input(
             materialize_value_input(slot_name, slot, data)
         }
         ShaderSlotKind::Map => materialize_map_input(slot_name, slot, data, registry),
+        ShaderSlotKind::Buffer => materialize_buffer_input(slot_name, slot, data),
         // A palette's uniform is a texture handle, not a value: there is no
         // `LpValue` shape a sampler could be materialized from, and the
         // shader node's bake path answers before this is reached. Saying so
@@ -63,6 +77,18 @@ pub enum ShaderInputMaterializeError {
         slot: String,
         len: u32,
         count: usize,
+    },
+    ExpectedBuffer(String),
+    MissingLen(String),
+    BufferShapeMismatch {
+        slot: String,
+        expected: String,
+        got: String,
+    },
+    OverBudget {
+        slot: String,
+        bytes: u64,
+        budget: u32,
     },
     Value(String),
 }
@@ -101,6 +127,26 @@ impl core::fmt::Display for ShaderInputMaterializeError {
             Self::TooManyEntries { slot, len, count } => write!(
                 f,
                 "shader map input {slot:?} has {count} entries but mapping length is {len}"
+            ),
+            Self::ExpectedBuffer(slot) => {
+                write!(f, "shader input {slot:?} expected a buffer value")
+            }
+            Self::MissingLen(slot) => write!(f, "shader buffer input {slot:?} missing len"),
+            Self::BufferShapeMismatch {
+                slot,
+                expected,
+                got,
+            } => write!(
+                f,
+                "shader buffer input {slot:?} expected {expected}, got {got}"
+            ),
+            Self::OverBudget {
+                slot,
+                bytes,
+                budget,
+            } => write!(
+                f,
+                "shader input {slot:?} declares {bytes} bytes, over the {budget} byte budget"
             ),
             Self::Value(message) => f.write_str(message),
         }
@@ -201,6 +247,53 @@ fn materialize_map_input(
         })?);
     }
     Ok(LpsValueF32::Array(out.into_boxed_slice()))
+}
+
+/// A buffer input is one packed value: present data validates elem/len and
+/// converts in one pass; absent data runs on the zeroed buffer, which is
+/// what an unwired sim input honestly is.
+fn materialize_buffer_input(
+    slot_name: &str,
+    slot: &ShaderSlotDef,
+    data: Option<&SlotData>,
+) -> Result<LpsValueF32, ShaderInputMaterializeError> {
+    let elem = slot
+        .value_lp_type()
+        .as_ref()
+        .and_then(lpc_model::BufferElem::from_lp_type)
+        .ok_or_else(|| {
+            ShaderInputMaterializeError::UnsupportedType(alloc::format!(
+                "buffer input {slot_name:?} element {:?}",
+                slot.value.value().as_str()
+            ))
+        })?;
+    let len = slot
+        .buffer_len()
+        .ok_or_else(|| ShaderInputMaterializeError::MissingLen(String::from(slot_name)))?;
+
+    let value = match data {
+        Some(SlotData::Value(value)) => value.value().clone(),
+        Some(_) => {
+            return Err(ShaderInputMaterializeError::ExpectedValue(String::from(
+                slot_name,
+            )));
+        }
+        None => LpValue::Buffer(lpc_model::LpBuffer::zeroed(elem, len)),
+    };
+    let LpValue::Buffer(ref buffer) = value else {
+        return Err(ShaderInputMaterializeError::ExpectedBuffer(String::from(
+            slot_name,
+        )));
+    };
+    if buffer.elem != elem || buffer.len() != len {
+        return Err(ShaderInputMaterializeError::BufferShapeMismatch {
+            slot: String::from(slot_name),
+            expected: alloc::format!("{elem:?}[{len}]"),
+            got: alloc::format!("{:?}[{}]", buffer.elem, buffer.len()),
+        });
+    }
+    model_value_to_lps_value_f32(&value)
+        .map_err(|e| ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}")))
 }
 
 fn lp_type_for_ref(
@@ -392,6 +485,80 @@ mod tests {
         assert!(matches!(
             err,
             ShaderInputMaterializeError::MismatchedKey { .. }
+        ));
+    }
+
+    /// A buffer input converts in one pass — words in, words out.
+    #[test]
+    fn materializes_buffer_input_from_packed_value() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::buffer_builtin("f32", 3);
+        let buffer = lpc_model::LpBuffer::from_words(
+            lpc_model::BufferElem::F32,
+            alloc::vec![f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.75)],
+        )
+        .expect("buffer");
+        let data = SlotData::Value(WithRevision::new(Revision::new(4), LpValue::Buffer(buffer)));
+
+        let value = materialize_shader_input("heat", &slot, Some(&data), &registry).expect("input");
+
+        let LpsValueF32::Buffer(out) = value else {
+            panic!("expected buffer, got {value:?}");
+        };
+        assert_eq!(
+            out.words(),
+            &[f32::to_bits(0.5), f32::to_bits(0.0), f32::to_bits(0.75)]
+        );
+    }
+
+    /// An unwired buffer input runs on zeros — the honest state of a sim
+    /// whose producer is not connected yet.
+    #[test]
+    fn materializes_missing_buffer_to_zeros() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::buffer_builtin("f32", 2);
+
+        let value = materialize_shader_input("heat", &slot, None, &registry).expect("input");
+
+        let LpsValueF32::Buffer(out) = value else {
+            panic!("expected buffer, got {value:?}");
+        };
+        assert_eq!(out.words(), &[0, 0]);
+    }
+
+    /// A resolved buffer whose shape disagrees with the declaration is a
+    /// wiring fault, reported rather than truncated or padded.
+    #[test]
+    fn rejects_buffer_shape_disagreement() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::buffer_builtin("f32", 2);
+        let data = SlotData::Value(WithRevision::new(
+            Revision::new(4),
+            LpValue::Buffer(lpc_model::LpBuffer::zeroed(lpc_model::BufferElem::F32, 3)),
+        ));
+
+        let err = materialize_shader_input("heat", &slot, Some(&data), &registry)
+            .expect_err("shape mismatch");
+
+        assert!(matches!(
+            err,
+            ShaderInputMaterializeError::BufferShapeMismatch { .. }
+        ));
+    }
+
+    /// The materialize-level valve fires BEFORE any allocation is sized
+    /// from the authored len — this test would OOM the process if it did
+    /// not.
+    #[test]
+    fn over_budget_input_errors_before_allocating() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::buffer_builtin("f32", 1_000_000_000);
+
+        let err = materialize_shader_input("heat", &slot, None, &registry).expect_err("budget");
+
+        assert!(matches!(
+            err,
+            ShaderInputMaterializeError::OverBudget { .. }
         ));
     }
 

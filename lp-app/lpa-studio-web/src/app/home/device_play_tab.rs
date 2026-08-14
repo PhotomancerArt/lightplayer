@@ -121,8 +121,20 @@ pub(crate) fn PlayTabBody(
             // data, whereas here there IS data — just old, which the
             // dimming and the veil say out loud.
             if let Some(frame) = card.frame_preview.clone() {
-                div { class: "ux-play-lamps",
-                    LampView { preview: frame }
+                if frame.display_layout.is_some() {
+                    div { class: "ux-play-lamps",
+                        LampView { preview: frame }
+                    }
+                } else {
+                    // Frames without geometry: the device declined the
+                    // display layout (genuinely over the link's budget at
+                    // this scale). Say so instead of painting nothing —
+                    // a wordless blank canvas reads as a defect.
+                    div { class: "ux-play-empty",
+                        p { class: "tw:m-0",
+                            "Frames are flowing, but this project's lamp layout is too large to preview over this link."
+                        }
+                    }
                 }
             }
             if liveness == PlayLiveness::Waiting {

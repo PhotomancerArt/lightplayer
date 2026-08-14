@@ -10,8 +10,12 @@ use lpa_studio_core::{
 };
 
 use lpa_studio_core::core::time_ago::time_ago;
+use lpc_cloud_api::share_link::slugify;
+
+use crate::router::canonical_share_path;
 
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_export::export_package_to_download;
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
@@ -40,6 +44,9 @@ pub(crate) fn PackageCard(
     /// The Connected-empty boards this card offers a one-click push to,
     /// as (card key, display name) — the key is the push target (M4).
     empty_devices: Vec<(String, String)>,
+    /// Open the card menu immediately (stories only).
+    #[props(default = false)]
+    menu_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
@@ -58,9 +65,30 @@ pub(crate) fn PackageCard(
     };
     // the slug IS the title; the thumbnail initial skips its date stamp
 
+    // The card's open link IS the project's share link (identity vision
+    // D1/D9): one address, so "copy what the address bar says" is the
+    // whole share gesture. The slug is recomputed from the display name
+    // rather than trusted from the library, so a rename shows up in the
+    // link the moment the card does.
+    let open_href = canonical_share_path(&slugify(&card.slug), &card.uid);
+
+    // A live preview leases a runtime and LOADS the project. On a package
+    // this Studio cannot read that is a guaranteed failure, so the blocked
+    // card keeps its seeded placeholder — and hovers no preview either.
+    let source = blocked
+        .is_none()
+        .then(|| PreviewSource::ProjectUid(card.uid.clone()));
+    // Hover-to-play: pointing at a card is what buys live rendering. The
+    // stretched open link is a CHILD of this article, so entering it is
+    // still entering the card. Touch devices never send these, so a tap
+    // still just follows the link.
+    let (hover_enter, hover_leave) = card_hover_handlers(source.as_ref());
+
     rsx! {
         article {
             class: package_card_class(opening, blocked.is_some()),
+            onmouseenter: hover_enter,
+            onmouseleave: hover_leave,
             // drag a project onto a device card = the push-confirm sheet
             draggable: blocked.is_none(),
             ondragstart: {
@@ -73,9 +101,9 @@ pub(crate) fn PackageCard(
                 }
             },
             // Opening a card is NAVIGATION, so it is a real <a> to the
-            // sim route (D37: the URL points at a runtime — a project
+            // project route (D37: the URL points at a runtime — a project
             // always opens on the sim, never a device takeover): plain
-            // click rides the hashchange → open path, and cmd/middle-click
+            // click rides the route listener → open path, and cmd/middle-click
             // "open in new tab" works natively. The link stretches over
             // the card (absolute overlay) instead of wrapping it, so the
             // card menu isn't interactive-inside-interactive markup; the
@@ -83,7 +111,7 @@ pub(crate) fn PackageCard(
             if blocked.is_none() {
                 a {
                     class: "tw:absolute tw:inset-0 tw:z-[1]",
-                    href: "/sim/{card.slug}",
+                    href: "{open_href}",
                     aria_label: "Open {card.slug}",
                     onclick: move |event| {
                         if busy || opening {
@@ -95,12 +123,10 @@ pub(crate) fn PackageCard(
             CardThumb {
                 seed: card.uid.clone(),
                 label: card.slug.clone(),
-                // A live preview leases a runtime and LOADS the project.
-                // On a package this Studio cannot read that is a guaranteed
-                // failure, so the blocked card keeps its seeded placeholder.
-                source: blocked
-                    .is_none()
-                    .then(|| PreviewSource::ProjectUid(card.uid.clone())),
+                source,
+                // Poster-first, like the example shelf: the library page is
+                // for finding a project, not for watching twelve of them.
+                mode: ThumbMode::PosterFirst,
             }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -173,7 +199,11 @@ pub(crate) fn PackageCard(
                 }
                 span {
                     class: "tw:relative tw:z-[2]",
-                    PackageCardMenu { card: card.clone(), on_action }
+                    PackageCardMenu {
+                        card: card.clone(),
+                        initially_open: menu_initially_open,
+                        on_action,
+                    }
                 }
             }
             // the crystallized open action (D36 prep): same navigation as
@@ -190,7 +220,7 @@ pub(crate) fn PackageCard(
                 if blocked.is_none() {
                     a {
                         class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
-                        href: "/sim/{card.slug}",
+                        href: "{open_href}",
                         title: "Open this project in the simulator.",
                         onclick: move |event| {
                             if busy || opening {
@@ -217,7 +247,7 @@ pub(crate) fn PackageCard(
                         span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                             StudioIcon { name: StudioIconName::Download, size: 14 }
                         }
-                        span { "Export zip" }
+                        span { "Download zip" }
                     }
                 }
                 for (device_key, device_name) in empty_devices.iter().filter(|_| blocked.is_none()) {
@@ -259,7 +289,13 @@ pub(crate) fn PackageCard(
 /// one look.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> Element {
+pub(crate) fn PackageCardMenu(
+    card: UiPackageCard,
+    /// Open the menu immediately (stories only).
+    #[props(default = false)]
+    initially_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let mut rename_value = use_signal(|| card.slug.clone());
     let rename_uid = card.uid.clone();
     let export_card = card.clone();
@@ -283,6 +319,15 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
         "Delete",
     ));
 
+    // "New project from this…" (module authoring unit, P5): only a
+    // PATTERN project has an export to build a project around, so the row
+    // is absent — not disabled — on everything else. A general project has
+    // no answer to "from WHICH module", and a disabled row that can never
+    // become enabled teaches nothing.
+    let new_from =
+        (!blocked && card.project_kind == PATTERN_KIND_LABEL && !card.exports.is_empty())
+            .then(|| card.exports.clone());
+
     // M8′ (dialog-free): the menu row IS the D11 consent, exactly like
     // the card's Push button — the push runs directly, progress on the
     // device card's Operation-in-flight lane.
@@ -304,6 +349,12 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
             icon: StudioIconName::More,
             label: "Project actions".to_string(),
             placement: PopoverPlacement::BottomEnd,
+            initially_open,
+            if let Some(exports) = new_from.clone() {
+                DetailSection { title: Some("New project from this\u{2026}".to_string()),
+                    NewFromPatternForm { uid: card.uid.clone(), exports, on_action }
+                }
+            }
             if !blocked {
                 DetailSection { title: Some("Rename".to_string()),
                     form {
@@ -353,7 +404,7 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
                         span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                             StudioIcon { name: StudioIconName::Download, size: 14 }
                         }
-                        span { "Export zip" }
+                        span { "Download zip" }
                     }
                     ActionButton {
                         action: delete,
@@ -365,6 +416,78 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
             }
         }
     }
+}
+
+/// The display label a pattern project's kind reads as (core's
+/// `package_manifest::kind_label`).
+const PATTERN_KIND_LABEL: &str = "Pattern";
+
+/// The inline "New project from this…" form (the Rename precedent: a form
+/// in the menu, never a dialog).
+///
+/// One name field, prefilled from the export — `fire-project`, not
+/// "Untitled": the thing you are starting from is the thing worth naming
+/// it after. A FAMILY (more than one export) grows a select ahead of it,
+/// because "from this" is ambiguous the moment a package ships two
+/// modules; a single-export package never sees the control.
+///
+/// The prefill follows the selected export until you type over it, at
+/// which point your name wins and stops moving under you.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NewFromPatternForm(
+    uid: String,
+    exports: Vec<String>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut selected = use_signal(|| exports.first().cloned().unwrap_or_default());
+    let mut typed = use_signal(|| Option::<String>::None);
+    let export = selected.read().clone();
+    let name = typed
+        .read()
+        .clone()
+        .unwrap_or_else(|| default_project_name(&export));
+    let submit_name = name.clone();
+
+    rsx! {
+        form {
+            class: "tw:grid tw:gap-2",
+            onsubmit: move |event| {
+                event.prevent_default();
+                let name = submit_name.trim().to_string();
+                if !name.is_empty() {
+                    on_action.call(home_action(HomeOp::CreateFromPattern {
+                        uid: uid.clone(),
+                        export: selected.read().clone(),
+                        name,
+                    }));
+                }
+            },
+            if exports.len() > 1 {
+                select {
+                    class: "tw:min-w-0 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground",
+                    value: "{export}",
+                    onchange: move |event| selected.set(event.value()),
+                    for name in exports.iter().cloned() {
+                        option { key: "{name}", value: "{name}", "{name}" }
+                    }
+                }
+            }
+            div { class: "tw:flex tw:gap-2",
+                input {
+                    class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground",
+                    value: "{name}",
+                    oninput: move |event| typed.set(Some(event.value())),
+                }
+                button { class: quiet_action_class(), r#type: "submit", "Create" }
+            }
+        }
+    }
+}
+
+/// The prefilled name for a new project built around `export`.
+fn default_project_name(export: &str) -> String {
+    format!("{export}-project")
 }
 
 /// Friendly display form of a project's advisory `target` (vendor/product
@@ -518,6 +641,8 @@ mod tests {
         UiPackageCard {
             uid: "prj1".to_string(),
             kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
             slug: "2026-07-09-1421-basic".to_string(),
             last_saved_at: None,
             provenance: None,

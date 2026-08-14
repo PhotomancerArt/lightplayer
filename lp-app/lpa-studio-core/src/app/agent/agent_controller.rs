@@ -212,7 +212,7 @@ impl AgentController {
     /// artifact's session bridge cell (`rejection` = joined rejection text
     /// when any command was refused). The awaiting run future polls it up
     /// by `seq`.
-    pub(crate) fn record_upsert_ack(
+    pub(crate) fn record_write_ack(
         &mut self,
         artifact: &ArtifactLocation,
         seq: u64,
@@ -220,7 +220,7 @@ impl AgentController {
     ) {
         for session in self.sessions.values_mut() {
             if &session.artifact == artifact {
-                session.bridge.borrow_mut().upsert_ack = Some((seq, rejection.clone()));
+                session.bridge.borrow_mut().write_ack = Some((seq, rejection.clone()));
             }
         }
     }

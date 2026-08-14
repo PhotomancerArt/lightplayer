@@ -15,8 +15,15 @@
 //!    visual" contract (the engine resolves the highest-priority
 //!    provider), so cards never re-derive which product is a project's
 //!    face.
-//! 3. **Snapshot seam** — a structurally present `<img>` for M6's
-//!    save-time capture; sourceless (and hidden) until that lands.
+//! 3. **Poster** — this session's captured frame for the card's preview
+//!    source, shown as soon as one exists ([`ThumbMode::PosterFirst`]).
+//!    It is what makes a gallery card stable: the picture arrives without
+//!    a running slot, and on a revisit it is there on the first render.
+//!    Every quadrant has a capture path, including the shader-only GPU
+//!    tier (worker-side texture readback; see
+//!    `docs/adr/2026-08-14-poster-first-gallery-previews.md`). Sourceless
+//!    (and hidden) only on a card that genuinely has none yet — including
+//!    every story. The same `<img>` is M6's save-time snapshot seam.
 //! 4. **Gradient base** — the deterministic identity gradient with the
 //!    name's initial: the placeholder before the first present, the
 //!    stories' whole face, and the fallback when previews fail.
@@ -27,7 +34,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{PreviewSource, UiControlProductPreview};
 
-use crate::app::home::gallery_preview::{ThumbPreviewBadge, use_thumb_preview};
+use crate::app::home::gallery_preview::{ThumbMode, ThumbPreviewBadge, use_thumb_preview};
 use crate::app::node::lamp_view::LampView;
 
 #[component]
@@ -40,6 +47,11 @@ pub(crate) fn CardThumb(
     /// contexts) renders the static gradient stack — no host, no canvas.
     #[props(default)]
     source: Option<PreviewSource>,
+    /// How long this card is willing to render. Gallery cards opt into
+    /// [`ThumbMode::PosterFirst`] — a picture, then nothing; the default
+    /// keeps the always-live behavior for any consumer that has not.
+    #[props(default = ThumbMode::Live)]
+    mode: ThumbMode,
     /// Story/test injection: render this badge statically, without any
     /// PreviewHost. Overrides the live badge when both exist.
     #[props(default)]
@@ -49,10 +61,17 @@ pub(crate) fn CardThumb(
     /// pose). Overrides the live one when both exist.
     #[props(default)]
     static_lamps: Option<UiControlProductPreview>,
+    /// Story/test injection: show this poster image (a data URL), without
+    /// any PreviewHost or capture — the poster-first states are otherwise
+    /// unposable statically, since a real poster is always a captured
+    /// frame. Overrides the live one when both exist.
+    #[props(default)]
+    static_poster: Option<String>,
 ) -> Element {
-    let preview = use_thumb_preview(source);
+    let preview = use_thumb_preview(source, mode);
     let badge = static_badge.or(preview.badge);
     let lamps = static_lamps.or(preview.lamps);
+    let poster = static_poster.or(preview.poster);
     let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
@@ -78,12 +97,14 @@ pub(crate) fn CardThumb(
                 style: "{style}",
                 span { class: initial_class, "{initial}" }
             }
-            // Snapshot seam (M6 coordination): the save-time capture layer.
-            // Structurally present so M6 only has to hand it a source
-            // (LibraryStore package metadata, never the deploy-synced file
-            // tree); sourceless and hidden until that capture lands.
+            // Poster layer (and M6's snapshot seam): this session's
+            // captured frame, shown as soon as there is one. It sits
+            // UNDER the live canvas on purpose — hover-to-play (P4) swaps
+            // motion in over a picture that is already there, so the
+            // exchange can never blank the card.
             img {
-                class: "tw:absolute tw:inset-0 tw:hidden tw:h-full tw:w-full tw:object-cover",
+                class: thumb_poster_class(poster.is_some()),
+                src: poster,
                 alt: "",
             }
             // live layer: the PreviewHost canvas, revealed after the first
@@ -122,13 +143,26 @@ pub(crate) fn CardThumb(
     }
 }
 
-/// The live canvas layer: hidden (gradient shows) until the first frame
-/// reaches it, then revealed with a short fade.
+/// The poster layer: structurally present always (M6's snapshot seam), but
+/// only displayed once it has an image — an `<img>` with no `src` would
+/// otherwise paint the broken-image glyph over the gradient.
+fn thumb_poster_class(has_poster: bool) -> &'static str {
+    if has_poster {
+        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:object-cover"
+    } else {
+        "tw:absolute tw:inset-0 tw:hidden tw:h-full tw:w-full tw:object-cover"
+    }
+}
+
+/// The live canvas layer: hidden (poster or gradient shows) until the first
+/// frame reaches it, then revealed with a short fade — and faded back out
+/// the same way when a hover lease ends, so motion arrives and leaves over
+/// the poster instead of cutting.
 fn thumb_canvas_class(revealed: bool) -> &'static str {
     if revealed {
         "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-100 tw:transition-opacity tw:duration-200"
     } else {
-        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0"
+        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0 tw:transition-opacity tw:duration-200"
     }
 }
 

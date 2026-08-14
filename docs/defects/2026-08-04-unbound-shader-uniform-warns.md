@@ -7,6 +7,7 @@ class: state-conflation
 related:
   - 2026-07-28-playlist-entry-selection.md
   - 2026-08-03-wasm-shader-instances-share-vmctx.md
+  - 2026-08-09-untouched-panel-knob-warns.md   # the same conflation, one step over
 ---
 # An unbound shader uniform warns for behaving exactly as authored
 
@@ -71,7 +72,7 @@ against the def's own shape, so a uniform name can never become one.
 kind (`shader_node.rs`, `compute_shader_node.rs`), each asserting both
 halves: the `ConsumedSlot` query resolves `Ok` to the authored default, and
 `runtime_status()` is `None`. They sit next to the negative tests
-(`unresolvable_bound_input_reports_warning_status`,
+(`a_dangling_input_binding_still_reports_warning_status`,
 `ambiguous_bus_providers_report_warning_status`) that they give meaning to.
 Two tests because the projection keys off the `NodeDef` variant and
 `ComputeShader` alone would leave the `Shader` arm unpinned.

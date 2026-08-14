@@ -79,5 +79,10 @@ construction.
   per-slot resolve failures (including ambiguous-bus) and report them as
   `NodeRuntimeStatus::Warn` on the card, with a transition-only log line;
   see `resolve_or_default_input` in `shader_node.rs` and
-  `unresolvable_bound_input_reports_warning_status` in
-  `compute_shader_node.rs`.
+  `a_dangling_input_binding_still_reports_warning_status` in
+  `compute_shader_node.rs`. (That test was
+  `unresolvable_bound_input_reports_warning_status` until 2026-08-09, when
+  its channel-with-no-writer case became the *quiet* one — see
+  `2026-08-09-untouched-panel-knob-warns.md`. The freeze this entry is
+  about stays covered: a dangling target, an ambiguous writer, and a
+  channel whose value the uniform cannot hold all still warn.)

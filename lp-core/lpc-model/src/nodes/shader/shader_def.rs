@@ -1,7 +1,9 @@
 use alloc::string::String;
 
-use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef};
-use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted, ValueSlot};
+use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef, ShaderSpace};
+use crate::{
+    AssetSlot, BindingDefs, EnumSlot, MapSlot, OptionSlot, RenderOrderSlot, Slotted, ValueSlot,
+};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -12,12 +14,24 @@ pub struct ShaderDef {
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
     pub bindings: BindingDefs,
-    /// Numeric mode this shader is authored and compiled in.
-    pub float_mode: ValueSlot<FloatMode>,
+    /// Optional pin forcing one execution representation for this shader's
+    /// float arithmetic. Absent (the normal state) is Auto: the target's
+    /// native representation. See [`FloatMode`].
+    pub float_mode: OptionSlot<ValueSlot<FloatMode>>,
     pub param_defs: MapSlot<String, ShaderParamDef>,
     /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
     #[slot(name = "consumed")]
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
+    /// The space this shader declares it lives in, plus its per-target
+    /// answer cell for the opposite dimension (dimensionality-first-class
+    /// plan, vision D6/D7). Defaults to `TwoD` — every shader authored
+    /// before this plan is 2D, so existing projects stay meaning-identical.
+    ///
+    /// Read end to end: the shader compiler takes it as the entry contract
+    /// (`OneD` ⇒ `vec4 render_1d(float)`), the sampling boundary takes the
+    /// answer cell as the coordinate map a 2D consumer receives, and the
+    /// studio's `dimensionality` drawer is where it is authored.
+    pub space: EnumSlot<ShaderSpace>,
 }
 
 impl Default for ShaderDef {
@@ -26,9 +40,10 @@ impl Default for ShaderDef {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::default(),
             bindings: BindingDefs::default(),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
+            space: EnumSlot::default(),
         }
     }
 }
@@ -64,9 +79,10 @@ mod tests {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
+            space: EnumSlot::default(),
         };
         assert_eq!(def.kind(), NodeKind::Shader);
     }
@@ -79,7 +95,11 @@ mod tests {
             "main.glsl"
         );
         assert_eq!(def.render_order(), 0);
-        assert_eq!(*def.float_mode.value(), FloatMode::Fixed);
+        assert!(
+            def.float_mode.is_none(),
+            "a fresh shader is unpinned (Auto)"
+        );
+        assert!(matches!(def.space.value(), crate::ShaderSpace::TwoD { .. }));
     }
 
     #[test]
@@ -99,6 +119,7 @@ mod tests {
             view.float_mode().path(),
             &SlotPath::parse("float_mode").unwrap()
         );
+        assert_eq!(view.space().path(), &SlotPath::parse("space").unwrap());
     }
 
     #[test]
@@ -195,7 +216,7 @@ mod tests {
         let err = NodeDef::from_json_str(
             r#"{
   "kind": "Shader",
-  "source": { "glsl": "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }" }
+  "source": { "glsl": "vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }" }
 }"#,
         )
         .expect_err("inline glsl bodies are not supported");

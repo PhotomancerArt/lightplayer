@@ -19,6 +19,9 @@ use crate::provider::model_provider::{
 };
 use crate::session::agent_event::AgentEvent;
 use crate::session::agent_transcript::AgentTranscript;
+use crate::tool::declare_space_tool::{
+    DECLARE_SPACE_TOOL_NAME, declare_space_tool_def, run_declare_space,
+};
 use crate::tool::iterate_host::AgentHost;
 use crate::tool::iterate_tool::{ITERATE_TOOL_NAME, IterateOutcome, iterate_tool_def, run_iterate};
 use crate::tool::upsert_param_tool::{
@@ -132,7 +135,11 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         let req = TurnRequest {
             system,
             messages: self.transcript.messages.clone(),
-            tools: vec![iterate_tool_def(), upsert_param_tool_def()],
+            tools: vec![
+                iterate_tool_def(),
+                upsert_param_tool_def(),
+                declare_space_tool_def(),
+            ],
         };
 
         let mut blocks: Vec<Acc> = Vec::new();
@@ -338,6 +345,15 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                     });
                 })
                 .await
+            } else if name == DECLARE_SPACE_TOOL_NAME {
+                let progress_id = id.clone();
+                run_declare_space(&input, &mut self.host, &mut |phase| {
+                    on_event(AgentEvent::ToolProgress {
+                        id: progress_id.clone(),
+                        phase,
+                    });
+                })
+                .await
             } else {
                 IterateOutcome {
                     content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
@@ -472,8 +488,8 @@ mod tests {
     use crate::tool::iterate_host::{HostError, HostFuture, ShaderContext};
     use crate::tool::tool_phase::ToolPhase;
 
-    const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
-    const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
+    const RED: &str = "vec4 render_2d(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
+    const GREEN: &str = "vec4 render_2d(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
 
     #[test]
     fn text_only_turn_completes_the_session() {
@@ -503,9 +519,10 @@ mod tests {
         let reqs = provider.requests.borrow();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].system.contains(RED));
-        assert_eq!(reqs[0].tools.len(), 2);
+        assert_eq!(reqs[0].tools.len(), 3);
         assert_eq!(reqs[0].tools[0].name, "iterate");
         assert_eq!(reqs[0].tools[1].name, "upsert_param");
+        assert_eq!(reqs[0].tools[2].name, "declare_space");
     }
 
     #[test]
@@ -838,7 +855,7 @@ mod tests {
             },
             TurnEvent::ToolInputDelta {
                 id: "tu_1".into(),
-                json_fragment: "{\"source\": \"vec4 render(".into(),
+                json_fragment: "{\"source\": \"vec4 render_2d(".into(),
             },
             turn_done(StopReason::MaxTokens, 10, 8192),
         ]]);
@@ -1120,6 +1137,7 @@ mod tests {
                 node_name: "test-shader".into(),
                 fixture: None,
                 bindings: Vec::new(),
+                ..ShaderContext::default()
             }
         }
     }

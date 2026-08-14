@@ -50,6 +50,11 @@ pub enum UiSlotValueKind {
     Mat4x4([[f32; 4]; 4]),
     /// Homogeneous or wire-provided array/list payload.
     Array(Vec<UiSlotValue>),
+    /// Packed typed buffer. Presented as a summary ("f32 × 300") — per-cell
+    /// state can be thousands of elements and is not element-editable in
+    /// the panel — but the words ride along so `to_lp_value` stays a true
+    /// inverse.
+    Buffer(lpc_model::LpBuffer),
     /// Structured value payload that is not independently addressable as slots.
     Struct {
         /// Optional type/name metadata.
@@ -96,6 +101,7 @@ impl UiSlotValueKind {
             Self::Mat3x3(_) => "Mat3x3",
             Self::Mat4x4(_) => "Mat4x4",
             Self::Array(_) => "Array",
+            Self::Buffer(_) => "Buffer",
             Self::Struct { .. } => "Struct",
             Self::Enum { .. } => "Enum",
             Self::Resource(_) => "Resource",
@@ -152,6 +158,7 @@ impl UiSlotValueKind {
                     .as_ref()
                     .map(|payload| Box::new(payload.kind.to_lp_value())),
             },
+            Self::Buffer(buffer) => LpValue::Buffer(buffer.clone()),
             Self::Resource(value) => LpValue::Resource(*value),
             Self::Product(value) => LpValue::Product(*value),
         }
@@ -175,6 +182,7 @@ impl UiSlotValueKind {
             Self::UVec2(_) => "Two-component unsigned integer vector.",
             Self::UVec3(_) => "Three-component unsigned integer vector.",
             Self::UVec4(_) => "Four-component unsigned integer vector.",
+            Self::Buffer(_) => "Packed per-cell state buffer.",
             Self::BVec2(_) => "Two-component boolean vector.",
             Self::BVec3(_) => "Three-component boolean vector.",
             Self::BVec4(_) => "Four-component boolean vector.",
@@ -385,6 +393,10 @@ impl UiSlotValue {
             LpValue::Mat3x3(value) => Self::mat3x3(*value),
             LpValue::Mat4x4(value) => Self::mat4x4(*value),
             LpValue::Array(values) => Self::array(values.iter().map(Self::from_lp_value).collect()),
+            LpValue::Buffer(buffer) => Self::new(
+                UiSlotValueKind::Buffer(buffer.clone()),
+                format!("{} × {}", buffer.elem.glsl_name(), buffer.len()),
+            ),
             LpValue::Struct { name, fields } => Self::struct_value(
                 name.clone(),
                 fields

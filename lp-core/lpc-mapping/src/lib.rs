@@ -6,9 +6,21 @@
 //! parametric objects — grids, multi-ring circles, sampled paths, and
 //! rotational repeats of any of those — whose vec order **is** the wiring
 //! order. [`resolve`] turns a document into the
-//! ordered lamp list (positions in doc space plus derived DMX-style
-//! `{universe, channel}` addresses); [`fit_points`] maps doc-space positions
+//! ordered lamp list (wiring-order indices plus positions in doc space);
+//! [`fit_points`] maps doc-space positions
 //! into a fixture render target without stretching.
+//!
+//! The crate owns a second document: the per-fixture **patch**
+//! ([`PatchDoc`], e.g. `fixture.patch.json`), which says where a fixture's
+//! lamps land on an output's wire. Mapping answers "where is this lamp?" and
+//! is built once; patching answers "which jack did that strand end up in?"
+//! and changes on every install — so they are stored apart and
+//! [`resolve_patch`] anchors sparse entries over auto-flow.
+//!
+//! A third document is project-level: the editor's `editor.json`
+//! ([`EditorMetaDoc`]) — per-node Arrange-canvas placement, for human eyes
+//! only. The engine and the device never read it, and it is never a
+//! sampling input (see the module doc in `editor_meta`).
 //!
 //! Boundary: schema + pure geometry only. No filesystem access, no engine
 //! types, no UI. The crate is `no_std + alloc` and dependency-light because
@@ -23,19 +35,35 @@
 extern crate alloc;
 
 pub mod corpus;
+mod editor_meta;
 pub mod import;
 mod map2d_doc;
 mod map2d_error;
 mod map2d_fit;
+mod map2d_object_id;
 mod map2d_resolve;
+mod map_object_path;
+mod patch;
 
+pub use editor_meta::{
+    EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,
+    EditorSurfaceMeta, EditorTransform,
+};
+pub use map_object_path::MapObjectPath;
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
-    Map2dDoc, Map2dObject, Map2dShape, PathShape, RepeatShape, RingDir, RingOrder, RingShape,
+    Map2dDoc, Map2dObject, Map2dShape, PathShape, PolygonShape, RepeatShape, RingDir, RingOrder,
+    RingShape,
 };
 pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
+pub use map2d_object_id::{MAP2D_OBJECT_ID_MAX_LEN, Map2dObjectId, ensure_object_ids};
 pub use map2d_resolve::{
-    CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectSpan, ResolvedLamp, ResolvedMap2d,
-    Rotation2d, resolve,
+    ObjectInstanceSpan, ObjectSpan, ResolvedLamp, ResolvedMap2d, Rotation2d, object_instance_spans,
+    object_stride, resolve, shape_lamp_count, shape_stride,
+};
+pub use patch::{
+    PATCH_FORMAT, PATCH_FORMAT_BASE, PATCH_FORMAT_OBJECT_GRAIN, PatchDoc, PatchEntry, PatchError,
+    PatchRange, PatchResolution, PatchResolveContext, PatchSource, PatchedRange, patched_wire_lamp,
+    resolve_patch,
 };

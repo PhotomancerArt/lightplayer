@@ -30,6 +30,14 @@
 /// buffer size).
 pub const PROJECT_READ_FRAME_MAX_BYTES: usize = 16 * 1024;
 
+/// Reserve subtracted from a frame budget to size the DISPLAY-LAYOUT byte
+/// budget: the probe header (product, extent, sample layout) and the frame
+/// envelope that ride alongside a layout in one `ResultBegin` event.
+///
+/// Shared between the engine's default layout budget and the server's
+/// frame-budget declaration so the two derivations can never drift.
+pub const PROJECT_READ_PROBE_HEADER_RESERVE_BYTES: usize = 2048;
+
 /// Slack added on top of the frame budget for a firmware scratch buffer.
 ///
 /// Covers transport framing delimiters (`\nM!` prefix, trailing `\n`) plus

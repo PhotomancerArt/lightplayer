@@ -9,8 +9,7 @@
 //! costs one JS call regardless of lamp count.
 //!
 //! View mode is a product display, not a wiring tool — no numbers, no
-//! universe colors, no arrows. Those are authoring instruments and live in
-//! the mapping editor.
+//! arrows. Those are authoring instruments and live in the mapping editor.
 //!
 //! Upgrade path: the software rasterizer's per-frame fill is the cost that
 //! scales, and at Radiance scale this component grows a WebGL/instanced
@@ -27,6 +26,7 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::neutral_lamp_rgb;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
+    UiFixturePatch,
 };
 use wasm_bindgen::{Clamped, JsCast, closure::Closure};
 
@@ -129,26 +129,52 @@ pub(crate) fn LampView(
     }
 }
 
-/// Live lamp colors indexed by wiring index — the same sample decode the
-/// display renderer uses, packaged for the mapping editor's live view.
-pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
+/// The dived fixture's live lamp colors, decoded out of its output's
+/// published WIRE frame through the patch cells — the mapping editor's
+/// live view (`live_feed`), rebuilt on the one-project canvas after the
+/// face embed's own-product feed died with it (R1).
+///
+/// Index = the lamp's position in the fixture's own resolved document —
+/// the same space the canvas's `data-lamp` attributes and
+/// [`UiPatchCell::source_start`] use. Lamps no cell claims stay
+/// [`UNLIT_RGB`]: they never light on hardware, and the neutral reads as
+/// geometry rather than as black lamps. No frame yet = empty (no feed —
+/// the host keeps the last good one).
+///
+/// A fixture feeding two outputs decodes every cell from the ONE frame
+/// [`UiFixturePatch::frame`] carries (the first output's), the same
+/// honest limit the patch bay's fixture face draws with.
+pub(crate) fn fixture_live_colors(patch: &UiFixturePatch) -> Vec<[u8; 3]> {
+    let Some(frame) = patch.frame.as_ref() else {
         return Vec::new();
     };
-    let len = layout
-        .lamps
-        .iter()
-        .map(|lamp| lamp.lamp_index as usize + 1)
-        .max()
-        .unwrap_or(0);
-    let mut colors = vec![[0_u8; 3]; len];
-    for lamp in &layout.lamps {
-        if let Some(rgb) = control_rgb_at_sample(preview, lamp.sample_start) {
-            colors[lamp.lamp_index as usize] = rgb;
+    let mut colors = vec![UNLIT_RGB; patch.lamps as usize];
+    for cell in &patch.cells {
+        for index in 0..cell.lamps {
+            let Some(slot) = colors.get_mut(cell.source_start.saturating_add(index) as usize)
+            else {
+                continue;
+            };
+            // The run lands on the wire end-first when reversed — the same
+            // mapping the patch bay's fixture-side strips draw with.
+            let wire_lamp = if cell.reversed {
+                cell.wire_start
+                    .saturating_add(cell.lamps.saturating_sub(1).saturating_sub(index))
+            } else {
+                cell.wire_start.saturating_add(index)
+            };
+            if let Some(rgb) = control_rgb_at_sample(frame, wire_lamp.saturating_mul(3)) {
+                *slot = rgb;
+            }
         }
     }
     colors
 }
+
+/// What a lamp with no frame sample behind it draws as — the same neutral
+/// the patch bay's cell strips use, so an unfed lamp reads as geometry
+/// rather than as a black lamp.
+pub(crate) const UNLIT_RGB: [u8; 3] = [58, 63, 70];
 
 /// Whether the product's sample layout carries anything this renderer can
 /// colour a lamp from.
@@ -161,11 +187,76 @@ pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -
     })
 }
 
-/// Rasterize the lamp field into `buffer` and blit it onto the canvas.
+/// The box one lamp field rasterizes into: backing-store size in device
+/// pixels, plus the CSS width and device-pixel ratio the dot geometry is
+/// measured in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LampRasterBox {
+    /// CSS width of the lamp box — lamp diameter is a percentage of it.
+    pub css_width: f64,
+    /// Device pixels per CSS pixel for this rasterization.
+    pub dpr: f64,
+    /// Backing-store width in device pixels.
+    pub width: u32,
+    /// Backing-store height in device pixels.
+    pub height: u32,
+}
+
+/// Rasterize `preview`'s lamps into `buffer` as RGBA at the box's
+/// device-pixel size, screen-blended over transparent black.
 ///
-/// Geometry matches the renderer this replaces so the view ⇄ edit flip lands
-/// on the same framing: lamp centers are fractions of the (already inset)
-/// canvas box, and diameter is a percentage of its width floored at 5 CSS px.
+/// Geometry matches the renderer [`LampView`] replaces so the view ⇄ edit
+/// flip lands on the same framing: lamp centers are fractions of the
+/// (already inset) box, and diameter is a percentage of its width floored
+/// at 5 CSS px.
+///
+/// Split out of [`paint_lamp_canvas`] so a gallery poster capture can
+/// rasterize the same field into an offscreen canvas of its own size: the
+/// card's live lamp layer and the poster standing in for it must be the
+/// same picture, or the hover swap would jump.
+pub(crate) fn rasterize_lamp_field(
+    preview: &UiControlProductPreview,
+    live: bool,
+    raster: LampRasterBox,
+    buffer: &mut Vec<u8>,
+) -> Result<(), String> {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
+        return Err("control preview has no 2D display layout".to_string());
+    };
+    let LampRasterBox {
+        css_width,
+        dpr,
+        width,
+        height,
+    } = raster;
+
+    // Transparent black: the frame behind the canvas is black, so unlit
+    // background needs no fill and lamp pixels blend as they did under
+    // `mix-blend-mode: screen`.
+    buffer.clear();
+    buffer.resize(width as usize * height as usize * 4, 0);
+    let neutral = neutral_lamp_rgb();
+    for lamp in &layout.lamps {
+        let color = if live {
+            control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
+        } else {
+            neutral
+        };
+        // A black lamp screen-blends to nothing over the black frame — the
+        // same nothing the div renderer drew, at none of the cost.
+        if color == [0, 0, 0] {
+            continue;
+        }
+        let diameter_pct = f64::from(lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
+        let radius = (diameter_pct / 100.0 * css_width).max(5.0) / 2.0 * dpr;
+        let center_x = f64::from(lamp.center[0].clamp(0.0, 1.0)) * f64::from(width);
+        let center_y = f64::from(lamp.center[1].clamp(0.0, 1.0)) * f64::from(height);
+        paint_lamp_dot(buffer, width, height, [center_x, center_y], radius, color);
+    }
+    Ok(())
+}
+
+/// Rasterize the lamp field into `buffer` and blit it onto the canvas.
 fn paint_lamp_canvas(
     canvas_id: &str,
     preview: &UiControlProductPreview,
@@ -178,9 +269,6 @@ fn paint_lamp_canvas(
         .ok_or_else(|| format!("canvas #{canvas_id} not mounted"))?
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .map_err(|_| format!("element #{canvas_id} is not a canvas"))?;
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
-        return Err("control preview has no 2D display layout".to_string());
-    };
 
     let css_width = f64::from(canvas.client_width());
     let css_height = f64::from(canvas.client_height());
@@ -207,29 +295,17 @@ fn paint_lamp_canvas(
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .map_err(|_| "2d context has an unexpected type".to_string())?;
 
-    // Transparent black: the frame behind the canvas is black, so unlit
-    // background needs no fill and lamp pixels blend as they did under
-    // `mix-blend-mode: screen`.
-    buffer.clear();
-    buffer.resize(width as usize * height as usize * 4, 0);
-    let neutral = neutral_lamp_rgb();
-    for lamp in &layout.lamps {
-        let color = if live {
-            control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
-        } else {
-            neutral
-        };
-        // A black lamp screen-blends to nothing over the black frame — the
-        // same nothing the div renderer drew, at none of the cost.
-        if color == [0, 0, 0] {
-            continue;
-        }
-        let diameter_pct = f64::from(lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
-        let radius = (diameter_pct / 100.0 * css_width).max(5.0) / 2.0 * dpr;
-        let center_x = f64::from(lamp.center[0].clamp(0.0, 1.0)) * f64::from(width);
-        let center_y = f64::from(lamp.center[1].clamp(0.0, 1.0)) * f64::from(height);
-        paint_lamp_dot(buffer, width, height, [center_x, center_y], radius, color);
-    }
+    rasterize_lamp_field(
+        preview,
+        live,
+        LampRasterBox {
+            css_width,
+            dpr,
+            width,
+            height,
+        },
+        buffer,
+    )?;
 
     let image =
         web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(buffer), width, height)
@@ -296,7 +372,14 @@ fn paint_lamp_dot(
     }
 }
 
-fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
+/// One lamp's display colour, decoded from a control preview's own samples
+/// — the sample-layout walk (span, encoding, colour order) plus the linear
+/// → sRGB transfer, shared with the patch bay's cell strips so the bay and
+/// the lamp field can never disagree about a colour.
+pub(crate) fn control_rgb_at_sample(
+    preview: &UiControlProductPreview,
+    sample_start: u32,
+) -> Option<[u8; 3]> {
     let span = preview.sample_layout.spans.iter().find(|span| {
         matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })
             && sample_start >= span.start
@@ -404,6 +487,8 @@ impl Drop for LampResizeObserver {
 
 #[cfg(test)]
 mod tests {
+    use lpa_studio_core::{ControlExtent, ControlSampleLayout, ControlSampleSpan, UiPatchCell};
+
     use super::*;
 
     /// Endpoints exact; the linear midtone must brighten (linear 0.2 →
@@ -418,5 +503,101 @@ mod tests {
             (123..=125).contains(&mid),
             "linear 0.2 ≈ sRGB 124, got {mid}"
         );
+    }
+
+    /// A wire frame whose lamp `n` carries full-red at `n == 0`, full-green
+    /// at `n == 1`, … cycling — distinguishable colors per wire position.
+    fn wire_frame(lamps: u32) -> UiControlProductPreview {
+        let mut bytes = Vec::with_capacity(lamps as usize * 6);
+        for lamp in 0..lamps {
+            let mut rgb = [0_u16; 3];
+            rgb[(lamp % 3) as usize] = 65535;
+            for sample in rgb {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        UiControlProductPreview {
+            revision: 1,
+            extent: ControlExtent::new(1, lamps * 3),
+            sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: vec![ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: lamps * 3,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count: lamps,
+                        color_order: ColorOrder::Rgb,
+                    },
+                }],
+            },
+            display_layout: None,
+            bytes: bytes.into(),
+        }
+    }
+
+    fn run(source_start: u32, lamps: u32, wire_start: u32, reversed: bool) -> UiPatchCell {
+        UiPatchCell {
+            source_start,
+            lamps,
+            wire_start,
+            reversed,
+            ..UiPatchCell::default()
+        }
+    }
+
+    const RED: [u8; 3] = [255, 0, 0];
+    const GREEN: [u8; 3] = [0, 255, 0];
+    const BLUE: [u8; 3] = [0, 0, 255];
+
+    /// The feed contract end to end: doc index = `source_start + offset`,
+    /// wire index rebased per cell (reversed runs read the wire end-first),
+    /// unclaimed lamps stay the unlit neutral, no frame = no feed.
+    #[test]
+    fn fixture_live_colors_rebase_doc_lamps_onto_the_wire() {
+        let mut patch = UiFixturePatch {
+            lamps: 7,
+            cells: vec![
+                // Doc 0..3 land forward at wire 3..6: R G B from lamp 3 → B R G.
+                run(0, 3, 3, false),
+                // Doc 4..7 land REVERSED at wire 0..3: doc 4 reads wire 2.
+                run(4, 3, 0, true),
+            ],
+            frame: Some(wire_frame(6)),
+            single_output: true,
+        };
+        assert_eq!(
+            fixture_live_colors(&patch),
+            vec![
+                RED, GREEN, BLUE,      // wire 3,4,5 (cycle restarts at wire 3 = red)
+                UNLIT_RGB, // doc 3: no cell claims it
+                BLUE, GREEN, RED, // wire 2,1,0
+            ]
+        );
+        patch.frame = None;
+        assert_eq!(
+            fixture_live_colors(&patch),
+            Vec::<[u8; 3]>::new(),
+            "no frame = no feed (the host keeps its last good one)"
+        );
+    }
+
+    /// A cell reaching past the frame's samples keeps the unlit neutral
+    /// (never panics, never wraps), and a cell reaching past the fixture's
+    /// own width is clipped.
+    #[test]
+    fn fixture_live_colors_survive_out_of_range_cells() {
+        let patch = UiFixturePatch {
+            lamps: 2,
+            cells: vec![run(0, 2, 5, false), run(1, 9, 1, false)],
+            frame: Some(wire_frame(6)),
+            single_output: true,
+        };
+        let colors = fixture_live_colors(&patch);
+        assert_eq!(colors.len(), 2);
+        // Doc 0 = wire 5 (blue); doc 1: wire 6 is past the frame, so the
+        // second cell's wire 1 (green) wins the contested slot.
+        assert_eq!(colors[0], BLUE);
+        assert_eq!(colors[1], GREEN);
     }
 }

@@ -4,7 +4,14 @@
 - **Date:** 2026-08-01
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** None. **Amended 2026-08-08** by
+  `2026-08-08-float-semantics-per-target-representation.md`, in two places
+  marked in the text below: decision 1's framing of the slot as a per-node
+  *semantics* choice (the slot survives; its meaning demotes to an optional
+  pin, and absence — Auto — is now the normal state), and the second
+  consequence's claim that the wasm CPU preview tier refuses Float (it no
+  longer does, and the stated reason was a misdiagnosis). Decisions 2–6 and
+  every measurement here stand unchanged.
 - **Builds on:** `2026-08-01-float-mode-as-a-compiler-parameter.md` (float mode
   is an emitter parameter; hardware capability is a property of the target and
   the result is reported, not requested) and
@@ -46,6 +53,27 @@ storage underneath, and neither can be added without it. Moving the slot to
 `ProjectDef` would also cost a `PROJECT_FORMAT_VERSION` bump and refusal of
 every existing artifact (alpha posture: bump and refuse, never migrate) in
 exchange for a coarser answer.
+
+> **⚠️ Dated amendment — 2026-08-08.** The *placement* decided here stands: the
+> slot is still on `ShaderDef` / `ComputeShaderDef`, still per node. Its
+> **meaning** is superseded by
+> `2026-08-08-float-semantics-per-target-representation.md`.
+>
+> This section reasons about "a project may mix Fixed and Float shaders" as
+> though the two were peer *semantics* an author chooses between. They are not.
+> Float is the product's one authored semantics; Q32 is an execution
+> representation the target picks. The slot is therefore an optional **pin** —
+> `OptionSlot<ValueSlot<FloatMode>>`, where **absence (Auto) is the normal
+> state** and resolves to the target's native representation. Format v5→v6
+> deleted the spelled-out `"float_mode": "fixed"` from every committed project
+> for exactly that reason: it was the pre-posture default written out, a pin
+> that pins nothing.
+>
+> The "alpha posture: bump and refuse, never migrate" clause above is also
+> stale as of `2026-08-04-project-format-migration-architecture.md` — the
+> product migrates now (`lpa-upgrade`), which is what made the demotion cheap.
+> The paragraph is left in place so the record shows the constraint that was
+> real on 2026-08-01.
 
 ### 2. Float mode is a **per-compile** parameter of the engine, not per engine
 
@@ -169,6 +197,34 @@ the negative control that proves the feature gate holds.
   > PR #287 into live source comments and a user-facing Studio error string. An
   > uncorrected ADR is not inert — it is what the next implementer quotes. Hence
   > a dated correction in place, which is the form that was always available.
+
+  > **⚠️ Dated correction — 2026-08-08. The consequence is now false in full,
+  > and so is the correction above it.** The wasm CPU preview tier **renders
+  > Float**. Both `FloatMode::Q32` guards are gone from `call_render_texture`
+  > and `call_render_samples` on `rt_wasmtime` and `rt_browser`; both engines
+  > honour a per-compile `float_mode` the way `NativeJitEngine` does; and the
+  > instance reads its mode from the compiled module rather than the engine's
+  > construction-time options, which also fixed `FloatImpl` silently disclosing
+  > `fixed` for a wasm F32 module.
+  >
+  > The 2026-08-02 block above says the surviving reason on the frame boundary
+  > is "the known wasmtime last-bit divergence". **That attribution was wrong
+  > too.** `lpvm-wasm`'s inline `FloatMode::F32` lowering of the unorm ops used
+  > the GPU `v × 65535` scale instead of the product's `floor(v × 65536)`
+  > clamped convention (`../design/float.md` §7) — a **Guaranteed**-class bug
+  > with a one-line cause, not a target-defined rounding difference. The
+  > uniformity was the tell: a rounding divergence is sparse, a scale error is
+  > uniform, and every channel was off by exactly one count. Fixed, the wasm f32
+  > frame path is **bit-identical** to the rv32 oracle
+  > (`../defects/2026-08-07-wasm-f32-unorm-scale-convention.md`,
+  > `lps-filetests/tests/f32_render_entry_wasm.rs`).
+  >
+  > So the correct reading of this consequence's history is that a
+  > *capability* claim was replaced by a *numerics* claim, and both were
+  > misdiagnoses of one emit bug that no filetest could reach — the corpus ran
+  > 6353/6353 on `wasm.f32` throughout. `rt_emu` remains the host oracle and the
+  > `wasm.q32` last-bit divergence is untouched. Posture and full context:
+  > `2026-08-08-float-semantics-per-target-representation.md` §5.
 - **A stub backend must state its tiers.** `CountingGraphics` in `lpc-engine`'s
   tests inherited the one-tier default and answered Q32 for a Float request —
   caught by the new test, which is the same bug shape the tier request exists
@@ -230,7 +286,14 @@ the negative control that proves the feature gate holds.
 - **Gate the choice on the shader card's face** once the firmware manifest can
   report a board's float capability, so Float is not offered where it cannot
   run. The compile error stays as the advanced-drawer backstop.
-- **Fix `lpvm-wasm`'s f32 builtin id resolution**, which unblocks both the CPU
-  preview tier and `wasm.f32` as a default filetest target.
-- **A project-level default** that nodes inherit, if authoring a mixed-mode
-  project turns out to be the common case rather than the exception.
+- ~~**Fix `lpvm-wasm`'s f32 builtin id resolution**, which unblocks both the CPU
+  preview tier and `wasm.f32` as a default filetest target.~~ — **closed
+  2026-08-08, and it was never the blocker.** The resolution was already
+  implemented (M5, PR #224); `wasm.f32` joined `DEFAULT_TARGETS` 2026-08-02.
+  What actually blocked the CPU preview tier was the unorm scale bug in the
+  same crate's emit path — see the 2026-08-08 correction above.
+- ~~**A project-level default** that nodes inherit, if authoring a mixed-mode
+  project turns out to be the common case rather than the exception.~~ —
+  **dissolved 2026-08-08.** With the slot demoted to an optional pin whose
+  absence means the target's native representation, the common case carries no
+  value for a project default to supply.

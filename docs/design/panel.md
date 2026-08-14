@@ -234,7 +234,8 @@ authoring surfaces. It speaks only P8's two ops plus reads. Anything
 play mode can do, an end user is allowed to do.
 
 > Status: implemented 2026-08-03 — mounted at
-> `#/sim|device/<key>/play`, the same session as the editor route (the
+> `/p/<slug>-<uid>/play` and `/device/<uid>/play`, the same session as
+> the editor route (the
 > segment changes the surface, never the runtime). What a panel PUBLISHES
 > is `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
 

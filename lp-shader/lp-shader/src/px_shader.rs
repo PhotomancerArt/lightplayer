@@ -17,6 +17,7 @@ use lpvm::{
 
 use crate::LpsCompileStats;
 use crate::compile_stats::LpirModuleStats;
+use crate::entry_space::ShaderEntrySpace;
 use crate::error::{LpsError, ShaderFuelTrap, ShaderFuelTrapEntry};
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
@@ -130,13 +131,18 @@ fn out_of_fuel_invocation<E: GuestTrapError>(error: &E) -> Option<u32> {
 pub struct LpsPxShader {
     inner: RefCell<Box<dyn PxShaderBackend>>,
     output_format: TextureStorageFormat,
+    /// Space this shader was compiled for — which entry it has, how many
+    /// coordinate lanes a packed sample point carries, and what target
+    /// shapes [`Self::render_frame`] accepts.
+    space: ShaderEntrySpace,
     meta: LpsModuleSig,
     compile_stats: LpsCompileStats,
     /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
     render_texture_fn_name: String,
     /// Synthesised point-sampling entry, currently available for RGBA16 shaders.
     render_samples_fn_name: Option<String>,
-    /// Index of `render` in `meta.functions` (preserved from compile_px).
+    /// Index of the entry (`render_2d` / `render_1d`) in `meta.functions`
+    /// (preserved from compile_px).
     render_fn_index: usize,
 }
 
@@ -150,6 +156,7 @@ impl LpsPxShader {
         meta: LpsModuleSig,
         ir_stats: LpirModuleStats,
         output_format: TextureStorageFormat,
+        space: ShaderEntrySpace,
         render_fn_index: usize,
         render_texture_fn_name: String,
         render_samples_fn_name: Option<String>,
@@ -192,6 +199,7 @@ impl LpsPxShader {
         Ok(Self {
             inner: RefCell::new(inner),
             output_format,
+            space,
             meta,
             compile_stats,
             render_texture_fn_name,
@@ -218,10 +226,17 @@ impl LpsPxShader {
         self.output_format
     }
 
-    /// Signature of the user `render` function (not the synthesised loop).
+    /// Signature of the authored entry (`render_2d` / `render_1d`), not the
+    /// synthesised loop.
     #[must_use]
     pub fn render_sig(&self) -> &LpsFnSig {
         &self.meta.functions[self.render_fn_index]
+    }
+
+    /// Space this shader was compiled for.
+    #[must_use]
+    pub fn space(&self) -> ShaderEntrySpace {
+        self.space
     }
 
     /// Render one frame into the given texture buffer.
@@ -250,6 +265,16 @@ impl LpsPxShader {
 
         let w = tex.width();
         let h = tex.height();
+        // A 1D shader's target is a single row `(N, 1)`: the synthesised
+        // wrapper walks x only, so a taller target would silently leave
+        // every row but the first black. Refused here, before the guest
+        // runs, rather than paid for per frame inside the loop.
+        if self.space == ShaderEntrySpace::OneD && h != 1 {
+            return Err(LpsError::Render(format!(
+                "render_frame: a 1D-declared shader renders into a single row \
+                 (height 1), target is {w}x{h}"
+            )));
+        }
         let mut buf = tex.buffer();
         self.inner
             .borrow_mut()
@@ -257,6 +282,10 @@ impl LpsPxShader {
     }
 
     /// Sample this shader at packed Q16.16 points and write packed RGBA16 colors.
+    ///
+    /// `points` holds `count` tightly packed lane groups in this shader's
+    /// declared space — `[x, y]` pairs for a 2D shader, single `[t]` words
+    /// for a 1D one (see [`crate::synth::render_samples`] for the layout).
     pub fn sample_points_rgba16(
         &self,
         uniforms: &LpsValueF32,
@@ -445,6 +474,7 @@ pub(crate) fn px_shader_from_parts_for_test(
     LpsPxShader {
         inner: RefCell::new(inner),
         output_format,
+        space: ShaderEntrySpace::TwoD,
         meta,
         compile_stats: LpsCompileStats::default(),
         render_texture_fn_name,

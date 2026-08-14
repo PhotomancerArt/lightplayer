@@ -11,6 +11,20 @@ pub enum ProjectEditorOp {
     /// collapse, mirrored composer draft) — the node arm of the CardUiState
     /// re-home. Applied synchronously in the controller, like `Focus`.
     NodeUi(crate::app::project::node_card_ui_state::NodeUiOp),
+    /// Point the patch surface's one shared selection (D36; core-owned so
+    /// e2e can drive it and P6's verbs can read it). Applied synchronously.
+    PatchSelect {
+        target: Option<crate::UiPatchTarget>,
+    },
+    /// Record an event into the undo-correlation journal (unified-editor
+    /// P2): node/mode switches, and the mapping session's step commits
+    /// observed at the shell layer (P5's glue — `lpa-mapping-editor`
+    /// stays project-unaware). Applied synchronously.
+    EditorJournal {
+        event: crate::UiEditJournalEvent,
+        node: Option<lpc_model::NodeId>,
+        mode: crate::UiEditorMode,
+    },
 }
 
 impl ControllerOp for ProjectEditorOp {
@@ -26,6 +40,16 @@ impl ControllerOp for ProjectEditorOp {
                 "Change what this node card is showing.",
                 ActionPriority::Tertiary,
             ),
+            Self::PatchSelect { .. } => ActionMeta::new(
+                "Select patch target",
+                "Point the patch surface's selection.",
+                ActionPriority::Tertiary,
+            ),
+            Self::EditorJournal { .. } => ActionMeta::new(
+                "Record editor event",
+                "Stamp a node/mode switch or edit into the undo journal.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -37,7 +61,10 @@ impl ControllerOp for ProjectEditorOp {
         // `NodeUi` is likewise a purely local mutation: the handler never
         // awaits, so the deadline never engages.
         match self {
-            Self::Focus | Self::NodeUi(_) => ActionClass::Foreground {
+            Self::Focus
+            | Self::NodeUi(_)
+            | Self::PatchSelect { .. }
+            | Self::EditorJournal { .. } => ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             },
         }
