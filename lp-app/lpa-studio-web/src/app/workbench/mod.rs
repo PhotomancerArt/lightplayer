@@ -271,6 +271,7 @@ pub fn WorkbenchFrame(
                         dive_focused,
                         dive_session,
                         dive_commits,
+                        workspace_href: workspace_href.clone(),
                         running,
                         now_secs,
                         on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
@@ -290,7 +291,7 @@ pub fn WorkbenchFrame(
                     },
                 }
                 div { class: "tw:max-[960px]:hidden",
-                    ViewTabs { view, workspace_href, mapping_href }
+                    ViewTabs { view, workspace_href: workspace_href.clone(), mapping_href }
                 }
                 div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                     match view {
@@ -341,6 +342,7 @@ pub fn WorkbenchFrame(
                                     dive_focused,
                                     dive_session,
                                     dive_commits,
+                                    workspace_href: workspace_href.clone(),
                                     running,
                                     now_secs,
                                     on_action,
@@ -362,6 +364,7 @@ pub fn WorkbenchFrame(
                         dive_focused,
                         dive_session,
                         dive_commits,
+                        workspace_href: workspace_href.clone(),
                         running,
                         now_secs,
                         on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
@@ -535,6 +538,8 @@ fn PanelDock(
     dive_focused: Signal<Option<NodeId>>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
+    /// The Nodes view's route — the Props stack's context-strip link.
+    workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
     /// A tab press: the SAME radio toggle the strip sends — the active
@@ -586,6 +591,7 @@ fn PanelDock(
                     dive_focused,
                     dive_session,
                     dive_commits,
+                    workspace_href,
                     running,
                     now_secs,
                     on_action,
@@ -636,6 +642,8 @@ fn PanelBody(
     dive_focused: Signal<Option<NodeId>>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
+    /// The Nodes view's route — the Props stack's context-strip link.
+    workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
@@ -696,6 +704,8 @@ fn PanelBody(
                 dive_focused,
                 dive_session,
                 dive_commits,
+                workspace_href,
+                on_action,
             }
         },
         PanelId::Outputs => rsx! {

@@ -333,7 +333,7 @@ pub(crate) fn editor_repeated_sector() -> Element {
 }
 
 #[story(
-    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the popover breadcrumbs the scope."
+    description = "Scoped tessellation authoring: descended into the repeat, the authored sub-object is the interactive primary while the other instances render inert and span-colored; the Props stack carries the scope as ancestor cards."
 )]
 pub(crate) fn editor_repeat_scoped() -> Element {
     rsx! {

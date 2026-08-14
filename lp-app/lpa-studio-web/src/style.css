@@ -1528,55 +1528,6 @@ label:has(> input:not(:disabled)) {
     padding: 0 4px;
 }
 
-/* Popover breadcrumb (descended selection): ancestors click to ascend. */
-.lpme-pop-crumbs {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-    flex: 1;
-}
-
-.lpme-pop-crumb {
-    border: none;
-    background: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--studio-color-text-muted);
-}
-
-.lpme-pop-crumb:hover {
-    color: var(--studio-color-text-strong);
-    text-decoration: underline;
-}
-
-.lpme-pop-crumb-here {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--studio-color-text-strong);
-}
-
-.lpme-pop-crumb-sep {
-    font-size: 10px;
-    color: var(--studio-color-text-muted);
-}
-
-/* The "enter the group" affordance on a repeat's fields. */
-.lpme-pop-descend {
-    border: none;
-    background: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--studio-color-text);
-}
-
-.lpme-pop-descend:hover {
-    color: var(--studio-color-text-strong);
-    text-decoration: underline;
-}
-
 .lpme-canvas-wrap {
     position: relative;
     flex: 1;
@@ -1754,58 +1705,78 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 4 3;
 }
 
-.lpme-props-pane {
-    /* The re-housed object properties (R4): a dock pane, not a floating
-       card — the pop-* internals keep their band layout, so the pane
-       carries the padding the popover used to. */
-    padding: 10px 12px 12px;
+/* The Props stack (B′): one card per level of the selected path, deepest
+   first. The shell's placement card joins the same grid; a nested stack
+   (the document cards) keeps the same gap, so the rhythm stays uniform.
+   Padding is the host panel's job. */
+.lpme-stack {
+    display: grid;
+    gap: 7px;
+    align-content: start;
 }
 
-.lpme-props-empty {
-    margin: 14px 8px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--studio-color-text-muted);
-}
-
-.lpme-pop-head {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin: -10px -12px 10px;
-    padding: 9px 12px 8px;
-    border-bottom: 1px solid var(--studio-color-border);
+/* One level card. The selected level (always the top card) wears the
+   selection blue; ancestors stay muted context. */
+.lpme-lvl {
+    border: 1px solid var(--studio-color-border);
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
-    border-radius: 10px 10px 0 0;
+    overflow: hidden;
 }
 
-.lpme-pop-name {
-    flex: 1;
+.lpme-lvl-sel {
+    border-color: #4c9ffe;
+    box-shadow: 0 0 0 1px rgba(76, 159, 254, 0.25);
+}
+
+.lpme-lvl-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.lpme-lvl-head:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* The object-colour swatch: filled = the authored root, hollow = a
+   descended level — the same group-vs-member language as the tree rows. */
+.lpme-lvl-swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 3px;
+}
+
+.lpme-lvl-swatch-hollow {
+    background: transparent;
+    border: 1.5px solid;
+}
+
+.lpme-lvl-name {
     min-width: 0;
-    background: none;
-    border: none;
-    border-bottom: 1px solid transparent;
-    color: var(--studio-color-text-strong);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
     font-weight: 600;
-    font-size: 13px;
-}
-
-.lpme-pop-name:focus {
-    outline: none;
-    border-bottom-color: #4c9ffe;
-}
-
-.lpme-pop-name-static {
-    flex: 1;
     color: var(--studio-color-text-strong);
-    font-weight: 600;
-    font-size: 13px;
 }
 
-.lpme-pop-kind {
+.lpme-lvl-kind {
+    margin-left: auto;
+    flex: none;
     font-family: var(--studio-font-mono);
     font-size: 10px;
     color: var(--studio-color-text-muted);
+}
+
+.lpme-lvl-body {
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--studio-color-border);
 }
 
 .lpme-field {
