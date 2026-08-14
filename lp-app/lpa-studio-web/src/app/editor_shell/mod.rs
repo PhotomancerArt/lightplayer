@@ -88,8 +88,9 @@ pub fn EditorShellCenter(
     prefetch_editor_meta(&on_action, &surface);
     prefetch_selected_body(&on_action, &surface, &selection);
     let (bodies, asset_editors) = mapping_assets(&project_editor);
-    // Sticky auto-pack slots: refreshed only when the unarranged set
-    // changes, so arranging one fixture never moves another.
+    // Sticky auto-pack slots: grown only when a never-slotted fixture
+    // appears, and never re-packed — arranging one fixture must not move
+    // another, and an undone arrange returns to the retained slot.
     let mut pack_slots = use_signal(PackSlots::new);
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {

@@ -428,37 +428,43 @@ fn selected_instance_range(
     }
 }
 
-/// Sticky auto-pack slots for the UNARRANGED fixtures, keyed by editor
-/// key. Owned by the shell and refreshed only when the unarranged SET
-/// changes — dragging an arranged fixture must never move its neighbours
-/// (the second gate's movement bug: the pack row used to follow the
-/// arranged content every render).
+/// Sticky auto-pack slots, keyed by editor key. Owned by the shell; a
+/// fixture keeps its slot for the LIFE OF THE MOUNT once assigned — even
+/// while arranged, so undoing an arrange returns it to its old slot — and
+/// no event ever re-packs an existing slot (the G1 jump bug: re-packing
+/// the whole set whenever it changed made every neighbour move when one
+/// fixture was dragged).
 pub(crate) type PackSlots = BTreeMap<String, UiArrangeTransform>;
 
-/// The pack layout for the CURRENT unarranged set: `None` when the held
-/// slots already cover exactly that set (keep them — stability is the
-/// point), else a freshly packed row below the arranged content.
+/// Grow the held slots to cover the current unarranged set: `None` when
+/// every unarranged fixture already has a slot (keep them — stability is
+/// the point), else the held slots plus freshly packed positions for the
+/// fixtures that have NEVER had one. Existing slots are never moved or
+/// dropped.
 pub(crate) fn refresh_pack_slots(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
     held: &PackSlots,
 ) -> Option<PackSlots> {
-    let renders = build_renders(surface, bodies, &PackSlots::new());
-    let unarranged: Vec<&FixtureRender> =
-        renders.iter().filter(|render| !render.arranged).collect();
-    if unarranged.len() == held.len()
-        && unarranged
-            .iter()
-            .all(|render| held.contains_key(&render.key))
-    {
+    let renders = build_renders(surface, bodies, held);
+    merge_pack_slots(&renders, held)
+}
+
+/// The pure half of [`refresh_pack_slots`]: adopt the auto-packed
+/// transform of every unarranged fixture without a held slot.
+fn merge_pack_slots(renders: &[FixtureRender], held: &PackSlots) -> Option<PackSlots> {
+    let fresh: Vec<&FixtureRender> = renders
+        .iter()
+        .filter(|render| !render.arranged && !held.contains_key(&render.key))
+        .collect();
+    if fresh.is_empty() {
         return None;
     }
-    Some(
-        unarranged
-            .into_iter()
-            .map(|render| (render.key.clone(), render.transform))
-            .collect(),
-    )
+    let mut next = held.clone();
+    for render in fresh {
+        next.insert(render.key.clone(), render.transform);
+    }
+    Some(next)
 }
 
 /// Build every fixture's render facts: resolve loaded bodies, fall back to
@@ -554,27 +560,51 @@ fn placeholder_bounds(lamps: u32) -> [f64; 4] {
 }
 
 /// Place every unarranged fixture WITHOUT a held slot in a bottom row
-/// (stable order = surface order) under the arranged content. Ephemeral:
-/// nothing is written until a fixture is first dragged.
+/// (stable order = surface order). When held slots exist their fixtures
+/// define the live row, and new fixtures CONTINUE it to the right —
+/// re-deriving a row from the arranged extent would collide with (or sit
+/// away from) the held neighbours. Ephemeral: nothing is written until a
+/// fixture is first dragged.
 fn auto_pack(renders: &mut [FixtureRender], held: &PackSlots) {
-    let arranged_max_y = renders
-        .iter()
-        .filter(|render| render.arranged)
-        .map(|render| {
-            // Conservative world-space extent: transformed bounds corners.
-            placement_of(&render.transform)
-                .corners(render.bounds)
-                .iter()
-                .map(|point| point[1])
-                .fold(f64::MIN, f64::max)
-        })
-        .fold(f64::MIN, f64::max);
-    let row_y = if arranged_max_y == f64::MIN {
-        0.0
+    // The held row: every held slot's world-space top edge and right
+    // extent — measured at the SLOT placement even for fixtures currently
+    // arranged, because an undone arrange returns them to that slot (the
+    // slot stays reserved). Held slots are always pack-made (r=0, s=1,
+    // tops aligned), so the min top recovers the row's y.
+    let mut row_top = f64::MAX;
+    let mut held_right = f64::MIN;
+    for render in renders.iter() {
+        let Some(slot) = held.get(&render.key) else {
+            continue;
+        };
+        for point in placement_of(slot).corners(render.bounds) {
+            row_top = row_top.min(point[1]);
+            held_right = held_right.max(point[0]);
+        }
+    }
+    let (row_y, mut cursor_x) = if row_top < f64::MAX {
+        (row_top, held_right + PACK_GAP)
     } else {
-        arranged_max_y + PACK_GAP * 2.0
+        // No held row yet: start one below the arranged content.
+        let arranged_max_y = renders
+            .iter()
+            .filter(|render| render.arranged)
+            .map(|render| {
+                // Conservative world-space extent: transformed bounds corners.
+                placement_of(&render.transform)
+                    .corners(render.bounds)
+                    .iter()
+                    .map(|point| point[1])
+                    .fold(f64::MIN, f64::max)
+            })
+            .fold(f64::MIN, f64::max);
+        let row_y = if arranged_max_y == f64::MIN {
+            0.0
+        } else {
+            arranged_max_y + PACK_GAP * 2.0
+        };
+        (row_y, 0.0)
     };
-    let mut cursor_x = 0.0;
     for render in renders
         .iter_mut()
         .filter(|render| !render.arranged && !held.contains_key(&render.key))
@@ -670,7 +700,7 @@ mod tests {
     }
 
     /// The movement bug's regression test: held slots survive arranged
-    /// content moving; only a CHANGED unarranged set re-packs.
+    /// content moving; a held fixture is NEVER re-packed.
     #[test]
     fn held_pack_slots_pin_unarranged_fixtures() {
         let mut renders = vec![
@@ -698,6 +728,92 @@ mod tests {
             [7.0, 9.0],
             "the held slot pins the fixture regardless of arranged bounds"
         );
+    }
+
+    /// The G1 jump bug's regression test: one fixture leaving the
+    /// unarranged set (first drag) must not move anyone else — the merge
+    /// keeps every held slot and reports nothing new.
+    #[test]
+    fn arranging_a_fixture_never_repacks_its_neighbours() {
+        let slot = |x: f64| UiArrangeTransform {
+            t: [x, 90.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let held: PackSlots = [("b".to_string(), slot(0.0)), ("c".to_string(), slot(44.0))]
+            .into_iter()
+            .collect();
+        // "b" was just dragged: arranged now, but its slot stays held.
+        let renders = vec![
+            render("b", true, [0.0, 0.0, 20.0, 20.0]),
+            render("c", false, [0.0, 0.0, 20.0, 20.0]),
+        ];
+        assert_eq!(
+            merge_pack_slots(&renders, &held),
+            None,
+            "no fresh fixtures: held slots (including b's, for undo) stay put"
+        );
+    }
+
+    /// Undo of a first drag: the fixture returns to the unarranged set and
+    /// its RETAINED slot places it exactly where it was.
+    #[test]
+    fn undone_arrange_returns_to_the_old_slot() {
+        let held: PackSlots = [(
+            "b".to_string(),
+            UiArrangeTransform {
+                t: [7.0, 9.0],
+                r: 0.0,
+                s: 1.0,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let mut renders = vec![render("b", false, [0.0, 0.0, 20.0, 20.0])];
+        assert_eq!(merge_pack_slots(&renders, &held), None);
+        for item in renders.iter_mut().filter(|item| !item.arranged) {
+            if let Some(slot) = held.get(&item.key) {
+                item.transform = *slot;
+            }
+        }
+        auto_pack(&mut renders, &held);
+        assert_eq!(renders[0].transform.t, [7.0, 9.0]);
+    }
+
+    /// A NEW fixture continues the held row to the right — including past
+    /// slots reserved by fixtures currently arranged (undo returns them
+    /// there), never into or below them.
+    #[test]
+    fn new_fixtures_continue_the_held_row() {
+        let slot = |x: f64| UiArrangeTransform {
+            t: [x, 90.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let held: PackSlots = [("b".to_string(), slot(0.0)), ("c".to_string(), slot(44.0))]
+            .into_iter()
+            .collect();
+        // "c" is arranged away; its slot (right edge x=64) stays reserved.
+        let mut renders = vec![
+            render("b", false, [0.0, 0.0, 20.0, 20.0]),
+            render("c", true, [0.0, 0.0, 20.0, 20.0]),
+            render("d", false, [0.0, 0.0, 20.0, 20.0]),
+        ];
+        for item in renders.iter_mut().filter(|item| !item.arranged) {
+            if let Some(slot) = held.get(&item.key) {
+                item.transform = *slot;
+            }
+        }
+        auto_pack(&mut renders, &held);
+        assert_eq!(
+            renders[2].transform.t,
+            [64.0 + PACK_GAP, 90.0],
+            "d appends after c's reserved slot, on the held row's y"
+        );
+        let merged = merge_pack_slots(&renders, &held).expect("d is fresh");
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged["b"], slot(0.0));
+        assert_eq!(merged["d"].t, [64.0 + PACK_GAP, 90.0]);
     }
 
     #[test]
