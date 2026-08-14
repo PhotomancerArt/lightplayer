@@ -1,4 +1,5 @@
-//! Pure pool policies: least-loaded worker choice and LRU eviction.
+//! Pure pool policies: least-loaded worker choice, LRU eviction, and
+//! which pending leases may start deploying.
 //!
 //! Kept browser-free so the decisions the host makes under budget pressure
 //! are unit-testable natively.
@@ -66,6 +67,36 @@ pub fn choose_worker(loads: &[Option<usize>]) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
+/// Which pending slots may start deploying this tick.
+///
+/// Starting every pending lease at once is what makes a freshly loaded
+/// gallery flicker: a dozen deploys pile onto a two-worker pool, each
+/// one's budget sized for a lease that now waits behind eleven others, and
+/// the timeouts that follow tear canvases down. Bounding in-flight deploys
+/// turns that stampede into a queue — cards fill in one after another,
+/// slower per card and far faster to a stable page.
+///
+/// `candidates` are `(slot_id, visible)` for the slots that passed the
+/// caller's pending gate, `deploying_now` counts slots already mid-deploy
+/// across the whole pool, and `max_concurrent_deploys` is the cap (the
+/// pool size: one in-flight deploy per worker). Visible slots go first —
+/// they are what the user is looking at — then ascending slot id, which is
+/// lease order, so the queue is stable and nothing starves: a slot not
+/// chosen this tick stays pending and is reconsidered on the next one.
+pub fn choose_starts(
+    mut candidates: Vec<(u64, bool)>,
+    deploying_now: usize,
+    max_concurrent_deploys: usize,
+) -> Vec<u64> {
+    let room = max_concurrent_deploys.saturating_sub(deploying_now);
+    if room == 0 {
+        return Vec::new();
+    }
+    candidates.sort_by_key(|&(slot_id, visible)| (!visible, slot_id));
+    candidates.truncate(room);
+    candidates.into_iter().map(|(slot_id, _)| slot_id).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +159,43 @@ mod tests {
     #[test]
     fn worker_choice_breaks_ties_toward_the_lowest_index() {
         assert_eq!(choose_worker(&[Some(2), Some(2)]), Some(0));
+    }
+
+    #[test]
+    fn starts_take_visible_slots_before_invisible_ones() {
+        let candidates = vec![(1, false), (2, false), (3, true), (4, true)];
+        assert_eq!(choose_starts(candidates, 0, 3), vec![3, 4, 1]);
+    }
+
+    #[test]
+    fn starts_within_a_visibility_class_follow_lease_order() {
+        let candidates = vec![(9, true), (2, true), (5, true)];
+        assert_eq!(choose_starts(candidates, 0, 2), vec![2, 5]);
+    }
+
+    #[test]
+    fn starts_leave_room_for_the_deploys_already_in_flight() {
+        let candidates = vec![(1, true), (2, true), (3, true)];
+        assert_eq!(choose_starts(candidates.clone(), 1, 2), vec![1]);
+        assert_eq!(choose_starts(candidates, 2, 2), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn starts_stop_at_a_saturated_pool() {
+        // More in flight than the cap allows (the cap shrank, or a recycle
+        // left extra deploys behind): no new starts, and no underflow.
+        let candidates = vec![(1, true)];
+        assert_eq!(choose_starts(candidates, 5, 2), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn starts_with_nothing_pending_are_empty() {
+        assert_eq!(choose_starts(Vec::new(), 0, 2), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn starts_are_capped_below_what_is_pending() {
+        let candidates = vec![(1, true), (2, true), (3, true), (4, true)];
+        assert_eq!(choose_starts(candidates, 0, 2), vec![1, 2]);
     }
 }

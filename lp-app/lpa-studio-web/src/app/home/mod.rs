@@ -30,6 +30,16 @@ pub mod projects_page;
 pub(crate) mod setup_wizard;
 #[cfg(feature = "stories")]
 pub(crate) mod setup_wizard_stories;
+/// Poster capture is the wasm thumb path; host builds of this crate render
+/// no live preview at all and only run the cache's unit tests.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "called only by the wasm poster-first thumb path; host builds render no preview and only run the cache unit tests"
+    )
+)]
+pub(crate) mod thumb_poster;
 
 pub use devices_page::DevicesPage;
 pub use explore_page::ExplorePage;

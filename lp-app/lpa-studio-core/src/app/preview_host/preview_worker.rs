@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
-    BrowserWorkerHandle, BrowserWorkerOptions, PreviewPixelFrame,
+    BrowserWorkerHandle, BrowserWorkerOptions, PosterPixelFrame, PreviewPixelFrame,
 };
 use lpc_wire::OutputFrameEntry;
 
@@ -37,6 +37,14 @@ pub(super) struct PresentedFrame {
     pub(super) runtime_id: u32,
 }
 
+/// One failed `capture_poster` request. Poster failures are NOT preview
+/// errors on purpose: a slot whose poster capture failed keeps presenting
+/// (or resting) — the card just keeps its placeholder.
+pub(super) struct SlotPosterError {
+    pub(super) runtime_id: u32,
+    pub(super) message: String,
+}
+
 /// One `preview_output_frame` answer: the project's published lamps, plus
 /// the engine's control-first verdict for it.
 pub(super) struct SlotOutputFrame {
@@ -53,6 +61,7 @@ pub(super) struct PreviewWorker {
     presented: Vec<PresentedFrame>,
     output_frames: Vec<SlotOutputFrame>,
     preview_errors: Vec<SlotPreviewError>,
+    poster_errors: Vec<SlotPosterError>,
     /// Worker-fatal errors (crash, uncaught script error). One entry is
     /// enough to condemn the worker to a recycle.
     worker_errors: Vec<String>,
@@ -77,6 +86,7 @@ impl PreviewWorker {
             presented: Vec::new(),
             output_frames: Vec::new(),
             preview_errors: Vec::new(),
+            poster_errors: Vec::new(),
             worker_errors: Vec::new(),
         })
     }
@@ -162,6 +172,16 @@ impl PreviewWorker {
                         message,
                     });
                 }
+                BrowserOutputEnvelope::PosterError {
+                    runtime_id,
+                    message,
+                    ..
+                } => {
+                    self.poster_errors.push(SlotPosterError {
+                        runtime_id,
+                        message,
+                    });
+                }
                 // "fatal" is the worker's sticky poisoned-instance status
                 // (escaped panic=abort trap): like "error", it condemns
                 // this worker to the recycle path.
@@ -190,6 +210,16 @@ impl PreviewWorker {
     /// Take preview request failures received since the last call.
     pub(super) fn take_preview_errors(&mut self) -> Vec<SlotPreviewError> {
         core::mem::take(&mut self.preview_errors)
+    }
+
+    /// Take binary poster-capture answers received since the last call.
+    pub(super) fn take_poster_frames(&mut self) -> Vec<PosterPixelFrame> {
+        self.handle.take_poster_frames()
+    }
+
+    /// Take poster-capture failures received since the last call.
+    pub(super) fn take_poster_errors(&mut self) -> Vec<SlotPosterError> {
+        core::mem::take(&mut self.poster_errors)
     }
 
     /// Take GPU-tier present completions received since the last call.
