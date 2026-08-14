@@ -162,6 +162,12 @@
   .stack .indent-rail { border-left: 2px solid var(--border-muted); margin-left: 8px;
                         padding-left: 7px; display: grid; gap: 7px; }
   .depthnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; }
+  .ctxline { display: flex; align-items: center; gap: 5px; margin: 0 1px 8px;
+    font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .ctxline .sep { font-size: 9px; }
+  .ctxline .name { color: var(--subtle); overflow: hidden; text-overflow: ellipsis; }
+  .ctxline .nodes { margin-left: auto; flex: none; color: var(--sel); opacity: .75;
+    cursor: pointer; font-size: 10px; }
 </style>
 </head>
 <body>
@@ -170,16 +176,23 @@
 <p class="hint">
   G1 follow-on to the one-project-canvas: the Props dock currently shows <b>one level at a
   time</b> (the selected node's fields, a breadcrumb standing in for ancestors). Yona's stack
-  idea: <b>one card per level of the selected path</b> — module &gt; fixture &gt; group &gt;
-  object — each level editable in place. The real chain is often <b>five</b> deep (the root
-  show sits above the module), so every concept here must survive a chain longer than the
-  nominal four. Concepts C and D split a real semantic question: is the stack <b>the
+  idea: <b>one card per level of the selected path</b>, each editable in place.
+  <b>Scope ruling (round 2):</b> the stack shows only the levels the Mapping view actually
+  EDITS — the fixture's <i>placement</i> (editor.json, an arrange concern, never node
+  config) plus the authored document levels (group &gt; object). Module/show levels are
+  context, homed in the Fixtures tree; a node level rendered here would have to be the
+  REAL node card re-housed whole (the workbench's re-house-don't-redesign rule), which is a
+  someday-unification, not this design. The module chain survives as a muted one-line
+  context strip. Concepts C and D still split the semantic question: is the stack <b>the
   selection</b> (clicking an ancestor ascends it, canvas follows) or a <b>local accordion</b>
-  (peek and edit an ancestor without moving the canvas selection)?
+  (edit an ancestor without moving the canvas selection)?
 </p>
 
 <div class="xcontrols">
   <span class="grp"><b>Selection</b><span id="selbtns"></span></span>
+  <span class="grp"><b>Context</b>
+    <button id="ctxbtn" class="on" onclick="state.ctx=!state.ctx;render()">module line</button>
+  </span>
   <span class="grp"><b>Data</b>
     <button data-ds="dome" class="on">mini-dome</button>
     <button data-ds="deep">nested repeat</button>
@@ -198,12 +211,12 @@
 <div class="concepts" id="concepts"></div>
 
 <p class="leannote" id="lean">
-  <b>Lean:</b> C (selection stack). It keeps the whole chain visible and clickable — the
-  context the breadcrumb hid — without the wall-of-fields cost of B, and it keeps ONE
-  selection model (the stack mirrors it) instead of D's second, local disclosure state.
-  B is the strongest counter-argument when the chain is short; D wins only if editing an
-  ancestor <i>without</i> ascending selection is a real workflow, which the canvas already
-  covers (click the parent there).
+  <b>Lean (round 2, document scope):</b> the scope ruling shortens the chain to 3 cards
+  (fixture · group · object; +1 per nested repeat), which materially strengthens <b>B</b> —
+  the whole dived fixture's story fits the dock without scrolling, and field edits never
+  move the selection. <b>C</b> still wins on selection clarity (the stack IS the selection,
+  esc walks it) and on nested repeats. Honest call: B and C are now close; judge by feel.
+  D's second disclosure state buys little once B can simply show everything.
 </p>
 
 <script>
@@ -211,9 +224,8 @@
 const DATASETS = {
   dome: {
     label: 'mini-dome',
+    context: ['mini_dome', 'Dome'],
     chain: [
-      { kind: 'show',    label: 'mini_dome', meta: '2 modules · 2 fixtures · 2 outputs' },
-      { kind: 'module',  label: 'Dome',      meta: '1 fixture · 177 lamps' },
       { kind: 'fixture', label: 'dome',      meta: '150 lamps · 5 instances',
         placement: { x: 12.0, y: 4.5, r: 0, s: 1.0 } },
       { kind: 'group',   label: 'sector', shape: 'repeat', count: 5, cx: 60, cy: 60 },
@@ -223,9 +235,8 @@ const DATASETS = {
   },
   deep: {
     label: 'nested repeat',
+    context: ['radiance', 'Petals'],
     chain: [
-      { kind: 'show',    label: 'radiance', meta: '4 modules · 12 fixtures' },
-      { kind: 'module',  label: 'Petals',   meta: '3 fixtures · 4.2k lamps' },
       { kind: 'fixture', label: 'petal_ring', meta: '1440 lamps · 24 instances',
         placement: { x: -8.2, y: 31.0, r: 15, s: 1.25 } },
       { kind: 'group',   label: 'arm',   shape: 'repeat', count: 6, cx: 0, cy: 0 },
@@ -235,9 +246,8 @@ const DATASETS = {
   },
   awkward: {
     label: 'awkward names',
+    context: ['kinetic-canopy-tour-rig-2026 (loaner)', 'Untitled module'],
     chain: [
-      { kind: 'show',    label: 'kinetic-canopy-tour-rig-2026 (loaner)', meta: '1 module · 1 fixture' },
-      { kind: 'module',  label: 'Untitled module', meta: '1 fixture · 88 lamps' },
       { kind: 'fixture', label: 'left_wing_underside_strip_final_v3_ACTUAL', meta: '88 lamps · range grain',
         placement: null },
       { kind: 'group',   label: '', shape: 'repeat', count: 11, cx: 4, cy: 4 },
@@ -247,7 +257,7 @@ const DATASETS = {
 };
 
 const KIND_GLYPH = { show: '▤', module: '▤', fixture: '⬡', group: '⟳', object: '·' };
-const state = { ds: 'dome', sel: 4, dOpen: null /* concept D's local open level */ };
+const state = { ds: 'dome', sel: 2, dOpen: null /* concept D's local open level */, ctx: true };
 
 function chain() { return DATASETS[state.ds].chain; }
 function kindLabel(lvl) {
@@ -321,11 +331,6 @@ for (let i = 0; i < 8; i++) {
 /* A — production baseline: one level, breadcrumb when descended */
 function conceptA() {
   const c = chain(), sel = state.sel, lvl = c[sel];
-  if (lvl.kind === 'show' || lvl.kind === 'module') return `
-    <div class="props-empty">Select a fixture on the canvas — its placement reads out here;
-    dive in (double-click) for object properties.<br><br>
-    <span style="font-size:10.5px">(production has no module/show readout — this row of the
-    matrix is the gap the stack fills)</span></div>`;
   if (lvl.kind === 'fixture') return `
     <div class="pop-head"><span class="pop-name">${esc(dispLabel(lvl))}</span>
       <span class="pop-kind">${lvl.meta}</span></div>
@@ -345,14 +350,25 @@ function conceptA() {
     ${levelBody(c[sel], sel)}
     ${next ? `<div class="field"><label>repeats</label>
         <button class="descend" onclick="setSel(${sel + 1})">${esc(kindLabel(next))} ▸</button></div>` : ''}
-    <p class="depthnote">Module and fixture context: not on this pane (the toolbar breadcrumb
-    names the fixture; the module lives nowhere).</p>`;
+    <p class="depthnote">Fixture placement: a different pane state (select the fixture) —
+    the stack concepts carry it as the top card instead.</p>`;
+}
+
+/* the module chain as CONTEXT, not cards: one muted line, links to the
+   Nodes view where those levels are actually edited */
+function ctxLine() {
+  if (!state.ctx) return '';
+  const parts = DATASETS[state.ds].context
+    .map(name => `<span class="name">${esc(name)}</span>`)
+    .join('<span class="sep">▸</span>');
+  return `<div class="ctxline"><span>▤</span>${parts}<span class="sep">▸</span>
+    <span class="nodes" title="modules are edited on the Nodes view">Nodes ↗</span></div>`;
 }
 
 /* B — full stack: every level expanded, always */
 function conceptB() {
   const c = chain();
-  return `<div class="stack">` + c.map((lvl, i) => `
+  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
     <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
       <div class="lvl-head" onclick="setSel(${i})">
         ${headBits(lvl, i)}
@@ -365,7 +381,7 @@ function conceptB() {
    Clicking a header ASCENDS/DESCENDS the one shared selection. */
 function conceptC() {
   const c = chain();
-  return `<div class="stack">` + c.map((lvl, i) => `
+  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
     <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
       <div class="lvl-head" onclick="setSel(${i})" title="select this level (canvas follows)">
         ${headBits(lvl, i)}
@@ -380,7 +396,7 @@ function conceptC() {
 function conceptD() {
   const c = chain();
   const open = state.dOpen ?? state.sel;
-  return `<div class="stack">` + c.map((lvl, i) => `
+  return ctxLine() + `<div class="stack">` + c.map((lvl, i) => `
     <div class="lvl ${i === state.sel ? 'sel' : 'ctx'}">
       <div class="lvl-head" onclick="dToggle(${i})" title="open this level's fields (selection stays)">
         <span class="glyph">${i === open ? '▾' : '▸'}</span>
@@ -433,6 +449,7 @@ function renderControls() {
       style="margin-right:5px">${esc(dispLabel(lvl)).slice(0, 14)}</button>`).join('');
   document.querySelectorAll('[data-ds]').forEach(b =>
     b.classList.toggle('on', b.dataset.ds === state.ds));
+  document.getElementById('ctxbtn').classList.toggle('on', state.ctx);
 }
 
 function setSel(i) { state.sel = i; state.dOpen = null; render(); }
