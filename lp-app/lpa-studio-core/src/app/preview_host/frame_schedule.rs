@@ -31,10 +31,16 @@ pub struct FrameSchedule {
     next_due_ms: Option<f64>,
     last_tick_at_ms: Option<f64>,
     in_flight: bool,
+    /// Presents this slot is worth in total (`PreviewProfile::frame_budget`);
+    /// `None` presents forever.
+    frame_budget: Option<u32>,
+    /// Frames that reached the consumer's canvas, for the budget.
+    presented: u32,
 }
 
 impl FrameSchedule {
-    /// A paused schedule at `fps` (non-positive fps falls back to 1).
+    /// A paused schedule at `fps` (non-positive fps falls back to 1),
+    /// presenting continuously.
     pub fn new(fps: f32) -> Self {
         let fps = if fps > 0.0 { f64::from(fps) } else { 1.0 };
         Self {
@@ -42,11 +48,49 @@ impl FrameSchedule {
             next_due_ms: None,
             last_tick_at_ms: None,
             in_flight: false,
+            frame_budget: None,
+            presented: 0,
+        }
+    }
+
+    /// Cap total presents at `frame_budget` frames (`None` = continuous).
+    ///
+    /// The budget lives here rather than beside the slot's lifetime
+    /// counter because it is a *scheduling* decision — spending it stops
+    /// the deadlines and nothing else: the slot keeps its runtime, its
+    /// status, and its last frame on the canvas until its consumer
+    /// releases it.
+    pub fn with_frame_budget(mut self, frame_budget: Option<u32>) -> Self {
+        self.frame_budget = frame_budget;
+        self
+    }
+
+    /// Whether the slot has presented everything its budget allows.
+    pub fn frame_budget_spent(&self) -> bool {
+        self.frame_budget
+            .is_some_and(|budget| self.presented >= budget)
+    }
+
+    /// Count one frame that reached the canvas (GPU present ack, CPU
+    /// blit), and pause once the budget is spent.
+    ///
+    /// Called after the frame landed, so a frame still in flight when the
+    /// budget ran out is counted when it arrives rather than lost — the
+    /// last present is the one the poster is captured from.
+    pub fn note_present(&mut self) {
+        self.presented = self.presented.saturating_add(1);
+        if self.frame_budget_spent() {
+            self.next_due_ms = None;
         }
     }
 
     /// Start (or resume) presenting: the next frame is due immediately.
+    /// A slot whose frame budget is spent stays paused (a visibility
+    /// return must not buy it more frames).
     pub fn start(&mut self, now_ms: f64) {
+        if self.frame_budget_spent() {
+            return;
+        }
         self.next_due_ms = Some(now_ms);
     }
 
@@ -196,6 +240,76 @@ mod tests {
                 delta_ms: MAX_TICK_DELTA_MS as u32
             }
         );
+    }
+
+    #[test]
+    fn a_frame_budget_pauses_the_slot_after_its_last_present() {
+        let mut schedule = FrameSchedule::new(10.0).with_frame_budget(Some(2));
+        schedule.start(0.0);
+        assert!(matches!(schedule.poll(0.0), FrameDecision::Send { .. }));
+        schedule.frame_completed();
+        schedule.note_present();
+        assert!(!schedule.frame_budget_spent(), "one of two frames");
+        assert!(
+            matches!(schedule.poll(100.0), FrameDecision::Send { .. }),
+            "the budget still has a frame in it"
+        );
+        schedule.frame_completed();
+        schedule.note_present();
+        assert!(schedule.frame_budget_spent());
+        assert_eq!(schedule.poll(200.0), FrameDecision::Wait, "budget spent");
+        assert_eq!(schedule.poll(10_000.0), FrameDecision::Wait);
+    }
+
+    #[test]
+    fn no_frame_budget_never_pauses() {
+        let mut schedule = FrameSchedule::new(10.0);
+        schedule.start(0.0);
+        for tick in 0..50 {
+            let now = f64::from(tick) * 100.0;
+            assert!(
+                matches!(schedule.poll(now), FrameDecision::Send { .. }),
+                "unbudgeted slot keeps presenting at {now} ms"
+            );
+            schedule.frame_completed();
+            schedule.note_present();
+            assert!(!schedule.frame_budget_spent());
+        }
+    }
+
+    #[test]
+    fn a_frame_in_flight_when_the_budget_runs_out_still_counts() {
+        let mut schedule = FrameSchedule::new(10.0).with_frame_budget(Some(1));
+        schedule.start(0.0);
+        assert!(matches!(schedule.poll(0.0), FrameDecision::Send { .. }));
+        assert!(schedule.in_flight());
+        // The frame lands late (worker busy): the landing is what spends
+        // the budget, so nothing is lost and nothing wedges.
+        schedule.frame_completed();
+        schedule.note_present();
+        assert!(schedule.frame_budget_spent());
+        assert!(!schedule.in_flight());
+        assert_eq!(schedule.poll(1_000.0), FrameDecision::Wait);
+    }
+
+    #[test]
+    fn a_spent_budget_survives_a_resume() {
+        let mut schedule = FrameSchedule::new(10.0).with_frame_budget(Some(1));
+        schedule.start(0.0);
+        assert!(matches!(schedule.poll(0.0), FrameDecision::Send { .. }));
+        schedule.frame_completed();
+        schedule.note_present();
+        // Visibility returns (scroll back): a spent slot buys no frames.
+        schedule.start(5_000.0);
+        assert_eq!(schedule.poll(5_000.0), FrameDecision::Wait);
+    }
+
+    #[test]
+    fn a_zero_frame_budget_never_presents() {
+        let mut schedule = FrameSchedule::new(10.0).with_frame_budget(Some(0));
+        assert!(schedule.frame_budget_spent());
+        schedule.start(0.0);
+        assert_eq!(schedule.poll(0.0), FrameDecision::Wait);
     }
 
     #[test]

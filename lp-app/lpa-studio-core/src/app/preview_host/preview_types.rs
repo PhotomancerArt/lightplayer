@@ -41,12 +41,25 @@ pub enum PreviewSource {
     ProjectUid(String),
 }
 
-/// Reserved seam for per-project preview behavior (preview-host ADR):
-/// auto input playback (button presses), audio sources for music-reactive
-/// programs, and eventually preview-mode authoring. Empty today; those
-/// features land by adding fields here instead of reshaping the lease API.
+/// Per-project preview behavior (preview-host ADR): how much live
+/// rendering a lease is worth. Further behavior — auto input playback
+/// (button presses), audio sources for music-reactive programs,
+/// preview-mode authoring — lands by adding fields here instead of
+/// reshaping the lease API.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct PreviewProfile {}
+pub struct PreviewProfile {
+    /// Present at most this many frames, then stop ticking the slot.
+    ///
+    /// The poster case: a consumer that only wants *a picture* leases a
+    /// slot, waits for its frames, captures, and drops the handle — it
+    /// should not pay for a preview that renders forever in the meantime.
+    /// The slot stays alive and readable at its budget (status unchanged,
+    /// canvas frozen on the last frame); releasing the handle frees it.
+    /// A budget of 0 never presents. `None` (default) renders
+    /// continuously — the live-preview behavior every lease had before
+    /// this field existed.
+    pub frame_budget: Option<u32>,
+}
 
 /// One slot lease request.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,7 +76,8 @@ pub struct PreviewSlotRequest {
     /// Present cadence override; `None` uses
     /// [`PreviewHostConfig::default_fps`].
     pub fps: Option<f32>,
-    /// Per-project preview behavior (reserved seam, empty today).
+    /// Per-project preview behavior (frame budget today; see
+    /// [`PreviewProfile`]).
     pub profile: PreviewProfile,
 }
 
@@ -152,6 +166,11 @@ mod tests {
         assert!(!is_teardown_abort_reason(
             "timed out waiting for browser worker boot"
         ));
+    }
+
+    #[test]
+    fn the_default_profile_renders_continuously() {
+        assert_eq!(PreviewProfile::default().frame_budget, None);
     }
 
     #[test]
