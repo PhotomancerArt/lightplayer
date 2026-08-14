@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Studio chrome — the IDE workbench (round 3)</title>
+<title>Studio chrome — one workbench bar (round 4)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -55,6 +55,7 @@
               border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
               margin: 14px 0 0; }
   .leannote b { color: var(--muted); }
+  .secnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; max-width: 940px; }
 
   /* ---- exploration controls ---- */
   .xcontrols {
@@ -94,45 +95,35 @@
                  border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 1px 9px; }
   .ghead .dots { color: var(--dim); letter-spacing: 2px; }
 
-  .wbbody { display: flex; min-height: 0; height: 580px; background: var(--bg); }
+  .wbbody { display: flex; min-height: 0; height: 540px; background: var(--bg); }
 
-  /* edge strips — the panel toggles (IntelliJ tool-window bars) */
-  .estrip { width: 27px; flex: none; background: var(--surface-muted); display: flex;
-            flex-direction: column; gap: 4px; padding: 8px 0; align-items: center; }
-  .estrip.l { border-right: 1px solid var(--border-strong); }
-  .estrip.r { border-left: 1px solid var(--border-strong); }
-  .ebtn { writing-mode: vertical-rl; font-size: 9.5px; letter-spacing: .12em;
-          text-transform: uppercase; color: var(--dim); cursor: pointer; user-select: none;
-          padding: 8px 3px; border-radius: 4px; border: 1px solid transparent; }
-  .estrip.l .ebtn { transform: rotate(180deg); }
-  .ebtn:hover { color: var(--strong); background: var(--bg-wash); }
-  .ebtn.on { color: var(--accent); background: var(--raised); border-color: var(--border-strong); }
+  /* ---- THE BAR (round 4) ---- */
+  .bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+         gap: 8px; padding: 5px 8px; background: var(--surface-muted);
+         border-bottom: 1px solid var(--border-strong); position: relative; min-height: 36px; }
+  .bar .bl { display: flex; gap: 5px; align-items: center; justify-self: start; }
+  .bar .br { display: flex; gap: 5px; align-items: center; justify-self: end; }
+  .bar .bc { display: flex; align-items: center; }
 
-  .dock { width: 250px; flex: none; display: flex; flex-direction: column; min-height: 0;
-          background: var(--surface-subtle); }
-  .dock.l { border-right: 1px solid var(--border-strong); }
-  .dock.r { border-left: 1px solid var(--border-strong); width: 290px; }
-  .panel { display: flex; flex-direction: column; min-height: 0; flex: 1;
-           border-bottom: 1px solid var(--border-strong); }
-  .panel:last-child { border-bottom: none; }
-  .phead { display: flex; align-items: center; gap: 6px; min-height: 28px;
-           padding: 0 8px; border-bottom: 1px solid var(--border-subtle);
-           background: var(--surface-muted); flex: none; }
-  .phead .ptitle { font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
-                   color: var(--dim); font-weight: 600; }
-  .phead .sp { flex: 1; }
-  .phead .hbtn { background: none; border: 0; color: var(--dim); cursor: pointer;
-                 font-size: 11px; padding: 1px 5px; border-radius: 4px; }
-  .phead .hbtn:hover { color: var(--strong); background: var(--bg-wash); }
-  .pbody { flex: 1; overflow-y: auto; min-height: 0; }
+  /* panel toggles — quieter than view tabs by design */
+  .bt { display: inline-flex; align-items: center; gap: 5px; padding: 3.5px 9px;
+        border: 1px solid transparent; border-radius: 6px; font-size: 11px;
+        color: var(--dim); cursor: pointer; user-select: none; white-space: nowrap; }
+  .bt .ico { font-size: 11px; }
+  .bt:hover { color: var(--strong); background: var(--bg-wash); }
+  .bt.on { color: var(--muted); background: var(--raised); border-color: var(--border-strong); }
+  .bt.on .ico { color: var(--accent); }
+  .bt.iconly { padding: 3.5px 7px; }
+  .bt.iconly .lab { display: none; }
 
-  .col.main { flex: 1; min-width: 0; background: var(--bg); display: flex;
-              flex-direction: column; min-height: 0; }
+  /* sm: everything compresses one notch */
+  .bar.tight { gap: 3px; padding: 4px 6px; min-height: 32px; }
+  .bar.tight .bt.iconly { padding: 3px 5px; }
+  .bar.tight .pchip { padding: 2px 5px; margin-right: 1px; }
+  .bar.tight .vseg button { padding: 3px 10px; font-size: 10.5px; }
 
-  /* center view tabs */
-  .viewtabs { display: flex; align-items: center; gap: 2px; padding: 0 8px;
-              background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
-              min-height: 30px; flex: none; }
+  /* view tabs — underline treatment (Q1a) */
+  .vtabs { display: flex; align-items: center; gap: 2px; }
   .vtab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 6px;
           font-size: 12px; color: var(--subtle); cursor: pointer;
           border-bottom: 2px solid transparent; user-select: none; }
@@ -142,6 +133,103 @@
   .vtab.on .vico { color: var(--accent); }
   .vtab.future { opacity: .45; cursor: default; }
   .vtab.future:hover { color: var(--subtle); }
+
+  /* view tabs — segmented treatment (Q1b, the sm control promoted) */
+  .vseg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px;
+          overflow: hidden; }
+  .vseg button { background: none; border: 0; color: var(--subtle); font: inherit;
+                 font-size: 11.5px; padding: 4px 14px; cursor: pointer;
+                 display: inline-flex; gap: 6px; align-items: center; }
+  .vseg button.on { background: var(--raised-strong); color: var(--strong); }
+  .vseg button .vico { font-size: 10.5px; color: var(--dim); }
+  .vseg button.on .vico { color: var(--accent); }
+
+  /* project chip */
+  .pchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+           border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer;
+           background: var(--surface-subtle); font-size: 11px; color: var(--subtle);
+           user-select: none; margin-right: 4px; }
+  .pchip:hover { color: var(--strong); border-color: var(--dim); }
+  .pchip .st { font-size: 11px; width: 13px; text-align: center; color: var(--dim); }
+  .pchip.unsaved { border-color: rgba(228,192,101,.55); }
+  .pchip.unsaved .st { color: var(--dirty); }
+  .pchip.failed { border-color: var(--err-border); background: var(--err-bg); }
+  .pchip.failed .st { color: var(--err-text); }
+  .pchip.syncing .st { color: var(--sel); animation: spin 1.2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pchip .cnt { font-family: var(--mono); font-size: 9.5px; color: var(--dirty); }
+  .pchip .pname { color: var(--muted); font-weight: 600; }
+
+  /* chip popover — ProjectDetailSections mounted as-is (D4) */
+  .ppop { position: absolute; top: calc(100% + 6px); left: 8px; width: 292px; z-index: 60;
+          border: 1px solid var(--border-strong); border-radius: var(--r-md);
+          background: var(--surface); box-shadow: 0 12px 30px rgba(0,0,0,.5); overflow: hidden; }
+  .ppop .ph { display: flex; align-items: baseline; gap: 8px; padding: 9px 12px 7px;
+              border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted); }
+  .ppop .ph b { color: var(--strong); font-size: 12.5px; }
+  .ppop .ph .stw { margin-left: auto; font-size: 10px; color: var(--good); }
+  .ppop .ph .stw.dirty { color: var(--dirty); }
+  .ppop .sec { padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .ppop .sec:last-child { border-bottom: none; }
+  .ppop .sechead { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+                   color: var(--dim); margin-bottom: 4px; display: flex; }
+  .ppop .sechead .meta { margin-left: auto; font-family: var(--mono); font-size: 9.5px;
+                         color: var(--dirty); text-transform: none; letter-spacing: 0; }
+  .ppop .acts { display: flex; gap: 7px; }
+  .ppop .acts button { flex: 1; background: var(--surface-muted); border: 1px solid var(--border-strong);
+                       border-radius: 5px; color: var(--muted); font: inherit; font-size: 11px;
+                       padding: 4px 0; cursor: pointer; }
+  .ppop .acts button:hover { color: var(--strong); }
+  .ppop .acts button.primary { border-color: rgba(228,192,101,.5); color: var(--dirty); }
+  .ppop .erow { display: flex; gap: 7px; align-items: center; font-size: 11px;
+                color: var(--subtle); padding: 2.5px 0; }
+  .ppop .erow .eico { color: var(--dirty); font-size: 10px; width: 12px; }
+  .ppop .erow .epath { font-family: var(--mono); font-size: 10px; color: var(--muted);
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ppop .erow .rvt { margin-left: auto; font-size: 9.5px; color: var(--dim); cursor: pointer; }
+  .ppop .erow .rvt:hover { color: var(--strong); }
+  .ppop .krow { display: flex; gap: 10px; font-size: 10.5px; padding: 1.5px 0; }
+  .ppop .krow .k { width: 92px; flex: none; color: var(--dim); font-size: 9.5px;
+                   letter-spacing: .07em; text-transform: uppercase; padding-top: 1px; }
+  .ppop .krow .v { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .ppop .sharenote { font-size: 10.5px; color: var(--dim); }
+  .ppop .sharenote.blocked { color: var(--warn-text); }
+
+  /* docks — round 4: no tab rows, body renders directly */
+  .dock { width: 262px; flex: none; display: flex; flex-direction: column; min-height: 0;
+          background: var(--surface-subtle); }
+  .dock.l { border-right: 1px solid var(--border-strong); }
+  .dock.r { border-left: 1px solid var(--border-strong); width: 300px; }
+  .pbody { flex: 1; overflow-y: auto; min-height: 0; }
+
+  /* ---- TODAY's chrome (section 1, shipped repro) ---- */
+  .dtabs { display: flex; align-items: center; min-height: 30px; padding: 0 4px;
+           background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+           flex: none; }
+  .dtab { padding: 7px 10px 6px; font-size: 11px; color: var(--dim); cursor: pointer;
+          position: relative; user-select: none; }
+  .dtab:hover { color: var(--strong); }
+  .dtab.on { color: var(--muted); background: var(--surface-subtle); }
+  .dtab.on::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0;
+                    height: 1px; background: var(--accent); }
+  .dtabs .sp { flex: 1; }
+  .dtabs .chev { color: var(--dim); cursor: pointer; padding: 2px 7px; font-size: 12px; }
+  .dtabs .chev:hover { color: var(--strong); }
+  .estrip { width: 27px; flex: none; background: var(--surface-muted); display: flex;
+            flex-direction: column; gap: 4px; padding: 8px 0; align-items: center; }
+  .estrip.l { border-right: 1px solid var(--border-strong); }
+  .estrip.r { border-left: 1px solid var(--border-strong); }
+  .ebtn { writing-mode: vertical-rl; font-size: 9.5px; letter-spacing: .12em;
+          text-transform: uppercase; color: var(--dim); cursor: pointer; user-select: none;
+          padding: 8px 3px; border-radius: 4px; border: 1px solid transparent; }
+  .estrip.l .ebtn { transform: rotate(180deg); }
+  .ebtn:hover { color: var(--strong); background: var(--bg-wash); }
+  .viewtabs-old { display: flex; align-items: center; gap: 2px; padding: 0 8px;
+                  background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+                  min-height: 30px; flex: none; }
+
+  .col.main { flex: 1; min-width: 0; background: var(--bg); display: flex;
+              flex-direction: column; min-height: 0; }
 
   .etools { display: flex; align-items: center; gap: 5px; padding: 5px 10px;
             border-bottom: 1px solid var(--border-subtle); background: var(--surface-subtle);
@@ -185,7 +273,6 @@
   .trow.child { margin-left: 16px; }
   .trow.leaf { margin-left: 20px; padding: 2.5px 7px; }
   .trow .mdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
-  .trow .mdot.un { background: none; border: 1px solid var(--dim); }
   .chip { font-family: var(--mono); font-size: 9.5px; color: var(--subtle);
           border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px;
           background: var(--surface-muted); white-space: nowrap; }
@@ -226,9 +313,6 @@
   .ncard .fold { padding: 6px 12px; border-top: 1px solid var(--border-subtle); font-size: 10.5px;
                  color: var(--dim); }
   .ncard .fold b { color: var(--subtle); font-weight: 600; letter-spacing: .08em; font-size: 9.5px; }
-  .ncard .code { font-family: var(--mono); font-size: 10.5px; color: var(--subtle);
-                 padding: 9px 12px; background: var(--terminal); line-height: 1.55; }
-  .ncard .code .kw { color: var(--obj-3); } .ncard .code .fn { color: var(--obj-0); }
 
   /* ---- device panel ---- */
   .dev { padding: 10px; display: grid; gap: 10px; align-content: start; }
@@ -239,12 +323,6 @@
                     background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle); }
   .devcard .dhead b { font-size: 12.5px; color: var(--strong); }
   .devcard .dhead .tag { margin-left: auto; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
-  .devcard .icons { display: flex; gap: 4px; padding: 5px 8px;
-                    border-bottom: 1px solid var(--border-subtle); }
-  .devcard .icons span { border: 1px solid transparent; border-radius: 5px; padding: 2px 9px;
-                         font-size: 10.5px; color: var(--dim); cursor: pointer; }
-  .devcard .icons span.on { border-color: rgba(63,214,142,.4); background: rgba(63,214,142,.1);
-                            color: var(--good); }
   .devcard .dbody { padding: 8px 11px; font-size: 11px; color: var(--subtle); display: grid; gap: 4px; }
   .devcard .dbody .run { color: var(--good); font-size: 11.5px; }
   .devcard .krow { display: flex; gap: 10px; }
@@ -262,9 +340,6 @@
                  color: var(--muted); }
   .obox .bhead .occ { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
                       font-family: var(--mono); font-size: 9.5px; color: var(--dim); }
-  .occbar { width: 44px; height: 5px; border-radius: 3px; background: var(--track);
-            overflow: hidden; }
-  .occbar i { display: block; height: 100%; background: color-mix(in srgb, var(--heading) 60%, var(--track)); }
   .port { padding: 4px 9px 6px; border-top: 1px solid var(--border-subtle); }
   .port .pline { display: flex; align-items: baseline; gap: 7px; font-family: var(--mono);
                  font-size: 10.5px; color: var(--muted); }
@@ -280,9 +355,24 @@
   .cell.gap { background: none; border-style: dashed; border-color: var(--border-muted);
               color: var(--border-strong); cursor: default; }
   .cell.range { border-color: rgba(240,145,59,.4); color: var(--obj-4); }
-  .dense .port { padding: 2px 9px 3px; }
-  .dense .cellbar { height: 10px; margin-top: 2px; }
-  .dense .cell { font-size: 0; }
+
+  /* ---- props panel (Mapping-only; #418 B′ deepest-first stack) ---- */
+  .props { padding: 10px; display: grid; gap: 9px; align-content: start; }
+  .pcard { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
+           overflow: hidden; }
+  .pcard.top { border-color: rgba(76,159,254,.4); }
+  .pcard .pchead { display: flex; align-items: baseline; gap: 7px; padding: 6px 10px;
+                   background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+                   font-size: 11px; }
+  .pcard .pchead b { color: var(--strong); }
+  .pcard .pchead .lvl { margin-left: auto; font-size: 9px; letter-spacing: .08em;
+                        text-transform: uppercase; color: var(--dim); }
+  .pcard .pcrow { display: flex; gap: 8px; padding: 4px 10px; font-size: 10.5px;
+                  color: var(--subtle); }
+  .pcard .pcrow .k { width: 60px; flex: none; font-size: 9px; letter-spacing: .08em;
+                     text-transform: uppercase; color: var(--dim); padding-top: 1px; }
+  .pcard .pcrow .v { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .modline { font-size: 9.5px; color: var(--dim); padding: 2px 4px; }
 
   /* ---- canvas svg ---- */
   .nametag { font: 600 10px var(--sans); fill: var(--muted); }
@@ -290,73 +380,26 @@
   .tagframe { fill: var(--surface-muted); stroke: var(--border-strong); rx: 4; }
   .fixframe { fill: none; stroke: var(--border-muted); stroke-dasharray: 3 3; rx: 8; }
   .fixframe.sel { stroke: var(--sel); stroke-dasharray: none; }
+  #dragdome { cursor: grab; }
+  #dragdome.dragging { cursor: grabbing; }
 
-  .verbbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
-             border-top: 1px solid var(--border-strong); background: var(--surface-muted);
-             flex: none; flex-wrap: wrap; }
-  .verbbar .vhint { font-size: 10px; color: var(--dim); margin-left: auto; }
+  /* ---- bar-only treatment strips (section 3) ---- */
+  .barrow { margin-top: 10px; display: grid; gap: 6px; max-width: 1080px; }
+  .barrow .cap { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+                 color: var(--dim); margin-top: 8px; }
+  .barframe { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
 
-  /* ---- panel anatomy (section 2) ---- */
-  .anat { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; align-items: flex-start; }
-  .anat .apanel { width: 264px; flex: none; }
-  .anat .aframe { border: 1px solid var(--border-strong); border-radius: var(--r-md);
-                  overflow: hidden; background: var(--surface-subtle); height: 350px;
-                  display: flex; flex-direction: column; }
-  .anat h3 { font-size: 11px; margin: 0 0 2px; color: var(--muted); font-weight: 600; }
-  .anat .arole { font-size: 10.5px; color: var(--dim); margin: 0 0 8px; min-height: 42px; }
-  .anat .arole b { color: var(--subtle); }
-
-  /* ---- future views (section 3) ---- */
-  .future { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
-  .fframe { width: 460px; border: 1px dashed var(--border-strong); border-radius: var(--r-md);
-            overflow: hidden; background: var(--surface-subtle); opacity: .85; }
-  .fframe .fcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em;
-                  text-transform: uppercase; color: var(--dim); background: var(--surface-muted);
-                  border-bottom: 1px dashed var(--border-strong); }
-  .fframe .fbody { height: 300px; display: flex; flex-direction: column; }
-  .bigpanel { flex: 1; display: grid; gap: 14px; padding: 18px 22px; align-content: center; }
-  .bigrow { display: flex; align-items: center; gap: 14px; }
-  .bigrow .lab { width: 110px; flex: none; font-size: 10px; letter-spacing: .1em;
-                 text-transform: uppercase; color: var(--dim); }
-  .bigrow .slider { flex: 1; height: 6px; border-radius: 3px; background: var(--track);
-                    position: relative; }
-  .bigrow .slider .fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px;
-                          background: color-mix(in srgb, var(--heading) 55%, var(--track)); }
-  .bigrow .slider .knob { position: absolute; top: 50%; width: 14px; height: 22px;
-                          transform: translate(-50%,-50%); background: var(--raised-strong);
-                          border: 1px solid var(--border-strong); border-radius: 4px; }
-  .tl { flex: 1; padding: 14px 18px; display: grid; gap: 8px; align-content: start; }
-  .tlrow { display: flex; gap: 6px; align-items: center; }
-  .tlrow .tname { width: 90px; flex: none; font-size: 10.5px; color: var(--subtle); }
-  .tlbar { flex: 1; height: 20px; border-radius: 4px; background: var(--track);
-           position: relative; overflow: hidden; }
-  .tlseg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
-           border: 1px solid var(--border-strong); }
-
-  /* ================= mobile frames ================= */
+  /* ================= mobile / md frames ================= */
   .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin-top: 10px; }
-  .phone { width: 300px; flex: none; border: 1px solid var(--border-strong); border-radius: 14px;
+  .phone { width: 310px; flex: none; border: 1px solid var(--border-strong); border-radius: 14px;
            overflow: hidden; background: var(--bg); }
-  .phone.tab { width: 620px; }
+  .phone.tab { width: 660px; border-radius: 10px; }
   .phone .pcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
                  color: var(--dim); background: var(--surface-muted);
                  border-bottom: 1px solid var(--border-subtle); }
   .phone .pbdy { height: 520px; display: flex; flex-direction: column; min-height: 0; }
-  .phone.tab .pbdy { height: 470px; flex-direction: row; }
-  .pstrip { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
-            background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
-            flex: none; }
-  .pstrip .sq { width: 30px; height: 26px; display: inline-flex; align-items: center;
-                justify-content: center; border: 1px solid var(--border-strong); border-radius: 6px;
-                color: var(--subtle); font-size: 12px; cursor: pointer; flex: none;
-                background: var(--surface-subtle); user-select: none; }
-  .pstrip .sq:hover { color: var(--strong); }
-  .pstrip .sq.on { color: var(--sel); border-color: rgba(76,159,254,.55); background: var(--sel-bg); }
-  .pstrip .pdoc { flex: 1; display: flex; border: 1px solid var(--border-strong); border-radius: 6px;
-                  overflow: hidden; }
-  .pstrip .pdoc button { flex: 1; background: none; border: 0; color: var(--subtle); font: inherit;
-                         font-size: 11px; padding: 4px 0; cursor: pointer; }
-  .pstrip .pdoc button.on { background: var(--raised-strong); color: var(--strong); }
+  .phone.tab .pbdy { height: 440px; }
+  .phone.tab .tbody { flex: 1; display: flex; min-height: 0; }
   .pmain { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
   .pmain.canvas { overflow: hidden; display: flex; align-items: center; }
   .pmain.canvas svg { width: 100%; height: 100%; }
@@ -366,9 +409,6 @@
   .pmain .backhead b { color: var(--muted); font-weight: 600; text-transform: uppercase;
                        font-size: 10px; letter-spacing: .1em; }
   .pmain .backhead .bk { cursor: pointer; color: var(--sel); }
-
-  .vstrip { width: 27px; flex: none; background: var(--surface-muted); display: flex;
-            flex-direction: column; gap: 4px; padding: 8px 0; align-items: center; }
 
   /* decisions table */
   table.dec { border-collapse: collapse; font-size: 12px; margin-top: 12px; max-width: 1080px; }
@@ -383,16 +423,15 @@
 </head>
 <body>
 
-<h1>Studio chrome — the IDE workbench (round 3)</h1>
+<h1>Studio chrome — one workbench bar (round 4)</h1>
 <p class="hint">
-  <b>Round-2 rulings (Yona):</b> panel homes as drawn, but the Project panel is called
-  <b>Nodes</b> — the whole workbench is the project (a <b>Files</b> view is likely someday).
-  View tabs = <b>Nodes · Mapping</b> ("mapping" is the term of art a pro LED artist scans for;
-  the Nodes view / Nodes panel name-share is accepted — they show the same thing). Edge strips
-  ruled in; expectation is <b>radio</b> behaviour (one panel per side, switching) — drawn as the
-  default here, with a <b>stack</b> mode in the strip controls to test whether two-at-once earns
-  its keep. <code>PanelDock</code> ruled. Open: R3-1 radio vs stack, R3-2 per-view panel memory
-  (see §5). Rounds 1–2 in git history.
+  <b>Vision (dir 2026-08-14-0826):</b> ONE responsive bar replaces four chrome systems
+  (ViewTabs · dock tab rows · EdgeStrip · SummonStrip) — <b>project chip</b>, then panel
+  toggles flanking centered view tabs. Docks lose their tab rows; a collapsed side is
+  <b>bare</b> (D6, provisional — this round is its test). The chip finally gives project
+  state a home on every view: <b>drag the dome on §2's canvas</b> — arrange edits already
+  land in <code>dirty.persisted</code>, and now you see it. Rounds 1–3 in git history;
+  shipped chrome reproduced in §1 so "keep what we have" stays comparable.
 </p>
 
 <div class="xcontrols">
@@ -400,163 +439,147 @@
     <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
     <button id="xv-map" onclick="setView('map')">Mapping</button>
   </span>
-  <span class="grp"><b>mapping mode</b>
-    <button id="xm-map" onclick="setMode('map')">mapping</button>
-    <button id="xm-patch" onclick="setMode('patch')">patching</button>
+  <span class="grp"><b>project state</b>
+    <button id="xp-saved" onclick="setProj('saved')">saved</button>
+    <button id="xp-unsaved" onclick="setProj('unsaved')">unsaved</button>
+    <button id="xp-failed" onclick="setProj('failed')">failed</button>
+    <button id="xp-syncing" onclick="setProj('syncing')">syncing</button>
   </span>
-  <span class="grp"><b>outputs data</b>
-    <button id="xd-dome" onclick="setDensity('dome')">mini-dome</button>
-    <button id="xd-rad" onclick="setDensity('radiance')">radiance 10×32</button>
+  <span class="grp"><b>Q1 view tabs</b>
+    <button id="xt-under" onclick="setTabs('under')">underline</button>
+    <button id="xt-seg" onclick="setTabs('seg')">segmented</button>
   </span>
-  <span class="grp"><b>strips</b>
-    <button id="xs-radio" onclick="setStripMode('radio')">radio</button>
-    <button id="xs-stack" onclick="setStripMode('stack')">stack</button>
+  <span class="grp"><b>Q2 chip</b>
+    <button id="xc-glyph" onclick="setChip('glyph')">glyph</button>
+    <button id="xc-name" onclick="setChip('name')">glyph+name</button>
+  </span>
+  <span class="grp"><b>docks</b>
+    <button onclick="preset('both')">both open</button>
+    <button onclick="preset('left')">left only</button>
+    <button onclick="preset('none')">both collapsed</button>
   </span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
 <section id="sec1">
-<h2>1 · The workbench</h2>
+<h2>1 · Today — the shipped chrome (#413), faithfully</h2>
 <p class="thesis">
-  Full-height under the (slimmed) site header. <b>Edge strips</b> carry the four panel toggles —
-  left strip: Nodes · Fixtures; right strip: Device · Outputs. A strip button opens its panel in
-  the side's dock; in <b>radio</b> mode (default — the ruling's expectation) it replaces the
-  side's open panel, and re-clicking collapses the side; <b>stack</b> mode (strip control above)
-  lets a side hold both. <b>View tabs</b> switch the center only. Panel visibility is remembered
-  <b>per view</b> (R3-2 ruling: try it and see how it feels), seeded by defaults — Nodes opens
-  the Nodes tree + Device; Mapping opens Fixtures + Outputs — and any panel can be summoned in
-  any view (the "always there" rule: check a port's occupancy without leaving Nodes). Patching
-  is a <b>mode inside Mapping</b>. Future views ride the same tab row (greyed).
+  View tabs live in the <b>center column only</b>; each open dock wears its <b>own tab row</b>
+  in the same band (plus a hide chevron); a collapsed side leaves a 27px vertical
+  <b>edge strip</b>. Three sibling systems share one row — panels read as peers of views.
+  The right side is drawn collapsed to show the edge strip. Unsaved state: nowhere in this
+  chrome — it lives inside the Nodes panel body and on the root card, neither on screen in
+  Mapping's default docks.
 </p>
-<div class="wb" id="c1"></div>
-<p class="secnote" style="font-size:10.5px; color:var(--dim); margin-top:8px;">
-  Everything here is live: edge-strip toggles, view tabs, mode segment, tree/cell selection,
-  density. Selection is one system — click a fixture row, canvas frame, or port cell and every
-  open panel follows.</p>
+<div class="wb" id="c-today"></div>
 </section>
 
 <section id="sec2">
-<h2>2 · The four panels</h2>
+<h2>2 · The bar — one chrome row, all of it (live)</h2>
 <p class="thesis">
-  One panel, one role — no double duty. Nodes (né Project — the whole workbench is the project)
-  stays the <b>assembly</b> tree: all nodes, add, structure. Fixtures and Outputs are
-  <b>project-scope slices</b>: the multi-node analogue of the custom node faces, derived from the
-  same graph + node selection + on-selection body loading the app already has. Device is the card
-  that exists today, docked.
+  <b>[chip] [left toggles] · view tabs · [right toggles]</b>. Toggles drive the same
+  radio-per-side docks (re-click collapses — the side goes <b>bare</b>, D6). The roster is the
+  view's: switch to Mapping and <b>Props appears</b> on the right. The chip is always there:
+  click it for the project popover (ProjectDetailSections as-is — save, revert, pending edits,
+  share-blocked-while-dirty). <b>Drag the dome</b> in Mapping: the commit bumps
+  <code>dirty.persisted</code> and the chip turns pencil — the #417 gate complaint, closed.
 </p>
-<div class="anat">
-  <div class="apanel"><h3>Nodes</h3>
-    <p class="arole"><b>Assembly + structure.</b> All nodes of the graph, tree-shaped; add node;
-      advanced tinkering. No fixture chips — that's the Fixtures panel's job.</p>
-    <div class="aframe" id="anat-project"></div></div>
-  <div class="apanel"><h3>Fixtures</h3>
-    <p class="arole"><b>The light-side slice.</b> fixture → object → instance with channel chips,
-      mapped/unmapped state, object colours. Selection here focuses the Map canvas.</p>
-    <div class="aframe" id="anat-fixtures"></div></div>
-  <div class="apanel" style="width:290px"><h3>Outputs</h3>
-    <p class="arole"><b>The hardware-side slice.</b> box → port → wire-window cells, occupancy,
-      gaps, contested ranges. Radiance density (10×32) must stay legible — toggle it above.</p>
-    <div class="aframe" id="anat-outputs"></div></div>
-  <div class="apanel"><h3>Device</h3>
-    <p class="arole"><b>Today's device card, docked.</b> Run state, lamps, frame, power; the sim /
-      hardware surface. Unchanged by this rework.</p>
-    <div class="aframe" id="anat-device"></div></div>
-</div>
+<div class="wb" id="c-bar"></div>
+<p class="secnote">
+  Everything is live: chip popover (save/revert work), panel toggles, view tabs, dome drag →
+  unsaved. Collapse both docks (control strip above) to feel the bare sides.</p>
 </section>
 
 <section id="sec3">
-<h2>3 · Future views (same tab row, zero new chrome)</h2>
+<h2>3 · Q1 / Q2 — the bar's two treatments, side by side</h2>
 <p class="thesis">
-  The test of the model: adding a view = a center tab + panel defaults. <b>Live / Perform</b> puts
-  the root panel front and center over a read-only map strip (kiosk mode; maybe what ships on
-  device). <b>Show</b> gets playlists / timelines. Neither is designed here — the frames only
-  prove the chrome doesn't change shape when they arrive.
+  <b>Q1:</b> view tabs as <b>underline</b> (today's lg language) vs <b>segmented</b> (the sm
+  control promoted). <b>Q2:</b> chip as glyph-only vs glyph+name. Same bar, both states of
+  each; the workbench above follows the control-strip setting so either can be felt live.
 </p>
-<div class="future">
-  <div class="fframe"><div class="fcap">future · Live / Perform — panel first, read-only map</div>
-    <div class="fbody" id="fut-live"></div></div>
-  <div class="fframe"><div class="fcap">future · Show — playlists / timelines</div>
-    <div class="fbody" id="fut-show"></div></div>
-</div>
+<div class="barrow" id="c-treatments"></div>
+</section>
+
+<section id="sec4">
+<h2>4 · md and sm — the same bar, folded</h2>
+<p class="thesis">
+  <b>md:</b> toggle labels drop to icons; docks narrow; nothing else changes. <b>sm:</b> the
+  identical bar, icons only, segmented center — a toggle <b>summons</b> the panel over the
+  main view instead of docking it. Props is summonable now (the shipped strip hard-codes the
+  four fixed panels; the unified roster fixes that for free). First phone is live.
+</p>
+<div class="phones" id="c-phones"></div>
 </section>
 
 <section id="sec5">
-<h2>4 · Mobile — the edge strips fold into the summon strip</h2>
-<p class="thesis">
-  Same model, folded: the main view is full-screen; the sticky strip carries the view switch and
-  the <b>same four panel toggles</b> the desktop edge strips carry. Summoning a panel temporarily
-  replaces the main view; back returns. The first phone is live. The tablet frame is the md
-  middle: one dock open, the other side stays a strip.
-</p>
-<div class="phones" id="phones"></div>
-</section>
-
-<section id="sec6">
-<h2>5 · Rulings + what round 3 tests</h2>
+<h2>5 · Round-4 questions</h2>
 <table class="dec">
-  <tr><th></th><th>Decision</th><th>Status</th></tr>
-  <tr><td class="q">R2-1</td>
-      <td>Panel homes: left = Nodes (né Project) + Fixtures · right = Device + Outputs. The whole
-          workbench is the project; a <b>Files</b> view is likely someday (greyed in the tab
-          row).</td>
-      <td><b>RULED</b> (round 2)</td></tr>
-  <tr><td class="q">R2-2</td>
-      <td>View tabs: <b>Nodes · Mapping</b> — "mapping" is the term of art an experienced LED
-          artist scans the screen for. Nodes view / Nodes panel share the name; accepted — they
-          show the same thing.</td>
-      <td><b>RULED</b> (round 2)</td></tr>
-  <tr><td class="q">R2-5</td>
-      <td>Code name: <code>PanelDock</code> — distinct from config/data "slot", easy to rename
-          later.</td>
-      <td><b>RULED</b> (round 2)</td></tr>
-  <tr><td class="q">R3-1</td>
-      <td>Strip behaviour: <b>radio</b> (one panel per side, ruling's expectation — drawn as
-          default) vs <b>stack</b> (two per side). Flip the <b>strips</b> control and feel
-          whether two-at-once earns its keep.</td>
-      <td>OPEN — try both</td></tr>
-  <tr><td class="q">R3-2</td>
-      <td>Panel visibility remembered <b>per main view</b> (Nodes keeps its set, Mapping its
-          own; defaults seed first visit). Ruled as "try it and see how it feels" — switch views
-          and back with different panels open.</td>
-      <td>TENTATIVE — feel test</td></tr>
+  <tr><th></th><th>Question</th><th>Status</th></tr>
+  <tr><td class="q">R4-1</td>
+      <td><b>The bar itself</b> — one row: chip + panel toggles flanking centered view tabs,
+          docks bare below. Does lg feel better than §1, and does the hierarchy finally read
+          (view = prominent center, panels = quiet flanks)?</td>
+      <td>GATE</td></tr>
+  <tr><td class="q">R4-2</td>
+      <td><b>D6 bare collapsed sides</b> — collapse both docks: is the unhighlighted toggle
+          enough of a "panels live here" signal, or do the sides feel amputated?</td>
+      <td>GATE (provisional ruling)</td></tr>
+  <tr><td class="q">R4-3</td>
+      <td><b>Q1 view-tab treatment</b> — underline (lg language, lighter) vs segmented (sm
+          language, boxier, more "control"). One language at all widths would be ideal; does
+          either survive both?</td>
+      <td>GATE — try both</td></tr>
+  <tr><td class="q">R4-4</td>
+      <td><b>Q2 chip content</b> — glyph-only (name stays in the site header) vs glyph+name
+          (project identity in the editing chrome too, echoes the header).</td>
+      <td>GATE — lean glyph-only</td></tr>
 </table>
 <p class="leannote">
-  <b>Lean.</b> Radio strips + per-view memory. Radio keeps sides honest at density (the 10×32
-  rail never shares a column) and matches the expectation; per-view memory is what makes the
-  defaults feel like the view helping rather than rearranging. Internally the view → dock
-  assignment stays a data table so <i>we</i> can experiment; customization remains a future
-  option, not v1 machinery.
+  <b>Lean.</b> The bar with <b>underline</b> view tabs and a <b>glyph-only</b> chip. Underline
+  keeps the view tabs the only prominent text element, which is the hierarchy argument made
+  visually; segmented reads as a control among controls and flattens it. Glyph-only because
+  the name is one level up (the header owns navigation/identity — Q1's ruling); the chip's job
+  is state + door, and it does it in 24px. Bare collapsed sides feel right in this mock — but
+  that's exactly R4-2's gate question.
 </p>
 </section>
 
 <script>
 /* ================= state ================= */
 const state = {
-  view: 'nodes',            // 'nodes' | 'map'
-  mode: 'map',              // 'map' | 'patch'  (the Mapping view's mode)
-  density: 'dome',
-  stripMode: 'radio',       // R3-1: 'radio' (ruling's expectation) | 'stack'
+  view: 'map',              // 'nodes' | 'map' — start on Mapping: the motivating view
+  mode: 'map',              // Mapping's mode
   sel: 'dome/2',
-  phoneView: 'main',        // 'main' | 'project' | 'fixtures' | 'outputs' | 'device'
-  // per-view panel visibility (R2-4): seeded with the good defaults
-  panels: {
-    nodes: { left: ['project'], right: ['device'] },
-    map:   { left: ['fixtures'], right: ['outputs'] },
+  tabs: 'under',            // Q1: 'under' | 'seg'
+  chipMode: 'glyph',        // Q2: 'glyph' | 'name'
+  proj: 'saved',            // 'saved' | 'unsaved' | 'failed' | 'syncing'
+  edits: [],                // pending arrange edits shown in the popover
+  popOpen: false,
+  domeDx: 0, domeDy: 0,     // committed arrange offset
+  phoneView: 'main',
+  // per-view dock memory (shipped defaults: Nodes→(Nodes,Device), Mapping→(Fixtures,Props))
+  docks: {
+    nodes: { left: 'project', right: 'device' },
+    map:   { left: 'fixtures', right: 'props' },
   },
+  // today's chrome (§1) keeps its own small state
+  today: { left: 'fixtures', right: null },
 };
 const Q = new URLSearchParams(location.search);
 if (Q.get('view')) state.view = Q.get('view');
-if (Q.get('mode')) state.mode = Q.get('mode');
-if (Q.get('density')) state.density = Q.get('density');
+if (Q.get('proj')) state.proj = Q.get('proj');
+if (Q.get('tabs')) state.tabs = Q.get('tabs');
+if (Q.get('chip')) state.chipMode = Q.get('chip');
+if (Q.get('pop')) state.popOpen = true;
+if (Q.get('docks') === 'none') state.docks[state.view] = { left: null, right: null };
 if (Q.get('phone')) state.phoneView = Q.get('phone');
-if (Q.get('panels')) { // e.g. panels=project,fixtures/outputs,device
-  const [l, r] = Q.get('panels').split('/');
-  state.panels[state.view] = { left: (l || '').split(/[+, ]/).filter(Boolean),
-                               right: (r || '').split(/[+, ]/).filter(Boolean) };
-}
 if (Q.get('only')) {
   document.querySelectorAll('section').forEach(s => { if (s.id !== Q.get('only')) s.hidden = true; });
   document.querySelector('.xcontrols').style.position = 'static';
+}
+if (state.proj === 'unsaved' && !state.edits.length) {
+  state.edits = [{ path: 'editor.json', what: 'arrange dome' },
+                 { path: 'sky.shader.json', what: 'speed 0.4' }];
 }
 
 /* ================= data (mini-dome world, #409) ================= */
@@ -578,16 +601,6 @@ const FIXTURES = [
   { id: 'peach', lamps: 40, color: 'var(--obj-4)', kind: 'range', range: true,
     instances: [ { path: 'peach 0..40', chip: 'IO16:1-40', range: true } ]},
 ];
-const TREE_TOP = [
-  { ico: '▤', name: 'Mini dome', kind: 'module', root: true },
-  { ico: '◔', name: 'Clock', kind: 'clock', child: true },
-  { ico: '✳', name: 'Sky shader', kind: 'shader', child: true },
-  { ico: '◑', name: 'Sunrise palette', kind: 'palette', child: true, warn: true },
-];
-const TREE_TAIL = [
-  { ico: '⌁', name: 'out_a', kind: 'output', child: true },
-  { ico: '⌁', name: 'out_b', kind: 'output', child: true },
-];
 const DOME_BOXES = [
   { name: 'Box 1 · out_a', ports: [
     { pin: 'IO18', strip: 'ws2812', used: 60, total: 64,
@@ -605,30 +618,41 @@ const DOME_BOXES = [
       cells: [{ label: 'peach', w: 40, range: true }, { gap: true, w: 24 }] },
   ]},
 ];
-const PANEL_TITLES = { project: 'Nodes', fixtures: 'Fixtures', outputs: 'Outputs', device: 'Device' };
-const PANEL_SIDE = { project: 'left', fixtures: 'left', device: 'right', outputs: 'right' };
-const STRIP_ORDER = ['project', 'fixtures', 'device', 'outputs']; // dock stacking = strip order
+const PANELS = {
+  project:  { title: 'Nodes',    ico: '▤', side: 'left' },
+  fixtures: { title: 'Fixtures', ico: '⬡', side: 'left' },
+  props:    { title: 'Props',    ico: '☰', side: 'right' },
+  outputs:  { title: 'Outputs',  ico: '▦', side: 'right' },
+  device:   { title: 'Device',   ico: '⌁', side: 'right' },
+};
+/* shipped roster: PanelId::strip — left fixed; right differs per view (Props Mapping-only) */
+function roster(view, side) {
+  if (side === 'left') return ['project', 'fixtures'];
+  return view === 'map' ? ['props', 'outputs', 'device'] : ['device', 'outputs'];
+}
 
-/* ================= panels ================= */
+/* ================= panel bodies ================= */
 function projectTree() {
-  let h = '<div class="tree">';
-  for (const n of TREE_TOP) {
-    h += `<div class="trow ${n.child ? 'child' : ''}">
-      <span class="tico">${n.ico}</span><span class="tname">${n.name}</span>
-      ${n.warn ? '<span class="warn">⚠</span>' : ''}<span class="kind">${n.kind}</span></div>`;
-  }
+  let h = `<div class="tree">
+    <div class="trow"><span class="tico">▤</span><span class="tname">Mini dome</span>
+      <span class="kind">module</span></div>
+    <div class="trow child"><span class="tico">◔</span><span class="tname">Clock</span>
+      <span class="kind">clock</span></div>
+    <div class="trow child"><span class="tico">✳</span><span class="tname">Sky shader</span>
+      <span class="kind">shader</span></div>
+    <div class="trow child"><span class="tico">◑</span><span class="tname">Sunrise palette</span>
+      <span class="warn">⚠</span><span class="kind">palette</span></div>`;
   for (const f of FIXTURES) {
     h += `<div class="trow child ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
       <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
       <span class="tname">${f.id}</span><span class="kind">fixture</span></div>`;
   }
-  for (const n of TREE_TAIL) {
-    h += `<div class="trow child"><span class="tico">${n.ico}</span>
-      <span class="tname">${n.name}</span><span class="kind">${n.kind}</span></div>`;
-  }
+  h += `<div class="trow child"><span class="tico">⌁</span><span class="tname">out_a</span>
+      <span class="kind">output</span></div>
+    <div class="trow child"><span class="tico">⌁</span><span class="tname">out_b</span>
+      <span class="kind">output</span></div>`;
   return h + '<div class="addrow">+ Add node…</div></div>';
 }
-
 function fixturesPanel() {
   let h = `<div class="psummary">3 fixtures · 217 lamps · 9 instances</div><div class="tree">`;
   for (const f of FIXTURES) {
@@ -647,12 +671,10 @@ function fixturesPanel() {
   }
   return h + '</div>';
 }
-
 function devicePanel() {
   return `<div class="dev">
     <div class="devcard">
       <div class="dhead"><b>Simulator</b><span class="tag">SIMULATOR ⤢</span></div>
-      <div class="icons"><span>▷</span><span class="on">ⓘ</span><span>▤</span><span>⌗</span><span>⚠</span></div>
       <div class="dbody"><span class="run">Running</span>
         <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
         <div class="krow"><span class="k">Frame</span><span class="v">60 fps · 2.1 ms</span></div>
@@ -666,9 +688,7 @@ function devicePanel() {
     </div>
   </div>`;
 }
-
 function outputsPanel() {
-  if (state.density === 'radiance') return radianceOutputs();
   let h = '<div class="outs">';
   for (const box of DOME_BOXES) {
     h += `<div class="obox"><div class="bhead">▾ ${box.name}
@@ -689,32 +709,30 @@ function outputsPanel() {
   }
   return h + '</div>';
 }
-
-function radianceOutputs() {
-  let h = '<div class="outs dense">';
-  for (let b = 1; b <= 10; b++) {
-    if (b !== 3) {
-      h += `<div class="obox"><div class="bhead">▸ Box ${b}
-        <span class="occ"><span class="occbar"><i style="width:${70 + (b * 13) % 30}%"></i></span>
-        ${30 + b % 3}/32</span></div></div>`;
-      continue;
-    }
-    h += `<div class="obox"><div class="bhead">▾ Box 3
-      <span class="occ">31/32 · 930 lamps</span></div>`;
-    for (let p = 0; p < 8; p++) {
-      h += `<div class="port"><div class="pline"><span class="pin">P${p}</span>
-        <span class="use">30/30</span></div><div class="cellbar">
-        <span class="cell ${p === 2 && state.mode === 'patch' ? 'sel' : ''}" style="flex-grow:30"></span>
-        </div></div>`;
-    }
-    h += `<div class="port"><div class="pline"><span class="use">… 24 more ports</span></div></div></div>`;
-  }
-  return h + '</div>';
+function propsPanel() {
+  /* B′ ruling (#418): full stack, deepest first — selection always the top card */
+  const arranged = state.domeDx || state.domeDy;
+  return `<div class="props">
+    <div class="pcard top">
+      <div class="pchead"><b>${state.sel}</b><span class="lvl">instance</span></div>
+      <div class="pcrow"><span class="k">chip</span><span class="v">IO13:1-30</span></div>
+      <div class="pcrow"><span class="k">lamps</span><span class="v">30</span></div>
+    </div>
+    <div class="pcard">
+      <div class="pchead"><b>dome</b><span class="lvl">placement</span></div>
+      <div class="pcrow"><span class="k">t</span>
+        <span class="v">[${(148 + state.domeDx).toFixed(0)}, ${(96 + state.domeDy).toFixed(0)}]${arranged ? ' ✎' : ''}</span></div>
+      <div class="pcrow"><span class="k">r · s</span><span class="v">0° · 1.00</span></div>
+    </div>
+    <div class="pcard">
+      <div class="pchead"><b>dome.map2d.json</b><span class="lvl">document</span></div>
+      <div class="pcrow"><span class="k">objects</span><span class="v">5 sectors · 150 lamps</span></div>
+    </div>
+    <div class="modline">in module: Mini dome › Dome</div>
+  </div>`;
 }
-
-const PANEL_BODY = {
-  project: projectTree, fixtures: fixturesPanel, outputs: outputsPanel, device: devicePanel,
-};
+const BODY = { project: projectTree, fixtures: fixturesPanel, outputs: outputsPanel,
+               device: devicePanel, props: propsPanel };
 
 /* ================= center views ================= */
 function miniRingSVG() {
@@ -726,7 +744,6 @@ function miniRingSVG() {
   }
   return `<svg viewBox="0 0 110 104" style="height:96px">${dots}</svg>`;
 }
-
 function nodeCardsView() {
   return `<div class="cards">
     <div class="ncard">
@@ -738,29 +755,18 @@ function nodeCardsView() {
         <span class="slider"><span class="fill"></span><span class="knob"></span></span>
         <span class="val">184</span></div>
       <div class="fold">▸ <b>DIMENSIONALITY</b> &nbsp;2d map · 150 lamps</div>
-      <div class="fold">▸ <b>ADVANCED</b> &nbsp;slots · bindings</div>
     </div>
     <div class="ncard">
-      <div class="nhead"><span style="color:var(--dim)">▾</span><b>Sky shader</b>
+      <div class="nhead"><span style="color:var(--dim)">▸</span><b>Sky shader</b>
         <span class="kind">shader</span><span class="sp"></span>
         <button class="ibtn">i</button></div>
-      <div class="code"><span class="kw">vec3</span> <span class="fn">main</span>(Ctx ctx) {<br>
-        &nbsp;&nbsp;<span class="kw">let</span> sky = mix(horizon, zenith, ctx.pos.y);<br>
-        &nbsp;&nbsp;<span class="kw">return</span> sky * pal(ctx.t);<br>}</div>
       <div class="prow"><span class="lab">Speed</span>
         <span class="slider"><span class="fill" style="width:38%"></span>
         <span class="knob" style="left:38%"></span></span><span class="val">0.4</span></div>
     </div>
-    <div class="ncard">
-      <div class="nhead"><span style="color:var(--dim)">▸</span><b>doors</b>
-        <span class="kind">fixture</span><span class="sp"></span>
-        <button class="ibtn">i</button></div>
-      <div class="fold">▸ <b>OUTPUT</b> &nbsp;27 lamps · out_b</div>
-    </div>
   </div>`;
 }
-
-function canvasSVG(idsuffix) {
+function canvasSVG(idsuffix, draggable) {
   const patch = state.mode === 'patch';
   let dome = '';
   for (let s = 0; s < 5; s++) {
@@ -776,25 +782,24 @@ function canvasSVG(idsuffix) {
           opacity="${seld || !patch ? .95 : .45}"/>`;
       }
     }
-    if (seld) {
-      const am = a0 + Math.PI / 5;
-      dome += `<circle cx="${260 + Math.cos(am) * 78}" cy="${205 + Math.sin(am) * 64}" r="44"
-        fill="none" stroke="var(--sel)" stroke-dasharray="4 3" opacity=".8"/>`;
-    }
   }
   let doors = '';
   for (let d = 0; d < 3; d++) for (let i = 0; i < 9; i++)
     doors += `<circle cx="${560 + d * 34}" cy="${120 + i * 17}" r="3.2"
-      fill="var(--obj-2)" opacity="${patch ? .5 : .9}"/>`;
+      fill="var(--obj-2)" opacity=".9"/>`;
   let peach = '';
   for (let i = 0; i < 24; i++)
     peach += `<circle cx="${120 + i * 15}" cy="386" r="2.6" fill="var(--obj-4)" opacity=".8"/>`;
+  const dg = draggable
+    ? `<g id="dragdome" transform="translate(${state.domeDx},${state.domeDy})">`
+    : `<g transform="translate(${state.domeDx},${state.domeDy})">`;
   return `<svg viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet" id="cv${idsuffix}">
+    ${dg}
     <rect class="fixframe ${state.sel.startsWith('dome') ? 'sel' : ''}" x="140" y="88" width="240" height="238" rx="8"/>
     <rect class="tagframe" x="140" y="70" width="86" height="16" rx="4"/>
     <text class="nametag" x="148" y="82">dome</text>
     <text class="nametag2" x="192" y="82">150</text>
-    ${dome}
+    ${dome}</g>
     <rect class="fixframe" x="542" y="98" width="106" height="166" rx="8"/>
     <rect class="tagframe" x="542" y="80" width="82" height="16" rx="4"/>
     <text class="nametag" x="550" y="92">doors</text>
@@ -808,227 +813,301 @@ function canvasSVG(idsuffix) {
     ${peach}
   </svg>`;
 }
-
 function mapToolbar() {
   const patch = state.mode === 'patch';
-  let h = '<div class="etools">';
-  h += `<span class="modeseg">
-    <button class="${!patch ? 'on' : ''}" onclick="setMode('map')">mapping</button>
-    <button class="${patch ? 'on' : ''}" onclick="setMode('patch')">patching</button>
-  </span><span class="sep"></span>`;
-  if (!patch) {
-    h += `<button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
-      <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
-      <button class="tbtn">⌖ ref</button><span class="sep"></span>
-      <button class="tbtn">fit</button><span style="font-family:var(--mono);font-size:10px;color:var(--dim)">100%</span>`;
-  } else {
-    h += `<button class="tbtn">assign</button><button class="tbtn">flip <kbd>r</kbd></button>
-      <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
-      <button class="tbtn">swap <kbd>s</kbd></button><button class="tbtn">clear</button>
-      <span class="sep"></span><button class="tbtn on">⌁ pulse on select</button>`;
-  }
-  h += `<span class="sp"></span><button class="tbtn">show visual</button></div>`;
-  return h;
+  return `<div class="etools">
+    <span class="modeseg">
+      <button class="${!patch ? 'on' : ''}" onclick="setMode('map')">mapping</button>
+      <button class="${patch ? 'on' : ''}" onclick="setMode('patch')">patching</button>
+    </span><span class="sep"></span>
+    <button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
+    <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
+    <span class="sep"></span><button class="tbtn">fit</button>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">100%</span>
+    <span class="sp"></span><button class="tbtn">show visual</button></div>`;
+}
+function center(draggable) {
+  return state.view === 'nodes'
+    ? `<div class="mainbody">${nodeCardsView()}</div>`
+    : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG(draggable ? 'bar' : 'x', draggable)}</div>`;
 }
 
-function verbBar() {
-  if (state.mode !== 'patch') return '';
-  return `<div class="verbbar">
-    <button class="tbtn">flip <kbd>r</kbd></button>
-    <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
-    <button class="tbtn">swap <kbd>s</kbd></button>
-    <button class="tbtn">clear <kbd>⌫</kbd></button>
-    <span class="vhint">? for keys · Esc steps out</span></div>`;
-}
-
-/* ================= the workbench ================= */
-function viewTabs() {
+/* ================= section 1: today's chrome ================= */
+function oldViewTabs() {
   const vt = (id, ico, label) =>
     `<span class="vtab ${state.view === id ? 'on' : ''}" onclick="setView('${id}')">
      <span class="vico">${ico}</span>${label}</span>`;
-  return `<div class="viewtabs">${vt('nodes', '▤', 'Nodes')}${vt('map', '⌖', 'Mapping')}
-    <span class="vtab future" title="future"><span class="vico">▸</span>Live</span>
-    <span class="vtab future" title="future"><span class="vico">≣</span>Show</span>
-    <span class="vtab future" title="future"><span class="vico">🗀</span>Files</span></div>`;
+  return `<div class="viewtabs-old">${vt('nodes', '▤', 'Nodes')}${vt('map', '⌖', 'Mapping')}</div>`;
 }
-
-function edgeStrip(side) {
-  const ids = side === 'left' ? ['project', 'fixtures'] : ['device', 'outputs'];
-  const open = state.panels[state.view][side];
+function todayDock(side) {
+  const open = state.today[side];
+  if (!open) return '';
+  const ids = roster(state.view, side);
+  const tabs = ids.map(id => `<span class="dtab ${open === id ? 'on' : ''}"
+      onclick="todayToggle('${side}','${id}')">${PANELS[id].title}</span>`).join('');
+  const chev = side === 'left' ? '«' : '»';
+  return `<div class="dock ${side === 'left' ? 'l' : 'r'}">
+    <div class="dtabs">${side === 'right' ? `<span class="chev" onclick="todayHide('${side}')">${chev}</span>` : ''}
+      ${tabs}<span class="sp"></span>
+      ${side === 'left' ? `<span class="chev" onclick="todayHide('${side}')">${chev}</span>` : ''}</div>
+    <div class="pbody">${BODY[open]()}</div></div>`;
+}
+function todayStrip(side) {
+  if (state.today[side]) return '';
+  const ids = roster(state.view, side);
   return `<div class="estrip ${side === 'left' ? 'l' : 'r'}">` + ids.map(id =>
-    `<span class="ebtn ${open.includes(id) ? 'on' : ''}"
-      onclick="togglePanel('${id}')">${PANEL_TITLES[id]}</span>`).join('') + '</div>';
+    `<span class="ebtn" onclick="todayToggle('${side}','${id}')">${PANELS[id].title}</span>`).join('') +
+    '</div>';
 }
-
-function dock(side) {
-  const open = state.panels[state.view][side];
-  if (!open.length) return '';
-  const panels = open.map(id => `<div class="panel">
-    <div class="phead"><span class="ptitle">${PANEL_TITLES[id]}</span><span class="sp"></span>
-      <button class="hbtn" onclick="togglePanel('${id}')" title="hide">—</button></div>
-    <div class="pbody">${PANEL_BODY[id]()}</div></div>`).join('');
-  return `<div class="dock ${side === 'left' ? 'l' : 'r'}">${panels}</div>`;
-}
-
-function renderWorkbench() {
-  const center = state.view === 'nodes'
-    ? `<div class="mainbody">${nodeCardsView()}</div>`
-    : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG('c1')}</div>${verbBar()}`;
-  const openL = state.panels[state.view].left, openR = state.panels[state.view].right;
-  document.getElementById('c1').innerHTML =
+function renderToday() {
+  document.getElementById('c-today').innerHTML =
     `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
       <span class="gnav"><span>Devices</span><span>Projects</span></span><span class="sp"></span>
       <span class="sess">mini dome · sim ▸</span><span class="dots">···</span></div>
      <div class="wbbody">
-       ${edgeStrip('left')}${dock('left')}
-       <div class="col main">${viewTabs()}${center}</div>
-       ${dock('right')}${edgeStrip('right')}
-     </div>
-     <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
-       <span>60 fps</span><span>view: ${state.view}${state.view === 'map' ? ' · ' + state.mode : ''}</span>
-       <span class="sp"></span>
-       <span>panels: [${openL.join(' ')}] · [${openR.join(' ')}]</span>
-       <span class="good">saved ✓</span></div>`;
-}
-
-/* ================= section 2: anatomy ================= */
-function renderAnatomy() {
-  const frame = (id, body) => { document.getElementById(id).innerHTML =
-    `<div class="phead"><span class="ptitle">${PANEL_TITLES[id.split('-')[1]]}</span></div>
-     <div class="pbody">${body}</div>`; };
-  frame('anat-project', projectTree());
-  frame('anat-fixtures', fixturesPanel());
-  frame('anat-outputs', outputsPanel());
-  frame('anat-device', devicePanel());
-}
-
-/* ================= section 3: future views ================= */
-function renderFuture() {
-  document.getElementById('fut-live').innerHTML =
-    `<div style="height:86px; border-bottom:1px dashed var(--border-strong); display:flex;
-       align-items:center; justify-content:center; overflow:hidden;">
-       <div style="transform:scale(.5); width:720px; flex:none;">${canvasSVG('fl')}</div></div>
-     <div class="bigpanel">
-       <div class="bigrow"><span class="lab">Brightness</span>
-         <span class="slider"><span class="fill" style="width:72%"></span>
-         <span class="knob" style="left:72%"></span></span></div>
-       <div class="bigrow"><span class="lab">Warmth</span>
-         <span class="slider"><span class="fill" style="width:45%"></span>
-         <span class="knob" style="left:45%"></span></span></div>
-       <div class="bigrow"><span class="lab">Scene</span>
-         <span style="display:inline-flex; gap:8px;">
-           <button class="tbtn on">Sunrise</button><button class="tbtn">Aurora</button>
-           <button class="tbtn">Ember</button></span></div>
-     </div>`;
-  document.getElementById('fut-show').innerHTML =
-    `<div class="tl">
-      <div class="tlrow"><span class="tname">intro</span><span class="tlbar">
-        <span class="tlseg" style="left:2%; width:20%; background:rgba(90,169,230,.25); border-color:rgba(90,169,230,.5)"></span></span></div>
-      <div class="tlrow"><span class="tname">sunrise</span><span class="tlbar">
-        <span class="tlseg" style="left:22%; width:34%; background:rgba(228,192,101,.22); border-color:rgba(228,192,101,.5)"></span></span></div>
-      <div class="tlrow"><span class="tname">aurora</span><span class="tlbar">
-        <span class="tlseg" style="left:56%; width:28%; background:rgba(63,214,142,.2); border-color:rgba(63,214,142,.5)"></span></span></div>
-      <div class="tlrow"><span class="tname">outro</span><span class="tlbar">
-        <span class="tlseg" style="left:84%; width:13%; background:rgba(199,146,234,.2); border-color:rgba(199,146,234,.5)"></span></span></div>
-      <div style="margin-top:10px; color:var(--dim); font-size:10.5px;">playlist · timeline ·
-        cue authoring — future pass, drawn only to prove the tab row holds it</div>
+       ${todayStrip('left')}${todayDock('left')}
+       <div class="col main">${oldViewTabs()}${center(false)}</div>
+       ${todayDock('right')}${todayStrip('right')}
      </div>`;
 }
+function todayToggle(side, id) {
+  state.today[side] = state.today[side] === id ? null : id;
+  renderAll();
+}
+function todayHide(side) { state.today[side] = null; renderAll(); }
 
-/* ================= section 4: phones ================= */
-function phoneStrip(interactive) {
-  const on = v => state.phoneView === v ? 'on' : '';
-  const act = v => interactive ? `onclick="phoneSummon('${v}')"` : '';
-  return `<div class="pstrip">
-    <span class="sq ${on('project')}" ${act('project')} title="Nodes">▤</span>
-    <span class="sq ${on('fixtures')}" ${act('fixtures')} title="Fixtures">⬡</span>
-    <span class="pdoc">
-      <button class="${state.view === 'nodes' ? 'on' : ''}" ${interactive ? `onclick="setView('nodes')"` : ''}>Nodes</button>
-      <button class="${state.view === 'map' ? 'on' : ''}" ${interactive ? `onclick="setView('map')"` : ''}>Map</button>
-    </span>
-    <span class="sq ${on('outputs')}" ${act('outputs')} title="Outputs">▦</span>
-    <span class="sq ${on('device')}" ${act('device')} title="Device">⌁</span>
+/* ================= section 2: the bar ================= */
+function chipHTML(compact) {
+  const st = { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj];
+  const cnt = state.proj === 'unsaved' && state.edits.length
+    ? `<span class="cnt">${state.edits.length}</span>` : '';
+  const name = (state.chipMode === 'name' && !compact)
+    ? '<span class="pname">mini dome</span>' : '';
+  const title = { saved: 'Project — saved', unsaved: 'Project has unsaved changes',
+                  failed: 'Project — failed edits', syncing: 'Project — syncing' }[state.proj];
+  return `<span class="pchip ${state.proj}" onclick="togglePop(event)" title="${title}">
+    <span class="st">${st}</span>${name}${cnt}</span>`;
+}
+function popoverHTML() {
+  if (!state.popOpen) return '';
+  const dirty = state.proj === 'unsaved' || state.proj === 'failed';
+  const stw = { saved: 'Ready', unsaved: 'Unsaved', failed: 'Failed edits', syncing: 'Syncing' }[state.proj];
+  let edits = '';
+  if (dirty && state.edits.length) {
+    edits = `<div class="sec">
+      <div class="sechead">Unsaved (persisted)<span class="meta">${state.edits.length}</span></div>` +
+      state.edits.map((e, i) => `<div class="erow"><span class="eico">✎</span>
+        <span class="epath">${e.path}</span><span style="font-size:10px">${e.what}</span>
+        <span class="rvt" onclick="revertOne(${i}, event)">revert</span></div>`).join('') +
+      `</div>
+      <div class="sec"><div class="acts">
+        <button class="primary" onclick="saveAll(event)">Save</button>
+        <button onclick="revertAll(event)">Revert to saved</button></div></div>`;
+  }
+  return `<div class="ppop" onclick="event.stopPropagation()">
+    <div class="ph"><b>mini dome</b><span class="stw ${dirty ? 'dirty' : ''}">${stw}</span></div>
+    ${edits}
+    <div class="sec"><div class="sechead">Share</div>
+      <div class="sharenote ${dirty ? 'blocked' : ''}">${dirty
+        ? 'save before sharing — link reflects saved state'
+        : 'lightplayer.app/p/9f3k2 · view link active'}</div></div>
+    <div class="sec"><div class="sechead">Project</div>
+      <div class="krow"><span class="k">Nodes</span><span class="v">9 · 3 fixtures</span></div>
+      <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
+      <div class="krow"><span class="k">Overlay rev</span><span class="v">v41</span></div></div>
   </div>`;
 }
+function barToggles(side, iconly, summon) {
+  const ids = roster(state.view, side);
+  const open = state.docks[state.view][side];
+  return ids.map(id => {
+    const on = summon ? state.phoneView === id : open === id;
+    const act = summon ? `phoneSummon('${id}')` : `toggleDock('${id}')`;
+    return `<span class="bt ${on ? 'on' : ''} ${iconly ? 'iconly' : ''}"
+      onclick="${act}" title="${PANELS[id].title}">
+      <span class="ico">${PANELS[id].ico}</span><span class="lab">${PANELS[id].title}</span></span>`;
+  }).join('');
+}
+function barViewTabs(seg, tight) {
+  if (state.tabs === 'seg' || seg) {
+    return `<span class="vseg">
+      <button class="${state.view === 'nodes' ? 'on' : ''}" onclick="setView('nodes')">
+        ${tight ? '' : '<span class="vico">▤</span>'}Nodes</button>
+      <button class="${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">
+        ${tight ? '' : '<span class="vico">⌖</span>'}${tight ? 'Map' : 'Mapping'}</button></span>`;
+  }
+  return `<span class="vtabs">
+    <span class="vtab ${state.view === 'nodes' ? 'on' : ''}" onclick="setView('nodes')">
+      <span class="vico">▤</span>Nodes</span>
+    <span class="vtab ${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">
+      <span class="vico">⌖</span>Mapping</span>
+    <span class="vtab future"><span class="vico">▸</span>Live</span></span>`;
+}
+function theBar(opts = {}) {
+  return `<div class="bar ${opts.tight ? 'tight' : ''}">
+    <span class="bl">${chipHTML(opts.iconly)}${barToggles('left', opts.iconly, opts.summon)}</span>
+    <span class="bc">${barViewTabs(opts.seg, opts.tight)}</span>
+    <span class="br">${barToggles('right', opts.iconly, opts.summon)}</span>
+    ${opts.pop ? popoverHTML() : ''}</div>`;
+}
+function barDock(side) {
+  const open = state.docks[state.view][side];
+  if (!open) return '';
+  return `<div class="dock ${side === 'left' ? 'l' : 'r'}">
+    <div class="pbody">${BODY[open]()}</div></div>`;
+}
+function renderBar() {
+  const d = state.docks[state.view];
+  document.getElementById('c-bar').innerHTML =
+    `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
+      <span class="gnav"><span>Devices</span><span>Projects</span></span><span class="sp"></span>
+      <span class="sess">mini dome · sim ▸</span><span class="dots">···</span></div>
+     ${theBar({ pop: true })}
+     <div class="wbbody">
+       ${barDock('left')}
+       <div class="col main">${center(true)}</div>
+       ${barDock('right')}
+     </div>
+     <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
+       <span>60 fps</span>
+       <span>view: ${state.view}${state.view === 'map' ? ' · ' + state.mode : ''}</span>
+       <span class="sp"></span>
+       <span>docks: ${d.left || '·'} | ${d.right || '·'}</span></div>`;
+  wireDrag();
+}
+
+/* dome drag → arrange edit → dirty (the #417 moment) */
+function wireDrag() {
+  const g = document.getElementById('dragdome');
+  if (!g) return;
+  const svg = g.ownerSVGElement;
+  let start = null, base = null;
+  g.addEventListener('pointerdown', e => {
+    start = { x: e.clientX, y: e.clientY };
+    base = { x: state.domeDx, y: state.domeDy };
+    g.classList.add('dragging');
+    g.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  g.addEventListener('pointermove', e => {
+    if (!start) return;
+    const scale = 720 / svg.getBoundingClientRect().width;
+    const dx = base.x + (e.clientX - start.x) * scale;
+    const dy = base.y + (e.clientY - start.y) * scale;
+    g.setAttribute('transform', `translate(${dx},${dy})`);
+  });
+  g.addEventListener('pointerup', e => {
+    if (!start) return;
+    const scale = 720 / svg.getBoundingClientRect().width;
+    state.domeDx = base.x + (e.clientX - start.x) * scale;
+    state.domeDy = base.y + (e.clientY - start.y) * scale;
+    start = null;
+    if (Math.abs(state.domeDx - base.x) > 1 || Math.abs(state.domeDy - base.y) > 1) {
+      state.proj = 'unsaved';
+      if (!state.edits.some(x => x.path === 'editor.json'))
+        state.edits.push({ path: 'editor.json', what: 'arrange dome' });
+    }
+    renderAll();
+  });
+}
+
+/* ================= section 3: treatment strips ================= */
+function renderTreatments() {
+  const saved = { tabs: state.tabs, chipMode: state.chipMode };
+  let h = '';
+  state.tabs = 'under'; state.chipMode = 'glyph';
+  h += `<div class="cap">Q1a underline + Q2a glyph-only — the lean</div>
+        <div class="barframe">${theBar()}</div>`;
+  state.tabs = 'seg';
+  h += `<div class="cap">Q1b segmented + Q2a glyph-only</div>
+        <div class="barframe">${theBar()}</div>`;
+  state.tabs = 'under'; state.chipMode = 'name';
+  h += `<div class="cap">Q1a underline + Q2b glyph+name</div>
+        <div class="barframe">${theBar()}</div>`;
+  Object.assign(state, saved);
+  document.getElementById('c-treatments').innerHTML = h;
+}
+
+/* ================= section 4: md + sm ================= */
 function phoneMain() {
   if (state.phoneView !== 'main') {
     return `<div class="pmain">
       <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span>
-        <b>${PANEL_TITLES[state.phoneView]}</b></div>
-      ${PANEL_BODY[state.phoneView]()}</div>`;
+        <b>${PANELS[state.phoneView].title}</b></div>
+      ${BODY[state.phoneView]()}</div>`;
   }
   return state.view === 'nodes'
     ? `<div class="pmain">${nodeCardsView()}</div>`
-    : `<div class="pmain canvas">${canvasSVG('ph')}</div>${verbBar()}`;
+    : `<div class="pmain canvas">${canvasSVG('ph', false)}</div>`;
 }
 function renderPhones() {
-  const live = `<div class="phone"><div class="pcap">sm · live — tap the strip</div>
-    <div class="pbdy">${phoneStrip(true)}${phoneMain()}</div></div>`;
-  const saved = { ...state };
-  Object.assign(state, { view: 'map', mode: 'patch', phoneView: 'main' });
-  const patching = `<div class="phone"><div class="pcap">sm · Map view, patching mode — verbs docked</div>
-    <div class="pbdy">${phoneStrip(false)}${phoneMain()}</div></div>`;
-  Object.assign(state, { view: 'map', mode: 'map', phoneView: 'outputs' });
-  const summoned = `<div class="phone"><div class="pcap">sm · Outputs summoned — replaces main</div>
-    <div class="pbdy">${phoneStrip(false)}${phoneMain()}</div></div>`;
-  Object.assign(state, saved);
-  const tablet = `<div class="phone tab"><div class="pcap">md · one dock open; other side stays a strip</div>
-    <div class="pbdy">
-      <div class="vstrip" style="border-right:1px solid var(--border-strong)">
-        <span class="ebtn" style="transform:rotate(180deg)">Nodes</span>
-        <span class="ebtn" style="transform:rotate(180deg)">Fixtures</span></div>
-      <div class="col main">${viewTabs()}${state.view === 'nodes'
-        ? `<div class="mainbody">${nodeCardsView()}</div>`
-        : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG('tab')}</div>${verbBar()}`}</div>
-      <div class="dock r" style="width:240px"><div class="panel">
-        <div class="phead"><span class="ptitle">Outputs</span></div>
-        <div class="pbody">${outputsPanel()}</div></div></div>
-      <div class="estrip r"><span class="ebtn">Device</span><span class="ebtn on">Outputs</span></div>
-    </div></div>`;
-  document.getElementById('phones').innerHTML = live + patching + summoned + tablet;
+  const live = `<div class="phone"><div class="pcap">sm · live — same bar, icons, summon</div>
+    <div class="pbdy">${theBar({ iconly: true, seg: true, summon: true, tight: true })}${phoneMain()}</div></div>`;
+  const saved = { view: state.view, phoneView: state.phoneView };
+  state.view = 'map'; state.phoneView = 'props';
+  const summoned = `<div class="phone"><div class="pcap">sm · Props summoned (now reachable)</div>
+    <div class="pbdy">${theBar({ iconly: true, seg: true, summon: true, tight: true })}${phoneMain()}</div></div>`;
+  state.view = saved.view; state.phoneView = saved.phoneView;
+  const mdLeft = state.docks[state.view].left;
+  const md = `<div class="phone tab"><div class="pcap">md · same bar, icon toggles, docks narrow</div>
+    <div class="pbdy">${theBar({ iconly: true })}
+      <div class="tbody">
+        ${mdLeft ? `<div class="dock l" style="width:210px"><div class="pbody">${BODY[mdLeft]()}</div></div>` : ''}
+        <div class="col main">${center(false)}</div>
+      </div></div></div>`;
+  document.getElementById('c-phones').innerHTML = live + summoned + md;
 }
 
 /* ================= state changes ================= */
 function renderAll() {
-  renderWorkbench(); renderAnatomy(); renderFuture(); renderPhones();
+  renderToday(); renderBar(); renderTreatments(); renderPhones();
   const B = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
   B('xv-nodes', state.view === 'nodes'); B('xv-map', state.view === 'map');
-  B('xm-map', state.mode === 'map'); B('xm-patch', state.mode === 'patch');
-  document.getElementById('xm-map').disabled = state.view !== 'map';
-  document.getElementById('xm-patch').disabled = state.view !== 'map';
-  B('xd-dome', state.density === 'dome'); B('xd-rad', state.density === 'radiance');
-  B('xs-radio', state.stripMode === 'radio'); B('xs-stack', state.stripMode === 'stack');
+  B('xp-saved', state.proj === 'saved'); B('xp-unsaved', state.proj === 'unsaved');
+  B('xp-failed', state.proj === 'failed'); B('xp-syncing', state.proj === 'syncing');
+  B('xt-under', state.tabs === 'under'); B('xt-seg', state.tabs === 'seg');
+  B('xc-glyph', state.chipMode === 'glyph'); B('xc-name', state.chipMode === 'name');
   document.getElementById('xstatus').textContent =
-    `view=${state.view} · mode=${state.mode} · strips=${state.stripMode} · sel=${state.sel}`;
+    `view=${state.view} · proj=${state.proj} · edits=${state.edits.length}`;
 }
-function setView(v) { state.view = v; if (state.phoneView !== 'main') state.phoneView = 'main'; renderAll(); }
+function setView(v) { state.view = v; state.phoneView = 'main'; renderAll(); }
 function setMode(m) { state.mode = m; state.view = 'map'; renderAll(); }
-function setDensity(d) { state.density = d; renderAll(); }
-function togglePanel(id) {
-  const side = PANEL_SIDE[id];
-  const arr = state.panels[state.view][side];
-  const i = arr.indexOf(id);
-  if (state.stripMode === 'radio') {
-    // one panel per side: switch to it; re-click collapses the side
-    state.panels[state.view][side] = i >= 0 ? [] : [id];
-  } else {
-    if (i >= 0) arr.splice(i, 1); else arr.push(id);
-    arr.sort((a, b) => STRIP_ORDER.indexOf(a) - STRIP_ORDER.indexOf(b));
-  }
+function setProj(p) {
+  state.proj = p;
+  if (p === 'unsaved' && !state.edits.length)
+    state.edits = [{ path: 'editor.json', what: 'arrange dome' },
+                   { path: 'sky.shader.json', what: 'speed 0.4' }];
+  if (p === 'saved') { state.edits = []; state.domeDx = 0; state.domeDy = 0; }
   renderAll();
 }
-function setStripMode(m) {
-  state.stripMode = m;
-  if (m === 'radio') { // collapse each side to its first open panel
-    for (const v of Object.keys(state.panels)) {
-      for (const s of ['left', 'right']) {
-        const arr = state.panels[v][s];
-        if (arr.length > 1) state.panels[v][s] = [arr[0]];
-      }
-    }
-  }
+function setTabs(t) { state.tabs = t; renderAll(); }
+function setChip(c) { state.chipMode = c; renderAll(); }
+function preset(p) {
+  const d = state.docks[state.view];
+  if (p === 'both') { d.left = roster(state.view, 'left')[state.view === 'map' ? 1 : 0];
+                      d.right = roster(state.view, 'right')[0]; }
+  if (p === 'left') { d.left = d.left || 'fixtures'; d.right = null; }
+  if (p === 'none') { d.left = null; d.right = null; }
   renderAll();
 }
+function toggleDock(id) {
+  const side = PANELS[id].side;
+  const d = state.docks[state.view];
+  d[side] = d[side] === id ? null : id;
+  renderAll();
+}
+function togglePop(e) { e.stopPropagation(); state.popOpen = !state.popOpen; renderAll(); }
+document.addEventListener('click', () => {
+  if (state.popOpen) { state.popOpen = false; renderAll(); }
+});
+function saveAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved'; renderAll(); }
+function revertAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved';
+  state.domeDx = 0; state.domeDy = 0; renderAll(); }
+function revertOne(i, e) { e.stopPropagation();
+  const [ed] = state.edits.splice(i, 1);
+  if (ed && ed.path === 'editor.json') { state.domeDx = 0; state.domeDy = 0; }
+  if (!state.edits.length) state.proj = 'saved';
+  renderAll(); }
 function selectPath(p) { state.sel = p; renderAll(); }
 function phoneSummon(v) { state.phoneView = v === state.phoneView ? 'main' : v; renderAll(); }
 
