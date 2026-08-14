@@ -504,6 +504,20 @@ hours), and neither is an exit path on its own.
   mobile fold's replaced center at sm) are exempt; an empty canvas records
   its reconciliation too (the default camera is deterministic), so the guard
   cannot deadlock on content-less mounts.
+  **Verified across two consecutive CI captures on PR #423** (the only
+  comparison that falsifies an oscillation): run 31779708023 captured the
+  fixed tree and auto-committed exactly 24 baselines — all in the
+  mapping-editor composed-story family, the expected one-time re-fit at the
+  settled zoom — with ZERO workbench drift; the parked bot-head run
+  31780802809 was then approved deliberately (the standing "don't approve"
+  lore exists because approval re-armed the flip on the UNFIXED mechanism —
+  with the mechanism gone, the re-capture is the convergence proof) and
+  passed with no further auto-commit. Locally, three consecutive captures of
+  the workbench + mapping-editor families were byte-identical for all 30
+  canvas-bearing stories; the single local flipper
+  (`workbench-nodes-view__md`, 25 px at max Δ1, story mounts no mapping
+  canvas) is the known tolerated sub-AA raster class, diffed before being
+  dismissed per this entry's own rule.
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
   called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
   imports `applyRefresh` from it — exited 2 before doing anything. The
