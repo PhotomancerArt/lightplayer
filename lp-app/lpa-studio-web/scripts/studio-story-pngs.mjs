@@ -1216,6 +1216,38 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       if (mismatched.length > 0) {
         return false;
       }
+      // The mapping canvas fits its camera to a measured viewport, and the
+      // first measurement races container layout settling — a fit frozen on
+      // a pre-settle size renders the same story at a different zoom run to
+      // run (workbench-mapping-view oscillated 82% vs 157%). The app now
+      // re-fits until the measurement settles and stamps data-fit-viewport
+      // with the size the camera was last reconciled against; refuse to
+      // shoot while any visible canvas's real box disagrees ("" = measured
+      // but never reconciled). Hidden mounts (the mobile fold's replaced
+      // center) are exempt — they have no box to disagree with.
+      const unreconciled = [...el.querySelectorAll('[data-fit-viewport]')].filter((wrap) => {
+        const rect = wrap.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) {
+          return false;
+        }
+        const svg = wrap.querySelector('svg');
+        if (!svg) {
+          return false;
+        }
+        const box = svg.getBoundingClientRect();
+        if (box.width < 1 || box.height < 1) {
+          return false;
+        }
+        const stamp = wrap.getAttribute('data-fit-viewport');
+        if (!stamp) {
+          return true;
+        }
+        const [w, h] = stamp.split('x').map(Number);
+        return Math.abs(w - box.width) > 2 || Math.abs(h - box.height) > 2;
+      });
+      if (unreconciled.length > 0) {
+        return false;
+      }
       return !document.querySelector('[data-story-wait="1"]');
     })()
   `;
