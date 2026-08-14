@@ -30,6 +30,12 @@ use crate::{UiFixturePatch, UiPatchBay};
 /// The whole surface, in module order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiPatchSurface {
+    /// Every module on the tree path above a fixture or output, in tree
+    /// (pre-)order — the structural context the G1 feedback asked the
+    /// Fixtures/Outputs trees to show. Fixtures and outputs point at their
+    /// nearest enclosing module via [`UiPatchSurfaceFixture::module`] /
+    /// [`UiPatchSurfaceOutput::module`].
+    pub modules: Vec<UiPatchSurfaceModule>,
     /// Every bus-consuming output that has answered a frame probe, with its
     /// bay (ports + cells) — the sidebar's tree and the canvas's wires.
     pub outputs: Vec<UiPatchSurfaceOutput>,
@@ -57,6 +63,21 @@ impl UiPatchSurface {
     }
 }
 
+/// One module level above the surface's fixtures/outputs: pure structural
+/// context (label + nesting), selectable like every other surface row.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UiPatchSurfaceModule {
+    /// The module node — selection identity.
+    pub node: NodeId,
+    /// The node's tree label (the root module wears the project name).
+    pub label: String,
+    /// The node's address path — the prefix its fixtures/outputs nest under.
+    pub address: Option<String>,
+    /// Nesting depth among the surface's modules (root module = 0), for
+    /// indentation without re-deriving prefixes in the view.
+    pub depth: usize,
+}
+
 /// One output on the surface: identity, its bay, and its live wire.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiPatchSurfaceOutput {
@@ -77,6 +98,9 @@ pub struct UiPatchSurfaceOutput {
     pub name_assign: Option<(crate::ProjectSlotAddress, String)>,
     /// Ports + cells + frame — the same derivation the face bay renders.
     pub bay: UiPatchBay,
+    /// The nearest enclosing module on [`UiPatchSurface::modules`], `None`
+    /// when the output sits above every module face.
+    pub module: Option<NodeId>,
 }
 
 impl UiPatchSurfaceOutput {
@@ -125,6 +149,9 @@ pub struct UiPatchSurfaceFixture {
     /// the editor-meta fetch settles (see
     /// [`UiPatchSurface::editor_meta_loaded`]).
     pub arrange: Option<UiArrangeMeta>,
+    /// The nearest enclosing module on [`UiPatchSurface::modules`], `None`
+    /// when the fixture sits above every module face.
+    pub module: Option<NodeId>,
 }
 
 /// One addressable node of a fixture's object tree: an instance (or a
@@ -198,6 +225,8 @@ pub struct UiArrangeFootprint {
 /// P6: the verbs' subject). Stored in core ui state so e2e can drive it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiPatchTarget {
+    /// A module level above the fixtures/outputs (tree context row).
+    Module { node: NodeId },
     /// A whole output (sidebar header).
     Output { node: NodeId },
     /// One port of an output.
