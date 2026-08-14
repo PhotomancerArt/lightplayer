@@ -79,7 +79,7 @@ fn in_a_row() -> Element {
         div { class: "tw:grid tw:w-80 tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-card tw:p-3",
             div { class: "tw:flex tw:items-center tw:gap-1.5",
                 span { class: "tw:min-w-0 tw:flex-1 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                    "paths"
+                    "paths (snapshot probe)"
                 }
                 InlineButton {
                     label: "Add entry at key 3",
