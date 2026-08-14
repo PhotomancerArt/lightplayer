@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     NodeId, UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchInstance, UiPatchPort, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -36,6 +36,18 @@ fn port(key: u32, pin: &str, start: u32, lamps: u32, cells: Vec<UiPatchCell>) ->
         start,
         lamps,
         cells,
+    }
+}
+
+/// A surface module row — production always has at least the root (the
+/// tree root wears the module kind), and the panels render the chain as
+/// the levels above the fixtures/outputs.
+fn module(node: u32, label: &str, depth: usize) -> UiPatchSurfaceModule {
+    UiPatchSurfaceModule {
+        node: NodeId::new(node),
+        label: label.to_string(),
+        address: None,
+        depth,
     }
 }
 
@@ -86,6 +98,13 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
     let mut door0 = cell("doors:0:0:30", "doors", 0, 9, 30);
     door0.contested = contested;
     UiPatchSurface {
+        // The example's real tree shape: each fixture lives in its OWN
+        // sub-module under the root show.
+        modules: vec![
+            module(1, "mini_dome", 0),
+            module(20, "Dome", 1),
+            module(21, "Doors", 1),
+        ],
         outputs: vec![
             UiPatchSurfaceOutput {
                 node: NodeId::new(10),
@@ -93,6 +112,7 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                 name: Some("1".to_string()),
                 address: None,
                 name_assign: None,
+                module: Some(NodeId::new(1)),
                 bay: UiPatchBay {
                     ports: vec![
                         port(0, "IO18", 0, 39, vec![sector2, door0]),
@@ -125,6 +145,7 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                 name: Some("Box 2".to_string()),
                 address: None,
                 name_assign: None,
+                module: Some(NodeId::new(1)),
                 bay: UiPatchBay {
                     ports: vec![
                         port(
@@ -172,6 +193,7 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                     frame: None,
                     single_output: false,
                 },
+                module: Some(NodeId::new(20)),
                 instances: (0..5)
                     .map(|k| {
                         instance(
@@ -203,6 +225,7 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                     frame: None,
                     single_output: false,
                 },
+                module: Some(NodeId::new(21)),
                 instances: (0..3)
                     .map(|k| instance(&format!("/door/{k}"), &format!("door {k}"), k * 9, 9, 3))
                     .collect(),
@@ -221,12 +244,14 @@ pub(crate) fn peach_surface() -> UiPatchSurface {
 
 fn build_peach_surface() -> UiPatchSurface {
     UiPatchSurface {
+        modules: vec![module(1, "peach", 0)],
         outputs: vec![UiPatchSurfaceOutput {
             node: NodeId::new(10),
             label: "output".to_string(),
             name: None,
             address: None,
             name_assign: None,
+            module: Some(NodeId::new(1)),
             bay: UiPatchBay {
                 ports: vec![port(
                     0,
@@ -267,6 +292,7 @@ fn build_peach_surface() -> UiPatchSurface {
                     frame: None,
                     single_output: true,
                 },
+                module: Some(NodeId::new(1)),
                 instances: Vec::new(),
                 arrange: None,
             },
@@ -284,6 +310,7 @@ fn build_peach_surface() -> UiPatchSurface {
                     frame: None,
                     single_output: true,
                 },
+                module: Some(NodeId::new(1)),
                 instances: Vec::new(),
                 arrange: None,
             },
