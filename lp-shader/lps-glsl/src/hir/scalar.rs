@@ -1,6 +1,4 @@
 use alloc::format;
-use alloc::string::String;
-use alloc::vec::Vec;
 
 use lps_shared::LpsType;
 
@@ -42,23 +40,28 @@ pub(super) fn binary_op_token(op: BinaryOp) -> &'static str {
     }
 }
 
-pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<String, Diagnostic> {
+/// The LPFN signature spelling of a parameter type.
+///
+/// Static spellings: the caller matches on them and joins them into one
+/// signature string, so handing back owned `String`s would allocate one per
+/// argument per call for nothing.
+pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<&'static str, Diagnostic> {
     Ok(match ty {
-        LpsType::Float => String::from("Float"),
-        LpsType::Int => String::from("Int"),
-        LpsType::UInt => String::from("UInt"),
-        LpsType::Vec2 => String::from("Vec2"),
-        LpsType::Vec3 => String::from("Vec3"),
-        LpsType::Vec4 => String::from("Vec4"),
-        LpsType::IVec2 => String::from("IVec2"),
-        LpsType::IVec3 => String::from("IVec3"),
-        LpsType::IVec4 => String::from("IVec4"),
-        LpsType::UVec2 => String::from("UVec2"),
-        LpsType::UVec3 => String::from("UVec3"),
-        LpsType::UVec4 => String::from("UVec4"),
-        LpsType::BVec2 => String::from("BVec2"),
-        LpsType::BVec3 => String::from("BVec3"),
-        LpsType::BVec4 => String::from("BVec4"),
+        LpsType::Float => "Float",
+        LpsType::Int => "Int",
+        LpsType::UInt => "UInt",
+        LpsType::Vec2 => "Vec2",
+        LpsType::Vec3 => "Vec3",
+        LpsType::Vec4 => "Vec4",
+        LpsType::IVec2 => "IVec2",
+        LpsType::IVec3 => "IVec3",
+        LpsType::IVec4 => "IVec4",
+        LpsType::UVec2 => "UVec2",
+        LpsType::UVec3 => "UVec3",
+        LpsType::UVec4 => "UVec4",
+        LpsType::BVec2 => "BVec2",
+        LpsType::BVec3 => "BVec3",
+        LpsType::BVec4 => "BVec4",
         other => {
             return Err(Diagnostic::error(
                 span,
@@ -99,27 +102,43 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
     }
 }
 
-pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
+/// Scalarized IR lane types of a value type.
+///
+/// Sixteen inline lanes covers every vector and matrix shape (up to `mat4`)
+/// plus small arrays and structs, so the per-call list stays off the heap on
+/// the lowering hot path — this is queried per user call, per return, per
+/// uniform/global load, per local declaration and per conditional.
+pub type IrTypes = crate::small::InlineVec<lpir::IrType, 16>;
+
+pub fn scalar_ir_types(ty: &LpsType) -> Result<IrTypes, Diagnostic> {
+    let mut tys = IrTypes::new();
+    push_scalar_ir_types(ty, &mut tys)?;
+    Ok(tys)
+}
+
+fn push_scalar_ir_types(ty: &LpsType, tys: &mut IrTypes) -> Result<(), Diagnostic> {
     if *ty == LpsType::Void {
-        return Ok(Vec::new());
+        return Ok(());
     }
     if *ty == LpsType::Texture2D {
-        return Ok(alloc::vec![lpir::IrType::I32; 4]);
+        for _ in 0..4 {
+            tys.push(lpir::IrType::I32);
+        }
+        return Ok(());
     }
     if let LpsType::Array { element, len } = ty {
-        let element_tys = scalar_ir_types(element)?;
-        let mut tys = Vec::new();
+        let mut element_tys = IrTypes::new();
+        push_scalar_ir_types(element, &mut element_tys)?;
         for _ in 0..*len {
             tys.extend(element_tys.iter().copied());
         }
-        return Ok(tys);
+        return Ok(());
     }
     if let LpsType::Struct { members, .. } = ty {
-        let mut tys = Vec::new();
         for member in members {
-            tys.extend(scalar_ir_types(&member.ty)?);
+            push_scalar_ir_types(&member.ty, tys)?;
         }
-        return Ok(tys);
+        return Ok(());
     }
     let Some(base) = scalar_base_type(ty) else {
         return Err(Diagnostic::error(
@@ -137,5 +156,8 @@ pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
             ));
         }
     };
-    Ok(alloc::vec![lane; scalar_lane_count(ty)])
+    for _ in 0..scalar_lane_count(ty) {
+        tys.push(lane);
+    }
+    Ok(())
 }

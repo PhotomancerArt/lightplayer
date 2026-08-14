@@ -115,6 +115,7 @@ impl NativeCompileJob {
                         ))
                     })?;
                     compile_function_lower_stage(func, body, ir, session)?;
+                    Self::release_lowered_ir_body(ir, func, session);
                     Ok(())
                 })
             }
@@ -163,6 +164,34 @@ impl NativeCompileJob {
             NativeCompileStage::Done => NativeCompileStepResult::Failed(NativeError::Internal(
                 String::from("compile job already finished"),
             )),
+        }
+    }
+
+    /// Debug off: drop a function's LPIR body the moment Lower has consumed
+    /// it, instead of at job end.
+    ///
+    /// After this function is lowered, the only reads of the job's module are
+    /// *other* functions' lowering resolving callees — which consults names,
+    /// `sret_arg` and `return_types`, never a body or a vreg-type table — and
+    /// the module ABI, which was built whole in `setup_module`. Both survive.
+    ///
+    /// With `debug_info` on, the Debug stage re-reads this exact body to build
+    /// its sections, so nothing is released and behavior is byte-identical.
+    /// The entry itself always stays in the map: the Debug stage looks it up
+    /// either way.
+    fn release_lowered_ir_body(
+        ir: &mut LpirModule,
+        func: &FunctionCompileState,
+        session: &CompileSession,
+    ) {
+        if session.options.debug_info {
+            return;
+        }
+        if let Some(lowered_fn) = ir.functions.get_mut(&func.func_id) {
+            // LpirBody::clear() swaps in a fresh ChunkedVec, so the chunk
+            // allocations are freed here, not just len-reset.
+            lowered_fn.body.clear();
+            lowered_fn.vreg_types = Vec::new();
         }
     }
 

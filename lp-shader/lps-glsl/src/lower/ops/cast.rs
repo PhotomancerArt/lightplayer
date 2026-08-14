@@ -1,5 +1,4 @@
 use alloc::format;
-use alloc::vec::Vec;
 
 use lpir::{IrType, LpirOp, VReg};
 use lps_shared::LpsType;
@@ -7,7 +6,7 @@ use lps_shared::LpsType;
 use crate::hir::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 
 pub(in crate::lower) fn lower_cast(
     ctx: &mut LowerCtx<'_>,
@@ -24,7 +23,7 @@ pub(in crate::lower) fn lower_cast(
         return Err(Diagnostic::error(span, "cast lane count mismatch"));
     }
     let dst_types = scalar_ir_types(target_ty)?;
-    let mut lanes = Vec::new();
+    let mut lanes = Lanes::new();
     for (src, dst_ty) in value.lanes.iter().zip(dst_types.iter()) {
         let dst = lower_scalar_cast(ctx, span, *src, &src_base, &dst_base, *dst_ty)?;
         lanes.push(dst);

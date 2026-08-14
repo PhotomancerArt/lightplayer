@@ -17,7 +17,13 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_all(mut self) -> Result<Vec<Token>, Diagnostic> {
-        let mut tokens = Vec::new();
+        // Real shaders (comments, whitespace, multi-byte literals) run ~1
+        // token per 4+ source bytes; /4 lands near-exact there, and the heap
+        // budget gate watches this as the compile window's largest single
+        // alloc — over-reserving raises the largest contiguous hole the
+        // device allocator must find. Under-estimating just costs one
+        // re-grow; this only avoids the first few doublings.
+        let mut tokens = Vec::with_capacity(self.source.len() / 4);
         loop {
             self.skip_trivia()?;
             let start = self.pos;

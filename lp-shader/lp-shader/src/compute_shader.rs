@@ -8,6 +8,7 @@ use lps_shared::{LpsModuleSig, LpsValueF32};
 use lpvm::{LpvmInstance, LpvmModule};
 
 use crate::LpsCompileStats;
+use crate::compile_stats::LpirModuleStats;
 use crate::compute_abi::COMPUTE_TICK_FN;
 use crate::error::LpsError;
 
@@ -58,7 +59,7 @@ impl LpsComputeShader {
         ir: &lpir::LpirModule,
         tick_fn_index: usize,
     ) -> Result<Self, LpsError> {
-        let compile_stats = LpsCompileStats::from_module(ir, &module);
+        let compile_stats = LpsCompileStats::from_module(LpirModuleStats::from_ir(ir), &module);
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
