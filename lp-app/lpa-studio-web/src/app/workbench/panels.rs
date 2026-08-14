@@ -833,11 +833,23 @@ pub fn PropsPanel(
             .iter()
             .filter(|output| output.module == Some(module.node))
             .count();
+        let count = |n: usize, word: &str| {
+            if n == 1 {
+                format!("1 {word}")
+            } else {
+                format!("{n} {word}s")
+            }
+        };
+        let facts = format!(
+            "module · {} · {}",
+            count(fixtures, "fixture"),
+            count(outputs, "output")
+        );
         return rsx! {
             div { class: "tw:grid tw:content-start tw:gap-1 tw:px-1.5 tw:text-sm",
                 p { class: "tw:m-0 tw:font-medium tw:text-foreground", "{module.label}" }
                 p { class: "tw:m-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
-                    "module · {fixtures} fixtures · {outputs} outputs"
+                    "{facts}"
                 }
                 p { class: "tw:m-0 tw:mt-2 tw:text-[11px] tw:text-dim-foreground",
                     "Select a fixture beneath it for placement, or dive in for object properties."
